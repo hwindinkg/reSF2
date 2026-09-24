@@ -2215,6 +2215,76 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.set_item;
             return true;
         }
+        // `Bj` L961: `case "_$ClanTutStepToRun": a.Fb.result = this.ta.H_a`.
+        // `ta.H_a` (ctor L1004 = "") has no writer in the shipped bundle -> "".
+        if (token == "_$ClanTutStepToRun") {
+            out = ctx.journal.clan_tut_step;
+            return true;
+        }
+        // `Bj` L961: `case "_$CurRaidFloor": a.Fb.result = K.T(this.ta.Hlb)`.
+        // `ta.Hlb` (ctor L1004 = 0) has no writer -> ctor default 0.
+        if (token == "_$CurRaidFloor") {
+            out = std::to_string(ctx.journal.cur_raid_floor);
+            return true;
+        }
+        // `Bj` L961: `case "_$FightAvgFPS": a.Fb.result = K.T(this.ta.J_)`.
+        // `ta.J_` is the fight's average FPS, written at fight end (`flb`
+        // L1213 `d.J_=c` / `kD` L1214 `a.J_=g`); the port models no frame-rate
+        // average, so it stays the ctor default (L1004 = 0).
+        if (token == "_$FightAvgFPS") {
+            out = std::to_string(ctx.journal.fight_avg_fps);
+            return true;
+        }
+        // `Bj` L962: `case "_$GameStarted": a.Fb.result = v.Q1?"1":"0"`. `v.Q1`
+        // (L2480 = !1) is the session flag `v.owb` (L1215) sets right before
+        // `v.uwb` -> `QUEST_EVENT_SESSION` (`dp.start` L1164); read from the
+        // engine state the `SessionStart` fire sets.
+        if (token == "_$GameStarted") {
+            out = game_started_ ? "1" : "0";
+            return true;
+        }
+        // `Bj` L962: `case "_$InEclipseMode": a.Fb.result = p.o.Yh?"1":"0"`.
+        // `p.o.Yh` is the profile's `EclipseMode` attr (profile ctor L248:
+        // `this.Yh=(b!=null?b:"Off")=="On"`); the port models no EclipseMode,
+        // so the ctor default "Off" -> false -> "0".
+        if (token == "_$InEclipseMode") {
+            out = "0";
+            return true;
+        }
+        // `Bj` L962: `case "_$InLottery": a.Fb.result = this.ta.Dab?"1":"0"`.
+        // `ta.Dab` (ctor L1004 = !1) has no writer -> ctor default false -> "0".
+        if (token == "_$InLottery") {
+            out = ctx.journal.in_lottery ? "1" : "0";
+            return true;
+        }
+        // `Bj` L962: `case "_$LotteryLastSpinNumber": a.Fb.result =
+        // K.T(this.ta.feb)`. `ta.feb` (ctor L1004 = 0) has no writer -> 0.
+        if (token == "_$LotteryLastSpinNumber") {
+            out = std::to_string(ctx.journal.lottery_last_spin);
+            return true;
+        }
+        // `Bj` L963: `case "_$PackName": a.Fb.result = this.ta.Klb`. `ta.Klb`
+        // (ctor L1004 = "") has no writer -> "".
+        if (token == "_$PackName") {
+            out = ctx.journal.pack_name;
+            return true;
+        }
+        // `Bj` L963: `case "_$PacksSummarySize": a.Fb.result =
+        // Sy(this.ta.ME,2)`. `Sy(a,b){return a.toFixed(b)}` (L9): `ta.ME`
+        // (ctor L1004 = 0) has no writer -> `(0).toFixed(2)` = "0.00".
+        if (token == "_$PacksSummarySize") {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.2f",
+                          static_cast<double>(ctx.journal.packs_summary_size));
+            out = buf;
+            return true;
+        }
+        // `Bj` L963: `case "_$RaidPurchase": a.Fb.result = this.ta.Llb`.
+        // `ta.Llb` (ctor L1004 = "") has no writer -> "".
+        if (token == "_$RaidPurchase") {
+            out = ctx.journal.raid_purchase;
+            return true;
+        }
         // `Bj` L960: `case "_$ActualCoinPackItem": let d=p.items.zua;
         // a.Fb.result = d!=null ? d.name : ""`. `it.zua` (ctor = null) is the
         // coin-pack registry, populated only by `EOa` scanning `items.Dp` for
@@ -4612,6 +4682,10 @@ std::vector<std::string> QuestEngine::purchase_unsuccessful(
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
                                            const QuestJournal& journal) {
     std::vector<std::string> fired;
+    // `v.owb` (L1215) sets `v.Q1` right before `v.uwb` raises
+    // `QUEST_EVENT_SESSION` (`dp.start` L1164): mark the session started so
+    // `_$GameStarted` (`Bj` L962) reads "1" from this fire on.
+    if (event == "SessionStart") game_started_ = true;
     // JS `Do`/`Eo` register `Cm` on `p.o.zi.LE` — the story-step change event
     // (`zt.PMa` fires `LE`). A step change while a lesson is parked resumes the
     // chain immediately; the `TutorialStepTimeout` is only the fallback.

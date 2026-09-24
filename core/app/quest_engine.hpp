@@ -85,6 +85,19 @@ struct QuestJournal {
     std::string perk_name;          // `Bj.Ria` (`_$PerkName`; ctor null; L963)
     std::string chosen_locale;      // `Bj.exa` (`_$ChosenLocale`; ctor null; L961)
     std::string set_item;           // `Bj.setItem` (`_$SetItem`; ctor ""; L964)
+    // --- the FINAL `Bj` L961-963 journal fields whose driving event the port
+    // does NOT fire (no clan-tutorial/raid/lottery/pack model, no frame-rate
+    // average). The `Bj` ctor (L1004) defaults them (`H_a`/`Kb`/`Llb`="",
+    // `Hlb`/`J_`/`feb`=0, `Dab`=!1, `ME`=0), so absent the event they resolve
+    // to those ctor defaults — modelled as the struct's own defaults here.
+    std::string clan_tut_step;    // `Bj.H_a` (`_$ClanTutStepToRun`; ctor ""; L961)
+    int cur_raid_floor = 0;       // `Bj.Hlb` (`_$CurRaidFloor`, K.T; ctor 0; L961)
+    int fight_avg_fps = 0;        // `Bj.J_` (`_$FightAvgFPS`, K.T; ctor 0; L961)
+    bool in_lottery = false;      // `Bj.Dab` (`_$InLottery`; ctor !1; L962)
+    int lottery_last_spin = 0;    // `Bj.feb` (`_$LotteryLastSpinNumber`, K.T; L962)
+    std::string pack_name;        // `Bj.Klb` (`_$PackName`; ctor ""; L963)
+    int packs_summary_size = 0;   // `Bj.ME` (`_$PacksSummarySize`, Sy(x,2); L963)
+    std::string raid_purchase;    // `Bj.Llb` (`_$RaidPurchase`; ctor ""; L963)
 };
 
 // Condition node (leaf comparison or And/Or operator). Leaf kinds mirror
@@ -785,6 +798,11 @@ public:
     // `_$SceneTo` (`ta.nLa`, written by `wa.mp` L933).
     void set_current_scene(const std::string& name) { current_scene_ = name; }
     const std::string& current_scene() const { return current_scene_; }
+    // `v.Q1` (L2480 = !1): the session flag `v.owb` (L1215) sets right before
+    // `v.uwb` -> `QUEST_EVENT_SESSION` (`dp.start` L1164). `_$GameStarted`
+    // (`Bj` L962: `v.Q1?"1":"0"`) reads it. The port sets it on the
+    // `SessionStart` fire (the analogue of the `owb`+`uwb` pair).
+    bool game_started() const { return game_started_; }
     // `Ct.t_a(a)` (L292) against an explicit clock (the JS tick is
     // parameterized by `p.Dc`): expire every `Nv <= now`, fire `TimerEnd`
     // per timer, then remove them. Returns the expired count.
@@ -1164,6 +1182,9 @@ private:
     // `ha.F().ta.Xo` (ctor L1004 `this.Xo="None"`; `wa.ghb` L934 writes it):
     // the current scene NAME read by `_$CurrentScene` (`Bj` L961).
     std::string current_scene_ = "None";
+    // `v.Q1` (L2480 = !1): set by `v.owb` (L1215) alongside `v.uwb`
+    // (`QUEST_EVENT_SESSION`). Read by `_$GameStarted` (`Bj` L962).
+    bool game_started_ = false;
     void timer_activate(const std::string& name, double deadline);  // `Uaa`
     void timer_end(const std::string& name);                        // `H4`
     void tick_timers(App& app, double now);                         // `t_a`

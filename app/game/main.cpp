@@ -2946,6 +2946,59 @@ int main(int argc, char** argv) {
             }
             check(noop_ok, "6 no-op break cases -> '' (L963)");
         }
+        // --- `Bj` L961-963: the FINAL journal tokens (census) ----------------
+        // The per-journal fields read their `Bj` ctor default (L1004) because
+        // the port fires none of their events; the two named globals are
+        // `v.Q1` -> `_$GameStarted` (session flag) and `p.o.Yh` ->
+        // `_$InEclipseMode` (profile `EclipseMode`, ctor default "Off").
+        // `Sy(a,b)=a.toFixed(b)` (L9) formats `_$PacksSummarySize`.
+        {
+            sf2::app::QuestJournal fj;
+            fj.clan_tut_step = "Step3";
+            fj.cur_raid_floor = 4;
+            fj.fight_avg_fps = 61;
+            fj.in_lottery = true;
+            fj.lottery_last_spin = 9;
+            fj.pack_name = "Pack_Starter";
+            fj.packs_summary_size = 5;
+            fj.raid_purchase = "PACK_X";
+            const auto rq = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, fj);
+            };
+            const sf2::app::QuestJournal fe;
+            const auto rqe = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, fe);
+            };
+            check(rq("_$ClanTutStepToRun") == "Step3" &&
+                      rqe("_$ClanTutStepToRun").empty(),
+                  "_$ClanTutStepToRun = ta.H_a (L961; ctor '')");
+            check(rq("_$CurRaidFloor") == "4" && rqe("_$CurRaidFloor") == "0",
+                  "_$CurRaidFloor = K.T(ta.Hlb) (L961; ctor 0)");
+            check(rq("_$FightAvgFPS") == "61" && rqe("_$FightAvgFPS") == "0",
+                  "_$FightAvgFPS = K.T(ta.J_) (L961; ctor 0)");
+            check(rq("_$InLottery") == "1" && rqe("_$InLottery") == "0",
+                  "_$InLottery = ta.Dab (L962; ctor !1)");
+            check(rq("_$LotteryLastSpinNumber") == "9" &&
+                      rqe("_$LotteryLastSpinNumber") == "0",
+                  "_$LotteryLastSpinNumber = K.T(ta.feb) (L962; ctor 0)");
+            check(rq("_$PackName") == "Pack_Starter" &&
+                      rqe("_$PackName").empty(),
+                  "_$PackName = ta.Klb (L963; ctor '')");
+            check(rq("_$PacksSummarySize") == "5.00" &&
+                      rqe("_$PacksSummarySize") == "0.00",
+                  "_$PacksSummarySize = Sy(ta.ME,2) (L963; ctor 0 -> '0.00')");
+            check(rq("_$RaidPurchase") == "PACK_X" &&
+                      rqe("_$RaidPurchase").empty(),
+                  "_$RaidPurchase = ta.Llb (L963; ctor '')");
+            check(rqe("_$InEclipseMode") == "0",
+                  "_$InEclipseMode = p.o.Yh (L962; profile ctor Off -> '0')");
+            const std::string started_boot = rqe("_$GameStarted");
+            sf2::app::QuestEngine fresh;
+            const std::string started_fresh =
+                fresh.resolve_for_test(app, "_$GameStarted", fe);
+            check(started_fresh == "0" && started_boot == "1",
+                  "_$GameStarted = v.Q1 (L962); fresh '0', after SessionStart '1'");
+        }
         const bool all = checks == passed;
         std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
