@@ -1136,6 +1136,10 @@ private:
     // The stages `<Battle Type>` key per battle (`pkb` L719570 reads it;
     // `?Fight.Type`/`?Battle.Type` map it through `b0`/`rAa`).
     std::map<std::string, std::string> battle_type_;
+    // `Nn` per fight keyed by the `hb` triple `Zone|Battle|Fight-Name`
+    // (`<Fight ReplayInterval>`, `IIa` L98652; JS default 0). Read by
+    // `?Fight[...].TimeLeft` (`f9a` L727530).
+    std::map<std::string, int> fight_replay_interval_;
     // `p.items` catalog cache + the list.xml `BonusPrice` map (see
     // `catalog_find`/`catalog_bonus_price`).
     mutable std::vector<CatalogItem> catalog_cache_;

@@ -2518,11 +2518,17 @@ int main(int argc, char** argv) {
             // BEFORE: the shipped profile has no `<Fight>` for this triple.
             {
                 const sf2::app::QuestJournal bj;
+                std::fprintf(stdout, "[qquery] fight clock now=%lld\n",
+                             static_cast<long long>(app.quest_engine().now_seconds()));
                 const char* const fe[] = {
                     "?Fight[ZONE_1|BOSS_LYNX|1].Level",
                     "?Fight[ZONE_1|BOSS_LYNX|1].LossCount",
                     "?Fight[ZONE_1|BOSS_LYNX|1].Timestamp",
                     "?Fight[ZONE_1|BOSS_LYNX|1].WinCount",
+                    // `f9a` L727530: `max(Nn - Qe, 0)`. No record -> `Qe=-1`,
+                    // `Nn`(Duel)=14400 -> 14401; an absent fight -> `Nn=0` -> 1.
+                    "?Fight[ZONE_1|Duel|1].TimeLeft",
+                    "?Fight[ZONE_1|BOSS_LYNX|9].TimeLeft",
                 };
                 for (const char* e : fe) {
                     std::fprintf(stdout, "[qquery] fight BEFORE %-38s = '%s'\n", e,
@@ -2542,6 +2548,17 @@ int main(int argc, char** argv) {
                 fr.time_left = 1234;
                 fr.randomize_time_left = 9;
                 fr.completed_time = 55;
+                // `?Fight.TimeLeft` proof: the record `TimeLeft` attr (`Gs`,
+                // `Cla` L142896) is the `p.Dc` entry clock. The port's clock
+                // (`quest_now()`) is 0 at this early point, so seed the Duel
+                // fight (`<Fight Name="1" ReplayInterval="14400">`,
+                // stages.xml) with `Gs = clock+100` (>0): `Qe = now-Gs = -100`
+                // -> `TimeLeft = 14400-(-100) = 14500`. (Before/after diff vs
+                // the `Gs<=0 -> Qe=-1 -> Nn+1 = 14401` branch.)
+                sf2::app::WarriorSave::FightWins& duel =
+                    seeded.fight_record_or_create("ZONE_1|Duel|1");
+                duel.time_left =
+                    static_cast<int>(app.quest_engine().now_seconds()) + 100;
             }
             seeded.variables.erase("CurrentZone");       // prove the write
             seeded.variables.erase("_CurrentZone");
@@ -2558,6 +2575,8 @@ int main(int argc, char** argv) {
                     "?Fight[ZONE_1|BOSS_LYNX|1].LossCount",
                     "?Fight[ZONE_1|BOSS_LYNX|1].Timestamp",
                     "?Fight[ZONE_1|BOSS_LYNX|1].WinCount",
+                    "?Fight[ZONE_1|Duel|1].TimeLeft",
+                    "?Fight[ZONE_1|BOSS_LYNX|9].TimeLeft",
                 };
                 for (const char* e : fe) {
                     std::fprintf(stdout, "[qquery] fight AFTER  %-38s = '%s'\n", e,

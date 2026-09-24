@@ -615,6 +615,19 @@ bool QuestEngine::ensure_loaded(App& app) {
                             // `pkb` L719570: `this.type = p.F().b0(<Battle
                             // Type>)`; the query maps it back via `rAa`.
                             battle_type_[bname] = b.attribute("Type").value();
+                            // `IIa` L98652: `a.Nn = u.I(get("ReplayInterval"))`
+                            // per `<Fight>` (JS default 0 — absent attr ->
+                            // `parseInt(null)` -> 0). Keyed by the `hb` triple
+                            // `Zone|Battle|Fight-Name` for `?Fight.*.TimeLeft`.
+                            for (pugi::xml_node f : b.children("Fight")) {
+                                const std::string fname = f.attribute("Name").value();
+                                if (fname.empty()) continue;
+                                const int nn =
+                                    f.attribute("ReplayInterval")
+                                        ? std::atoi(f.attribute("ReplayInterval").value())
+                                        : 0;
+                                fight_replay_interval_[zname + "|" + bname + "|" + fname] = nn;
+                            }
                         }
                     }
                 }
@@ -1556,9 +1569,15 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         // `X3a` L498367: the data fields read the live fight record `c.Wc`
         // (`il`), defaulting to "0" when absent. `Level`=`bb()` (L143548),
         // `LossCount`=`FW`, `WinCount`=`no`, `Timestamp`=`Pz()` (the `TimeLeft`
-        // attr). `TimeLeft`=`f9a()` (L727530) needs the fight def's
-        // `ReplayInterval` (`Nn`, L98652) and the player quest timer `e4`
-        // (`aPa` L138972) — neither is modelled, so it stays UNKNOWN.
+        // attr). `TimeLeft`=`f9a()` (L727530) = `max(Nn - Wc.WQ(), 0)` with
+        // `Nn` = the `<Fight ReplayInterval>` (`IIa` L98652) and `Wc.WQ()`
+        // = the record clock `Qe` (`il` ctor L141504 `Qe=-1`; `ZA` L143481
+        // `Qe = Gs<=0 ? -1 : clock-Gs`, `Gs` = the record `TimeLeft` attr).
+        // The sibling `n1a` (L625394) computes the same remaining as
+        // `Pz() + Nn - p.Dc` = `Nn - (p.Dc - Gs)`, i.e. the clock is the
+        // GAME clock `p.Dc` (the port's `quest_now()`). `G3a` (L93340) passes
+        // `p.o.e4` (the energy-regen countdown `aPa` L138972) — the port has
+        // no energy-regen timer, so `p.Dc`/`quest_now()` is used.
         const WarriorSave& w = ctx.live(app);
         const WarriorSave::FightWins* rec = nullptr;
         for (const WarriorSave::FightWins& f : w.fights) {
@@ -1578,6 +1597,17 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         }
         if (field == "Timestamp") {
             out = std::to_string(rec != nullptr ? rec->time_left : 0);
+            return true;
+        }
+        if (field == "TimeLeft") {
+            const auto nit = fight_replay_interval_.find(triple);
+            const long long nn = nit != fight_replay_interval_.end() ? nit->second : 0;
+            const long long gs = rec != nullptr ? rec->time_left : 0;
+            const double qe = gs <= 0 ? -1.0 : (quest_now() - static_cast<double>(gs));
+            long long v = static_cast<long long>(
+                std::llround(static_cast<double>(nn) - qe));
+            if (v < 0) v = 0;  // `a<0&&(a=0)`
+            out = std::to_string(v);
             return true;
         }
         note_unanswerable(token);

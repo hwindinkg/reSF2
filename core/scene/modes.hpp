@@ -109,6 +109,10 @@ struct StageFight {
     int rounds = 2;
     int round_time = 99;
     int replays = 1;  // Replays= (entry repeat cap data, map-side)
+    // `Nn` (`IIa` L98652): `u.I(b.attributes.get("ReplayInterval"))` — the
+    // per-fight replay interval in SECONDS (JS default 0 when absent).
+    // `?Fight[...].TimeLeft` (`f9a` L727530) counts it down.
+    int replay_interval = 0;
     double health_recovery = 1.0;  // `qDa` (default 1)
     std::vector<StageReward> rewards;
     std::vector<StageWarrior> warriors;
@@ -406,6 +410,7 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                     fight.rounds = xml_int(f, "Rounds", 2);
                     fight.round_time = xml_int(f, "RoundTime", 99);
                     fight.replays = xml_int(f, "Replays", 1);
+                    fight.replay_interval = xml_int(f, "ReplayInterval", 0);
                     fight.health_recovery = xml_num(f, "HealthRecovery", 1.0);
                     const pugi::xml_node rewards = f.child("Rewards");
                     if (rewards) {
