@@ -4361,6 +4361,14 @@ std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_
 // -> no animation (`NS` L505 / `da.ia` L499). The battle is resolved among
 // the current zone's direct <Battle> children (same `hp` semantics as
 // `battle_fight_rules`); empty `zone_name` falls back to the legacy scan.
+// One `<Perk Name="X"><Set k="v"/></Perk>` row of a Warrior/Template
+// `<Perks>` (JS `xc.AK` parse, off 97350/166140: the resolved perk def is
+// cloned with its `<Set>`/`<RatingEvaluation>` and pushed to `AK`).
+struct WarriorPerkRef {
+    std::string name;
+    std::map<std::string, std::string> set;
+};
+
 struct BattleWarriorInfo {
     std::string first_name;
     bool has_not_ai = false;
@@ -4368,6 +4376,10 @@ struct BattleWarriorInfo {
     std::string tactic;
     std::map<std::string, std::string> attrs;
     std::vector<std::string> items;
+    // `xc.AK` (JS `pGa` L198 + `ur` L188-190): the warrior's own `<Perks>`
+    // (template chain first, the Warrior's own merged on top), each with its
+    // `<Set>` override. The enemy's `Wk()` `m.addRange(a,this.AK)` input.
+    std::vector<WarriorPerkRef> perks;
     // `xc.IY` (JS L191): the warrior's effective `<AttributesAlign>` rows —
     // its own appended after the inherited `<Template Name="Default">` rows
     // (`pGa` L198). `pAa` blends with these.
@@ -4555,6 +4567,26 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
                     }
                 }
             }
+            // The template `<Perks>` (JS `xc.AK` parse; base-first so the
+            // derived template's `<Set>` wins on a name collision).
+            for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                for (const pugi::xml_node pk :
+                     templates[*it].child("Perks").children("Perk")) {
+                    WarriorPerkRef ref;
+                    if (const pugi::xml_attribute nm = pk.attribute("Name"))
+                        ref.name = nm.value();
+                    if (ref.name.empty()) continue;
+                    if (const pugi::xml_node st = pk.child("Set")) {
+                        for (const pugi::xml_attribute a : st.attributes())
+                            ref.set[a.name()] = a.value();
+                    }
+                    bool merged = false;
+                    for (WarriorPerkRef& e : out.perks) {
+                        if (e.name == ref.name) { e.set = ref.set; merged = true; break; }
+                    }
+                    if (!merged) out.perks.push_back(std::move(ref));
+                }
+            }
         }
         // The Warrior's own attrs win over the inherited template ones.
         for (const auto& kv : tmpl_attrs) out.attrs.emplace(kv.first, kv.second);
@@ -4577,6 +4609,23 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             if (const pugi::xml_attribute nm = it.attribute("Name")) {
                 out.items.emplace_back(nm.value());
             }
+        }
+        // The Warrior's own `<Perks>` (`xc.AK`, JS `pGa` appends then the
+        // parse dedups by def): the Warrior's `<Set>` replaces the template's.
+        for (const pugi::xml_node pk : w.child("Perks").children("Perk")) {
+            WarriorPerkRef ref;
+            if (const pugi::xml_attribute nm = pk.attribute("Name"))
+                ref.name = nm.value();
+            if (ref.name.empty()) continue;
+            if (const pugi::xml_node st = pk.child("Set")) {
+                for (const pugi::xml_attribute a : st.attributes())
+                    ref.set[a.name()] = a.value();
+            }
+            bool merged = false;
+            for (WarriorPerkRef& e : out.perks) {
+                if (e.name == ref.name) { e.set = ref.set; merged = true; break; }
+            }
+            if (!merged) out.perks.push_back(std::move(ref));
         }
     } catch (const std::exception&) {
     }
@@ -4798,17 +4847,55 @@ void resolve_enemy_loadout(App& app, const BattleWarriorInfo& bw,
 // Perk setup for the fight trigger bus (`ZOa` analog, PERKS §5.4/§5.7):
 // equipped items' `<Perks>`/`<Enchantments>` rows + names from the save,
 // resolved against the perk catalog. Enemy gear is not modeled (empty).
-sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets) {
+sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
+                                     const BattleWarriorInfo& enemy) {
     sf2::scene::PerkSetup ps;
     ps.catalog = &assets.perk_catalog;
     ps.tactics = &assets.tactic_defs;
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    const auto add_items = [&catalog](
+                               const std::vector<std::string>& names,
+                               std::vector<std::string>& out_names,
+                               std::vector<sf2::scene::ItemPerkRef>& out_refs) {
+        for (const std::string& name : names) {
+            if (name.empty()) continue;
+            for (const CatalogItem& ci : catalog) {
+                if (ci.name != name) continue;
+                out_names.push_back(name);
+                for (const ItemPerkRef& ref : ci.perks) {
+                    sf2::scene::ItemPerkRef scene_ref;
+                    scene_ref.name = ref.name;
+                    scene_ref.set_num = ref.set_num;
+                    scene_ref.set_str = ref.set_str;
+                    scene_ref.enchant = ref.enchant;
+                    out_refs.push_back(std::move(scene_ref));
+                }
+                break;
+            }
+        }
+    };
+    // JS `Wk` L811-812 for the ENEMY: `m.addRange(a,this.AK)` — the warrior's
+    // own `<Perks>` (with their `<Set>` overrides) come FIRST — then each
+    // equipped item's `Oa` (its catalog `<Perks>`/`<Enchantments>`), exactly
+    // the player's resolution below.
+    for (const WarriorPerkRef& pr : enemy.perks) {
+        if (pr.name.empty()) continue;
+        sf2::scene::ItemPerkRef ref;
+        ref.name = pr.name;
+        ref.set_str = pr.set;
+        ps.enemy_refs.push_back(std::move(ref));
+    }
+    add_items(enemy.items, ps.enemy_items, ps.enemy_refs);
+    std::fprintf(stdout,
+                 "[perk] enemy loadout: warrior perks=%zu items=%zu -> refs=%zu\n",
+                 enemy.perks.size(), enemy.items.size(), ps.enemy_refs.size());
+    std::fflush(stdout);
     WarriorSave w;
     try {
         w = app.save().load();
     } catch (const std::exception&) {
         return ps;
     }
-    const std::vector<CatalogItem> catalog = load_full_catalog(app);
     std::vector<std::string> equipped = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
     for (const auto& oi : w.items) {
         if (oi.count > 0 && oi.equipped) equipped.push_back(oi.name);
@@ -4820,22 +4907,7 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets) {
         if (pr.name.empty()) continue;
         ps.learned.push_back(pr.name);
     }
-    for (const std::string& name : equipped) {
-        if (name.empty()) continue;
-        for (const CatalogItem& ci : catalog) {
-            if (ci.name != name) continue;
-            ps.player_items.push_back(name);
-            for (const ItemPerkRef& ref : ci.perks) {
-                sf2::scene::ItemPerkRef scene_ref;
-                scene_ref.name = ref.name;
-                scene_ref.set_num = ref.set_num;
-                scene_ref.set_str = ref.set_str;
-                scene_ref.enchant = ref.enchant;
-                ps.player_refs.push_back(std::move(scene_ref));
-            }
-            break;
-        }
-    }
+    add_items(equipped, ps.player_items, ps.player_refs);
     return ps;
 }
 
@@ -5535,7 +5607,7 @@ void DojoScreen::build_dojo_fight(App& app) {
         "Player", bw.first_name.empty() ? battle_name : bw.first_name,
         battle.player_spawn_x, battle.player_spawn_y, battle.enemy_spawn_x,
         battle.enemy_spawn_y, battle.max_hp, battle.max_hp, {}, player_owned,
-        equipped_perks(app, assets), nullptr, player_model, &assets.merged_bag,
+        equipped_perks(app, assets, bw), nullptr, player_model, &assets.merged_bag,
         player_tactic);
     dojo_fight_->set_seed(0x5F2u);  // JS `Da.pg=new Rk(L.seed)` (L67)
     dojo_fight_->set_bounds(wall, arena_w - wall, loc.arena_floor());
@@ -7518,6 +7590,56 @@ std::vector<sf2::scene::PerkModel> equipped_rating_perks(App& app) {
     return out;
 }
 
+// JS `xc.Wk` L811-812 for the ENEMY: the warrior's `<Perks>` (`AK`, with
+// their `<Set>` overrides) + each equipped item's `<Perks>`/`<Enchantments>`
+// (`Oa`, from the item catalog), resolved against perks.xml — the mirror of
+// `equipped_rating_perks` (which reads the player's SAVE). Feeds
+// `FighterParams::perks` -> `warrior_rating`'s perk `<Rating>`/PerkAspect
+// branch (`xc.JBa`), so an enemy carrying a `<Rating>` perk is no longer
+// mis-rated. `bw` is the resolved stage Warrior (`battle_warrior`).
+std::vector<sf2::scene::PerkModel> enemy_rating_perks(
+    const std::vector<CatalogItem>& catalog, const BattleWarriorInfo& bw) {
+    std::vector<sf2::scene::PerkModel> out;
+    static std::string perks_xml;
+    static bool perks_loaded = false;
+    if (!perks_loaded) {
+        perks_loaded = true;
+        std::ifstream in("reference/extracted/xml/res/perks.xml",
+                         std::ios::binary);
+        if (in) {
+            perks_xml.assign((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+        }
+    }
+    if (perks_xml.empty()) return out;
+    const auto push_if = [&out](sf2::scene::PerkModel&& m) {
+        if (m.ratings.empty()) return;  // `JBa` skips `x4.length==0`
+        out.push_back(std::move(m));
+    };
+    // `m.addRange(a,this.AK)`: the warrior's own `<Perks>` first.
+    for (const WarriorPerkRef& pr : bw.perks) {
+        if (pr.name.empty()) continue;
+        push_if(sf2::scene::parse_perk_def(perks_xml, pr.name, pr.set));
+    }
+    // Then each equipped item's `Oa` (its catalog `<Perks>`/`<Enchantments>`).
+    for (const std::string& name : bw.items) {
+        if (name.empty()) continue;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name != name) continue;
+            for (const ItemPerkRef& ref : ci.perks) {
+                if (ref.name.empty()) continue;
+                std::map<std::string, std::string> ov = ref.set_str;
+                for (const auto& kv : ref.set_num) {
+                    ov[kv.first] = std::to_string(kv.second);
+                }
+                push_if(sf2::scene::parse_perk_def(perks_xml, ref.name, ov));
+            }
+            break;
+        }
+    }
+    return out;
+}
+
 // `v.OAa(battle)` (L1219): the rating ratio for a battle node. `a` = the
 // player (`v.cw`), `b` = the enemy (the LAST `v.EQ(fight.Xs)` warrior), via
 // `battle.Gz(v.cw(), v.EQ(battle.Xs))` -> `dl.A8a` (L1421-1422).
@@ -7569,6 +7691,16 @@ float map_battle_rating(App& app, const std::string& battle_name,
         e.player_rating = fattr("PlayerRating", -1.0f);       // `W3`
         e.enemy_rating = fattr("EnemyRating", -1.0f);         // `C_`
         e.rating_correction = fattr("RatingCorrection", 0.0f);  // `w4`
+        // JS `xc.Wk` L811-812: the live perk set of BOTH warriors feeds the
+        // `xc.JBa` perk `<Rating>`/PerkAspect loops. The player's from its
+        // save (the previously-unwired `equipped_rating_perks`), the enemy's
+        // from its stage `<Warrior>/<Perks>` + equipped items.
+        p.perks = equipped_rating_perks(app);
+        e.perks = enemy_rating_perks(load_full_catalog(app), bw);
+        std::fprintf(stdout,
+                     "[maprating] perks: player=%zu enemy=%zu (warrior perks=%zu)\n",
+                     p.perks.size(), e.perks.size(), bw.perks.size());
+        std::fflush(stdout);
         // The live `<Set>` operands `perk_aspect` reads (`?RandomAspect`/
         // `?Aspect`/`?PlayerAttribute[Enemy]`): the player's level + the two
         // sides' attributes. `isRaid`/`wd.yV`/`Da.pg` stay default (a normal
@@ -8514,7 +8646,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, {},
-                       player_owned, equipped_perks(app(), assets), nullptr,
+                       player_owned, equipped_perks(app(), assets, bw), nullptr,
                        player_model, enemy_model, player_tactic);
     fight_->set_seed(fight_seed);  // JS `Da.pg=new Rk(L.seed)` (L67)
     // The player's Locks move list (`ra.Hza` L684-685) — identical for the
