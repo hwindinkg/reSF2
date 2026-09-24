@@ -54,6 +54,26 @@ struct AlignDelta {
     int eclipse_op = 2;   // `OP`
 };
 
+// One `<Rating>` child of a perk's `<RatingEvaluation>` (JS `Jw` g="2E0",
+// `Jw.parse` L703284). The perk-rating modifier the `xc.JBa` Me/Enemy loops
+// read (`Be.x4`). `_`-prefixed attribute values are already substituted from
+// the perk's `<Set>` map at parse time.
+struct PerkRating {
+    std::string player = "Me";  // `Ob` (Player; default "Me")
+    std::string damage;         // `Xb` (Damage; "" = the JS null)
+    std::string defense;        // `Xi` (Defense; "" = the JS null)
+    float multiplier = 0.0f;    // `ff` (Multiplier; `u.H(...,0)`)
+    std::string enemy_attr;     // `dQ` (EnemyAttribute; "" = the JS null)
+};
+
+// One equipped perk, reduced to what the rating sum reads (JS `Be` subset):
+// the `<Set>` attribute map (`iC`, `Be.Zjb` L681500) + the
+// `<RatingEvaluation><Rating>` list (`x4`, `Be.Ujb` L681500).
+struct PerkModel {
+    std::map<std::string, std::string> set;  // `iC` (the `<Set>` attrs)
+    std::vector<PerkRating> ratings;         // `x4`
+};
+
 // Fighter parameters the damage formula reads (JS `xc`/`El` fields).
 struct FighterParams {
     bool is_player = false;   // `qb`
@@ -82,6 +102,12 @@ struct FighterParams {
     // cancelling-item test (`g.hI`/`D.hI`). Shipped save: Body/Head/Fists/
     // NoRanged/NoMagic; the enemy's from its Warrior template items.
     std::vector<std::string> equipment_names;
+    // `Wk()` (L413727) restricted to the perks the rating sum reads: the
+    // equipped `<Perks>` (`AK`/`TE`) + the equipped items' perks (`Oa`).
+    // EMPTY for the fresh save (no `<Rating>` perk equipped), so the `xc.JBa`
+    // perk loops are no-ops there. Resolving `AK` from the save's `<Perks>`
+    // against perks.xml is the OPEN perk-equip mapping (`PERKS_STATIC` 5.1).
+    std::vector<PerkModel> perks;
 
     // JS `ud.get(name, out)` — returns the attribute value (0 if absent).
     float attr(const std::string& name) const {
@@ -226,6 +252,12 @@ struct FightParams {
     // `xc.t$` (L820-821): the `<RatingEvaluation>` `<Damage>` rows in document
     // order (shipped: Weapon, Unarmed, Ranged, Magic).
     std::vector<RatingDamageRow> rating_table;
+    // `v.CY` (JS `Gv` g="248", set by `v.Mib` L625685 from the settings
+    // `<Aspect Antilimit DoublingRange Limit>`; shipped 0 / 108 / 1.2). The
+    // `Be.eea` (L691464) perk-rating aspect curve reads these.
+    float aspect_antilimit = 0.0f;       // `tva` (Antilimit)
+    float aspect_doubling_range = 0.0f;  // `cda` (DoublingRange)
+    float aspect_limit = 0.0f;           // `lha` (Limit)
 
     // The process-wide instance (JS `v` statics), populated at boot from
     // internal_settings.xml by `load_fight_params_from_settings`.
@@ -455,13 +487,14 @@ inline R8aOut r8a_decide(bool ecb, bool target_vc, float zi_over_so,
 //
 // PORTED: `zBa`, `mDa` (cancelling item), `iWa`/`msb`/`nsb`, the defense
 // weighted sum + `iea` (`balance_multiplier`), the `xha` magic branch, the
-// `A8a`/`Gz` formula, the `qAa` side split.
-// NOT PORTED (unported subsystems — see damage.cpp OPEN): the perk `<Rating>`
-// Me/Enemy loops (`xc.Wk` items' `x4`, perks.xml `<Rating Player=..>`), the
-// `xc.gX` PerkAspect branch (`Be.eea` + `v.CY` `<Aspect>` config + `oma`/`gy`),
-// and `v.cw()`/`v.EQ()`/`v.Wka`/`Fm`/`Bua` (the warrior-from-save model). The
-// shipped fresh save has NO `<Rating>` perks, so the omitted loops are EMPTY
-// for the fresh-save case and the sum is exact there.
+// `A8a`/`Gz` formula, the `qAa` side split, the perk `<Rating>` Me/Enemy loops
+// (`xc.Wk` items' `x4`, perks.xml `<Rating Player=..>`) and the `xc.gX`
+// PerkAspect branch (`Be.eea` + `v.CY` `<Aspect>` config + `oma`/`gy`).
+// NOT PORTED (unported subsystems — see damage.cpp OPEN): `v.cw()`/`v.EQ()`/
+// `v.Wka`/`Fm`/`Bua` (the warrior-from-save model) and the perk-EQUIP mapping
+// (`AK` from the save's `<Perks>` against perks.xml) — so `FighterParams::perks`
+// is empty unless a caller fills it. The shipped fresh save has NO `<Rating>`
+// perk equipped, so the loops are EMPTY there and the sum is exact.
 
 // One `Ba` (name, value) pair (JS `Ba` L112): the merged attribute list
 // `JBa` builds (`iWa`/`msb`) and the `k5a`/`j5a` side list.
@@ -481,9 +514,36 @@ bool rating_cancelled(const FighterParams& w, const std::string& item);
 // `xc.JBa(other, attrs)` (L812-815): the per-warrior weighted rating sum over
 // the `<RatingEvaluation>` rows. `attrs` is the `k5a`/`j5a` side list. The
 // `nsb` step mutates the OTHER warrior's attributes, so `other` is copied.
+// The perk `<Rating>` loops (L414665 Me / L415034 Enemy) are ported: the
+// SELF's `<Rating Player="Me">` entries scale each Defense's `F`, the OTHER's
+// `<Rating Player="Enemy">` entries divide it.
 float warrior_rating(const FighterParams& self, const FighterParams& other,
                      const std::vector<RatingAttrPair>& attrs,
                      const FightParams& fp = FightParams::defaults());
+
+// `Be.eea(x)` (L691464): the perk-rating aspect curve, `v.CY` config
+// (shipped Antilimit=0, DoublingRange=108, Limit=1.2).
+//   `x>=0` -> Limit - (Limit-1)*2^(-x/DoublingRange)
+//   `x<0`  -> Antilimit + 2^(x/DoublingRange)
+inline float aspect_curve(float x,
+                          const FightParams& fp = FightParams::defaults()) {
+    if (x >= 0.0f) {
+        return fp.aspect_limit -
+               (fp.aspect_limit - 1.0f) *
+                   std::pow(2.0f, -x / fp.aspect_doubling_range);
+    }
+    return fp.aspect_antilimit + std::pow(2.0f, x / fp.aspect_doubling_range);
+}
+
+// `Be.parse` + `Jw.parse` (L681500 / L703284) on one `<Perk>` document:
+// `<Set>` -> `set`, each `<RatingEvaluation><Rating>` -> `ratings`, with the
+// `_`-prefix value substitution against the perk's own `<Set>` map. Returns
+// an empty model on a malformed document.
+PerkModel parse_perk_xml(const std::string& perk_xml);
+
+// `--rating-perk-probe`: JS-exact before/after of the `xc.JBa` perk
+// `<Rating>`/`<Aspect>` branch. True on pass.
+bool rating_perk_probe();
 
 // The `ERuleRatingEvaluation` inputs (`eVa`/`yUa`/`jVa`, JS `qn` L881).
 struct RatingRule {

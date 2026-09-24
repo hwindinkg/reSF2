@@ -295,6 +295,13 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     if (const pugi::xml_node lt = root.child("ResistanceDoublingRange")) {
         if (lt.attribute("Value")) v.resistance_doubling_range = lt.attribute("Value").as_float();
     }
+    // `v.Mib` (L625685): `<Aspect Antilimit DoublingRange Limit>` -> `v.CY`
+    // (the `Be.eea` perk-rating aspect curve). Shipped 0 / 108 / 1.2.
+    if (const pugi::xml_node asp = root.child("Aspect")) {
+        v.aspect_antilimit = asp.attribute("Antilimit").as_float(0.0f);
+        v.aspect_doubling_range = asp.attribute("DoublingRange").as_float(0.0f);
+        v.aspect_limit = asp.attribute("Limit").as_float(0.0f);
+    }
     // `v.ACa/zCa/E9a` (L1155) = `<DamageFactor Base Attribute MaxValue>`.
     if (const pugi::xml_node df = root.child("DamageFactor")) {
         if (df.attribute("Base")) v.damage_factor_base = df.attribute("Base").as_float();
@@ -461,6 +468,39 @@ void rating_merge(std::vector<RatingAttrPair>& a,
     }
 }
 
+// `u.H(a,b=0)` (L1263017): parse a float; absent/empty/NaN -> `def`. (The
+// JS `gy` (L2894) throws 18 on a non-numeric value instead; the shipped
+// first-`<Set>` `Aspect` values are all numeric, so that guard is unreachable
+// and the `u.H` default is the faithful in-range behaviour.)
+float js_float(const std::string& s, float def = 0.0f) {
+    if (s.empty()) return def;
+    try {
+        std::size_t used = 0;
+        const float v = std::stof(s, &used);
+        if (used != s.size()) return def;
+        return v;
+    } catch (const std::exception&) {
+        return def;
+    }
+}
+
+// `Jw` match test (L414690 / L415059): `Xb` empty (JS null/"") or == the row's
+// Damage Name, AND `Xi` empty or == the Defense Name.
+bool perk_rating_match(const PerkRating& z, const std::string& row_name,
+                       const std::string& def_name) {
+    if (!z.damage.empty() && z.damage != row_name) return false;
+    return z.defense.empty() || z.defense == def_name;
+}
+
+// `r.oma(xc.gX)` + `gy` (L414976 / L415314): the perk `<Set>` value named by
+// the settings `PerkAspectParameter` ("Aspect"), parsed as a float; 0 when the
+// parameter name is unset or absent from the perk's `<Set>`.
+float perk_aspect(const PerkModel& perk, const FightParams& fp) {
+    if (fp.rating_perk_aspect.empty()) return 0.0f;
+    const auto it = perk.set.find(fp.rating_perk_aspect);
+    return it != perk.set.end() ? js_float(it->second) : 0.0f;
+}
+
 // `xc.nsb` (L815): for each (name f, val e) in `attrs`, for every `<Defense>`
 // row `<Attribute>` named f, `other.attr[f] = (other.attr[f] + e) | 0`.
 void rating_nsb(FighterParams& other,
@@ -523,7 +563,40 @@ float warrior_rating(const FighterParams& self, const FighterParams& other,
             }
             const float g = balance_multiplier(self, other_mut, iv,
                                                def.attributes[0].name, fp);
-            B += def.weight * std::min(1.0f, h * g);
+            float F = std::min(1.0f, h * g);
+            // `xc.JBa` perk loops (L414665 Me / L415034 Enemy): the SELF's
+            // `<Rating Player="Me">` entries scale F by
+            // `1 + (ff-1)*eea(A - other.zBa(dQ))`; the OTHER's
+            // `<Rating Player="Enemy">` entries divide F by the same factor.
+            // `A` = the perk `<Set>` value named by the settings
+            // `PerkAspectParameter` (0 when unset/absent).
+            for (const PerkModel& perk : self.perks) {
+                for (const PerkRating& z : perk.ratings) {
+                    if (z.player != "Me") continue;
+                    if (!perk_rating_match(z, row.attr_name,
+                                           def.attributes[0].name))
+                        continue;
+                    F *= 1.0f + (z.multiplier - 1.0f) *
+                                    aspect_curve(perk_aspect(perk, fp) -
+                                                     rating_attribute(other_mut,
+                                                                      z.enemy_attr),
+                                                 fp);
+                }
+            }
+            for (const PerkModel& perk : other_mut.perks) {
+                for (const PerkRating& z : perk.ratings) {
+                    if (z.player != "Enemy") continue;
+                    if (!perk_rating_match(z, row.attr_name,
+                                           def.attributes[0].name))
+                        continue;
+                    F /= 1.0f + (z.multiplier - 1.0f) *
+                                    aspect_curve(perk_aspect(perk, fp) -
+                                                     rating_attribute(other_mut,
+                                                                      z.enemy_attr),
+                                                 fp);
+                }
+            }
+            B += def.weight * F;
         }
         // `g.xha > 0`: `B *= xha * (X7a()*yBa(self) + k6a()*JAa(self))` where
         // `X7a`/`k6a` are the Magic Pain/DamageRecharge bases and `yBa`/`JAa`
@@ -592,6 +665,162 @@ std::vector<RatingAttrPair> rating_side_attrs(
         }
     }
     return out;
+}
+
+PerkModel parse_perk_xml(const std::string& perk_xml) {
+    PerkModel m;
+    pugi::xml_document doc;
+    if (!doc.load_buffer(perk_xml.data(), perk_xml.size())) return m;
+    const pugi::xml_node perk = doc.document_element();
+    if (!perk) return m;
+    // `Be.Zjb` (L681500): every `<Set>` attribute -> `iC` (the `_` lookup map).
+    if (const pugi::xml_node set = perk.child("Set")) {
+        for (const pugi::xml_attribute a : set.attributes()) {
+            m.set[a.name()] = a.value();
+        }
+    }
+    // `Be.Ujb` (L681500) -> `Jw.parse` (L703284): the `<Rating>` children.
+    const pugi::xml_node re = perk.child("RatingEvaluation");
+    if (!re) return m;
+    // `Jw.parse`'s `_`-substitution: an attribute value starting with `_` is
+    // replaced by the perk `<Set>` entry named after the `_` (or by the bare
+    // name when the set lacks it).
+    const auto sub = [&m](const char* v) -> std::string {
+        if (v == nullptr) return "";
+        std::string s = v;
+        if (!s.empty() && s[0] == '_') {
+            const std::string key = s.substr(1);
+            const auto it = m.set.find(key);
+            s = it != m.set.end() ? it->second : key;
+        }
+        return s;
+    };
+    for (const pugi::xml_node r : re.children("Rating")) {
+        PerkRating pr;
+        const char* pl = r.attribute("Player").value();
+        pr.player = (pl != nullptr && *pl != '\0') ? sub(pl) : "Me";
+        pr.damage = sub(r.attribute("Damage").value());
+        pr.defense = sub(r.attribute("Defense").value());
+        pr.enemy_attr = sub(r.attribute("EnemyAttribute").value());
+        pr.multiplier = js_float(sub(r.attribute("Multiplier").value()));
+        m.ratings.push_back(std::move(pr));
+    }
+    return m;
+}
+
+bool rating_perk_probe() {
+    // 1) `<Aspect>` config + the `<RatingEvaluation>` row via the real loader.
+    static const char* kSettings =
+        "<Settings>"
+        "<Aspect DoublingRange=\"108\" Limit=\"1.2\" Antilimit=\"0\" />"
+        "<RatingEvaluation PerkAspectParameter=\"Aspect\">"
+        "<Damage Name=\"Weapon\" AverageBaseDamage=\"0.1\">"
+        "<Attribute Name=\"WeaponDamage\" />"
+        "<Defense Name=\"BodyDefense\" Weight=\"0.24\">"
+        "<Attribute Name=\"BodyDefense\" />"
+        "</Defense>"
+        "</Damage>"
+        "</RatingEvaluation>"
+        "</Settings>";
+    load_fight_params_from_settings(kSettings);
+    FightParams& fp = fight_params();
+    fp.align_target_attributes.clear();  // deterministic `balance_multiplier`
+    fp.eclipse = false;
+    const bool cfg_ok = fp.rating_perk_aspect == "Aspect" &&
+                        fp.aspect_antilimit == 0.0f &&
+                        fp.aspect_doubling_range == 108.0f &&
+                        fp.aspect_limit == 1.2f && fp.rating_table.size() == 1;
+    // 2) `Be.eea` pinned directly (shipped config 0/108/1.2).
+    const float c0 = aspect_curve(0.0f, fp);       // 1.2 - 0.2*1   = 1.0
+    const float cpos = aspect_curve(108.0f, fp);   // 1.2 - 0.2*0.5 = 1.1
+    const float cneg = aspect_curve(-108.0f, fp);  // 0 + 2^-1      = 0.5
+    const bool curve_ok = std::fabs(c0 - 1.0f) < 1e-4f &&
+                          std::fabs(cpos - 1.1f) < 1e-4f &&
+                          std::fabs(cneg - 0.5f) < 1e-4f;
+    // 3) the perk `<Rating>`/`<Set>` model from a real perks.xml snippet
+    //    (`SkillsEnch02.EnchantmentLifeDrain`).
+    static const char* kPerk =
+        "<Perk Name=\"SkillsEnch02.EnchantmentLifeDrain\">"
+        "<Set Aspect=\"0\" Base=\"25000\" Animation=\"Weapon\" Chance=\"0.4\" "
+        "Frames=\"90\" DamageRating=\"Weapon\" MultiplierRating=\"2\" />"
+        "<RatingEvaluation>"
+        "<Rating Player=\"Me\" Damage=\"_DamageRating\" "
+        "Defense=\"BodyDefense\" Multiplier=\"_MultiplierRating\" "
+        "EnemyAttribute=\"EnchantmentResistance\" />"
+        "<Rating Player=\"Me\" Damage=\"_DamageRating\" "
+        "Defense=\"HeadDefense\" Multiplier=\"_MultiplierRating\" "
+        "EnemyAttribute=\"EnchantmentResistance\" />"
+        "</RatingEvaluation>"
+        "</Perk>";
+    const PerkModel perk = parse_perk_xml(kPerk);
+    // A real `<Rating Player="Enemy">` perk (`SkillsEnch02.EnchantmentRegeneration`)
+    // for the Enemy branch: `Defense="_DefenseRating"` -> `DefenseRating`.
+    static const char* kPerkEnemy =
+        "<Perk Name=\"SkillsEnch02.EnchantmentRegeneration\">"
+        "<Set Aspect=\"0\" Base=\"750\" ChanceFactor=\"2.2\" Frames=\"300\" "
+        "Defense=\"BodyDefense\" DefenseRating=\"BodyDefense\" />"
+        "<RatingEvaluation>"
+        "<Rating Player=\"Enemy\" Defense=\"_DefenseRating\" Multiplier=\"2\" "
+        "EnemyAttribute=\"EnchantmentResistance\" />"
+        "</RatingEvaluation>"
+        "</Perk>";
+    const PerkModel perk_enemy = parse_perk_xml(kPerkEnemy);
+    const bool model_ok =
+        perk.set.count("Aspect") == 1 && perk.set.at("Aspect") == "0" &&
+        perk.ratings.size() == 2 && perk.ratings[0].player == "Me" &&
+        perk.ratings[0].damage == "Weapon" &&
+        perk.ratings[0].defense == "BodyDefense" &&
+        std::fabs(perk.ratings[0].multiplier - 2.0f) < 1e-6f &&
+        perk.ratings[0].enemy_attr == "EnchantmentResistance" &&
+        perk_enemy.ratings.size() == 1 &&
+        perk_enemy.ratings[0].player == "Enemy" &&
+        perk_enemy.ratings[0].damage.empty() &&
+        perk_enemy.ratings[0].defense == "BodyDefense" &&
+        std::fabs(perk_enemy.ratings[0].multiplier - 2.0f) < 1e-6f;
+    // 4) the branch: before/after on a controlled single-row evaluation.
+    FighterParams self;
+    self.is_player = true;
+    self.attributes["WeaponDamage"] = 50.0f;
+    self.attributes["BodyDefense"] = 12.0f;
+    self.equipment_names = {"Fists", "NoRanged", "NoMagic"};
+    FighterParams other;
+    other.attributes["BodyDefense"] = 5.0f;
+    other.iy.push_back(AlignDelta{1.0f, 0.0f, 0, 2});  // finite `balance`
+    const std::vector<RatingAttrPair> none;
+    const float r0 = warrior_rating(self, other, none, fp);
+    self.perks.push_back(perk);  // Me perk on SELF -> F *= 2.2
+    const float r1 = warrior_rating(self, other, none, fp);
+    const float ratio_me = r0 > 0.0f ? r1 / r0 : 0.0f;
+    self.perks.clear();
+    other.perks.push_back(perk_enemy);  // Enemy perk on OTHER -> F /= 2.2
+    const float r2 = warrior_rating(self, other, none, fp);
+    const float ratio_enemy = r0 > 0.0f ? r2 / r0 : 0.0f;
+    // Enemy WITH EnchantmentResistance=54 -> eea(-54) = 2^-0.5 ->
+    // M = 1 + 2^-0.5 = 1.70710678.
+    other.attributes["EnchantmentResistance"] = 54.0f;
+    const float r3 = warrior_rating(self, other, none, fp);
+    const float ratio_resist = r0 > 0.0f ? r3 / r0 : 0.0f;
+    const float exp_resist = 1.0f / (1.0f + std::pow(2.0f, -0.5f));
+    const bool branch_ok = r0 > 0.0f && std::fabs(ratio_me - 2.2f) < 1e-3f &&
+                           std::fabs(ratio_enemy - (1.0f / 2.2f)) < 1e-3f &&
+                           std::fabs(ratio_resist - exp_resist) < 1e-3f;
+    const bool pass = cfg_ok && curve_ok && model_ok && branch_ok;
+    std::fprintf(stdout,
+                 "[rating-perk] cfg=%d curve=%d model=%d branch=%d\n"
+                 "[rating-perk] aspect antilimit=%.4f doublingRange=%.4f "
+                 "limit=%.4f perkAspect=%s\n"
+                 "[rating-perk] eea(0)=%.6f eea(+108)=%.6f eea(-108)=%.6f\n"
+                 "[rating-perk] rating before=%.9f Me=%.9f (x%.6f) "
+                 "Enemy=%.9f (x%.6f) EnemyResist54=%.9f (x%.6f exp x%.6f)\n"
+                 "[rating-perk] RESULT %s\n",
+                 cfg_ok ? 1 : 0, curve_ok ? 1 : 0, model_ok ? 1 : 0,
+                 branch_ok ? 1 : 0, fp.aspect_antilimit,
+                 fp.aspect_doubling_range, fp.aspect_limit,
+                 fp.rating_perk_aspect.c_str(), c0, cpos, cneg, r0, r1,
+                 ratio_me, r2, ratio_enemy, r3, ratio_resist, exp_resist,
+                 pass ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return pass;
 }
 
 }  // namespace sf2::scene

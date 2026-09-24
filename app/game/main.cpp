@@ -42,6 +42,7 @@
 #include "app/screens.hpp"
 #include "atlas.hpp"
 #include "audio/audio.hpp"
+#include "scene/damage.hpp"
 #include "scene/fighter.hpp"
 #include "scene/fight.hpp"
 #include "scene/magic_effects.hpp"
@@ -1408,6 +1409,7 @@ int main(int argc, char** argv) {
     bool auto_click = false;
     bool headless_loop = false;
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
+    bool rating_perk_probe_mode = false;  // --rating-perk-probe
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
@@ -1557,6 +1559,11 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--verify-input") {
             verify_input = true;
+        } else if (arg == "--rating-perk-probe") {
+            // `xc.JBa` perk `<Rating>`/`<Aspect>` branch self-check (no OS
+            // input, no sim): the before/after rating with a `<Rating>` perk.
+            // Dispatched after the RULE 0 watchdog install (see below).
+            rating_perk_probe_mode = true;
         } else if (arg == "--fx-probe") {
             // Targeted FX-bus self-check (no OS input, no sim): exercises the
             // three kinds end to end — spawn (`Yl`/`lwb`), the follow update
@@ -1834,6 +1841,12 @@ int main(int argc, char** argv) {
 
     if (driver_mode) {
         install_watchdog(watchdog_secs);
+    }
+
+    // `--rating-perk-probe`: dispatched after the watchdog (RULE 0) so the
+    // pure-computation self-check can never leave a process behind.
+    if (rating_perk_probe_mode) {
+        return sf2::scene::rating_perk_probe() ? 0 : 1;
     }
 
     // The `--verify-input` tape + probe expectations are authored on the
