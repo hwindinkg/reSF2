@@ -3376,8 +3376,12 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 gok = resolve_token(app, raw_name, gc, gname);  // `ba.Pc`
             }
             if (!gok) {
-                // Never invent a name (the shipped `?Concat[...]` names need the
-                // unmodelled `Concat` op) -> UNKNOWN, as before.
+                // A genuinely unanswerable Name (an unmodelled op or a missing
+                // variable) stays UNKNOWN — never invent one. `?Concat`/`?Slice`
+                // ARE modelled (`QNa` L956-957; dispatch `fAa` L967
+                // `case "Concat":this.QNa(b,a,1)` / L969 `case "Slice"`), so
+                // the shipped `?Concat[ITEM|,?Sum[...]]` names resolve here and
+                // grant (probe `[qa] GIVEITEM CONCAT ... PASS`).
                 fx.unknown.push_back("GiveItem (Name unresolved): " + raw_name);
             } else {
                 int gcount = 0;
