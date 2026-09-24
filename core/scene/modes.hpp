@@ -105,7 +105,11 @@ struct StageReward {
 
 struct StageFight {
     std::string name;
-    int power = 0;
+    // `?Fight.Description` base `Sb`: the `<Fight Description>` attr (`IIa`
+    // L98560 `e=b.attributes.get("Description"); a.jla(e!=null?e:"")`).
+    std::string description;
+    // `IIa` L98652 `a.d4=u.I(b.attributes.get("Power"),1)` — JS default 1.
+    int power = 1;
     int rounds = 2;
     int round_time = 99;
     int replays = 1;  // Replays= (entry repeat cap data, map-side)
@@ -406,7 +410,8 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                 for (const pugi::xml_node f : b.children("Fight")) {
                     StageFight fight;
                     if (f.attribute("Name")) fight.name = f.attribute("Name").value();
-                    fight.power = xml_int(f, "Power", 0);
+                    fight.power = xml_int(f, "Power", 1);
+                    if (f.attribute("Description")) fight.description = f.attribute("Description").value();
                     fight.rounds = xml_int(f, "Rounds", 2);
                     fight.round_time = xml_int(f, "RoundTime", 99);
                     fight.replays = xml_int(f, "Replays", 1);

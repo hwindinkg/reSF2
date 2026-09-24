@@ -627,6 +627,35 @@ bool QuestEngine::ensure_loaded(App& app) {
                                         ? std::atoi(f.attribute("ReplayInterval").value())
                                         : 0;
                                 fight_replay_interval_[zname + "|" + bname + "|" + fname] = nn;
+                                // `IIa` L98652 `a.d4=u.I(get("Power"),1)`.
+                                const int pw = f.attribute("Power")
+                                                   ? std::atoi(f.attribute("Power").value())
+                                                   : 1;
+                                fight_power_[zname + "|" + bname + "|" + fname] = pw;
+                                // `?Fight.Description`: `GD()` L727376 =
+                                // `g8!=null&&g8!=""?g8:Sb`. `Sb` = the
+                                // `<Fight Description>` attr (`IIa` L98560
+                                // `jla`). `g8` = `o7a()` (L731629), the first
+                                // level-gated top-level rule whose `o0()`
+                                // (L731530) text is non-empty. Statically only
+                                // a direct `<Description Alias>` child resolves
+                                // (`Cg` = the Alias attr, L437628); a
+                                // `<RandomRule>` resolves through its RUNTIME
+                                // pick (`ERuleRandom.CB`), absent from the
+                                // static document.
+                                std::string desc;
+                                if (f.attribute("Description"))
+                                    desc = f.attribute("Description").value();
+                                for (pugi::xml_node r : f.child("Rules").children()) {
+                                    if (std::string(r.name()) != "Description") continue;
+                                    const char* al =
+                                        r.attribute("Alias") ? r.attribute("Alias").value() : "";
+                                    if (*al) {
+                                        desc = al;
+                                        break;
+                                    }
+                                }
+                                fight_description_[zname + "|" + bname + "|" + fname] = desc;
                             }
                         }
                     }
@@ -1594,6 +1623,21 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         }
         if (field == "Timestamp") {
             out = std::to_string(rec != nullptr ? rec->time_left : 0);
+            return true;
+        }
+        if (field == "Power") {
+            // `X3a` L498367 `case "Power":a=c.d4==null?"null":""+c.d4;`.
+            // `c.d4` = `IIa` L98652 `u.I(get("Power"),1)` — an int for any
+            // parsed fight, so the answer is its decimal string.
+            const auto it = fight_power_.find(triple);
+            out = it != fight_power_.end() ? std::to_string(it->second) : "0";
+            return true;
+        }
+        if (field == "Description") {
+            // `X3a` L498367 `case "Description":a=c.GD();`; `GD()` L727376
+            // = `g8!=null&&g8!=""?g8:Sb`.
+            const auto it = fight_description_.find(triple);
+            out = it != fight_description_.end() ? it->second : std::string();
             return true;
         }
         if (field == "TimeLeft") {

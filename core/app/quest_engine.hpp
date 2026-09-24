@@ -1140,6 +1140,11 @@ private:
     // (`<Fight ReplayInterval>`, `IIa` L98652; JS default 0). Read by
     // `?Fight[...].TimeLeft` (`f9a` L727530).
     std::map<std::string, int> fight_replay_interval_;
+    // `d4` (`<Fight Power>`, `IIa` L98652; JS default 1) and the
+    // `?Fight.Description` string (`GD()` L727376 = `g8 ?? Sb`) per `hb`
+    // triple `Zone|Battle|Fight-Name`.
+    std::map<std::string, int> fight_power_;
+    std::map<std::string, std::string> fight_description_;
     // `p.items` catalog cache + the list.xml `BonusPrice` map (see
     // `catalog_find`/`catalog_bonus_price`).
     mutable std::vector<CatalogItem> catalog_cache_;
