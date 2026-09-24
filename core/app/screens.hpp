@@ -757,6 +757,11 @@ public:
     // unknown tab (the caller logs; no screen change).
     bool open_at(const std::string& tab, const std::string& item);
 
+    // `Oa.Imb()` (L1181282) minus the pane/`refresh` plumbing the port folds
+    // into `render_impl`: `jAa()` refills the item lists and `f5(tab)`
+    // re-selects the current tab. Re-reads the catalog + the save snapshot.
+    void refresh_items();
+
     // The live `Oa.Hg` shop tab index (probe/verify read).
     int tab() const { return tab_; }
 
@@ -1138,6 +1143,11 @@ int map_zone_selected(App& app);
 // name and select the item by name. Pushes the Shop when it is not current;
 // otherwise re-points the live screen. Returns false for an unknown tab.
 bool shop_open_at(App& app, const std::string& tab, const std::string& item);
+
+// `Po` `UpdateShopItems` (L570290) -> `Oa.get().Imb()`: refresh the LIVE shop
+// (refill lists + re-select the tab). No-op (returns false) when the shop is
+// not the current screen, matching `a!=null && a.Imb()`.
+bool shop_refresh_items(App& app);
 
 // --- quest dialog (He) display/dispatch contracts (screens.cpp) -------------
 // The action-plate frame for a `<Button Color>` (`He.lea` L1063 ->

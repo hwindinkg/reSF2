@@ -98,6 +98,10 @@ struct QuestAction {
 // One quest definition (JS `be`).
 struct QuestDef {
     std::string name;
+    // The quest file the node was parsed from (JS `be.fileName`; `Ln.iLa`
+    // L531194 writes it to the resume point as `K_`). Populated by
+    // `parse_quest_node` from the `file` argument.
+    std::string file;
     int priority = 0;
     bool unresumable = false;
     std::vector<std::string> events;  // ChangeTab/SceneLoaded/Activate/…
@@ -384,6 +388,22 @@ struct QuestSideEffects {
     // `eo` L1117 (`Nn`… `sxa()`): `MenuBtnFlashing` collapses the `za` scroll
     // (`za.instance.sxa()` -> `scroll.collapse(0)`, L2001) before it flashes.
     bool collapse_nav = false;
+    // `Po` L570290 (`EUpdateShopItems`): `S` runs `a=Oa.get(); a!=null&&a.Imb()`
+    // — refresh the LIVE shop (refill lists + re-select the tab). Applied by
+    // `tick` via `shop_refresh_items` (no-op when the shop is not live).
+    bool update_shop_items = false;
+    // `Ln` L531194 (`ECheckpoint`): `iLa` upserts a resume point (`HBа(ZE)`
+    // find by quest name, else `WO(ZE,K_)` create) then `setParameters(action,
+    // Faa, index)` + `p.o.save()`. `ZE` = the quest name, `K_` = its file,
+    // `Faa` = the quest `k7` (Place) -> `QuestParameters ScreenIndex`, `index`
+    // = 0 -> `ChekPointIndex` (both written by `fl`, L144813).
+    struct Checkpoint {
+        std::string quest_name;    // `ZE`
+        std::string file_name;     // `K_`
+        int screen_index = 0;      // `Faa` (`ScreenIndex`)
+        int checkpoint_index = 0;  // `index` (`ChekPointIndex`)
+    };
+    std::vector<Checkpoint> checkpoints;
     // `GiveItem` grants (`Pa.W$a` L631756): applied to the save inventory in
     // `apply_effects` (the JS acts immediately; the port batches save writes).
     std::vector<QuestGiveItem> give_items;
@@ -708,6 +728,10 @@ public:
     // being recorded. Monotonic; headless runs leave them at 0.
     std::size_t scene_actions() const { return scene_actions_; }
     std::size_t shop_actions() const { return shop_actions_; }
+    // `Po` (L570290) UpdateShopItems actions actually EXECUTED (shop live).
+    std::size_t shop_refresh_actions() const { return shop_refresh_actions_; }
+    // `Ln` (L531194) Checkpoint actions actually EXECUTED (resume point saved).
+    std::size_t checkpoint_actions() const { return checkpoint_actions_; }
     // `Hn` (L1032-1034) ChangeTab actions actually EXECUTED (target live).
     std::size_t tab_actions() const { return tab_actions_; }
     // `zj.Qh` L1072 (`EForeach`): the number of `Sl.compare` matches — one per
@@ -1105,9 +1129,13 @@ private:
     std::vector<QuestShopOpen> shop_queue_;
     std::vector<QuestTabSelect> tab_queue_;
     bool collapse_nav_pending_ = false;
+    // `Po` `UpdateShopItems` (L570290) pending live-shop refresh.
+    bool shop_refresh_pending_ = false;
     std::vector<std::string> armed_clicks_;  // `Nn` non-ignored targets
     std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
+    std::size_t shop_refresh_actions_ = 0;   // executed `UpdateShopItems` count
+    std::size_t checkpoint_actions_ = 0;     // executed `Checkpoint` count
     std::size_t tab_actions_ = 0;            // executed `ChangeTab` count
     std::size_t foreach_matches_ = 0;        // `zj.Qh` sub-quest match count
     std::size_t fight_end_actions_ = 0;      // `Tn` (`EFightEnd`) action count

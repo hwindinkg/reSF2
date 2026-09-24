@@ -11637,6 +11637,34 @@ void ShopScreen::render_impl(App& app) {
         const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f;
         const std::map<std::string, int> equipped_attrs =
             shop_equipped_attrs(app, *sel_it);  // JS `$e.Qi`
+        // `os` value bar (`vH`, L2268): the 3-layer compare overlay. `os.Gr`
+        // (L2269) fills ONE `Sn` layer to the LEFT `amount` fraction
+        // (`wl(vc.ho(Jc.io,a))` = EFilled/EHorizontal, the same left-fraction
+        // wipe `draw_vs_brush` documents, L3441-3443). The layer frames are
+        // atlas 248 (`shop`): `parametersBar/bar_5` (`Sn[0]`), `bar_4`
+        // (`Sn[1]`), `bar_2` (`Sn[2]`, drawn last = on top); the `background`
+        // is `parametersBar/bar_0`. Returns false when the atlas is absent.
+        const auto draw_bar_layer = [&](const char* frame, float x0, float y0, float w,
+                                        float h, float amount) -> bool {
+            if (amount <= 0.0f) return false;
+            amount = std::min(amount, 1.0f);
+            sf2::data::atlas_frame fr;
+            int tw = 0, th = 0;
+            unsigned int gl = 0;
+            if (!app.get_atlas_frame(frame, &fr, &tw, &th, &gl)) return false;
+            const float x1 = x0 + w * amount;
+            const float xy[8] = {x0, y0, x1, y0, x0, y0 + h, x1, y0 + h};
+            const float un = tw > 0 ? 1.0f / static_cast<float>(tw) : 0.0f;
+            const float vn = th > 0 ? 1.0f / static_cast<float>(th) : 0.0f;
+            const float u0 = static_cast<float>(fr.x) * un;
+            const float u1 =
+                (static_cast<float>(fr.x) + static_cast<float>(fr.w) * amount) * un;
+            const float v0 = static_cast<float>(fr.y) * vn;
+            const float v1 = (static_cast<float>(fr.y) + static_cast<float>(fr.h)) * vn;
+            const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+            app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+            return true;
+        };
         float row_y = stat_y;
         for (const ShopAttributeDef& def : shop_attribute_defs()) {
             if (def.hidden) continue;  // `!h.hidden` L2274
@@ -11671,18 +11699,39 @@ void ShopScreen::render_impl(App& app) {
                               stat_h * 0.4f, dtxt, 0.8f, UiAlign::Left, dr, dg, db);
             }
             // `vH` (`os`, L2268) value bar: `fi.ba` bottom-aligns it under the
-            // row; `fi.Gr` (L2273) fills it with `fi.Z7a(value)` — the `v.Ova`
-            // (`Mv` L604556) `<ItemLimits>` ratio for the player level.
+            // row; `fi.Gr` (L2273) fills each layer with `fi.Z7a(value)` — the
+            // `v.Ova` (`Mv` L604556) `<ItemLimits>` ratio for the player level.
             {
                 const float bxx = cx0 + stat_h * 1.1f;
                 const float bww = cw0 - stat_h * 1.1f - 8.0f;
                 const float bh2 = stat_h * 0.4f;
-                const ShopRect track{bxx, row_y + stat_h - bh2, bxx + bww, row_y + stat_h};
-                quad(track, 0.35f, 0.24f, 0.14f, 0.6f);
-                const float fill_frac =
+                const float byy = row_y + stat_h - bh2;
+                // `os.background` = `parametersBar/bar_0` (L2268); fall back to
+                // the flat track when the shop atlas is absent.
+                if (!draw_bar_layer("parametersBar/bar_0", bxx, byy, bww, bh2, 1.0f)) {
+                    const ShopRect track{bxx, byy, bxx + bww, row_y + stat_h};
+                    quad(track, 0.35f, 0.24f, 0.14f, 0.6f);
+                }
+                // `fi.$rb(a,b)` (L2272), a = item `d.G`, b = compare `e.G`:
+                //   b<a ? (Gr(b,0),Gr(a,2),Gr(b,1)) : (Gr(a,0),Gr(b,1),Gr(a,2))
+                // i.e. layer0 = min, layer1 = compare, layer2 = item.
+                const float f_item =
                     shop_attribute_bar_fill(def.bar_scale, value, seen_.level);
-                const ShopRect fill{bxx, track.P, bxx + bww * fill_frac, track.W};
-                quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
+                const float f_cmp =
+                    shop_attribute_bar_fill(def.bar_scale, compare, seen_.level);
+                float l0, l1, l2;
+                if (compare < value) {
+                    l0 = f_cmp; l1 = f_cmp; l2 = f_item;
+                } else {
+                    l0 = f_item; l1 = f_cmp; l2 = f_item;
+                }
+                // Bottom-to-top: `Sn[0]`=bar_5, `Sn[1]`=bar_4, `Sn[2]`=bar_2.
+                draw_bar_layer("parametersBar/bar_5", bxx, byy, bww, bh2, l0);
+                draw_bar_layer("parametersBar/bar_4", bxx, byy, bww, bh2, l1);
+                if (!draw_bar_layer("parametersBar/bar_2", bxx, byy, bww, bh2, l2)) {
+                    const ShopRect fill{bxx, byy, bxx + bww * l2, row_y + stat_h};
+                    quad(fill, 0.95f, 0.62f, 0.20f, 1.0f);
+                }
             }
             row_y += stat_h;  // `ms.ba`: `c += f.node.qa()` L2274
         }
@@ -14022,6 +14071,40 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item) {
     }
     app.set_pending_shop(tab, item);
     app.screens().push(make_screen(app.screens(), kScreenShop));
+    return true;
+}
+
+// `Oa.Imb()` (L1181282): `jAa()` (refill the lists, L2297) + `refresh()`
+// (re-read the owned/equipped save snapshot, L2248) + `f5(tab)` (re-select
+// the current tab, L2286-2288). The pane/`Za.*` plumbing is folded into the
+// port's per-frame render, so only the catalog/save re-read + re-selection
+// remain.
+void ShopScreen::refresh_items() {
+    items_ = load_catalog(app());  // `jAa()` L2297
+    try {
+        seen_ = app().save().load();  // `refresh()` L2248
+    } catch (const std::exception&) {
+    }
+    // `f5(tab)`: keep `tab_`, clamp the row selection to the new list.
+    const std::vector<std::size_t> rows = shop_tab_rows(items_, tab_);
+    if (rows.empty()) {
+        sel_ = 0;
+        hover_ = -1;
+    } else if (sel_ >= static_cast<int>(rows.size())) {
+        sel_ = static_cast<int>(rows.size()) - 1;
+    }
+    buy_armed_ = -1;    // the list changed under the open panel
+    scroll_tab_ = -1;   // force the `Gg` scroller to re-init (L1891)
+    scroll_count_ = -1;
+    std::fprintf(stdout, "[shop] Imb refresh: %zu items, tab %d, sel %d\n",
+                 items_.size(), tab_, sel_);
+    std::fflush(stdout);
+}
+
+bool shop_refresh_items(App& app) {
+    Screen* top = app.screens().top();
+    if (top == nullptr || top->id() != kScreenShop) return false;  // `Oa.get()!=null`
+    static_cast<ShopScreen*>(top)->refresh_items();
     return true;
 }
 

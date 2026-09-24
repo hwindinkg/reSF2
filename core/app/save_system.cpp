@@ -205,6 +205,18 @@ WarriorSave SaveSystem::load() {
             WarriorSave::QuestState qs;
             if (q.attribute("Name")) qs.name = q.attribute("Name").value();
             if (q.attribute("FileName")) qs.file_name = q.attribute("FileName").value();
+            // `Et.parameters` (`fl`, L144813): `ScreenIndex`/`ChekPointIndex`.
+            if (pugi::xml_node qp = q.child("QuestParameters")) {
+                qs.has_parameters = true;  // `Et` ctor: `A("QuestParameters")!=null`
+                try {
+                    if (qp.attribute("ScreenIndex"))
+                        qs.screen_index = std::stoi(qp.attribute("ScreenIndex").value());
+                    if (qp.attribute("ChekPointIndex"))
+                        qs.checkpoint_index =
+                            std::stoi(qp.attribute("ChekPointIndex").value());
+                } catch (const std::exception&) {
+                }
+            }
             out.quests.push_back(std::move(qs));
         }
         if (pugi::xml_node vars = quests.child("Variables")) {
@@ -586,6 +598,16 @@ void SaveSystem::save(const WarriorSave& w) {
             pugi::xml_node q = quest_list.append_child("Quest");
             q.append_attribute("Name").set_value(qs.name.c_str());
             q.append_attribute("FileName").set_value(qs.file_name.c_str());
+            // `fl` (L114518): the `QuestParameters` row written by `Ln`
+            // `Checkpoint` (`setParameters`). Present whenever `setParameters`
+            // ran (`has_parameters`), even at 0/0 — the JS ctor force-defaults
+            // both indices rather than omitting the node.
+            if (qs.has_parameters || qs.screen_index != 0 ||
+                qs.checkpoint_index != 0) {
+                pugi::xml_node qp = q.append_child("QuestParameters");
+                qp.append_attribute("ScreenIndex").set_value(qs.screen_index);
+                qp.append_attribute("ChekPointIndex").set_value(qs.checkpoint_index);
+            }
         }
         pugi::xml_node vars = quests.child("Variables");
         if (!vars) vars = quests.append_child("Variables");

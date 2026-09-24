@@ -562,9 +562,9 @@ void QuestEngine::load_include(App& app, const pugi::xml_node& node) {
 void QuestEngine::parse_quest_node(App& app, const pugi::xml_node& q,
                                    const std::string& file) {
     (void)app;
-    (void)file;
     QuestDef def;
     def.name = q.attribute("Name").value();
+    def.file = file;  // JS `be.fileName`; `Ln.iLa` L531194 writes it as `K_`.
     if (def.name.empty()) return;
     def.priority = parse_int_or(q.attribute("Priority").value(), 0);
     def.unresumable = std::string(q.attribute("Unresumable").value()) == "1";
@@ -3321,12 +3321,43 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     if (in_catalog) fx.perk_grants.push_back(std::move(g));
                 }
             } else if (apply_to == "Item") {
-                // `RWa` (`$n` L555926): item enchant path (`Pa.cDa`/enchant
-                // model not ported) -> record so it surfaces in the census.
-                fx.unknown.push_back("GivePerk:Item");
+                // `RWa` (`$n` L555926): `Eba` substitutes the action's attrs
+                // into the cloned node, then `b.fc(this.Bo,a)` re-tags it with
+                // the `Item` value and `Pa.cDa(name, [xe.Qd(node)])` runs the
+                // grant. `xe.Qd` builds the item MODEL from the node — the
+                // enchant/item model is not ported, so record it (with the
+                // resolved `Item`, `this.Bo`) for the census.
+                const std::string item = resolve_apply(attr_or(a.attrs, "Item"));
+                fx.unknown.push_back(item.empty() ? std::string("GivePerk:Item")
+                                                  : ("GivePerk:Item:" + item));
             } else {
                 fx.unknown.push_back(t);
             }
+        } else if (t == "Checkpoint") {
+            // `Ln` (`ECheckpoint`, L531194): `iLa` upserts the resume point
+            // (`p.o.HBa(ZE)` find by quest name, else `p.o.WO(ZE,K_)` create)
+            // and `setParameters(action, Faa, index)` then `p.o.save()`.
+            // `ZE` = the quest name (`S.initialize(this.name,…)` L483025);
+            // `K_` = the quest file; `Faa` = the quest `k7` (Place); `index`
+            // = the action's ORDINAL in `<Actions>` (`Haa` L517802:
+            // `a.index=d`, `d` = the `for(c=0;c<a.length;)` counter over the
+            // `<Actions>` children, L517673). All are read off the QuestDef by
+            // name (nested sub-quests pass their file as `quest`, which the
+            // name lookup simply misses -> 0/empty).
+            QuestSideEffects::Checkpoint cp;
+            cp.quest_name = quest;
+            cp.checkpoint_index = static_cast<int>(i);  // `Haa` L517802: `a.index=d`
+            for (const QuestDef& qd : quests_) {
+                if (qd.name == quest) {
+                    cp.file_name = qd.file;
+                    cp.screen_index = qd.place;
+                    break;
+                }
+            }
+            fx.checkpoints.push_back(std::move(cp));
+        } else if (t == "UpdateShopItems") {
+            // `Po` (`EUpdateShopItems`, L570290): `Oa.get()!=null && a.Imb()`.
+            fx.update_shop_items = true;
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
@@ -3487,6 +3518,41 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                          "[quest] FightEnd request (Delay=%s) -> fight scene\n",
                          d.c_str());
         }
+        // `Ln` `Checkpoint` (`iLa` L531194 -> `HBа`/`WO`/`setParameters`):
+        // upsert the resume point into `<Quests><Quests><Quest Name FileName>`
+        // (find by quest name, else append) and write the `QuestParameters`
+        // `ScreenIndex`/`ChekPointIndex` (both written by `fl`, L144813).
+        for (const QuestSideEffects::Checkpoint& cp : fx.checkpoints) {
+            if (cp.quest_name.empty()) continue;
+            WarriorSave::QuestState* found = nullptr;
+            for (WarriorSave::QuestState& qs : w.quests) {
+                if (qs.name == cp.quest_name) {
+                    found = &qs;
+                    break;
+                }
+            }
+            if (found == nullptr) {
+                WarriorSave::QuestState qs;
+                qs.name = cp.quest_name;
+                w.quests.push_back(std::move(qs));
+                found = &w.quests.back();
+            }
+            if (!cp.file_name.empty()) found->file_name = cp.file_name;
+            found->screen_index = cp.screen_index;
+            found->checkpoint_index = cp.checkpoint_index;
+            // `fl` ctor (L114518): `Et.setParameters` appends `QuestParameters`
+            // (`this.node.appendChild("QuestParameters")`) and the `fl` ctor
+            // force-defaults `ScreenIndex`/`ChekPointIndex` to "0", so the node
+            // EXISTS after any Checkpoint — even a 0/0 one.
+            found->has_parameters = true;
+            dirty = true;
+            ++checkpoint_actions_;
+            std::fprintf(stdout,
+                         "[quest] Checkpoint quest=%s file=%s screen=%d index=%d\n",
+                         cp.quest_name.c_str(), found->file_name.c_str(),
+                         cp.screen_index, cp.checkpoint_index);
+            std::fflush(stdout);
+        }
         if (dirty) {
             app.save().save(w);
             std::fprintf(stdout,
@@ -3587,6 +3653,8 @@ void QuestEngine::enqueue_effects(App& app, const QuestSideEffects& fx,
         std::fprintf(stdout, "[quest] ClickButton armed: %s (callback live)\n", t.c_str());
     }
     if (fx.collapse_nav) collapse_nav_pending_ = true;
+    // `Po` `UpdateShopItems` (L570290): `Oa.get().Imb()` on the live shop.
+    if (fx.update_shop_items) shop_refresh_pending_ = true;
     std::fflush(stdout);
 }
 
@@ -3895,7 +3963,7 @@ void QuestEngine::tick(App& app) {
     // fires ChangeTab/SceneLoaded, which may enqueue more work.
     for (int pass = 0; pass < 16; ++pass) {
         if (nav_queue_.empty() && shop_queue_.empty() && tab_queue_.empty() &&
-            !collapse_nav_pending_) {
+            !collapse_nav_pending_ && !shop_refresh_pending_) {
             break;
         }
         std::vector<QuestSceneRequest> navs;
@@ -3906,10 +3974,14 @@ void QuestEngine::tick(App& app) {
         tabs.swap(tab_queue_);
         const bool collapse = collapse_nav_pending_;
         collapse_nav_pending_ = false;
+        const bool refresh_shop = shop_refresh_pending_;
+        shop_refresh_pending_ = false;
         if (collapse) set_za_nav_open(false);  // `eo` L1117 -> `za.sxa()`
         for (const QuestSceneRequest& n : navs) do_navigate(app, n);
         for (const QuestShopOpen& s : shops) do_open_shop(app, s);
         for (const QuestTabSelect& s : tabs) do_tab_select(app, s);
+        // `Po` (L570290): `Oa.get().Imb()` — refresh the LIVE shop only.
+        if (refresh_shop && shop_refresh_items(app)) ++shop_refresh_actions_;
     }
 }
 

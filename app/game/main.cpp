@@ -3608,6 +3608,71 @@ int main(int argc, char** argv) {
                       cnt_after > cnt_before && buys_after == buys_before + 1,
                   "BuyItem Ruby (Energy_Refill) -> deduct bonus + grant + Purchase");
         }
+        // --- Checkpoint (`Ln` L531194 -> `iLa`): the resume point -----------
+        // `iLa(a)`: `b=p.o.HBa(ZE); b==null&&(b=p.o.WO(ZE,K_)); b.setParameters
+        // (a,this.Faa,this.index); b.fileName=this.K_; p.o.save()`. The upsert
+        // (`HBa` L129950 find-by-name / `WO` L132608 create) + the
+        // `QuestParameters` write (`fl` ctor L114518 force-defaults
+        // `ScreenIndex`/`ChekPointIndex`) are persisted, so the save
+        // ROUND-TRIP must show the node. `run_action_probe` passes quest
+        // "<probe>", not a shipped QuestDef -> file/screen 0, index = ordinal.
+        {
+            const std::size_t ck_before = app.quest_engine().checkpoint_actions();
+            bool existed_before = false;
+            for (const auto& qs : original.quests) {
+                if (qs.name == "<probe>") existed_before = true;
+            }
+            fire_action("Checkpoint", {});
+            const std::size_t ck_after = app.quest_engine().checkpoint_actions();
+            bool found = false, has_params = false;
+            int scr = -1, idx = -1;
+            try {
+                for (const auto& qs : app.save().load().quests) {
+                    if (qs.name == "<probe>") {
+                        found = true;
+                        has_params = qs.has_parameters;
+                        scr = qs.screen_index;
+                        idx = qs.checkpoint_index;
+                    }
+                }
+            } catch (const std::exception&) {
+            }
+            std::fprintf(stdout,
+                         "[qa] CHECKPOINT: actions %zu->%zu; <probe> state "
+                         "before=%d after=%d params=%d screen=%d index=%d\n",
+                         ck_before, ck_after, existed_before ? 1 : 0, found ? 1 : 0,
+                         has_params ? 1 : 0, scr, idx);
+            std::fflush(stdout);
+            check(ck_after == ck_before + 1 && !existed_before && found && has_params &&
+                      scr == 0 && idx == 0,
+                  "Checkpoint -> resume point upserted + QuestParameters round-trip");
+        }
+        // --- UpdateShopItems (`Po` L570290 -> `Oa.Imb()`) --------------------
+        // `S`: `a=Oa.get(); a!=null&&a.Imb()`. `Imb` (L1181282: `jAa` refill +
+        // `refresh` + `f5(tab)` re-select) touches the LIVE shop only, so it
+        // must be a no-op with no shop and refresh with the shop on top.
+        {
+            const std::size_t rf_before = app.quest_engine().shop_refresh_actions();
+            fire_action("UpdateShopItems", {});  // no live shop -> no-op
+            const std::size_t rf_noshop = app.quest_engine().shop_refresh_actions();
+            app.screens().push(
+                sf2::app::make_screen(app.screens(), sf2::app::kScreenShop));
+            app.run_one_frame();
+            sf2::app::ShopScreen* probe_shop =
+                dynamic_cast<sf2::app::ShopScreen*>(app.screens().top());
+            fire_action("UpdateShopItems", {});  // live shop -> Imb
+            const std::size_t rf_shop = app.quest_engine().shop_refresh_actions();
+            std::fprintf(stdout,
+                         "[qa] UPDATESHOPITEMS: refresh %zu->(no-shop %zu)->"
+                         "(shop-live %zu) shop_top=%d\n",
+                         rf_before, rf_noshop, rf_shop, probe_shop != nullptr ? 1 : 0);
+            std::fflush(stdout);
+            check(probe_shop != nullptr && rf_noshop == rf_before &&
+                      rf_shop == rf_before + 1,
+                  "UpdateShopItems -> no-op without shop, Imb with live shop");
+            app.screens().pop();
+            app.run_one_frame();
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

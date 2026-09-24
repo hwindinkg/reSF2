@@ -277,6 +277,16 @@ struct BattleRecord {
     struct QuestState {
         std::string name;       // `Et.name` (`Name` attr)
         std::string file_name;  // `Et.fileName` (`FileName` attr)
+        // `Et.parameters` (`fl`, L144813): the `QuestParameters` row written by
+        // `Ln` `Checkpoint` (`setParameters`, L531194) — `ScreenIndex` (`Faa`)
+        // and `ChekPointIndex` (`index`). Absent -> both 0.
+        int screen_index = 0;
+        int checkpoint_index = 0;
+        // `Et.parameters != null` — the `QuestParameters` node EXISTS. The
+        // JS `fl` ctor (L114518) appends it on the first `setParameters` and
+        // force-defaults both indices, so a 0/0 Checkpoint still writes the
+        // node (unlike "never checkpointed", where it is absent).
+        bool has_parameters = false;
     };
     std::vector<QuestState> quests;
     // `rv`: the quest variables. JS keys carry a LEADING `_` (`wkb` L132880:
