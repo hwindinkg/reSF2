@@ -4,6 +4,7 @@
 #include "scene/damage.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 #include "xml_doc.hpp"
@@ -498,7 +499,15 @@ bool perk_rating_match(const PerkRating& z, const std::string& row_name,
 float perk_aspect(const PerkModel& perk, const FightParams& fp) {
     if (fp.rating_perk_aspect.empty()) return 0.0f;
     const auto it = perk.set.find(fp.rating_perk_aspect);
-    return it != perk.set.end() ? js_float(it->second) : 0.0f;
+    if (it == perk.set.end()) return 0.0f;
+    // The `<Set>` value may be a `?Method[...]` expression
+    // (`?RandomAspect[min,max]` / `?Aspect[expr]`), not a plain number: the JS
+    // reads it through the `Qa` engine (`Wgb` off 688816 / `Ffb` off 689007),
+    // so a bare `js_float` would collapse it to 0.
+    SetValueCtx ctx;
+    ctx.fp = &fp;
+    for (const auto& kv : perk.set) ctx.set_vals[kv.first] = js_float(kv.second);
+    return static_cast<float>(eval_set_value(it->second, ctx));
 }
 
 // `xc.nsb` (L815): for each (name f, val e) in `attrs`, for every `<Defense>`
@@ -519,6 +528,214 @@ void rating_nsb(FighterParams& other,
 }
 
 }  // namespace
+
+namespace {
+
+// Recursive-descent evaluator for the `Qa` value-expression subset the shipped
+// perk `<Set>` values and trigger attributes use (JS `Qa.oh`). Mirrors the JS
+// operand order; unknown methods fail (the caller falls back to `js_float`).
+struct SetExpr {
+    const std::string& s;
+    const SetValueCtx& ctx;
+    std::size_t pos = 0;
+
+    void skip() {
+        while (pos < s.size() &&
+               std::isspace(static_cast<unsigned char>(s[pos]))) {
+            ++pos;
+        }
+    }
+    bool eat(char c) {
+        skip();
+        if (pos < s.size() && s[pos] == c) {
+            ++pos;
+            return true;
+        }
+        return false;
+    }
+    std::optional<double> expr() {
+        auto v = term();
+        if (!v) return std::nullopt;
+        for (;;) {
+            if (eat('+')) {
+                auto r = term();
+                if (!r) return std::nullopt;
+                *v += *r;
+            } else if (eat('-')) {
+                auto r = term();
+                if (!r) return std::nullopt;
+                *v -= *r;
+            } else {
+                return v;
+            }
+        }
+    }
+    std::optional<double> term() {
+        auto v = factor();
+        if (!v) return std::nullopt;
+        for (;;) {
+            if (eat('*')) {
+                auto r = factor();
+                if (!r) return std::nullopt;
+                *v *= *r;
+            } else if (eat('/')) {
+                auto r = factor();
+                if (!r || *r == 0.0) return std::nullopt;
+                *v /= *r;
+            } else {
+                return v;
+            }
+        }
+    }
+    std::optional<double> factor() {
+        skip();
+        if (eat('-')) {
+            auto v = factor();
+            if (!v) return std::nullopt;
+            return -*v;
+        }
+        if (eat('(')) {
+            auto v = expr();
+            if (!v || !eat(')')) return std::nullopt;
+            return v;
+        }
+        if (pos < s.size() &&
+            (std::isdigit(static_cast<unsigned char>(s[pos])) || s[pos] == '.')) {
+            std::size_t len = 0;
+            try {
+                const double d = std::stod(s.substr(pos), &len);
+                if (len == 0) return std::nullopt;
+                pos += len;
+                return d;
+            } catch (...) {
+                return std::nullopt;
+            }
+        }
+        if (pos < s.size() && s[pos] == '?') return qref();
+        if (pos < s.size() && s[pos] == '_') {
+            // Bare `_X` -> the perk `<Set>` entry, parsed as a number.
+            const std::size_t st = pos;
+            while (pos < s.size() &&
+                   (std::isalnum(static_cast<unsigned char>(s[pos])) ||
+                    s[pos] == '_')) {
+                ++pos;
+            }
+            const auto it = ctx.set_vals.find(s.substr(st + 1, pos - st - 1));
+            return it != ctx.set_vals.end() ? std::optional<double>(it->second)
+                                            : std::nullopt;
+        }
+        return std::nullopt;
+    }
+    std::optional<double> qref() {
+        ++pos;  // '?'
+        std::string name;
+        while (pos < s.size() &&
+               (std::isalnum(static_cast<unsigned char>(s[pos])) ||
+                s[pos] == '_')) {
+            name += s[pos++];
+        }
+        skip();
+        std::string arg;
+        if (eat('[')) {
+            std::size_t depth = 1;
+            const std::size_t start = pos;
+            while (pos < s.size() && depth > 0) {
+                if (s[pos] == '[') ++depth;
+                if (s[pos] == ']') --depth;
+                ++pos;
+            }
+            if (depth != 0) return std::nullopt;
+            arg = s.substr(start, pos - start - 1);
+        }
+        std::string field;
+        if (eat('.')) {
+            while (pos < s.size() &&
+                   (std::isalnum(static_cast<unsigned char>(s[pos])) ||
+                    s[pos] == '_')) {
+                field += s[pos++];
+            }
+        }
+        if (name == "RandomAspect") {
+            // `Wgb`: exactly two comma args `[min,max]`; else 0.
+            const std::size_t comma = arg.find(',');
+            if (comma == std::string::npos) return std::optional<double>(0.0);
+            const int lo = static_cast<int>(js_float(arg.substr(0, comma)));
+            const int hi =
+                static_cast<int>(js_float(arg.substr(comma + 1))) + 1;
+            double c = static_cast<double>(lo);
+            const double r = ctx.rand01 ? ctx.rand01() : 0.0;
+            c += static_cast<double>(static_cast<int>((hi - c) * r));
+            c += ctx.aspect_scale ? ctx.aspect_scale(ctx.level) : 0.0;
+            return c;
+        }
+        if (name == "Aspect") {
+            // `Ffb`: exactly one arg; `eea(kc(expr))`.
+            if (arg.find(',') != std::string::npos) return std::optional<double>(0.0);
+            SetExpr inner{arg, ctx};
+            double v = 0.0;
+            auto r = inner.expr();
+            inner.skip();
+            if (r && inner.pos == arg.size()) v = *r;
+            const FightParams& fp =
+                ctx.fp != nullptr ? *ctx.fp : FightParams::defaults();
+            return static_cast<double>(aspect_curve(static_cast<float>(v), fp));
+        }
+        if (name == "CurrentFight" && field == "isRaid") {
+            return std::optional<double>(ctx.is_raid ? 1.0 : 0.0);
+        }
+        if (name == "PlayerParameter") {
+            if (field == "isPlayer")
+                return std::optional<double>(ctx.is_player ? 1.0 : 0.0);
+            if (field == "DefaultPerksAspect")
+                return std::optional<double>(ctx.default_perks_aspect);
+            if (field == "DamageConverter")
+                return std::optional<double>(ctx.damage_converter);
+            if (field == "Level") return std::optional<double>(ctx.level);
+            return std::nullopt;
+        }
+        if (name == "PlayerAttribute") {
+            const auto& m = (arg == "Enemy") ? ctx.enemy_attrs : ctx.me_attrs;
+            const auto it = m.find(field);
+            return std::optional<double>(it != m.end() ? it->second : 0.0);
+        }
+        if (name == "Variable") {
+            const auto it = ctx.vars.find(arg);
+            return std::optional<double>(it != ctx.vars.end() ? it->second : 0.0);
+        }
+        if (name == "Abs") {
+            SetExpr inner{arg, ctx};
+            auto r = inner.expr();
+            inner.skip();
+            if (!r || inner.pos != arg.size()) return std::nullopt;
+            return std::fabs(*r);
+        }
+        if (name == "Hit") {
+            if (field == "Damage") return std::optional<double>(ctx.hit_damage);
+            if (field == "BaseDamage")
+                return std::optional<double>(ctx.hit_base_damage);
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+};
+
+}  // namespace
+
+double eval_set_value(const std::string& raw, const SetValueCtx& ctx) {
+    if (raw.empty()) return 0.0;
+    // A plain `_`-substituted value or a numeric prefix need not be an
+    // expression; `js_float` is the faithful fallback (the JS `gy`/`ky` path).
+    const unsigned char c0 = static_cast<unsigned char>(raw[0]);
+    if (raw[0] != '?' && raw[0] != '(' && raw[0] != '-' && raw[0] != '_' &&
+        raw[0] != '.' && !std::isdigit(c0)) {
+        return js_float(raw);
+    }
+    SetExpr p{raw, ctx};
+    auto v = p.expr();
+    p.skip();
+    if (v && p.pos == raw.size()) return *v;
+    return js_float(raw);
+}
 
 float rating_attribute(const FighterParams& w, const std::string& name) {
     const auto it = w.attributes.find(name);
@@ -831,21 +1048,64 @@ bool rating_perk_probe() {
     const bool branch_ok = r0 > 0.0f && std::fabs(ratio_me - 2.2f) < 1e-3f &&
                            std::fabs(ratio_enemy - (1.0f / 2.2f)) < 1e-3f &&
                            std::fabs(ratio_resist - exp_resist) < 1e-3f;
-    const bool pass = cfg_ok && curve_ok && model_ok && branch_ok;
+    // 5) the `<Set>` value-expression evaluators (`Wgb`/`Ffb`, offsets 688816 /
+    //    689007): a `?RandomAspect[-30,30]` (the forge.xml item-enchant shape)
+    //    + a `?Aspect[expr]`, vs the OLD `js_float` collapse to 0.
+    const PerkModel perk_rand = parse_perk_xml(
+        "<Perk Name=\"P\"><Set Aspect=\"?RandomAspect[-30,30]\" Base=\"25000\"/>"
+        "</Perk>");
+    SetValueCtx vc;
+    vc.fp = &fp;
+    vc.set_vals["Base"] = 25000.0;
+    vc.rand01 = []() { return 0.9; };   // floor((31-(-30))*0.9)=floor(54.9)=54
+    vc.aspect_scale = [](int) { return 100.0; };  // `gea(level)`
+    const double rnd = eval_set_value(perk_rand.set.at("Aspect"), vc);
+    const double old_rnd = js_float(perk_rand.set.at("Aspect"));  // pre-fix path
+    SetValueCtx va;
+    va.fp = &fp;
+    const double asp0 = eval_set_value("?Aspect[0]", va);      // eea(0)   = 1.0
+    const double aspn = eval_set_value("?Aspect[-108]", va);   // eea(-108) = 0.5
+    // The trigger shape (perks.xml L725/L1148, non-raid): `_Chance *
+    // ?Aspect[_Aspect*(1-isRaid*isPlayer) + DPA*isRaid*isPlayer - EnemyRes]`;
+    // `_Aspect=0`, EnemyRes=54 -> `0.4 * eea(-54) = 0.4*2^-0.5`.
+    SetValueCtx vt;
+    vt.fp = &fp;
+    vt.set_vals["Aspect"] = 0.0;
+    vt.set_vals["Chance"] = 0.4;
+    vt.is_player = true;
+    vt.is_raid = false;
+    vt.enemy_attrs["EnchantmentResistance"] = 54.0;
+    const double tc = eval_set_value(
+        "_Chance * ?Aspect[_Aspect * ( 1 - ?CurrentFight[].isRaid * "
+        "?PlayerParameter[Me].isPlayer ) + ?PlayerParameter[Me].DefaultPerksAspect"
+        " * ?CurrentFight[].isRaid * ?PlayerParameter[Me].isPlayer - "
+        "?PlayerAttribute[Enemy].EnchantmentResistance]",
+        vt);
+    const double tc_exp = 0.4 * std::pow(2.0, -0.5);
+    const bool setexpr_ok = std::fabs(rnd - 124.0) < 1e-6 &&
+                            old_rnd == 0.0f &&
+                            std::fabs(asp0 - 1.0) < 1e-4 &&
+                            std::fabs(aspn - 0.5) < 1e-4 &&
+                            std::fabs(tc - tc_exp) < 1e-3;
+    const bool pass =
+        cfg_ok && curve_ok && model_ok && branch_ok && setexpr_ok;
     std::fprintf(stdout,
-                 "[rating-perk] cfg=%d curve=%d model=%d branch=%d\n"
+                 "[rating-perk] cfg=%d curve=%d model=%d branch=%d setexpr=%d\n"
                  "[rating-perk] aspect antilimit=%.4f doublingRange=%.4f "
                  "limit=%.4f perkAspect=%s\n"
                  "[rating-perk] eea(0)=%.6f eea(+108)=%.6f eea(-108)=%.6f\n"
+                 "[rating-perk] setexpr RandomAspect=%.1f (old js_float=%.1f) "
+                 "Aspect[0]=%.6f Aspect[-108]=%.6f triggerChance=%.6f "
+                 "(exp %.6f)\n"
                  "[rating-perk] rating before=%.9f Me=%.9f (x%.6f) "
                  "Enemy=%.9f (x%.6f) EnemyResist54=%.9f (x%.6f exp x%.6f)\n"
                  "[rating-perk] RESULT %s\n",
                  cfg_ok ? 1 : 0, curve_ok ? 1 : 0, model_ok ? 1 : 0,
-                 branch_ok ? 1 : 0, fp.aspect_antilimit,
+                 branch_ok ? 1 : 0, setexpr_ok ? 1 : 0, fp.aspect_antilimit,
                  fp.aspect_doubling_range, fp.aspect_limit,
-                 fp.rating_perk_aspect.c_str(), c0, cpos, cneg, r0, r1,
-                 ratio_me, r2, ratio_enemy, r3, ratio_resist, exp_resist,
-                 pass ? "PASS" : "FAIL");
+                 fp.rating_perk_aspect.c_str(), c0, cpos, cneg, rnd, old_rnd,
+                 asp0, aspn, tc, tc_exp, r0, r1, ratio_me, r2, ratio_enemy, r3,
+                 ratio_resist, exp_resist, pass ? "PASS" : "FAIL");
     std::fflush(stdout);
     return pass;
 }

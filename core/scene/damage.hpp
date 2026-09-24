@@ -28,7 +28,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 
 #include "scene/physics.hpp"
@@ -534,6 +536,41 @@ inline float aspect_curve(float x,
     }
     return fp.aspect_antilimit + std::pow(2.0f, x / fp.aspect_doubling_range);
 }
+
+// --- `<Set>` value-expression evaluator (`Wgb`/`Ffb` + the `Qa` subset) -----
+// The perk `<Set>` attribute values — and the trigger `<Random Chance>` /
+// `<ModAttributes>` expressions that reuse them — are `?Method[args]` value
+// expressions, NOT plain numbers. `Wgb` (`?RandomAspect[min,max]`, off
+// 688816 in sf2.502f0946.js) draws
+//   `c = min + ((max+1) - min) * pg.jf() | 0`  then  `c += gea(level)`
+// (the `AspectScale` table). `Ffb` (`?Aspect[expr]`, off 689007) is
+// `Be.eea(kc(expr))` — the aspect curve of the evaluated inner expression.
+// This context supplies the operands; `eval_set_value` is the JS-exact entry.
+struct SetValueCtx {
+    int level = 1;                      // `p.o.bb()` (player level)
+    bool is_raid = false;               // `?CurrentFight[].isRaid`
+    bool is_player = true;              // `?PlayerParameter[Me].isPlayer`
+    double default_perks_aspect = 0.0;  // `?PlayerParameter[Me].DefaultPerksAspect`
+    double damage_converter = 0.0;      // `?PlayerParameter[Me].DamageConverter`
+    double hit_damage = 0.0;            // `?Hit[].Damage`
+    double hit_base_damage = 0.0;       // `?Hit[].BaseDamage`
+    std::map<std::string, double> me_attrs;     // `?PlayerAttribute[Me].X`
+    std::map<std::string, double> enemy_attrs;  // `?PlayerAttribute[Enemy].X`
+    std::map<std::string, double> vars;         // `?Variable[X]`
+    std::map<std::string, double> set_vals;     // `_X` (the perk `<Set>` lookup)
+    const FightParams* fp = nullptr;            // `v.CY` (the `eea` config)
+    std::function<double(int)> aspect_scale;    // `gea(level)` (AspectScale)
+    std::function<double()> rand01;             // `Da.pg.jf()` draw
+};
+
+// Evaluate one `<Set>`/attribute value expression. Numeric literals and the
+// arithmetic operators (+,-,*,/,(,)) are always handled; `?RandomAspect`,
+// `?Aspect`, `?CurrentFight[].isRaid`, `?PlayerParameter[Me].*`,
+// `?PlayerAttribute[Me|Enemy].*`, `?Variable[*]`, `?Abs[*]`, `?Hit[].*` and
+// `_Set` lookups are resolved from `ctx`. Anything unparseable falls back to
+// `js_float(raw)` (0 when the raw value is not numeric).
+double eval_set_value(const std::string& raw,
+                      const SetValueCtx& ctx = SetValueCtx{});
 
 // `Be.parse` + `Jw.parse` (L681500 / L703284) on one `<Perk>` document:
 // `<Set>` -> `set`, each `<RatingEvaluation><Rating>` -> `ratings`, with the
