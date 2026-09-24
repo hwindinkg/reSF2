@@ -2533,6 +2533,12 @@ int main(int argc, char** argv) {
                     // `Nn`(Duel)=14400 -> 14401; an absent fight -> `Nn=0` -> 1.
                     "?Fight[ZONE_1|Duel|1].TimeLeft",
                     "?Fight[ZONE_1|BOSS_LYNX|9].TimeLeft",
+                    // `X3a` L498367 `case "Difficulty"`: `Wc.NAa(v.Gz(c))` ->
+                    // `Wc.gD.indexOf(...)`. The shipped `DifficultyAlert` quest
+                    // (quests.xml) reads `?Fight[_$Fight].Difficulty`.
+                    "?Fight[ZONE_1|BOSS_LYNX|1].Difficulty",
+                    "?Fight[ZONE_1|BOSS_LYNX|2].Difficulty",
+                    "?Fight[ZONE_1|Duel|1].Difficulty",
                 };
                 for (const char* e : fe) {
                     std::fprintf(stdout, "[qquery] fight BEFORE %-38s = '%s'\n", e,
@@ -2587,6 +2593,9 @@ int main(int argc, char** argv) {
                     "?Fight[ZONE_1|BOSS_LYNX|1].WinCount",
                     "?Fight[ZONE_1|Duel|1].TimeLeft",
                     "?Fight[ZONE_1|BOSS_LYNX|9].TimeLeft",
+                    "?Fight[ZONE_1|BOSS_LYNX|1].Difficulty",
+                    "?Fight[ZONE_1|BOSS_LYNX|2].Difficulty",
+                    "?Fight[ZONE_1|Duel|1].Difficulty",
                 };
                 for (const char* e : fe) {
                     std::fprintf(stdout, "[qquery] fight AFTER  %-38s = '%s'\n", e,
@@ -2648,6 +2657,9 @@ int main(int argc, char** argv) {
                 "?Battle[ZONE_1|BOSS_LYNX].Zone",
                 "?Battle[ZONE_1|BOSS_LYNX].Type",        // nYa L982 -> BOSSES
                 "?Fight[ZONE_1|BOSS_LYNX|BOSS_LYNX].Type",  // X3a L972 -> BOSSES
+                "?Fight[ZONE_1|BOSS_LYNX|1].Difficulty",    // X3a L498367 -> level
+                "?Fight[ZONE_1|BOSS_LYNX|2].Difficulty",    // -> level
+                "?Fight[ZONE_1|Duel|1].Difficulty",         // -> level
                 "?Battle[BOSS_LYNX].Available",
                 "?Sum[?Multi[100,?Player[].Level],30]",
                 "?Multi[7,6]",

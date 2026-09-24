@@ -1709,6 +1709,18 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
             out = it != fight_description_.end() ? it->second : std::string();
             return true;
         }
+        if (field == "Difficulty") {
+            // `X3a` L498367 `case "Difficulty":a=Wc.NAa(v.Gz(c));
+            // a=K.T(Wc.gD.indexOf(a));`. `v.Gz` resolves the fight record and
+            // `Wc.NAa` picks the LAST `Wc.gD` row whose `RatingRatioTreshold`
+            // is `<` the rating ratio; `indexOf` is the 0-based level index.
+            // The port resolves the SAME rating the Map's `Wc` bar uses
+            // (`map_fight_difficulty_level` -> `map_battle_rating_cached` ->
+            // `map_difficulty_level`); a malformed triple is the JS `p.Wv`
+            // miss -> `-1`.
+            out = std::to_string(map_fight_difficulty_level(app, triple));
+            return true;
+        }
         if (field == "TimeLeft") {
             const auto nit = fight_replay_interval_.find(triple);
             const long long nn = nit != fight_replay_interval_.end() ? nit->second : 0;

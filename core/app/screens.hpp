@@ -1141,6 +1141,13 @@ bool za_nav_expanded(ScreenId id);
 // the wins recorded for the battle, clamped to its `<Fight>` count, so the
 // quest journal's `_$Fight` is `zone|name|(index+1)`.
 int map_fight_index(App& app, const std::string& name, int fight_count);
+// `Wc.NAa(v.Gz(fight))` (JS L2163): the `Wc` difficulty LEVEL index (0..4) for
+// a fight, resolved from the SAME rating the Map's `Wc` bar uses
+// (`map_battle_rating_cached` -> `map_difficulty_level`). `fight_triple` is the
+// `hb` triple `zone|battle|fight`; the battle's `<Fight>` index is the triple's
+// 1-based fight ordinal minus 1 (the `map_fight_index` convention). Returns -1
+// when the triple is malformed (the JS `p.Wv` miss -> `a=-1`).
+int map_fight_difficulty_level(App& app, const std::string& fight_triple);
 // The live Map screen's `Ur` strip, for probes/drivers — null-safe (returns
 // false / -1 when the Map is not the top screen).
 bool map_zone_dot_center(App& app, std::size_t zi, float& cx, float& cy);

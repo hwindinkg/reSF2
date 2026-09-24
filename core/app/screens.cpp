@@ -7421,6 +7421,33 @@ int map_difficulty_level(float rating_ratio) {
     return idx;
 }
 
+// `Wc.NAa(v.Gz(fight))` (JS L2163): the difficulty LEVEL index for a fight
+// triple. `v.Gz` resolves the fight record and returns `-1` on a miss; the
+// port resolves the SAME rating the Map's `Wc` bar uses (`map_battle_rating`
+// -> `map_difficulty_level`). The triple is `zone|battle|fight` (the `hb`
+// `toString`, L1416); the battle's `<Fight>` index is the 1-based fight
+// ordinal minus 1 (the `map_fight_index` convention).
+int map_fight_difficulty_level(App& app, const std::string& fight_triple) {
+    // Split the `hb` triple `zone|battle|fight` (the `toString`, L1416).
+    const std::size_t p1 = fight_triple.find('|');
+    if (p1 == std::string::npos) return -1;  // `p.Wv` miss -> `a=-1`
+    const std::size_t p2 = fight_triple.find('|', p1 + 1);
+    if (p2 == std::string::npos) return -1;
+    const std::string zone = fight_triple.substr(0, p1);
+    const std::string battle = fight_triple.substr(p1 + 1, p2 - (p1 + 1));
+    const std::string fight = fight_triple.substr(p2 + 1);
+    if (battle.empty() || fight.empty()) return -1;
+    int fight_index = 0;
+    try {
+        fight_index = std::stoi(fight) - 1;
+    } catch (const std::exception&) {
+        return -1;
+    }
+    if (fight_index < 0) fight_index = 0;
+    return map_difficulty_level(
+        map_battle_rating_cached(app, battle, zone, fight_index));
+}
+
 // Source size of an atlas frame (untrimmed `sourceSize`), for the JS
 // aspect-driven scale (`R.za()/qa()`).
 bool map_frame_size(App& app, const char* name, float& w, float& h) {
