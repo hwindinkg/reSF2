@@ -3834,6 +3834,27 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
                 return sub;
             }
+        } else if (t == "ResetEnchantments") {
+            // `Nz.hi` (sf2.502f0946.js L488166) lists `ResetEnchantments` among
+            // the KNOWN node names, so `Fe.Ij` (L484141) maps it to
+            // `"EResetEnchantments"` (`Fe.ol`/`Nz.hi` returns `"E"+a`). But the
+            // factory switch `Fe.S0a` (L484148..L487176; 82 cases) has NO such
+            // case — its only `EReset*` case is `EResetDuelTimer` (L485665) —
+            // so it hits `default:a=null` and `Fe.Us`/`Fe.Ij` substitute
+            // `Fe.Wxa()` = `qa.Ya(S,[])`, a bare base-class action `S`
+            // (class L482959). `S.S(a)` (L482988) only applies Lock/Sound and
+            // queues its child actions; it never mutates an item, and in
+            // particular never clears `OwnedItem.enchantments`. So JS-exact is
+            // a recognised INERT action: run any nested actions, apply no side
+            // effect. (Unlike `GivePerk`, which has a real `$n` case, this tag
+            // is declared-but-unimplemented in the web build; the shipped XML
+            // never emits `<ResetEnchantments>`.)
+            ActionRest sub = run_actions(app, a.children, journal, fx, locals,
+                                         quest, depth + 1, iterator);
+            if (sub.suspended) {
+                sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
+                return sub;
+            }
         } else {
             fx.unknown.push_back(t);
         }
