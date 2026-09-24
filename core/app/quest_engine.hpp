@@ -73,6 +73,18 @@ struct QuestJournal {
     // item was just received (`OfferItemRecieved`, `G_` L513220 maps it to
     // `QUEST_EVENT_OFFER_ITEM_RECIEVED`). Set by `offer_purchase`.
     std::string offer;             // `_$Offer`
+    // --- `Bj` L960-964 journal fields whose driving event the port does NOT
+    // fire (no XP/energy model; no perk-activate/locale/set-item event). The
+    // JS `Bj` ctor (L1004/1005) defaults them (`fja`/`t2`/`Ilb`=0,
+    // `setItem`="", `Ria`/`exa`=null), so absent the event they resolve to
+    // those defaults — modelled as the struct's own defaults here. `_$Deliver`
+    // (L961) reads the SAME `ta.item` as `_$Purchase`, so it reuses `item`.
+    int energy_change = 0;          // `Bj.fja` (`_$EnergyChange`, K.T; L961)
+    int level_up = 0;               // `Bj.t2` (`_$LevelUp`, K.T; L962)
+    int gems_price = 0;             // `Bj.Ilb` (`_$GemsPrice`, K.T; L962)
+    std::string perk_name;          // `Bj.Ria` (`_$PerkName`; ctor null; L963)
+    std::string chosen_locale;      // `Bj.exa` (`_$ChosenLocale`; ctor null; L961)
+    std::string set_item;           // `Bj.setItem` (`_$SetItem`; ctor ""; L964)
 };
 
 // Condition node (leaf comparison or And/Or operator). Leaf kinds mirror

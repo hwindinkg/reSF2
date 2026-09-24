@@ -2898,6 +2898,54 @@ int main(int argc, char** argv) {
                       timer_after == "Timer_StarterPack",
                   "_$TimerName = the last-fired timer (Ct.swa L292)");
         }
+        // --- `Bj` L960-964: the remaining journal tokens (census batch) ------
+        // `_$Deliver` reads the SAME `ta.item` as `_$Purchase` (L961); the
+        // numeric fields (`fja`/`t2`/`Ilb`) and string fields (`Ria`/`exa`/
+        // `setItem`) default from the `Bj` ctor (L1004/1005) because the port
+        // fires none of their events; the 6 no-op `break` cases leave the
+        // result untouched -> "". `_$ActualCoinPackItem`/`_$Enchantment` read
+        // registries the port does not populate -> "".
+        {
+            sf2::app::QuestJournal dj;
+            dj.item = "WEAPON_KNIVES";
+            dj.energy_change = 5;
+            dj.level_up = 1;
+            dj.gems_price = 250;
+            dj.perk_name = "Perk_Test";
+            dj.chosen_locale = "ru";
+            dj.set_item = "ITEM_X";
+            const auto rq = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, dj);
+            };
+            const sf2::app::QuestJournal empty;
+            const auto rqe = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, empty);
+            };
+            check(rq("_$Deliver") == "WEAPON_KNIVES",
+                  "_$Deliver = ta.item.name (Bj L961)");
+            check(rq("_$EnergyChange") == "5" && rqe("_$EnergyChange") == "0",
+                  "_$EnergyChange = K.T(ta.fja) (L961; ctor 0)");
+            check(rq("_$LevelUp") == "1" && rqe("_$LevelUp") == "0",
+                  "_$LevelUp = K.T(ta.t2) (L962; ctor 0)");
+            check(rq("_$GemsPrice") == "250" && rqe("_$GemsPrice") == "0",
+                  "_$GemsPrice = K.T(ta.Ilb) (L962; ctor 0)");
+            check(rq("_$PerkName") == "Perk_Test" && rqe("_$PerkName").empty(),
+                  "_$PerkName = ta.Ria (L963; ctor null -> '')");
+            check(rq("_$ChosenLocale") == "ru" && rqe("_$ChosenLocale").empty(),
+                  "_$ChosenLocale = ta.exa (L961; ctor null -> '')");
+            check(rq("_$SetItem") == "ITEM_X" && rqe("_$SetItem").empty(),
+                  "_$SetItem = ta.setItem (L964; ctor '')");
+            check(rqe("_$ActualCoinPackItem").empty(),
+                  "_$ActualCoinPackItem = it.zua.name (L960; null -> '')");
+            check(rqe("_$Enchantment").empty(),
+                  "_$Enchantment = x6a() (L961; Jf.iE='' -> '')");
+            bool noop_ok = true;
+            for (const char* n : {"_$PacksCount", "_$Raid", "_$RaidAvatar",
+                                  "_$RaidId", "_$RaidMode", "_$RaidResult"}) {
+                if (!rqe(n).empty()) noop_ok = false;
+            }
+            check(noop_ok, "6 no-op break cases -> '' (L963)");
+        }
         const bool all = checks == passed;
         std::fprintf(stdout, "[qquery] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");

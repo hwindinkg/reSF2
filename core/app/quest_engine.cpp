@@ -2168,8 +2168,79 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             out = ctx.journal.offer;
             return true;
         }
-        // Other `Bj` journal fields (`_$Iterator` is modelled above; the rest
-        // the shell does not model) -> UNKNOWN.
+        // `Bj` L961: `case "_$Deliver": a.Fb.result = this.ta.item!=null ?
+        // this.ta.item.name : ""`. The SAME `ta.item` `_$Purchase` reads
+        // (L963); `Pa.Wz` (L1234) sets it before the delivery/purchase fire.
+        if (token == "_$Deliver") {
+            out = ctx.journal.item;
+            return true;
+        }
+        // `Bj` L961: `case "_$EnergyChange": a.Fb.result = K.T(this.ta.fja)`.
+        // `ta.fja` (ctor L1004 = 0) is written at fight end; the port models no
+        // XP/energy, so it stays the ctor default 0.
+        if (token == "_$EnergyChange") {
+            out = std::to_string(ctx.journal.energy_change);
+            return true;
+        }
+        // `Bj` L962: `case "_$LevelUp": a.Fb.result = K.T(this.ta.t2)`.
+        // `ta.t2` (ctor L1004 = 0) is the fight-end level-up flag; no XP model
+        // in the port -> ctor default 0.
+        if (token == "_$LevelUp") {
+            out = std::to_string(ctx.journal.level_up);
+            return true;
+        }
+        // `Bj` L963: `case "_$PerkName": a.Fb.result = this.ta.Ria`. `ta.Ria`
+        // (ctor L1004 = null) is written by the perk activate/deactivate
+        // handler before `QUEST_EVENT_ACTIVATE_PERK`; no such event in the port
+        // -> null -> "".
+        if (token == "_$PerkName") {
+            out = ctx.journal.perk_name;
+            return true;
+        }
+        // `Bj` L962: `case "_$GemsPrice": a.Fb.result = K.T(this.ta.Ilb)`.
+        // `ta.Ilb` (ctor L1004 = 0), no writer -> 0.
+        if (token == "_$GemsPrice") {
+            out = std::to_string(ctx.journal.gems_price);
+            return true;
+        }
+        // `Bj` L961: `case "_$ChosenLocale": a.Fb.result = this.ta.exa!=null ?
+        // this.ta.exa : ""`. `ta.exa` (ctor L1005 = null) -> "".
+        if (token == "_$ChosenLocale") {
+            out = ctx.journal.chosen_locale;
+            return true;
+        }
+        // `Bj` L964: `case "_$SetItem": a.Fb.result = this.ta.setItem`.
+        // `ta.setItem` (ctor L1004 = "") -> "".
+        if (token == "_$SetItem") {
+            out = ctx.journal.set_item;
+            return true;
+        }
+        // `Bj` L960: `case "_$ActualCoinPackItem": let d=p.items.zua;
+        // a.Fb.result = d!=null ? d.name : ""`. `it.zua` (ctor = null) is the
+        // coin-pack registry, populated only by `EOa` scanning `items.Dp` for
+        // `Yb==I.voa`; the port ships no coin pack -> null -> "".
+        if (token == "_$ActualCoinPackItem") {
+            out = "";
+            return true;
+        }
+        // `Bj` L961: `case "_$Enchantment": a.Fb.result = this.x6a()`. `x6a`:
+        // `let a=new Fb; if(this.ta.Jf.iE!=""){...a.M+=Jf.iE+"|"+Jf.xja+"|"+
+        // max(0,Jf.Ec-p.Dc)} return a.M`. `ta.Jf` (ctor `new qv`) defaults
+        // `iE==""` -> "".
+        if (token == "_$Enchantment") {
+            out = "";
+            return true;
+        }
+        // `Bj` L963: the pure no-op `break` cases — `_$PacksCount`, `_$Raid`,
+        // `_$RaidAvatar`, `_$RaidId`, `_$RaidMode`, `_$RaidResult` leave
+        // `a.Fb.result` untouched (ctor null) -> "".
+        if (token == "_$PacksCount" || token == "_$Raid" ||
+            token == "_$RaidAvatar" || token == "_$RaidId" ||
+            token == "_$RaidMode" || token == "_$RaidResult") {
+            out = "";
+            return true;
+        }
+        // Other `Bj` journal fields the shell does not model -> UNKNOWN.
         note_unanswerable(token);
         return false;
     }
