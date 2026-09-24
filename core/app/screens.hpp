@@ -392,6 +392,11 @@ public:
         // `a.locked=u.ka(b.attributes.get("Locked"),!1)`; `Xr` L2134
         // `c[k].locked?l.wMa(2)`), parallel to `fight_names`.
         std::vector<bool> fight_locked;
+        // Per-`<Fight>` `Replays` (JS `dl.repeat`, `IIa` L195
+        // `a.repeat=u.I(b.attributes.get("Replays"))`; `u.I` L... default 0) —
+        // the `YL` status-1 threshold (`c.no >= a.repeat`, L220). Parallel to
+        // `fight_names`.
+        std::vector<int> fight_replays;
         std::vector<bool> pip_beaten;
         float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;
@@ -408,6 +413,16 @@ public:
         // what keeps their labels off the base node's.
         bool visible = true;
         bool alt_state = false;
+        // JS `Lc.eJ()` (L1405): `DAa(1)==ag ? 1 : DAa(3)==ag ? 3 : 2` — the
+        // node's fight-variant index, where `ag` is the `<Fight>` count
+        // (`D0a` L1408) and `DAa(s)` counts the node's fight entries with
+        // `dl.status==s` (`YL` L220). `dl.status==3` never occurs: `uga`
+        // (L1431) compares a STRING rule type to numeric `2` (always true)
+        // and stages.xml has no `<Conditions`, so `Jbb()` is always true.
+        // Hence 1 = every `<Fight>` beaten (`status==1`: `repeat>0 &&
+        // CompletedCount>=repeat`), 2 = otherwise. The `VEa` red-dot gate
+        // requires exactly 2 (L2132).
+        int variant = 1;
     };
 
     // One zone tab (JS `st`, parsed by `p.Dkb` L188): the zone strip the map

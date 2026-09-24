@@ -4146,6 +4146,10 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                     // pip lock (`c[k].locked?l.wMa(2)`, L2134).
                     n.fight_locked.push_back(
                         sf2::data::xml_attr_bool(fight, "Locked", false));
+                    // JS `dl.repeat` (`IIa` L195: `a.repeat=u.I(Replays)`,
+                    // absent -> 0) — the `YL` status-1 threshold.
+                    n.fight_replays.push_back(
+                        sf2::data::xml_attr_int(fight, "Replays", 0));
                     // First positive <Reward Money> of the first fight (the
                     // `ci` gold icon value under the difficulty bar, L2133).
                     if (n.fight_count == 1 && n.reward_money == 0) {
@@ -6862,6 +6866,31 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
                 if (wins == 0 && pip_n == 1) wins = wins_for(n.name);
                 n.pip_beaten[static_cast<std::size_t>(k)] = wins >= 1;
             }
+            // JS `Lc.eJ()` (L1405) — the node variant read by `VEa` (L2132).
+            // `ag` is the FULL `<Fight>` count (JS `D0a` L1408), not the `Xr`
+            // pip count. `dl.status==1` (`YL` L220) = `repeat>0 &&
+            // CompletedCount>=repeat` for the non-replayable branch; the
+            // `VEa` names are TOURNAMENT/CHALLENGE, never a `*Replayable`
+            // type (whose `Eyb` L1414 branch differs). status 3 cannot occur
+            // (see `Node::variant`), so `eJ()==2` iff `ag>0` and not every
+            // fight is beaten.
+            // `ag==0` -> `DAa(1)==0==ag` -> JS returns 1 (vacuous), so the
+            // accumulator starts true and only a non-status-1 fight clears it.
+            bool all_fights_beaten = true;
+            for (int k = 0; k < n.fight_count; ++k) {
+                const std::size_t kk = static_cast<std::size_t>(k);
+                const std::string ids =
+                    n.zone + "|" + n.name + "|" +
+                    (kk < n.fight_names.size() ? n.fight_names[kk] : std::string());
+                int wins = wins_for(ids);
+                if (wins == 0 && n.fight_count == 1) wins = wins_for(n.name);
+                const int repeat =
+                    kk < n.fight_replays.size() ? n.fight_replays[kk] : 0;
+                if (!(repeat > 0 && wins >= repeat)) all_fights_beaten = false;
+            }
+            n.variant = all_fights_beaten ? 1 : 2;
+            std::fprintf(stdout, "[map] node %s variant=%d fights=%d\n",
+                         n.name.c_str(), n.variant, n.fight_count);
             {
                 int lit = 0;
                 for (bool b : n.pip_beaten) lit += b ? 1 : 0;
@@ -7175,14 +7204,17 @@ bool ur_zone_has_active_boss(const MapScreen::ZoneTab& z) {
     return false;
 }
 
-// JS `Ya.VEa` (L2124): the zone carries an ACTIVE, unlocked battle named in
-// the ZoneSwitch `BattleTypes` list (`a.xQ(name)`). NOTE: JS also requires
-// `e.eJ()==2` (the base variant, excluding the 1st/3rd hard-mode twin); the
-// port's `Node` does not model that variant field — see the divergence note.
+// JS `Ya.VEa` (L2131-2132, invoked L2116): the zone carries an ACTIVE,
+// unlocked battle named in the ZoneSwitch `BattleTypes` list (`a.xQ(name)`,
+// L1432) whose variant is 2 — `let f=e.eJ()==2, g=!e.tt(); if(f&&g&&
+// e.isActive) return !0` (L2132). `Node::variant` models `eJ()` exactly for
+// the `VEa` names (see its note).
 bool ur_zone_red(const MapScreen::ZoneTab& z, const UrBlinkCfg& cfg) {
     for (const std::string& t : cfg.battle_types) {
         for (const MapScreen::Node& n : z.nodes) {
-            if (n.name == t && n.active && !n.locked) return true;
+            if (n.name == t && n.active && !n.locked && n.variant == 2) {
+                return true;
+            }
         }
     }
     return false;
