@@ -430,8 +430,9 @@ std::string item_display_name(App& app, const CatalogItem& it) {
 // and start a new line) with vertical overflow (`e > height-jd`) setting `vn`
 // and clipping. The single-line `Bg.Sk` fit (L1626-1627) is `draw_ui_label`;
 // a multiline label keeps its authored `ua` and wraps instead. `line_step` is
-// the JS line advance `(fontSize/eF)*lineHeight` (L1628 `d`); native menu
-// eF=100, so `line_step = ua_scale * font->line_height`.
+// the JS line advance `(fontSize/eF)*ij*lineHeight*nha` (L1627 `d`); native
+// menu eF=100 and the port models the authored `Kc` line factor as 1, so
+// `line_step = ua_scale * font->line_height * ea.b1`.
 struct UiWrap {
     std::vector<std::string> lines;
     float line_step = 0.0f;
@@ -450,7 +451,11 @@ UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale) 
     const std::string body = expand_br(text);
     const float scale = ua_scale * ea_a1(app);
     if (scale <= 0.0f) return out;
-    out.line_step = scale * static_cast<float>(font->line_height);
+    // `nha` (L1623/L1627): `ea.Kc(a)` (L1712) sets `nha = a*ea.b1`, so the
+    // per-language factor is `ea.b1` (ja/ko/ru 1.2, else 1 — L65/L1931/L2484).
+    // The authored `a` is modelled as 1 here; `ea.b1` is applied exactly.
+    out.line_step = scale * static_cast<float>(font->line_height) *
+                    app.ui_text_spacing_scale();
     if (out.line_step <= 0.0f) return out;
     // `bx.Csb` (L1624) splits on '\n' first; `apply` char-wraps each logical
     // line.

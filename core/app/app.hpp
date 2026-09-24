@@ -202,8 +202,9 @@ public:
     // globals at 1 for every other locale (L65; the settings picker repeats
     // the same switch at L1931). `ea.ua(a)` multiplies by `ea.a1` (L1711), so
     // every `ua()` size is scaled by this. `ea.b1` (1.2 ja/ko/ru, else 1)
-    // scales `ea.Kc()` letter-spacing (L1712) — expose it as the paired
-    // factor for callers that draw `Kc` (e.g. Act's `Kc(.7)`).
+    // scales `ea.Kc()` -> `Qh.nha`, the line-height multiplier in the wrap
+    // advance `d` (L1623/L1627) and the measured height `ew()` (L1635);
+    // applied by `wrap_ui_text` (screens.cpp).
     float ui_text_scale() const {
         return (lang_ == "ja" || lang_ == "ko" || lang_ == "ru") ? 0.8f : 1.0f;
     }
