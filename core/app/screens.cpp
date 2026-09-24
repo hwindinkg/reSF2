@@ -10827,6 +10827,169 @@ bool ShopScreen::purchase_gem_price_plate(App& app, const CatalogItem& bit) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Item UPGRADE path (JS `I.zz` L337 / `I.vu` L340 / `zf.uu` L1260; the
+// `Ne.FUa` GoldUpgradeButton + `Ne.qVa` RubyUpgradeButton, `Ne.Wub` L2255 and
+// `Ne.Ehb` cases 8/9 L2250; the purchase is `Pa.DYa`/`Pa.FYa` L1228-1229).
+// ---------------------------------------------------------------------------
+
+// `it.qkb` L164: the global list.xml `<UpgradeList>` templates the per-item
+// `<Upgrades Template>` (`D6`) keys into (`S7a` L165). Loaded once.
+const std::vector<UpgradeTemplate>& load_upgrade_templates(App& app) {
+    static std::vector<UpgradeTemplate> cached;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        try {
+            std::ifstream in("reference/extracted/xml/res/list.xml", std::ios::binary);
+            if (in) {
+                std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+                cached = parse_upgrade_list(std::string(data.begin(), data.end()));
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "upgrade list load failed: %s\n", e.what());
+        }
+    }
+    (void)app;
+    return cached;
+}
+
+// JS `p.o.qC` (world ctor L247): `u.ka(a.attributes.get("ShowUpgrades"),false)`
+// on the WARRIOR node — a SAVE attribute (`users_default.xml` ships "0").
+// `SaveSystem` does not model it and `save()` preserves it verbatim, so read
+// it from the save file (no save yet -> the template's "0" -> false).
+bool shop_show_upgrades(App& app) {
+    if (!app.save().has_save()) return false;
+    std::ifstream in(app.save().save_path(), std::ios::binary);
+    if (!in) return false;
+    std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    std::string text(data.begin(), data.end());
+    if (text.size() >= 3 && text.compare(0, 3, "SF2") == 0) {
+        text = SaveSystem::envelope_decode(text);
+    }
+    sf2::data::xml_doc doc;
+    try {
+        doc.parse(text);
+    } catch (const std::exception&) {
+        return false;
+    }
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) return false;
+    // The Warrior lives under `<Warriors><Warrior>` (users_default.xml).
+    pugi::xml_node w = root.child("Warriors").child("Warrior");
+    if (!w) w = root.child("Warrior");
+    if (!w) return false;
+    const pugi::xml_attribute a = w.attribute("ShowUpgrades");
+    return a && std::string(a.value()) == "1";
+}
+
+// `zf.uu` L1260: the owned entry's tier (`Ce`) resolved against the item's
+// rows. `has_next` (`k9` half) = `has_rows && !maxed`.
+ItemUpgradeState shop_upgrade_state(const CatalogItem& it, int tier, int player_level,
+                                    const std::vector<UpgradeTemplate>& templates) {
+    return resolve_item_upgrade(it, templates, tier, player_level);
+}
+
+// `Pa.Cba` L1227 (instant) / `Pa.z2a` L1227-1228 (timed `Ec>0`): `BF(!0)`
+// (`AcquireType=Upgrade`), `Np(a.Tg)` (UpgradeLevel = the row tier), `uu()`.
+// `WarriorSave` models neither `AcquireType` nor `DeliveryUpgradeLevel`, so
+// only the tier + the delivery timer are written (shipped rows carry no
+// `DeliveryTime`, so the timed branch is dead for list.xml data).
+void shop_apply_upgrade(WarriorSave& w, const CatalogItem& it, const UpgradeRow& row) {
+    for (WarriorSave::OwnedItem& oi : w.items) {
+        if (oi.name != it.name) continue;
+        oi.upgrade_level = row.tc;  // `b.Np(a.Tg)` L1227
+        break;
+    }
+    if (row.delivery_sec > 0) {
+        w.timers[it.name] = WarriorSave::wall_now() + row.delivery_sec;  // `b.zF` L1227
+    }
+}
+
+// `Pa.DYa(a)` L1228 (the `FUa` GoldUpgradeButton, `Ne.Ehb` case 8 L2250):
+// gate `p.o.Tb >= c.mi`, charge coins, `Pa.Cba`/`Pa.z2a`, save, `Pa.Wz`.
+bool purchase_upgrade_gold(App& app, const CatalogItem& it, int tier) {
+    WarriorSave bw;
+    try {
+        bw = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    const ItemUpgradeState st =
+        shop_upgrade_state(it, tier, bw.level, load_upgrade_templates(app));
+    if (!st.has_next) return false;  // `c==null -> return false`
+    const std::int64_t price = st.next.price;  // `c.mi` (64-bit: up to 1.5e13)
+    if (static_cast<std::int64_t>(bw.money) < price) {
+        std::fprintf(stdout,
+                     "[shop] FUa Pa.DYa v.Bv(a,2): NOT ENOUGH GOLD for %s upgrade "
+                     "(need %lld, have %d)\n",
+                     it.name.c_str(), static_cast<long long>(price), bw.money);
+        log_purchase_fired(
+            "PurchaseUnsuccessful",
+            app.quest_engine().purchase_unsuccessful(app, it.name, 2));
+        std::fflush(stdout);
+        return false;
+    }
+    bw.money -= static_cast<int>(price);
+    sf2::audio::AudioEngine::instance().play("snd_upgrade");  // `rb.QS` (Cba/z2a)
+    shop_apply_upgrade(bw, it, st.next);
+    app.save().save(bw);
+    std::fprintf(stdout,
+                 "[shop] FUa Pa.DYa -> UPGRADED %s tier %d -> %d price=%lld -> money %d\n",
+                 it.name.c_str(), tier, st.next.tc, static_cast<long long>(price),
+                 bw.money);
+    log_purchase_fired("Purchase", app.quest_engine().purchase(app, it.name));
+    std::fflush(stdout);
+    return true;
+}
+
+// `Pa.FYa(a)` L1229 (the `qVa` RubyUpgradeButton, `Ne.Ehb` case 9 L2250):
+// gate `p.o.fd >= c.od`, charge rubies, `Pa.Cba`, `p.o.vl(a,10)`, save, `Pa.Wz`.
+bool purchase_upgrade_gem(App& app, const CatalogItem& it, int tier) {
+    WarriorSave bw;
+    try {
+        bw = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    const ItemUpgradeState st =
+        shop_upgrade_state(it, tier, bw.level, load_upgrade_templates(app));
+    if (!st.has_next) return false;
+    const int price = st.next.bonus_price;  // `c.od`
+    if (bw.bonus < price) {
+        std::fprintf(stdout,
+                     "[shop] qVa Pa.FYa v.Bv(a,3): NOT ENOUGH RUBIES for %s upgrade "
+                     "(need %d, have %d)\n",
+                     it.name.c_str(), price, bw.bonus);
+        log_purchase_fired(
+            "PurchaseUnsuccessful",
+            app.quest_engine().purchase_unsuccessful(app, it.name, 3));
+        std::fflush(stdout);
+        return false;
+    }
+    bw.bonus -= price;
+    sf2::audio::AudioEngine::instance().play("snd_upgrade");  // `rb.QS` (Cba)
+    shop_apply_upgrade(bw, it, st.next);
+    app.save().save(bw);
+    std::fprintf(stdout,
+                 "[shop] qVa Pa.FYa -> UPGRADED %s tier %d -> %d price=%dR -> bonus %d\n",
+                 it.name.c_str(), tier, st.next.tc, price, bw.bonus);
+    log_purchase_fired("Purchase", app.quest_engine().purchase(app, it.name));
+    std::fflush(stdout);
+    return true;
+}
+
+// The owned entry's tier (`zf.Ce`): the save's owned-item `UpgradeLevel`
+// (`u.I(this.ga.attributes.get("UpgradeLevel"))`), else the item's own `Tg`.
+int shop_owned_tier(const WarriorSave& w, const CatalogItem& it) {
+    for (const WarriorSave::OwnedItem& oi : w.items) {
+        if (oi.name == it.name) return oi.upgrade_level;
+    }
+    return it.upgrade_level;
+}
+
 // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width bar
 // `height = za.Sp*1.2` with `Le` buttons (id 248 shop atlas) scaled to the
 // bar height and laid left->right (spacing factor 1.2 at lc>1.2), centred.
@@ -11470,8 +11633,27 @@ void ShopScreen::update_impl(float dt) {
     if (buy_armed_ < 0 && !rows.empty()) {
         const int psel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
         const CatalogItem& pit = items_[rows[static_cast<std::size_t>(psel)]];
-        const int p_gold = shop_effective_price(app(), pit);
-        const int p_gems = shop_effective_bonus(app(), pit);
+        // `Ne.Wub` L2254-2255: the plates are the `M8`/`pVa` BUY pair for an
+        // unowned row, or the `FUa`/`qVa` UPGRADE pair for an owned upgradeable
+        // one (`k9 && p.o.qC`). `kL` L2254 hides a 0-price plate.
+        const bool powned = shop_owned_live(seen_, pit.name);
+        int p_gold = 0;
+        int p_gems = 0;
+        int up_tier = 0;
+        bool up_ok = false;
+        if (powned) {
+            up_tier = shop_owned_tier(seen_, pit);
+            const ItemUpgradeState ust =
+                shop_upgrade_state(pit, up_tier, seen_.level, load_upgrade_templates(app()));
+            up_ok = ust.has_rows && !ust.maxed && show_upgrades_;
+            if (up_ok) {
+                p_gold = ust.next.price;        // `Qi.jp()`
+                p_gems = ust.next.bonus_price;  // `Qi.nn()`
+            }
+        } else {
+            p_gold = shop_effective_price(app(), pit);
+            p_gems = shop_effective_bonus(app(), pit);
+        }
         // `Ne.ba` L2249 stacks ruby (`pVa`) at the bottom when both are live,
         // gold (`M8`) above; `kL` L2254 hides a 0-price plate.
         const int gold_slot = (p_gems > 0 && p_gold > 0) ? 1 : 0;
@@ -11482,20 +11664,22 @@ void ShopScreen::update_impl(float dt) {
         const bool hit_gem = p_gems > 0 && p.pressed && p.x >= gem_rect.J &&
                              p.x <= gem_rect.N && p.y >= gem_rect.P && p.y <= gem_rect.W;
         if (hit_gold || hit_gem) {
-            WarriorSave pw;
-            bool powned = false;
-            try {
-                pw = app().save().load();
-                powned = shop_owned_live(pw, pit.name);
-            } catch (const std::exception&) {
-                return;
-            }
-            if (!powned) {
-                if (hit_gem) {
-                    purchase_gem_price_plate(app(), pit);
-                } else {
-                    purchase_price_plate(app(), pit);
+            if (powned) {
+                // `Ne.Ehb` cases 8/9 L2250 -> `Pa.DYa`/`Pa.FYa` L1228-1229.
+                if (up_ok) {
+                    const bool ok = hit_gem ? purchase_upgrade_gem(app(), pit, up_tier)
+                                            : purchase_upgrade_gold(app(), pit, up_tier);
+                    if (ok) {
+                        try {
+                            seen_ = app().save().load();
+                        } catch (const std::exception&) {
+                        }
+                    }
                 }
+            } else if (hit_gem) {
+                purchase_gem_price_plate(app(), pit);
+            } else {
+                purchase_price_plate(app(), pit);
             }
         }
     }
@@ -11884,8 +12068,24 @@ void ShopScreen::render_impl(App& app) {
         // `d = b-c*3`, so `pVa` (pushed after `M8`) lands at the BOTTOM and
         // `M8` above it. A crystal-only row (Price absent, BonusPrice set)
         // therefore shows its Ruby cost, never a "0" gold plate.
-        const int gold = shop_effective_price(app, *sel_it);
-        const int gems = shop_effective_bonus(app, *sel_it);
+        // `Ne.Wub` L2254-2255 branch: OWNED -> the `FUa`/`qVa` upgrade plates
+        // (`k9 && p.o.qC`; prices `Qi.jp()`/`Qi.nn()`), else the `M8`/`pVa`
+        // buy plates (prices `Aa.jp()`/`Aa.nn()`).
+        int gold = 0;
+        int gems = 0;
+        if (shop_owned_live(seen_, sel_it->name)) {  // `gW` = `re.XDa`
+            const int tier = shop_owned_tier(seen_, *sel_it);
+            const ItemUpgradeState ust =
+                shop_upgrade_state(*sel_it, tier, seen_.level, load_upgrade_templates(app));
+            const bool k9 = ust.has_rows && !ust.maxed;  // `re.Zcb` L2285
+            if (k9 && show_upgrades_) {                   // `&& p.o.qC` L2255
+                gold = ust.next.price;        // `Qi.jp()`
+                gems = ust.next.bonus_price;  // `Qi.nn()`
+            }
+        } else {
+            gold = shop_effective_price(app, *sel_it);
+            gems = shop_effective_bonus(app, *sel_it);
+        }
         auto draw_price_plate = [&](int slot, const char* icon, int value) {
             const float py = byy0 - static_cast<float>(slot) * (bh + bpad);
             if (!(load_sliced_atlas(app) &&
@@ -14186,6 +14386,9 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item) {
 // remain.
 void ShopScreen::refresh_items() {
     items_ = load_catalog(app());  // `jAa()` L2297
+    // `p.o.qC` (the WARRIOR `ShowUpgrades` save attr) — read once here, like
+    // the JS world ctor (`Oa.Imb` L2295 -> `jAa`). Gates the upgrade plates.
+    show_upgrades_ = shop_show_upgrades(app());
     try {
         seen_ = app().save().load();  // `refresh()` L2248
     } catch (const std::exception&) {
@@ -14854,6 +15057,31 @@ std::string EquipmentScreen::shown_move() const {
     return move_rows_[static_cast<std::size_t>(sel)].name;
 }
 
+// [probe] Force the WARRIOR `ShowUpgrades` attr in the save file. The port's
+// `WarriorSave` does not model it (`save_system` preserves it verbatim), so the
+// probe patches the raw XML — the same attribute `shop_show_upgrades` reads.
+bool patch_save_show_upgrades(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    std::string text((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    in.close();
+    const std::string from = "ShowUpgrades=\"0\"";
+    const std::string to = "ShowUpgrades=\"1\"";
+    const std::size_t p = text.find(from);
+    if (p != std::string::npos) {
+        text.replace(p, from.size(), to);
+    } else {
+        const std::size_t w = text.find("<Warrior ");
+        if (w == std::string::npos) return false;
+        text.insert(w + 9, " ShowUpgrades=\"1\"");
+    }
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out << text;
+    return true;
+}
+
 int run_shell_probe(App& app) {
     int fails = 0;
     const auto check = [&](bool ok, const char* what) {
@@ -14942,6 +15170,119 @@ int run_shell_probe(App& app) {
         fire_discount("0", "3600", "1");
         check(qe.offer_for(kDisc) == nullptr,
               "(iv) Discount Toggle=0 -> offer cleared (E4)");
+    }
+    // (v) UPGRADE model + cost (JS `I.zz` L337 / `I.vu` L340 / `zf.uu` L1260):
+    // `WEAPON_KNIVES` (`Tg`=100, `D6=Weapon_Bonus`) -> `zz(true)` first row
+    // `Tc`>100 = 300 -> 770 coins / 24 rubies (SHOP_STATIC §12). `Body` (no
+    // `<Upgrades>` child) -> `RB=false` (not upgradeable).
+    {
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const std::vector<UpgradeTemplate>& tpl = load_upgrade_templates(app);
+        const CatalogItem* knives = nullptr;
+        const CatalogItem* body = nullptr;
+        for (const CatalogItem& it : full) {
+            if (it.name == "WEAPON_KNIVES") knives = &it;
+            if (it.name == "Body") body = &it;
+        }
+        const std::vector<UpgradeRow> cand =
+            knives != nullptr ? item_upgrade_candidates(*knives, tpl, /*only_above_tier=*/true)
+                              : std::vector<UpgradeRow>();
+        const UpgradeRow* first = cand.empty() ? nullptr : &cand.front();
+        std::fprintf(stdout,
+                     "[sps] upgrade WEAPON_KNIVES Tg=%d D6='%s' cands=%zu firstTc=%d "
+                     "gold=%d ruby=%d\n",
+                     knives != nullptr ? knives->upgrade_level : -1,
+                     knives != nullptr ? knives->upgrade_template.c_str() : "",
+                     cand.size(), first != nullptr ? first->tc : -1,
+                     first != nullptr ? first->price : -1,
+                     first != nullptr ? first->bonus_price : -1);
+        std::fflush(stdout);
+        check(knives != nullptr && knives->upgrade_level == 100 && first != nullptr &&
+                  first->tc == 300 && first->price == 770 && first->bonus_price == 24,
+              "(v) WEAPON_KNIVES Tg=100 -> Tc=300 @ 770c/24R (zz)");
+        const ItemUpgradeState bs =
+            body != nullptr ? resolve_item_upgrade(*body, tpl, body->upgrade_level, 52)
+                            : ItemUpgradeState{};
+        check(body != nullptr && !bs.has_rows,
+              "(v) Body (no <Upgrades>) -> RB=false (not upgradeable)");
+    }
+    // (vi) The `Ne.Wub` L2255 gate `k9 && p.o.qC` (`p.o.qC` = the WARRIOR
+    // `ShowUpgrades` save attr, world ctor L247): with `ShowUpgrades="1"` the
+    // gate reads true; then the `FUa` gold path (`Pa.DYa` L1228) charges
+    // `Qi.mi` and writes `Np(Qi.Tg)` into the owned entry.
+    {
+        sf2::app::WarriorSave w;
+        try {
+            w = app.save().load();
+        } catch (const std::exception&) {
+        }
+        // `vu` L340 picks the HIGHEST milestone tier whose `Level <= player
+        // level`; at level 3 that is exactly Tc=300 (`Weapon_Bonus[0]`,
+        // 770c/24R — SHOP_STATIC §12).
+        w.level = 3;
+        w.money = 5000;
+        w.bonus = 1000;
+        bool found = false;
+        for (WarriorSave::OwnedItem& oi : w.items) {
+            if (oi.name == "WEAPON_KNIVES") {
+                oi.upgrade_level = 100;
+                oi.equipped = true;
+                found = true;
+            }
+        }
+        if (!found) {
+            WarriorSave::OwnedItem oi;
+            oi.name = "WEAPON_KNIVES";
+            oi.count = 1;
+            oi.upgrade_level = 100;
+            oi.equipped = true;
+            w.items.push_back(oi);
+        }
+        w.weapon = "WEAPON_KNIVES";
+        app.save().save(w);
+        const bool patched = patch_save_show_upgrades(app.save().save_path());
+        const bool qc = shop_show_upgrades(app);
+        std::fprintf(stdout, "[sps] qC patch=%d ShowUpgrades=%d\n", patched ? 1 : 0,
+                     qc ? 1 : 0);
+        std::fflush(stdout);
+        check(patched && qc, "(vi) save ShowUpgrades=\"1\" -> p.o.qC true (Wub gate)");
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const CatalogItem* knives = nullptr;
+        for (const CatalogItem& it : full) {
+            if (it.name == "WEAPON_KNIVES") knives = &it;
+        }
+        const ItemUpgradeState st =
+            knives != nullptr
+                ? resolve_item_upgrade(*knives, load_upgrade_templates(app), 100, w.level)
+                : ItemUpgradeState{};
+        const int money0 = w.money;
+        const bool ok = knives != nullptr && st.has_next &&
+                        purchase_upgrade_gold(app, *knives, 100);
+        int tier_after = -1;
+        int money_after = -1;
+        int lvl_after = -1;
+        try {
+            const WarriorSave nw = app.save().load();
+            money_after = nw.money;
+            lvl_after = nw.level;
+            for (const WarriorSave::OwnedItem& oi : nw.items) {
+                if (oi.name == "WEAPON_KNIVES") tier_after = oi.upgrade_level;
+            }
+        } catch (const std::exception&) {
+        }
+        std::fprintf(stdout,
+                     "[sps] FUa dbg has_next=%d nextTc=%d nextPrice=%d wLevel=%d "
+                     "reloadLevel=%d\n",
+                     st.has_next ? 1 : 0, st.has_next ? st.next.tc : -1,
+                     st.has_next ? st.next.price : -1, w.level, lvl_after);
+        std::fprintf(stdout,
+                     "[sps] FUa upgrade ok=%d tier %d->%d money %d->%d (charged %d)\n",
+                     ok ? 1 : 0, 100, tier_after, money0, money_after,
+                     money0 - money_after);
+        std::fflush(stdout);
+        check(ok && st.has_next && tier_after == st.next.tc &&
+                  money0 - money_after == st.next.price,
+              "(vi) FUa Pa.DYa charges Qi.mi and sets the owned UpgradeLevel");
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);

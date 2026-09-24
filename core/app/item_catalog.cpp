@@ -465,6 +465,34 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.add_percent = sf2::data::xml_attr_int(item, "AddPercent", 0);
         ci.consumable_product =
             attr_bool_str(item.attribute("ConsumableProduct").value());
+        // JS item ctor L326-327: `this.Tg = UpgradeLevel` and
+        // `this.D6 = <Upgrades Template>`; `dkb` L342 then walks the inline
+        // `<Upgrades><Upgrade>` rows into `eB` (each via `wf.Qd`).
+        ci.upgrade_level = sf2::data::xml_attr_int(item, "UpgradeLevel", 0);
+        if (const pugi::xml_node ups = item.child("Upgrades")) {
+            if (ups.attribute("Template")) {
+                ci.upgrade_template = ups.attribute("Template").value();
+            }
+            for (const pugi::xml_node up : ups.children("Upgrade")) {
+                UpgradeRow r;
+                r.tc = sf2::data::xml_attr_int(up, "UpgradeLevel", 0);
+                r.level = sf2::data::xml_attr_int(up, "Level", 0);
+                r.price = up.attribute("Price") ? up.attribute("Price").as_llong() : 0;
+                r.bonus_price = sf2::data::xml_attr_int(up, "BonusPrice", 0);
+                r.milestone = sf2::data::xml_attr_int(up, "Milestone", 0);
+                r.delivery_sec = sf2::data::xml_attr_int(up, "DeliveryTime", 0);
+                r.delivery_gems = sf2::data::xml_attr_int(up, "BonusDeliveryPrice", 0);
+                for (const ShopAttributeDef& def : shop_attribute_defs()) {
+                    if (up.attribute(def.name)) {
+                        r.attributes[def.name] = sf2::data::xml_attr_int(up, def.name, 0);
+                    }
+                }
+                ci.upgrades.push_back(std::move(r));
+            }
+            // `dkb` L342 sorts `eB` by `Tc` (`Wy` L354 = `pb(values.Tc,...)`).
+            std::sort(ci.upgrades.begin(), ci.upgrades.end(),
+                      [](const UpgradeRow& a, const UpgradeRow& b) { return a.tc < b.tc; });
+        }
         // JS item ctor: `for(e of v.eo.attributes) { let f=a.attributes.get(e.name);
         // f!=null && this.attributes.set(e.name, u.I(f)) }` — the item's combat
         // stats, keyed by the `internal_settings.xml` attribute names.
@@ -570,6 +598,128 @@ std::vector<CatalogItem> shop_items(const std::vector<CatalogItem>& all) {
         out.push_back(ci);
     }
     return out;
+}
+
+// `it.qkb` L164: each `<UpgradeList><Upgrades Name= ItemType=>` block with its
+// `<Upgrade>` rows (`wf.Qd` L354). `S7a` L165 then finds a block by `Name`.
+std::vector<UpgradeTemplate> parse_upgrade_list(const std::string& xml_text) {
+    std::vector<UpgradeTemplate> out;
+    sf2::data::xml_doc doc;
+    doc.parse(xml_text);
+    const pugi::xml_node root = doc.root().first_child();
+    if (root == nullptr || std::string(root.name()) != "List") return out;
+    const pugi::xml_node list = root.child("UpgradeList");
+    if (!list) return out;
+    for (const pugi::xml_node block : list.children("Upgrades")) {
+        UpgradeTemplate t;
+        if (block.attribute("Name")) t.name = block.attribute("Name").value();
+        if (block.attribute("ItemType")) t.item_type = block.attribute("ItemType").value();
+        for (const pugi::xml_node up : block.children("Upgrade")) {
+            UpgradeRow r;
+            r.tc = sf2::data::xml_attr_int(up, "UpgradeLevel", 0);
+            r.level = sf2::data::xml_attr_int(up, "Level", 0);
+            r.price = up.attribute("Price") ? up.attribute("Price").as_llong() : 0;
+            r.bonus_price = sf2::data::xml_attr_int(up, "BonusPrice", 0);
+            r.milestone = sf2::data::xml_attr_int(up, "Milestone", 0);
+            r.delivery_sec = sf2::data::xml_attr_int(up, "DeliveryTime", 0);
+            r.delivery_gems = sf2::data::xml_attr_int(up, "BonusDeliveryPrice", 0);
+            for (const ShopAttributeDef& def : shop_attribute_defs()) {
+                if (up.attribute(def.name)) {
+                    r.attributes[def.name] = sf2::data::xml_attr_int(up, def.name, 0);
+                }
+            }
+            t.rows.push_back(std::move(r));
+        }
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
+// `it.S7a(item)` L165: `for(d of Eia) if(d.type == a.D6) return d; return null`.
+const UpgradeTemplate* find_upgrade_template(const std::vector<UpgradeTemplate>& templates,
+                                             const CatalogItem& item) {
+    if (item.upgrade_template.empty()) return nullptr;  // `a.D6`
+    for (const UpgradeTemplate& t : templates) {
+        if (t.name == item.upgrade_template) return &t;
+    }
+    return nullptr;
+}
+
+// `item.zz(a,b)` L337: candidates = inline `eB` + template rows with
+// `Tc > W8a()` (the max inline `Tc`), sorted by `Tc`; then keep those with
+// (`!a || Tc > this.Tg`) and `level <= b` (`b` default 1E6).
+std::vector<UpgradeRow> item_upgrade_candidates(const CatalogItem& item,
+                                                const std::vector<UpgradeTemplate>& templates,
+                                                bool only_above_tier) {
+    std::vector<UpgradeRow> d = item.upgrades;  // `m.addRange(d, this.eB)`
+    int max_inline = -2147483647 - 1;           // `W8a` L336 seed (INT_MIN)
+    for (const UpgradeRow& r : item.upgrades) {
+        if (r.tc > max_inline) max_inline = r.tc;
+    }
+    if (const UpgradeTemplate* t = find_upgrade_template(templates, item)) {
+        for (const UpgradeRow& r : t->rows) {
+            if (r.tc > max_inline) d.push_back(r);  // `h.values.Tc > e`
+        }
+    }
+    std::sort(d.begin(), d.end(),
+              [](const UpgradeRow& a, const UpgradeRow& b) { return a.tc < b.tc; });
+    std::vector<UpgradeRow> c;
+    for (const UpgradeRow& r : d) {
+        if ((!only_above_tier || r.tc > item.upgrade_level) && r.level <= 1000000) {
+            c.push_back(r);
+        }
+    }
+    return c;
+}
+
+// `v.xIa.Gb(type)` L1188 (`bw` from `internal_settings.xml` `<OutdateLevels>`).
+int shop_upgrade_level_cap(const std::string& type) {
+    // Table: [{Value=1, Type=absent}, {Value=1, Type="Ranged|Magic"}]. `cw.parse`
+    // L1236 maps an absent `Type` to `[""]`, so only `""` matches row 0; a
+    // Ranged/Magic type matches row 1. `Gb` falls back to row 0's value.
+    (void)type;
+    return 1;
+}
+
+// `item.vu(a,b,c,d)` L340: `a` = player level, `b` = the entry tier (`Ce`).
+// `c.G` = `Xv(f)` where `f` has `Tc == b`; `d.G` = `Xv(g or h)` — the next
+// milestone row (`Og>0 && level >= b/100 + cap`) or the next non-milestone row.
+ItemUpgradeState resolve_item_upgrade(const CatalogItem& item,
+                                      const std::vector<UpgradeTemplate>& templates,
+                                      int tier, int player_level) {
+    ItemUpgradeState st;
+    const std::vector<UpgradeRow> rows = item_upgrade_candidates(item, templates, false);
+    st.has_rows = !rows.empty();  // `RB` = `ib.zz().length > 0`
+    const int cap = shop_upgrade_level_cap(item.type);  // `k`
+    const double l = static_cast<double>(tier) / 100.0;  // `l = b/100`
+    const UpgradeRow* g = nullptr;  // milestone candidate (smallest Tc)
+    const UpgradeRow* h = nullptr;  // non-milestone candidate (largest Tc)
+    for (const UpgradeRow& q : rows) {
+        const int r = q.tc;
+        if (r == tier) {  // `r==b && (f=q)`
+            st.current = q;
+            st.has_current = true;
+        }
+        if (q.level <= player_level && r > tier) {  // `q.values.level<=a && r>b`
+            if (q.milestone > 0) {
+                if (static_cast<double>(q.level) >= l + cap &&
+                    (g == nullptr || g->tc < r)) {
+                    g = &q;
+                }
+            } else if (h == nullptr || h->tc > r) {
+                h = &q;
+            }
+        }
+    }
+    if (g != nullptr) {  // `g!=null ? d.G=Xv(g) : h!=null && (d.G=Xv(h))`
+        st.next = *g;
+        st.has_next = true;
+    } else if (h != nullptr) {
+        st.next = *h;
+        st.has_next = true;
+    }
+    st.maxed = st.has_rows && !st.has_next;  // `zN` L1260
+    return st;
 }
 
 } // namespace sf2::app

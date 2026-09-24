@@ -811,6 +811,13 @@ private:
     // (fired from `Pi.qr`/`Jc.qr`) is the close: `Ad.$Ma(); fU(); Oya=!0`.
     // `buy_armed_` = the row index whose panel is open, -1 = plain detail.
     int buy_armed_ = -1;
+    // JS `p.o.qC` (world ctor L247: `u.ka(a.attributes.get("ShowUpgrades"),false)`
+    // on the WARRIOR node — a SAVE attribute; `users_default.xml` ships
+    // `ShowUpgrades="0"`). The second half of the upgrade-button gate
+    // (`this.k9 && p.o.qC`, `Ne.Wub` L2255). The port's `WarriorSave` does not
+    // carry it, so it is read from the save file once per `refresh_items`
+    // (the JS reads it once at world construction — this is no more dynamic).
+    bool show_upgrades_ = false;
     // --- Backdrop = the persistent dojo scene ----------------------------
     // JS `Oa extends ma` (L2285) is an overlay on the running dojo location,
     // so the oracle `shop_tab1..5`/`shop_detail` captures show the dojo

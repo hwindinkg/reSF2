@@ -21,6 +21,7 @@
 // the Model names for the fighter rebuild. The ItemCatalog is pure data +
 // parse — no platform code (portable C++17).
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -47,6 +48,46 @@ struct OfferCondition {
     bool invert = false; // Not="1"
 };
 
+// One `<Upgrade>` row of an `<Upgrades>` block (JS `wf` g="99", L351-354;
+// `wf.gfb` L351-353 reads the attrs). The row carries a tier id (`Tc` =
+// `UpgradeLevel`) plus the per-tier stat/price overrides the upgrade grants.
+struct UpgradeRow {
+    int tc = 0;            // `Tc`  <- UpgradeLevel (tier id; 100/300/600/...)
+    int level = 0;         // `level` <- Level (required player level)
+    // `Sg` <- Price. The shipped `<Upgrade>` prices reach 1.5e13 (the JS `xb`
+    // is a float64), so this MUST be 64-bit — an `int` clamps to INT_MAX.
+    std::int64_t price = 0;
+    int bonus_price = 0;   // `od`  <- BonusPrice (Ruby/crystal cost)
+    int milestone = 0;     // `Og`  <- Milestone
+    int delivery_sec = 0;  // `Ec`  <- DeliveryTime
+    int delivery_gems = 0; // `Od`  <- BonusDeliveryPrice
+    // The row's combat-stat overrides (`wf.gfb` L352: `for(e of v.eo.attributes)
+    // a.attributes.get(e.name)!=null && this.values.attributes.set(e.name,...)`).
+    std::map<std::string, int> attributes;
+};
+
+// One global `<UpgradeList><Upgrades Name=.. ItemType=..>` block (JS `lt`
+// g="9C", L355; `it.qkb` L164). `S7a(item)` L165 returns the block whose
+// `Name` equals the item's `<Upgrades Template>` (`CatalogItem::upgrade_template`).
+struct UpgradeTemplate {
+    std::string name;              // `type` <- Name ("Weapon_Bonus")
+    std::string item_type;         // `CR`   <- ItemType ("Weapon")
+    std::vector<UpgradeRow> rows;  // `ena`
+};
+
+// `item.vu(level, tier, cur, next)` L340 result (JS `zf.uu` L1260 reads the
+// two `ja` out-params into `OH`/`Qi`). `current` = the row with `Tc == tier`
+// (the owned tier's clone, `OH`); `next` = the next eligible upgrade row
+// (`Qi`, the one the two upgrade buttons price).
+struct ItemUpgradeState {
+    UpgradeRow current;
+    bool has_current = false;  // `OH != null`
+    UpgradeRow next;
+    bool has_next = false;  // `Qi != null`
+    bool has_rows = false;  // `RB` = `ib.zz().length > 0`
+    bool maxed = false;     // `zN` = `RB && Qi == null` (no next tier)
+};
+
 // One list.xml <Item> (JS `p.items.Xm` element).
 struct CatalogItem {
     std::string name;       // Name ("WEAPON_KNIVES")
@@ -70,6 +111,15 @@ struct CatalogItem {
     // `Level` attr PRESENT (JS `xf` = `u.I(Level)`; null when absent).
     // `?Item[x].Level` answers "null" for a Level-less row (`cdb` L977).
     bool has_level = false;
+    // JS item ctor L326: `this.Tg = u.I(a.attributes.get("UpgradeLevel"))` —
+    // the item's base upgrade tier (0 when absent; 342 shipped `<Item>` rows
+    // carry it). `zf.Np(Ce)` mirrors it into the save's owned-item node.
+    int upgrade_level = 0;  // `Tg`
+    // JS item ctor L327: `this.D6 = <Upgrades Template>` (`dkb` L342 keys the
+    // global `<UpgradeList>` block via `S7a` L165). Empty when no `<Upgrades>`.
+    std::string upgrade_template;  // `D6`
+    // JS `this.eB` (`dkb` L342): the inline `<Upgrades><Upgrade>` rows.
+    std::vector<UpgradeRow> upgrades;
     int weapon_damage = 0;  // WeaponDamage
     int body_defense = 0;   // BodyDefense
     int head_defense = 0;   // HeadDefense
@@ -189,5 +239,38 @@ float shop_attribute_bar_fill(const char* bar_scale, int value, int player_level
 // `Hidden` does (JS L2274-2275 checks `!h.hidden`), so `CriticalRating`
 // (`ShopHidden="1"`, no `Hidden`) is included.
 const std::vector<ShopAttributeDef>& shop_attribute_defs();
+
+// Parses the global `<UpgradeList>` of list.xml (JS `it.qkb` L164: each
+// `<Upgrades Name= ItemType=>` block with its `<Upgrade>` rows). `xml_text`
+// is the same list.xml document `parse_item_catalog` consumes.
+std::vector<UpgradeTemplate> parse_upgrade_list(const std::string& xml_text);
+
+// `it.S7a(item)` L165: the `<Upgrades>` block named by the item's
+// `<Upgrades Template>` (`CatalogItem::upgrade_template`); null when none.
+const UpgradeTemplate* find_upgrade_template(const std::vector<UpgradeTemplate>& templates,
+                                             const CatalogItem& item);
+
+// `item.zz(a,b)` L337: the candidate upgrade rows = the inline `eB` rows plus
+// the `D6` template rows whose `Tc` exceeds the max inline `Tc`, sorted by
+// `Tc`. `only_above_tier` = the `zz(true)` filter (`Tc > item.upgrade_level`).
+std::vector<UpgradeRow> item_upgrade_candidates(const CatalogItem& item,
+                                                const std::vector<UpgradeTemplate>& templates,
+                                                bool only_above_tier = false);
+
+// `item.vu(level, tier, cur, next)` L340: resolve the CURRENT tier row (exact
+// `Tc == tier`) and the NEXT upgrade row. The milestone rule (L340): among
+// rows with `level <= player_level` and `Tc > tier`, a `Milestone>0` row is
+// only eligible once `level >= tier/100 + cap` (`cap` = `v.xIa.Gb(type)`,
+// L1188 — 1 for every shipped type); non-milestone rows are always eligible.
+ItemUpgradeState resolve_item_upgrade(const CatalogItem& item,
+                                      const std::vector<UpgradeTemplate>& templates,
+                                      int tier, int player_level);
+
+// `v.xIa.Gb(type)` L1188 (`bw` parsed from `internal_settings.xml`
+// `<OutdateLevels>`): the per-type cap added to `tier/100` in the milestone
+// gate. The shipped table is `[{Value=1,Type=null},{Value=1,Type="Ranged|Magic"}]`
+// — 1 for Weapon/Armor/Helm (no `cw` matches -> first value) and 1 for
+// Ranged/Magic (`Xcb` match) — so the cap is 1 for every type.
+int shop_upgrade_level_cap(const std::string& type);
 
 } // namespace sf2::app
