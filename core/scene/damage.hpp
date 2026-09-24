@@ -106,6 +106,38 @@ struct HitEffect {
     float frequency_y = 0.0f; // `aAa` — FrequencyY
 };
 
+// `<RatingEvaluation>` settings table (JS `xc.Akb` L820-821 -> `xc.t$` rows,
+// row class `$u` g="164"). PHASE 1 stores the table only; the `xc.JBa`
+// (L812-815) weighted summation is phase 2.
+//
+// One `<Attribute>` child (JS `Ef` g="163", `Ef.Iia` L802): Name + Shift.
+struct RatingAttribute {
+    std::string name;    // `Ef.name` (Name)
+    float shift = 0.0f;  // `Ef.shift` (Shift; `u.H(...,0)`)
+};
+
+// One `<Defense>` child (JS `Wm` g="161", `Wm.Iia` L801): Name + Weight +
+// CancellingItem + its own `<Attribute>` list (`Ef.EIa`).
+struct RatingDefense {
+    std::string attr_name;       // `Wm.attrName` (Name)
+    float weight = 0.0f;         // `Wm.weight` (Weight; `u.H(...,0)`)
+    std::string cancelling_item; // `Wm.hI` (CancellingItem)
+    std::vector<RatingAttribute> attributes;  // `Ef.EIa` (`<Attribute>`)
+};
+
+// One `<RatingEvaluation><Damage>` row (JS `$u` g="164").
+struct RatingDamageRow {
+    std::string node_name;  // `nodeName` (child element name; shipped "Damage")
+    std::string attr_name;  // `attrName` (Name: Weapon/Unarmed/Ranged/Magic)
+    float average_quantity = 0.0f;     // `hYa` (AverageQuantity; `Ef.Pib`)
+    float average_base_damage = 0.0f;  // `Kva` (AverageBaseDamage; `Ef.Oib`)
+    float recharge_rate = 0.0f;        // `gmb` (RechargeRate; `Ef.Oib`)
+    float magic_recharge_rate = 0.0f;  // `xha` (MagicRechargeRate; `Ef.Oib`)
+    std::string cancelling_item;       // `hI` (CancellingItem)
+    std::vector<RatingAttribute> attributes;  // `Ef.EIa` (`<Attribute>`)
+    std::vector<RatingDefense> defenses;      // `KP` (`Wm.Hia` L801)
+};
+
 struct FightParams {
     std::string block_damage_attr = "BlockDamageFactor";
     float block_damage_base = 0.0001f;
@@ -172,6 +204,14 @@ struct FightParams {
     // carries exactly three rows in document order: CriticalHit, HeadHit,
     // Shock (internal_settings.xml L556-558).
     std::vector<HitEffect> hit_effects;
+
+    // `xc.gX` (L820) = `<RatingEvaluation PerkAspectParameter>` (shipped
+    // "Aspect"). `ImpossibleRatio`/`EasyRatio` are read by `xc.Akb` and
+    // DISCARDED (no assignment), so they are not stored.
+    std::string rating_perk_aspect;
+    // `xc.t$` (L820-821): the `<RatingEvaluation>` `<Damage>` rows in document
+    // order (shipped: Weapon, Unarmed, Ranged, Magic).
+    std::vector<RatingDamageRow> rating_table;
 
     // The process-wide instance (JS `v` statics), populated at boot from
     // internal_settings.xml by `load_fight_params_from_settings`.

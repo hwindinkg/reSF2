@@ -242,6 +242,19 @@ void parse_magic(const pugi::xml_node n, FightParams& v) {
     parse_eh(n.child("DamageRecharge"), v.magic_damage_attr, v.magic_damage_base);
 }
 
+// JS `Ef.EIa` (L802) -> `Ef.Iia(a,b,"Attribute")`: the direct
+// `<Attribute Name Shift>` children of a rating node.
+void parse_rating_attrs(const pugi::xml_node n,
+                        std::vector<RatingAttribute>& out) {
+    for (const pugi::xml_node a : n.children("Attribute")) {
+        RatingAttribute ra;
+        const char* nm = a.attribute("Name").value();
+        if (nm != nullptr) ra.name = nm;
+        ra.shift = a.attribute("Shift").as_float(0.0f);
+        out.push_back(std::move(ra));
+    }
+}
+
 }  // namespace
 
 void load_fight_params_from_settings(const std::string& xml_text) {
@@ -346,6 +359,62 @@ void load_fight_params_from_settings(const std::string& xml_text) {
                          e.type.c_str(), e.pause_time, e.effect_time,
                          e.amplitude_x, e.frequency_x, e.amplitude_y,
                          e.frequency_y);
+        }
+        std::fflush(stdout);
+    }
+    // `xc.Akb` (L820-821): `<RatingEvaluation PerkAspectParameter>` ->
+    // `xc.gX` + the `xc.t$` `<Damage>` rows. Each row: nodeName/attrName, its
+    // `<Attribute>` shifts (`Ef.EIa`), the `Ef.Pib`/`Ef.Oib` averages, the
+    // `CancellingItem`, and its `<Defense>` rows (`Wm.Hia`).
+    if (const pugi::xml_node re = root.child("RatingEvaluation")) {
+        const char* pa = re.attribute("PerkAspectParameter").value();
+        v.rating_perk_aspect = pa != nullptr ? pa : "";
+        v.rating_table.clear();
+        for (const pugi::xml_node d : re.children()) {
+            RatingDamageRow row;
+            row.node_name = d.name();
+            const char* nm = d.attribute("Name").value();
+            if (nm != nullptr) row.attr_name = nm;
+            parse_rating_attrs(d, row.attributes);
+            row.average_quantity = d.attribute("AverageQuantity").as_float(0.0f);
+            row.average_base_damage = d.attribute("AverageBaseDamage").as_float(0.0f);
+            row.recharge_rate = d.attribute("RechargeRate").as_float(0.0f);
+            row.magic_recharge_rate = d.attribute("MagicRechargeRate").as_float(0.0f);
+            const char* ci = d.attribute("CancellingItem").value();
+            if (ci != nullptr) row.cancelling_item = ci;
+            for (const pugi::xml_node df : d.children("Defense")) {
+                RatingDefense def;
+                const char* dn = df.attribute("Name").value();
+                if (dn != nullptr) def.attr_name = dn;
+                def.weight = df.attribute("Weight").as_float(0.0f);
+                const char* dc = df.attribute("CancellingItem").value();
+                if (dc != nullptr) def.cancelling_item = dc;
+                parse_rating_attrs(df, def.attributes);
+                row.defenses.push_back(std::move(def));
+            }
+            v.rating_table.push_back(std::move(row));
+        }
+        // Diagnostic (boot, once): the parsed table census (phase-1 evidence).
+        std::fprintf(stdout, "[fx] RatingEvaluation PerkAspectParameter=%s rows=%d\n",
+                     v.rating_perk_aspect.c_str(),
+                     static_cast<int>(v.rating_table.size()));
+        for (const RatingDamageRow& r : v.rating_table) {
+            std::fprintf(stdout,
+                         "[fx]   Rating row %s Name=%s avgBase=%.4f avgQty=%.4f "
+                         "recharge=%.4f magicRecharge=%.4f cancel=%s attrs=%d defs=%d\n",
+                         r.node_name.c_str(), r.attr_name.c_str(),
+                         r.average_base_damage, r.average_quantity,
+                         r.recharge_rate, r.magic_recharge_rate,
+                         r.cancelling_item.c_str(),
+                         static_cast<int>(r.attributes.size()),
+                         static_cast<int>(r.defenses.size()));
+            for (const RatingDefense& df : r.defenses) {
+                std::fprintf(stdout,
+                             "[fx]     Defense %s weight=%.4f cancel=%s attrs=%d\n",
+                             df.attr_name.c_str(), df.weight,
+                             df.cancelling_item.c_str(),
+                             static_cast<int>(df.attributes.size()));
+            }
         }
         std::fflush(stdout);
     }

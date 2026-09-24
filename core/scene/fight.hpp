@@ -285,6 +285,13 @@ struct FightRule {
     // the achievement-counter event (`ca.z3` L423) — no native source
     // (COMBAT_STATIC App. C "OPEN-KEPT: live dz tick source"). See OPEN.
     int win_style_type = 0;
+    // `qn` (`ERuleRatingEvaluation`, L881): `eVa`/`yUa`/`jVa`. The Magic/
+    // Ranged variants (`PlayerRatingMagic`/`EnemyRatingMagic`/
+    // `PlayerRatingRanged`/`EnemyRatingRanged`) are READ by `qn` but
+    // DISCARDED (no assignment), so they are not stored here.
+    float player_rating = 0.0f;      // `eVa` (PlayerRating; `u.H(...,0)`)
+    float enemy_rating = 0.0f;       // `yUa` (EnemyRating; `u.H(...,0)`)
+    float rating_correction = 0.0f;  // `jVa` (RatingCorrection; `u.H(...,0)`)
     // `Ce.EM` (L848): the rule's `<Animation Name="..."/>` child names
     // (JS `bn.parse` also folds a top-level `Animation` attr — DamageFactor
     // only, and its effect is OPEN). The animation-scoped rules match the
@@ -602,6 +609,11 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
         if (an != sr.attrs.end()) r.damage_animation = an->second;
         r.damage_factor_value = fight_rule_float(sr.attrs, "Factor", 1.0f);
         r.damage_repeat_factor = fight_rule_float(sr.attrs, "RepeatFactor", 1.0f);
+    } else if (r.kind == FightRuleKind::rating_evaluation) {
+        // `qn` ctor (L881): eVa/yUa/jVa via `u.H` (parseFloat, default 0).
+        r.player_rating = fight_rule_float(sr.attrs, "PlayerRating", 0.0f);
+        r.enemy_rating = fight_rule_float(sr.attrs, "EnemyRating", 0.0f);
+        r.rating_correction = fight_rule_float(sr.attrs, "RatingCorrection", 0.0f);
     }
     // ApplyTo overrides from the `bb.xe` dispatch (L891-893): Points is
     // always All (`new gj(b,3)`) -> split; Darkness always Player
