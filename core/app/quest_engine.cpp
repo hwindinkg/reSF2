@@ -31,6 +31,46 @@ namespace {
 constexpr int kMaxActivateDepth = 4;
 constexpr int kMaxActionDepth = 6;
 
+// `bb.OE`/`bb.M3` (L887-894) expand a `<Rules>` child into leaves for the
+// `?Fight.*` equipment/currency queries (`cJ`/`bJ` L727592/L727725,
+// `dEa`/`I3a` L727855/L626221). Mirrors `scene::modes_detail::
+// append_rule_element` (Level stamp, ComplexRule flatten, RandomRule group)
+// but stores only the fields those handlers read.
+void collect_fight_rule(const pugi::xml_node& el, int power_lo, int power_hi,
+                        int& next_group, int random_group,
+                        std::vector<FightRule>& out) {
+    const std::string tag = el.name();
+    if (tag == "Level") {
+        const int lo =
+            el.attribute("Min") ? std::atoi(el.attribute("Min").value()) : 0;
+        const int hi = el.attribute("Max")
+                           ? std::atoi(el.attribute("Max").value())
+                           : 2147483647;
+        for (const pugi::xml_node c : el.children())
+            collect_fight_rule(c, lo, hi, next_group, random_group, out);
+        return;
+    }
+    if (tag == "ComplexRule") {
+        for (const pugi::xml_node c : el.children())
+            collect_fight_rule(c, power_lo, power_hi, next_group, random_group, out);
+        return;
+    }
+    if (tag == "RandomRule") {
+        const int gid = next_group++;
+        for (const pugi::xml_node c : el.children())
+            collect_fight_rule(c, power_lo, power_hi, next_group, gid, out);
+        return;
+    }
+    FightRule rule;
+    rule.tag = tag;
+    for (const pugi::xml_attribute a : el.attributes())
+        rule.attrs[a.name()] = a.value();
+    rule.power_min = power_lo;
+    rule.power_max = power_hi;
+    rule.random_group = random_group;
+    out.push_back(std::move(rule));
+}
+
 constexpr const char* kQuestResRoot = "reference/extracted/xml/res/";
 
 // --- RealPrice markup (JS `aa` L1217616-1217700) -------------------------
@@ -632,6 +672,34 @@ bool QuestEngine::ensure_loaded(App& app) {
                                                    ? std::atoi(f.attribute("Power").value())
                                                    : 1;
                                 fight_power_[zname + "|" + bname + "|" + fname] = pw;
+                                // The fight's `<Rules>` + `<Rewards>` for the
+                                // `?Fight.*` equipment (`cJ`/`bJ`) and
+                                // currency (`dEa`/`I3a`) queries, and the
+                                // `?Fight.Money`/`?Fight.Bonus` reward rows
+                                // (`wi`, `Wjb` L105391).
+                                {
+                                    const std::string ftriple =
+                                        zname + "|" + bname + "|" + fname;
+                                    int next_group = 0;
+                                    for (const pugi::xml_node r :
+                                         f.child("Rules").children())
+                                        collect_fight_rule(r, 0, 2147483647,
+                                                           next_group, -1,
+                                                           fight_rules_[ftriple]);
+                                    for (const pugi::xml_node rr :
+                                         f.child("Rewards").children("Reward")) {
+                                        FightReward fr;
+                                        fr.money =
+                                            rr.attribute("Money")
+                                                ? std::atoi(rr.attribute("Money").value())
+                                                : 0;
+                                        fr.bonus =
+                                            rr.attribute("Bonus")
+                                                ? std::atoi(rr.attribute("Bonus").value())
+                                                : 0;
+                                        fight_rewards_[ftriple].push_back(fr);
+                                    }
+                                }
                                 // `?Fight.Description`: `GD()` L727376 =
                                 // `g8!=null&&g8!=""?g8:Sb`. `Sb` = the
                                 // `<Fight Description>` attr (`IIa` L98560
@@ -1650,6 +1718,116 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
                 std::llround(static_cast<double>(nn) - qe));
             if (v < 0) v = 0;  // `a<0&&(a=0)`
             out = std::to_string(v);
+            return true;
+        }
+        // `X3a` L498044: `Armor`/`Helm`/`Weapon`/`Ranged`/`Magic`/
+        // `RaidCharge` -> `c.cJ(type)` (L727592); the `*Level` variants ->
+        // `K.T(c.bJ(type))` (L727725). `cJ`/`bJ` walk `zR` in order: skip a
+        // rule failing its `<Level Min Max>` gate `Ti()` (L846), skip a
+        // removed rule (`NV`), then match the resolved item's `ib.type`.
+        // `<EquipItem>` (`hn` L441150) starts `NV=!0` -> skipped;
+        // `<RequireItem Type="T" MinLevel="L">` (`Ff` L440697, `NV=!1`)
+        // resolves to an item with `type=T` and an empty `Name` (`I.Qd`/
+        // `pL` L163388 read `Type`, no `Name`), so `cJ(T)=""` and
+        // `bJ(T)=L` (`zf.init` L644001 `Np(MinLevel)` -> `Ce`).
+        // `<RandomAquiredItem>` resolves a runtime-random owned item
+        // (`on.wJa` L446578 `m9a`), not derivable here.
+        static const char* const kEquipTypes[] = {
+            "Weapon", "Armor", "Helm", "Ranged", "Magic", "RaidCharge"};
+        for (const char* et : kEquipTypes) {
+            const std::size_t tlen = std::string(et).size();
+            const bool is_level = field.size() == tlen + 5 &&
+                                  field.compare(0, tlen, et) == 0 &&
+                                  field.compare(field.size() - 5, 5, "Level") == 0;
+            if (field != et && !is_level) continue;
+            std::string name_out;
+            int level_out = 0;
+            const auto rit = fight_rules_.find(triple);
+            if (rit != fight_rules_.end()) {
+                for (const FightRule& r : rit->second) {
+                    // `Ti()`: the rule's level gate.
+                    if (r.power_min > w.level || w.level > r.power_max) continue;
+                    // `EquipItem` `NV=!0`; `RandomAquiredItem` is runtime-random.
+                    if (r.tag != "RequireItem") continue;
+                    const auto ti = r.attrs.find("Type");
+                    if (ti == r.attrs.end() || ti->second != et) continue;
+                    int ml = 0;
+                    const auto mi = r.attrs.find("MinLevel");
+                    if (mi != r.attrs.end()) {
+                        try {
+                            ml = std::stoi(mi->second);
+                        } catch (...) {
+                        }
+                    }
+                    name_out = std::string();  // `ab()` = `Ba` = the (empty) Name
+                    level_out = ml;            // `Ce` = `Np(MinLevel)`
+                    break;
+                }
+            }
+            out = is_level ? std::to_string(level_out) : name_out;
+            return true;
+        }
+        // `X3a` L498044: `Money` -> `K.T(c.h4)`, `Bonus` -> `K.T(c.g4)`.
+        // `$L(level)` (L730846) sets `h4`/`g4` from the LAST `wi` row's
+        // `bm(level)`: `h4`=`Tb` (Money), `g4`=`Uo` (Bonus) (`tt.parse`
+        // L121771). The shipped `<Reward>` rows are flat, so the row is its
+        // own level value.
+        if (field == "Money" || field == "Bonus") {
+            int v = 0;
+            const auto rit = fight_rewards_.find(triple);
+            if (rit != fight_rewards_.end() && !rit->second.empty()) {
+                v = field == "Money" ? rit->second.back().money
+                                     : rit->second.back().bonus;
+            }
+            out = std::to_string(v);
+            return true;
+        }
+        // `X3a` L498044: `CheckCurrency` -> `K.T(c.dEa())` (L727855),
+        // `EnoughCurrency` -> `K.T(v.I3a(c))` (L626221). `dEa` is true when
+        // any `e0()` (`ERuleCurrencyCost`, `oh` L435626: `Kj`=Name,
+        // `an`=Value) has a non-empty `Name` and `Value > 0`. `I3a` is true
+        // when every such rule's summed `Value` per `Name` is covered by the
+        // player balance `p.o.uD(Name)` (`rea` L? — the port models no named
+        // currencies, so the balance is 0 for every name).
+        if (field == "CheckCurrency" || field == "EnoughCurrency") {
+            std::vector<std::pair<std::string, long long>> costs;
+            const auto rit = fight_rules_.find(triple);
+            if (rit != fight_rules_.end()) {
+                for (const FightRule& r : rit->second) {
+                    if (r.tag != "CurrencyCost") continue;
+                    const auto ni = r.attrs.find("Name");
+                    if (ni == r.attrs.end() || ni->second.empty()) continue;
+                    long long val = 0;
+                    const auto vi = r.attrs.find("Value");
+                    if (vi != r.attrs.end()) {
+                        try {
+                            val = std::stoll(vi->second);
+                        } catch (...) {
+                        }
+                    }
+                    costs.emplace_back(ni->second, val);
+                }
+            }
+            if (field == "CheckCurrency") {
+                bool any = false;
+                for (const auto& c : costs) {
+                    if (c.second > 0) any = true;
+                }
+                out = any ? "1" : "0";
+                return true;
+            }
+            bool enough = true;
+            for (const auto& c : costs) {
+                long long need = 0;
+                for (const auto& d : costs) {
+                    if (d.first == c.first) need += d.second;
+                }
+                if (need > 0) {  // `uD(Name)` = 0 in the port
+                    enough = false;
+                    break;
+                }
+            }
+            out = enough ? "1" : "0";
             return true;
         }
         note_unanswerable(token);

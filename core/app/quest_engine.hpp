@@ -40,6 +40,28 @@
 
 namespace sf2::app {
 
+// One `<Rules>` leaf read by the `?Fight.*` equipment/currency queries
+// (JS `Lb`/`Ff`/`hn`/`oh`). `power_min`/`power_max` = the `<Level Min Max>`
+// gate (`Lb.Ti`/`c_a` L846, against the player level `p.o.bb()`);
+// `random_group` >= 0 marks a `<RandomRule>` choice (live only once picked,
+// `pn.M4`). `attrs` carries `Type`/`MinLevel` (`RequireItem`) or
+// `Name`/`Value` (`CurrencyCost`).
+struct FightRule {
+    std::string tag;
+    std::map<std::string, std::string> attrs;
+    int power_min = 0;
+    int power_max = 2147483647;
+    int random_group = -1;
+};
+
+// One `<Reward>` row (`tt` L121771): `Tb` (Money) / `Uo` (Bonus). The
+// `?Fight.Money`/`?Fight.Bonus` handlers read the LAST row's `bm(level)`
+// (`$L` L730846); the shipped rows are flat, so the row is its own value.
+struct FightReward {
+    int money = 0;
+    int bonus = 0;
+};
+
 class App;
 
 // Journal for one event firing (JS `ha.ta`/`Bj` readable subset).
@@ -1145,6 +1167,12 @@ private:
     // triple `Zone|Battle|Fight-Name`.
     std::map<std::string, int> fight_power_;
     std::map<std::string, std::string> fight_description_;
+    // The fight's parsed `<Rules>` (the `zR`/`e0()` source for the
+    // `?Fight.*` equipment + currency queries) and `<Rewards>` rows (the
+    // `wi` source for `?Fight.Money`/`?Fight.Bonus`), keyed by the `hb`
+    // triple `Zone|Battle|Fight-Name`.
+    std::map<std::string, std::vector<FightRule>> fight_rules_;
+    std::map<std::string, std::vector<FightReward>> fight_rewards_;
     // `p.items` catalog cache + the list.xml `BonusPrice` map (see
     // `catalog_find`/`catalog_bonus_price`).
     mutable std::vector<CatalogItem> catalog_cache_;
