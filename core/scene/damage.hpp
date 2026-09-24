@@ -71,6 +71,17 @@ struct FighterParams {
     // fighter's align-armor rows. `pAa` reads `(attacker.qb ? defender :
     // attacker).IY`, filtered to the max `Priority` by `Ci.a5a` (L800).
     std::vector<AlignDelta> iy;
+    // --- RatingEvaluation warrior fields (JS `xc`, `ur` parse L188-190) -----
+    // `W3` (PlayerRating), `C_` (EnemyRating), `w4` (RatingCorrection): the
+    // Warrior-XML overrides `dl.A8a` L1421 reads. The `xc` ctor defaults are
+    // -1/-1/0 (L807), so an absent attribute leaves the override unset.
+    float player_rating = -1.0f;      // `W3`
+    float enemy_rating = -1.0f;       // `C_`
+    float rating_correction = 0.0f;   // `w4`
+    // `jt()` (L808): the warrior's equipment MODEL names — the `xc.mDa`
+    // cancelling-item test (`g.hI`/`D.hI`). Shipped save: Body/Head/Fists/
+    // NoRanged/NoMagic; the enemy's from its Warrior template items.
+    std::vector<std::string> equipment_names;
 
     // JS `ud.get(name, out)` — returns the attribute value (0 if absent).
     float attr(const std::string& name) const {
@@ -153,6 +164,9 @@ struct FightParams {
     float lifesteal_base = 0.0001f;
     std::string block_defense_attr = "BodyDefense";
     float damage_doubling_range = 10.0f;  // BP
+    // `v.lT` (L1156) = `<ResistanceDoublingRange Value>` — the `dl.A8a`
+    // L1422 resistance doubling divisor (the fight.cpp A2 local used 500).
+    float resistance_doubling_range = 500.0f;  // lT
     float damage_factor_base = 0.0001f;   // Ypa
     float damage_factor_max = 20000.0f;   // Zpa
     std::string damage_factor_attr = "DamageFactor";
@@ -423,5 +437,84 @@ inline R8aOut r8a_decide(bool ecb, bool target_vc, float zi_over_so,
     o.raw = (o.pain_c || o.head_f) ? true : o.crit_e;
     return o;
 }
+
+// ---------------------------------------------------------------------------
+// RatingEvaluation arithmetic (JS `xc.JBa` L812-815, `dl.A8a` L1421-1422,
+// `dl.Gz` L1423, `dl.k5a`/`j5a` L1428, `v.OAa` L1219).
+//
+// The map difficulty (`Wc` `DifficultyEvaluation`, screens.cpp) is the rating
+// RATIO `d/c * 2^((q-r)*ACa) * k/h * 2^(2*(w4+jVa)/BP)` (`dl.A8a` L1422),
+// where `c`/`d` are the two sides' ratings. Each side's rating is the
+// `xc.JBa` weighted sum over the `<RatingEvaluation>` `<Damage>` rows:
+//   per row:  h = Kva (AverageBaseDamage)
+//             per `<Defense>` D: F = min(1, h * iea(self.qb, self, other,
+//                                              rowAttrs+sideAttrs, D.attr[0]))
+//                                B += D.weight * F
+//   `c += B`; a row with `xha` (MagicRechargeRate) scales B by
+//   `xha * (X7a()*yBa(self) + k6a()*JAa(self))` (`v.jA`, L815).
+//
+// PORTED: `zBa`, `mDa` (cancelling item), `iWa`/`msb`/`nsb`, the defense
+// weighted sum + `iea` (`balance_multiplier`), the `xha` magic branch, the
+// `A8a`/`Gz` formula, the `qAa` side split.
+// NOT PORTED (unported subsystems — see damage.cpp OPEN): the perk `<Rating>`
+// Me/Enemy loops (`xc.Wk` items' `x4`, perks.xml `<Rating Player=..>`), the
+// `xc.gX` PerkAspect branch (`Be.eea` + `v.CY` `<Aspect>` config + `oma`/`gy`),
+// and `v.cw()`/`v.EQ()`/`v.Wka`/`Fm`/`Bua` (the warrior-from-save model). The
+// shipped fresh save has NO `<Rating>` perks, so the omitted loops are EMPTY
+// for the fresh-save case and the sum is exact there.
+
+// One `Ba` (name, value) pair (JS `Ba` L112): the merged attribute list
+// `JBa` builds (`iWa`/`msb`) and the `k5a`/`j5a` side list.
+struct RatingAttrPair {
+    std::string first;    // attribute name
+    float second = 0.0f;  // value
+};
+
+// `xc.zBa(name)` (L812): the attribute value, or -FLT_MAX when absent.
+float rating_attribute(const FighterParams& w, const std::string& name);
+
+// `xc.mDa(name)` (L812): true when `name` is one of the warrior's equipment
+// model names (`jt()`); a cancelling item skips the row/defense. An empty
+// `item` (a null `hI`) never cancels.
+bool rating_cancelled(const FighterParams& w, const std::string& item);
+
+// `xc.JBa(other, attrs)` (L812-815): the per-warrior weighted rating sum over
+// the `<RatingEvaluation>` rows. `attrs` is the `k5a`/`j5a` side list. The
+// `nsb` step mutates the OTHER warrior's attributes, so `other` is copied.
+float warrior_rating(const FighterParams& self, const FighterParams& other,
+                     const std::vector<RatingAttrPair>& attrs,
+                     const FightParams& fp = FightParams::defaults());
+
+// The `ERuleRatingEvaluation` inputs (`eVa`/`yUa`/`jVa`, JS `qn` L881).
+struct RatingRule {
+    float player_rating = 0.0f;      // eVa (PlayerRating)
+    float enemy_rating = 0.0f;       // yUa (EnemyRating)
+    float rating_correction = 0.0f;  // jVa (RatingCorrection)
+    bool present = false;            // `z8a() != null`
+};
+
+// `dl.A8a(a,b)` + `dl.Gz` (L1421-1423): the fight rating ratio. `a` = the
+// player, `b` = the enemy (the LAST warrior of `v.EQ(fight.Xs)`).
+// `side1_attrs` = `k5a()`, `side2_attrs` = `j5a()`.
+// `resistances` = the active `ERuleResistance` rows as (vX, save-value) pairs;
+// `A8a` reads `x = z.vX` (the rule) and `z = p.o.Pw.c0(z.eta)` (the save).
+float rating_ratio(const FighterParams& a, const FighterParams& b,
+                   const RatingRule& rule,
+                   const std::vector<RatingAttrPair>& side1_attrs,
+                   const std::vector<RatingAttrPair>& side2_attrs,
+                   const std::vector<std::pair<float, float>>& resistances,
+                   const FightParams& fp = FightParams::defaults());
+
+// One `ERuleAttributes` rule for the `dl.qAa` (L1428) split.
+struct RatingSideRule {
+    int apply_to = 3;                  // `mc()` (1 Player / 2 Bot / 3 All)
+    std::map<std::string, int> attrs;  // the `hea()` attribute map
+};
+
+// `dl.qAa(side)` (L1428): `side==1` (`k5a`) takes the NON-Defense attrs of
+// Player/All rules (and the Defense attrs of Bot rules); `side==2` (`j5a`)
+// the mirror. `Cb(name,"Defense")` = `name` contains "Defense".
+std::vector<RatingAttrPair> rating_side_attrs(
+    const std::vector<RatingSideRule>& rules, int side);
 
 }  // namespace sf2::scene

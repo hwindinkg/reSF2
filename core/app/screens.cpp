@@ -4381,6 +4381,13 @@ struct BattleWarriorInfo {
     // Default matches JS `b0` (L180): a missing/unknown kind maps to
     // "FightNone", so an unresolved battle never yields an empty type.
     std::string type = "FightNone";
+    // `dl.z8a()` (L1428): the fight's `<RatingEvaluation>` rule (`eVa`/`yUa`/
+    // `jVa`). `has_rating_rule` is false when the `<Fight>` carries none (then
+    // `dl.A8a` starts `c`/`d`/`e` at 0).
+    float rating_player = 0.0f;      // eVa (PlayerRating)
+    float rating_enemy = 0.0f;       // yUa (EnemyRating)
+    float rating_correction = 0.0f;  // jVa (RatingCorrection)
+    bool has_rating_rule = false;
 };
 
 // `StageWarrior::Delta` -> `damage.hpp` `AlignDelta` (same fields, float).
@@ -4457,6 +4464,17 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             }
         }
         if (!fight) return out;
+        // `dl.z8a()` (L1428): the fight's `<RatingEvaluation>` rule (`qn`
+        // L881: `eVa`/`yUa`/`jVa`; `u.H` leaves an absent attr at 0).
+        if (const pugi::xml_node re = fight.child("RatingEvaluation")) {
+            out.has_rating_rule = true;
+            if (re.attribute("PlayerRating"))
+                out.rating_player = re.attribute("PlayerRating").as_float();
+            if (re.attribute("EnemyRating"))
+                out.rating_enemy = re.attribute("EnemyRating").as_float();
+            if (re.attribute("RatingCorrection"))
+                out.rating_correction = re.attribute("RatingCorrection").as_float();
+        }
         const pugi::xml_node warriors = fight.child("Warriors");
         if (!warriors) return out;
         const pugi::xml_node w = warriors.child("Warrior");
@@ -7270,17 +7288,102 @@ const char* const kMapDiffFill[] = {
     "difficulty_very_easy", "difficulty_easy", "difficulty_middle",
     "difficulty_hard", "difficulty_very_hard"};
 
-// OPEN: the JS rating `v.OAa(battle)` (L1219, `RatingEvaluation`
-// internal_settings L490-527) is not ported. A neutral ratio 1.0 lands in
-// `diff1` [0.82,1.3) — exactly the oracle's ZONE_1/BOSS_LYNX value
-// ("Нормально"/diff1, fill frame `difficulty_easy`).
+// The neutral fallback when a battle cannot be resolved (the pre-phase-2
+// constant): 1.0 lands in `diff1` [0.82,1.3) — the oracle's ZONE_1/BOSS_LYNX.
 constexpr float kMapDefaultRatingRatio = 1.0f;
 
-int map_difficulty_level() {
+// `v.OAa(battle)` (L1219): the rating ratio for a battle node. `a` = the
+// player (`v.cw`), `b` = the enemy (the LAST `v.EQ(fight.Xs)` warrior), via
+// `battle.Gz(v.cw(), v.EQ(battle.Xs))` -> `dl.A8a` (L1421-1422).
+//
+// REMANDER (unported): the fight's `<Attributes>` rules (the `k5a`/`j5a` side
+// lists) are not parsed here, so the `dl.A8a` `JBa` path (which only runs when
+// the rule's PlayerRating/EnemyRating is NEGATIVE) receives an empty side list;
+// the perk `<Rating>` Me/Enemy loops + `xc.gX` PerkAspect branch (perks.xml
+// `<Rating>`) are also unported. For the shipped fights the rule has no
+// negative rating, so `c = b.W3` / `d = b.C_` (the Warrior-XML overrides) and
+// `JBa` is not reached — exact there.
+float map_battle_rating(App& app, const std::string& battle_name,
+                        const std::string& zone, int fight_index) {
+    try {
+        const BattleWarriorInfo bw = battle_warrior(battle_name, zone, fight_index);
+        if (bw.attrs.empty()) return kMapDefaultRatingRatio;
+        const auto fattr = [&bw](const char* k, float dflt) {
+            const auto it = bw.attrs.find(k);
+            if (it == bw.attrs.end() || it->second.empty()) return dflt;
+            try {
+                return std::stof(it->second);
+            } catch (const std::exception&) {
+                return dflt;
+            }
+        };
+        // The player (`v.cw`): the resolved attribute map + the shipped gear.
+        sf2::scene::FighterParams p;
+        p.is_player = true;
+        p.attributes = resolve_player_attributes(app);
+        p.iy = to_align_deltas(bw.player_align);
+        try {
+            const WarriorSave w = app.save().load();
+            p.equipment_names = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
+            for (const auto& oi : w.items) {
+                if (oi.count > 0 && oi.equipped) p.equipment_names.push_back(oi.name);
+            }
+        } catch (const std::exception&) {
+        }
+        // The enemy (`v.EQ(fight.Xs)` last warrior): the `<Warrior>` attrs.
+        sf2::scene::FighterParams e;
+        e.is_player = false;
+        e.iy = to_align_deltas(bw.align);
+        for (const auto& kv : bw.attrs) {
+            try {
+                e.attributes[kv.first] = std::stof(kv.second);
+            } catch (const std::exception&) {
+            }
+        }
+        e.player_rating = fattr("PlayerRating", -1.0f);       // `W3`
+        e.enemy_rating = fattr("EnemyRating", -1.0f);         // `C_`
+        e.rating_correction = fattr("RatingCorrection", 0.0f);  // `w4`
+        sf2::scene::RatingRule rule;
+        rule.present = bw.has_rating_rule;
+        rule.player_rating = bw.rating_player;
+        rule.enemy_rating = bw.rating_enemy;
+        rule.rating_correction = bw.rating_correction;
+        return sf2::scene::rating_ratio(p, e, rule, {}, {}, {},
+                                        sf2::scene::FightParams::defaults());
+    } catch (const std::exception&) {
+        return kMapDefaultRatingRatio;
+    }
+}
+
+// Cached wrapper: `battle_warrior` (a 200KB XML parse) must not run per frame.
+// The key carries the player's gear + level so a gear change re-evaluates.
+float map_battle_rating_cached(App& app, const std::string& battle_name,
+                               const std::string& zone, int fight_index) {
+    static std::map<std::string, float> cache;
+    std::string sig = zone + "|" + battle_name + "|" + std::to_string(fight_index);
+    try {
+        const WarriorSave w = app.save().load();
+        sig += "|" + w.weapon + "|" + w.armor + "|" + w.helm + "|" + w.ranged +
+               "|" + w.magic + "|" + std::to_string(w.level);
+    } catch (const std::exception&) {
+    }
+    const auto it = cache.find(sig);
+    if (it != cache.end()) return it->second;
+    const float r = map_battle_rating(app, battle_name, zone, fight_index);
+    std::fprintf(stdout, "[maprating] %s|%s fight=%d -> ratio=%.4f\n",
+                 zone.c_str(), battle_name.c_str(), fight_index, r);
+    std::fflush(stdout);
+    cache[sig] = r;
+    return r;
+}
+
+// `Wc` level index from the rating ratio (JS `Wc.ba` L2163: the LAST
+// threshold `< ratio`). The old neutral constant 1.0 landed in `diff1`.
+int map_difficulty_level(float rating_ratio) {
     const int n = static_cast<int>(sizeof(kMapDiffLevels) / sizeof(kMapDiffLevels[0]));
     int idx = 0;
     for (int i = 0; i < n; ++i) {
-        if (kMapDiffLevels[i].threshold < kMapDefaultRatingRatio) idx = i;
+        if (kMapDiffLevels[i].threshold < rating_ratio) idx = i;
     }
     return idx;
 }
@@ -7481,7 +7584,9 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
                                 : body_w * 0.1f;
         try_draw_atlas_button(app, "difficulty_empty", body_x + body_w * 0.5f,
                               body_y + wy + bar_h * 0.5f, body_w, bar_h, 1.0f);
-        const int lvl = map_difficulty_level();
+        const int lvl = map_difficulty_level(map_battle_rating_cached(
+            app, node->name, node->zone,
+            map_fight_index(app, node->name, node->fight_count)));
         try_draw_atlas_button(app, kMapDiffFill[lvl], body_x + body_w * 0.5f,
                               body_y + wy + bar_h * 0.5f, body_w, bar_h, 1.0f);
         // `Wc.ba` label: `ua(a*.16)`, `Fa(a, ua)`, `D(bar_h)`.

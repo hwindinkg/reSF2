@@ -289,6 +289,12 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     if (const pugi::xml_node bp = root.child("DamageDoublingRange")) {
         if (bp.attribute("Value")) v.damage_doubling_range = bp.attribute("Value").as_float();
     }
+    // `v.lT` (L1156) = `<ResistanceDoublingRange Value>` (the `dl.A8a` L1422
+    // resistance divisor). The static fallback is 500 (the pre-existing A2
+    // local); `u.H` leaves the value unset when the node is absent.
+    if (const pugi::xml_node lt = root.child("ResistanceDoublingRange")) {
+        if (lt.attribute("Value")) v.resistance_doubling_range = lt.attribute("Value").as_float();
+    }
     // `v.ACa/zCa/E9a` (L1155) = `<DamageFactor Base Attribute MaxValue>`.
     if (const pugi::xml_node df = root.child("DamageFactor")) {
         if (df.attribute("Base")) v.damage_factor_base = df.attribute("Base").as_float();
@@ -432,6 +438,160 @@ const HitEffect* select_hit_effect(bool critical, bool head, bool shock) {
         }
     }
     return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// RatingEvaluation arithmetic (JS `xc.JBa` L812-815, `dl.A8a` L1421-1422,
+// `dl.Gz` L1423, `dl.k5a`/`j5a` L1428).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// `xc.msb` (L815): for each (name, val) in `b`, add val to the FIRST matching
+// entry of `a`.
+void rating_merge(std::vector<RatingAttrPair>& a,
+                  const std::vector<RatingAttrPair>& b) {
+    for (const RatingAttrPair& p : b) {
+        for (RatingAttrPair& e : a) {
+            if (e.first == p.first) {
+                e.second += p.second;
+                break;
+            }
+        }
+    }
+}
+
+// `xc.nsb` (L815): for each (name f, val e) in `attrs`, for every `<Defense>`
+// row `<Attribute>` named f, `other.attr[f] = (other.attr[f] + e) | 0`.
+void rating_nsb(FighterParams& other,
+                const std::vector<RatingDefense>& defenses,
+                const std::vector<RatingAttrPair>& attrs) {
+    for (const RatingAttrPair& p : attrs) {
+        for (const RatingDefense& def : defenses) {
+            for (const RatingAttribute& da : def.attributes) {
+                if (da.name != p.first) continue;
+                const float cur = other.attr(p.first);
+                other.attributes[p.first] =
+                    static_cast<float>(static_cast<int>(cur + p.second));
+            }
+        }
+    }
+}
+
+}  // namespace
+
+float rating_attribute(const FighterParams& w, const std::string& name) {
+    const auto it = w.attributes.find(name);
+    return it != w.attributes.end() ? it->second : -3.4028234663852886e38f;
+}
+
+bool rating_cancelled(const FighterParams& w, const std::string& item) {
+    if (item.empty()) return false;  // a null `hI` never cancels
+    for (const std::string& n : w.equipment_names) {
+        if (n == item) return true;
+    }
+    return false;
+}
+
+float warrior_rating(const FighterParams& self, const FighterParams& other,
+                     const std::vector<RatingAttrPair>& attrs,
+                     const FightParams& fp) {
+    FighterParams other_mut = other;  // `nsb` mutates the OTHER warrior
+    float c = 0.0f;
+    for (const RatingDamageRow& row : fp.rating_table) {
+        if (row.node_name != "Damage") continue;
+        if (rating_cancelled(self, row.cancelling_item)) continue;
+        const float h = row.average_base_damage;  // `Kva`
+        // `d` = the row's own attributes (`iWa`) merged with the side list
+        // (`msb`).
+        std::vector<RatingAttrPair> d;
+        d.reserve(row.attributes.size() + attrs.size());
+        for (const RatingAttribute& ra : row.attributes) {
+            d.push_back(RatingAttrPair{ra.name, ra.shift});
+        }
+        rating_merge(d, attrs);
+        rating_nsb(other_mut, row.defenses, attrs);
+        float B = 0.0f;
+        for (const RatingDefense& def : row.defenses) {
+            if (rating_cancelled(self, def.cancelling_item)) continue;
+            if (def.attributes.empty()) continue;  // `D.attributes[0]`
+            // `F = min(1, h * iea(self.qb, self, other, d, D.attr[0]))`.
+            IntervalDamage iv;
+            iv.attack_attrs.reserve(d.size());
+            for (const RatingAttrPair& p : d) {
+                iv.attack_attrs.emplace_back(p.first, p.second);
+            }
+            const float g = balance_multiplier(self, other_mut, iv,
+                                               def.attributes[0].name, fp);
+            B += def.weight * std::min(1.0f, h * g);
+        }
+        // `g.xha > 0`: `B *= xha * (X7a()*yBa(self) + k6a()*JAa(self))` where
+        // `X7a`/`k6a` are the Magic Pain/DamageRecharge bases and `yBa`/`JAa`
+        // the base × the warrior's attr (`v.jA`, L1186).
+        if (row.magic_recharge_rate > 0.0f) {
+            const float pain = magic_aq(fp.magic_pain_base, fp.magic_pain_attr, self);
+            const float dmg = magic_aq(fp.magic_damage_base, fp.magic_damage_attr, self);
+            B *= row.magic_recharge_rate *
+                 (fp.magic_pain_base * pain + fp.magic_damage_base * dmg);
+        }
+        c += B;
+    }
+    return c;
+}
+
+float rating_ratio(const FighterParams& a, const FighterParams& b,
+                   const RatingRule& rule,
+                   const std::vector<RatingAttrPair>& side1_attrs,
+                   const std::vector<RatingAttrPair>& side2_attrs,
+                   const std::vector<std::pair<float, float>>& resistances,
+                   const FightParams& fp) {
+    float c = rule.present ? rule.player_rating : 0.0f;            // `eVa`
+    float d = rule.present ? rule.enemy_rating : 0.0f;              // `yUa`
+    const float e = rule.present ? rule.rating_correction : 0.0f;   // `jVa`
+    if (c == 0.0f) {
+        c = b.player_rating;  // `c==0 -> b.W3`
+    } else if (c < 0.0f) {
+        c = warrior_rating(a, b, side1_attrs, fp);  // `c<0 -> a.JBa(b,h)`
+    }
+    if (d == 0.0f) {
+        d = b.enemy_rating;  // `d==0 -> b.C_`
+    } else if (d < 0.0f) {
+        d = warrior_rating(b, a, side2_attrs, fp);  // `d<0 -> b.JBa(a,k)`
+    }
+    // `l = v.ACa()` (DamageFactor Base), `n = v.zCa()` (DamageFactor attr).
+    const float l = fp.damage_factor_base;
+    const float q = b.attr(fp.damage_factor_attr);
+    const float r = a.attr(fp.damage_factor_attr);
+    // Resistance: `x = z.vX` (rule), `z = p.o.Pw.c0(z.eta)` (save). The
+    // caller resolves the save half; a missing entry is 0.
+    float k = 1.0f, h = 1.0f;
+    for (const auto& rz : resistances) {
+        const float x = rz.first;
+        const float z = rz.second;
+        if (z < x) {
+            k *= std::pow(2.0f, (x - z) / fp.resistance_doubling_range);
+            h *= std::pow(2.0f, (z - x) / fp.resistance_doubling_range);
+        }
+    }
+    c = d / c * std::pow(2.0f, (q - r) * l) * k / h;
+    c *= std::pow(2.0f,
+                  2.0f * (b.rating_correction + e) / fp.damage_doubling_range);
+    return c;
+}
+
+std::vector<RatingAttrPair> rating_side_attrs(
+    const std::vector<RatingSideRule>& rules, int side) {
+    std::vector<RatingAttrPair> out;
+    for (const RatingSideRule& r : rules) {
+        const bool non_defense = (r.apply_to == side || r.apply_to == 3);
+        for (const auto& kv : r.attrs) {
+            const bool is_defense = kv.first.find("Defense") != std::string::npos;
+            if (non_defense ? !is_defense : is_defense) {
+                out.push_back(RatingAttrPair{kv.first, static_cast<float>(kv.second)});
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace sf2::scene
