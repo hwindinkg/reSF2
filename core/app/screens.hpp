@@ -327,6 +327,19 @@ struct BossRosterScroll {
 };
 
 // The map — native Map (screen 5).
+// The `Ur` red-bulb / selected-slot blink state (`Dw`/`Mb.Gm` ZoneSwitch +
+// `Ur.m4a`/`sZa`/`rZa`, JS L2112-2117). Per-instance, like the JS ctor's
+// seeds (`nq=255, mq=0, aN=Mb.Gm.c_, aW=false, $V=true, O7=true`).
+struct UrBlink {
+    int nq = 255;    // base-dot alpha of the red zones (`sZa`)
+    int mq = 0;      // `red_bulb` marker alpha (`rZa`)
+    int aN = 30;     // delay counter (`aN`, seeded `c_` DelayBeforeFade)
+    bool aW = false; // `nq` direction
+    bool V = true;   // `$V`, `mq` direction
+    bool O7 = true;  // red-fade phase (`O7`)
+    bool N7 = false; // selected-pulse phase (`N7`)
+};
+
 class MapScreen : public Screen {
 public:
     explicit MapScreen(ScreenManager& mgr);
@@ -414,6 +427,9 @@ private:
     int zone_sel_ = 0;
     int hover_ = -1;
     int tab_hover_ = -1;
+    // `Ur` red-bulb / selected-slot blink (`sZa`/`rZa` L2116-2117), ticked in
+    // `update_impl` and read by the dot draw.
+    UrBlink ur_blink_;
     // Tournament-series progress (save Fights/yc win counts, cached at
     // construction; the Map remounts every visit so it stays fresh).
     std::vector<WarriorSave::FightWins> fight_wins_;

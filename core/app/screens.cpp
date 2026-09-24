@@ -7033,6 +7033,141 @@ UrLayout ur_layout(const MapMetrics& mm) {
     return u;
 }
 
+// --- `Ur` red-bulb / selected-slot blink (JS L2112-2117) --------------------
+// The ZoneSwitch config `Mb.Gm` (class `Dw` L2A4): `Mb.parse` fills it from
+// internal_settings.xml `<ZoneSwitch>` — BattleTypes (`RY`), MinOpacity
+// (`tGa`), FadeSpeed (`H_`), DelayBeforeFade (`c_`). The shipped values are
+// BattleTypes={Tournament, Challenge, Tournament_INTERMISSION,
+// Challenge_INTERMISSION}, MinOpacity=122, FadeSpeed=30, DelayBeforeFade=30.
+struct UrBlinkCfg {
+    std::vector<std::string> battle_types;  // `Mb.Gm.RY`
+    int min_opacity = 122;                  // `Mb.Gm.tGa`
+    int fade_speed = 30;                    // `Mb.Gm.H_`
+    int delay_before_fade = 30;             // `Mb.Gm.c_`
+};
+
+const UrBlinkCfg& ur_blink_cfg() {
+    static const UrBlinkCfg cfg = [] {
+        UrBlinkCfg c;
+        try {
+            std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                             std::ios::binary);
+            if (!in) return c;
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            sf2::data::xml_doc doc;
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            if (!root) return c;
+            const pugi::xml_node zs = root.child("ZoneSwitch");
+            if (!zs) return c;
+            c.battle_types.clear();
+            for (const pugi::xml_node b : zs.child("BattleTypes").children("BattleType")) {
+                const std::string name = b.attribute("Name").value();
+                if (!name.empty()) c.battle_types.push_back(name);
+            }
+            c.min_opacity = zs.child("MinOpacity").attribute("Value").as_int(122);
+            c.fade_speed = zs.child("FadeSpeed").attribute("Value").as_int(30);
+            c.delay_before_fade =
+                zs.child("DelayBeforeFade").attribute("Value").as_int(30);
+        } catch (const std::exception&) {
+            // Degrade to the shipped defaults; the dots still draw.
+        }
+        return c;
+    }();
+    return cfg;
+}
+
+// A zone renders a dot iff it has a map backdrop and at least one visible
+// battle (`Vr.$v()` returns only zones with `!Cga`, i.e. an active battle);
+// the same gate `zone_dot_center` uses, so draw and hit-test cannot drift.
+bool ur_zone_renders(const MapScreen::ZoneTab& z) {
+    if (z.part < 0) return false;
+    for (const MapScreen::Node& n : z.nodes) {
+        if (n.visible) return true;
+    }
+    return false;
+}
+
+// JS `Ya.WEa` (L2124): the zone carries an ACTIVE boss battle
+// (`a0("FightBosses")`/`FightFinalTitan`/`FightBossesIntermission`). In `Ywa`
+// this is the "stop scanning" gate: the first non-Start zone without one
+// ends the red-bulb walk.
+bool ur_zone_has_active_boss(const MapScreen::ZoneTab& z) {
+    for (const MapScreen::Node& n : z.nodes) {
+        if (n.type == "BOSSES" || n.type == "FINAL_BATTLE_TITAN" ||
+            n.type == "BOSSES_INTERMISSION") {
+            if (n.active) return true;
+        }
+    }
+    return false;
+}
+
+// JS `Ya.VEa` (L2124): the zone carries an ACTIVE, unlocked battle named in
+// the ZoneSwitch `BattleTypes` list (`a.xQ(name)`). NOTE: JS also requires
+// `e.eJ()==2` (the base variant, excluding the 1st/3rd hard-mode twin); the
+// port's `Node` does not model that variant field — see the divergence note.
+bool ur_zone_red(const MapScreen::ZoneTab& z, const UrBlinkCfg& cfg) {
+    for (const std::string& t : cfg.battle_types) {
+        for (const MapScreen::Node& n : z.nodes) {
+            if (n.name == t && n.active && !n.locked) return true;
+        }
+    }
+    return false;
+}
+
+// JS `Ur.Ywa` (L2116): the indices (into `zones_`, i.e. the `Co`/`tW` slots)
+// of the zones whose base dot blinks and whose `red_bulb` marker pulses. The
+// `Start` zone (`e.yR`) is skipped entirely; a non-Start zone with no active
+// boss stops the walk (`break`).
+std::vector<std::size_t> ur_red_zones(const std::vector<MapScreen::ZoneTab>& zones,
+                                      const UrBlinkCfg& cfg) {
+    std::vector<std::size_t> out;
+    for (std::size_t i = 0; i < zones.size(); ++i) {
+        if (!ur_zone_renders(zones[i])) continue;  // not in `Vr.$v()`
+        if (zones[i].is_start) continue;           // `e.yR`
+        if (!ur_zone_has_active_boss(zones[i])) break;  // `!WEa` -> stop
+        if (ur_zone_red(zones[i], cfg)) out.push_back(i);
+    }
+    return out;
+}
+
+// JS `Ur.m4a` + `sZa` + `rZa` (L2115-2117), one tick per frame. `nq` fades the
+// red zones' base dots, `mq` pulses their `red_bulb` markers; `O7`/`N7` run the
+// two phases in turn, `aN` holds the `c_` frame delay. Integer truncation
+// `255/H_|0` is preserved.
+void ur_blink_tick(UrBlink& s, const UrBlinkCfg& cfg) {
+    if (s.aN > 0) {  // `m4a`: the delay gate
+        --s.aN;
+        return;
+    }
+    const int step = cfg.fade_speed > 0 ? (255 / cfg.fade_speed) : 0;  // `255/b|0`
+    if (step <= 0) return;
+    const int a = cfg.min_opacity;  // `tGa`
+    if (s.O7) {  // `sZa(this.r9)` — fade the red zones' base dots
+        if (s.aW) {
+            s.nq -= step;
+            if (s.nq <= 0) { s.nq = 0; s.aW = false; }
+        } else {
+            s.nq += step;
+            if (s.nq >= 255) { s.nq = 255; s.aW = true; s.aN = cfg.delay_before_fade; }
+        }
+        if (s.nq <= a && s.aW) s.N7 = true;
+        if (s.nq <= 0) s.O7 = false;
+    }
+    if (s.N7) {  // `rZa(this.s9)` — show + pulse the `red_bulb` markers
+        if (s.V) {
+            s.mq -= step;
+            if (s.mq <= 0) { s.mq = 0; s.V = false; }
+        } else {
+            s.mq += step;
+            if (s.mq >= 255) { s.mq = 255; s.V = true; s.aN = cfg.delay_before_fade; }
+        }
+        if (s.mq <= a && s.V) s.O7 = true;
+        if (s.mq <= 0) s.N7 = false;
+    }
+}
+
 // See screens.hpp. The dotted slot is the zone's index among the zones that
 // RENDER a dot (`Vr.HXa` L2123-2124), not its raw index. Only zones with a
 // MAP backdrop (`FileName` -> `part`) are map zones: the `Start` zone
@@ -7116,6 +7251,9 @@ void MapScreen::update_impl(float dt) {
         roster_ = BossRosterScroll{};
     }
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // `Ur.m4a` (L2115): advance the red-bulb / selected-slot blink once per
+    // frame (the JS `aa` update loop). The draw pass reads `ur_blink_`.
+    ur_blink_tick(ur_blink_, ur_blink_cfg());
     // `SetMapFocus` focus refresh (`qo` L1086 = `p.o.m5(battle)` + the `Ya`
     // focus refresh): StoryTutorialBossFight fires on THIS map's SceneLoaded
     // (tutorial_quests.xml L143-155), i.e. AFTER the ctor read the save, so
@@ -7856,12 +7994,36 @@ void MapScreen::render_impl(App& app) {
                       u.label_ua / 100.0f, UiAlign::Right, 0.78f, 0.655f, 0.451f);
         // One dot per rendered zone widget (`Vr.HXa` L2123-2124: only zones
         // with an active battle render).
+        // `Ur` dots (JS L2113-2117). Base art = `inactive_bulb` (`DRa`) for
+        // EVERY dot (JS `WG`, `d = db.xz(null, y.DRa)`); the selected slot
+        // OVERLAYS `bulb` (`Una`, `UB`) on top (JS `ba`/`aa` position `UB` at
+        // `q9`), and a red zone overlays `red_bulb` (`MRa`, `tW`). Draw order
+        // mirrors the JS child order: `WG` base below `KG` (UB, then the `tW`
+        // markers appended by `X_a`).
+        const UrBlinkCfg& blink_cfg = ur_blink_cfg();
+        const std::vector<std::size_t> red = ur_red_zones(zones_, blink_cfg);
         for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
             float dot_x = 0.0f, dot_cy = 0.0f;
             if (!zone_dot_center(zi, dot_x, dot_cy)) continue;
             const bool sel = static_cast<int>(zi) == zone_sel_;
-            if (!try_draw_atlas_button(app, sel ? "bulb" : "inactive_bulb", dot_x, dot_cy,
-                                       u.dot_d, u.dot_d, 1.0f)) {
+            bool is_red = false;
+            for (std::size_t r : red) {
+                if (r == zi) { is_red = true; break; }
+            }
+            // Base dot: a red zone's alpha blinks (`sZa` -> `nq/255`); the rest
+            // stay opaque.
+            bool drew = try_draw_atlas_button(app, "inactive_bulb", dot_x, dot_cy,
+                                              u.dot_d, u.dot_d,
+                                              is_red ? ur_blink_.nq / 255.0f : 1.0f);
+            if (sel) {
+                drew = try_draw_atlas_button(app, "bulb", dot_x, dot_cy, u.dot_d,
+                                             u.dot_d, 1.0f) || drew;
+            }
+            if (is_red) {
+                drew = try_draw_atlas_button(app, "red_bulb", dot_x, dot_cy, u.dot_d,
+                                             u.dot_d, ur_blink_.mq / 255.0f) || drew;
+            }
+            if (!drew) {
                 draw_flat_button(app, "", dot_x, dot_cy, u.dot_d * 0.5f,
                                  u.dot_d * 0.5f, 0.8f, 0.45f, 0.15f, false);
             }
