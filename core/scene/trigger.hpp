@@ -135,6 +135,13 @@ struct TrigCond {
     bool negate = false;
     std::map<std::string, std::string> s;  // Name/Type/Subtype/Min/Max/...
     double chance = 0.0;  // Random (0..1 fraction; `cT(ou*100)`)
+    // `xp.isEqual` (L669651) reads `Da.cT(this.ih.Wb().ou()*100)`: `ou` is the
+    // Chance attr evaluated through the `Qa` engine (may be a
+    // `_Set * ?Aspect[...]` expression), so a non-numeric raw -> `eval_set_value`
+    // at fire time; a plain number keeps `c.chance` (load-time fallback).
+    bool chance_expr = false;
+    // The owning perk's `<Set>` numeric map (`_X` lookups in the expression).
+    std::map<std::string, double> set_vals;
     std::string op;  // Operator Or/And
     std::vector<TrigCond> nested;
 };
@@ -403,8 +410,31 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
     if (k == "PerkStart") {
         r = true;
     } else if (k == "Random") {
-        // `Da.cT(ou*100)`: `a>b(100)` true else `draw*100 < a*100`.
-        const double ch = c.chance;
+        // `Da.cT(ou*100)` (L2352 / `xp.isEqual` L669651): `a>b(100)` true
+        // else `pg.cT(a,100)` = `jf() < ou`. `ou` is the Chance expression
+        // evaluated through the `Qa` engine; `c.chance` is the load-time
+        // numeric fallback (unchanged for a plain number).
+        double ch = c.chance;
+        if (c.chance_expr) {
+            const auto cit = c.s.find("Chance");
+            if (cit != c.s.end()) {
+                const SetValueRuntime& rt = set_value_runtime();
+                SetValueCtx sc;
+                sc.fp = &fight_params();
+                sc.level = rt.level;
+                sc.is_raid = rt.is_raid;
+                sc.is_player = true;
+                sc.default_perks_aspect = rt.default_perks_aspect;
+                sc.me_attrs = rt.me_attrs;
+                sc.enemy_attrs = rt.enemy_attrs;
+                sc.set_vals = c.set_vals;
+                sc.rand01 = m.draw01 ? m.draw01 : rt.rand01;
+                sc.aspect_scale = [](int level) {
+                    return aspect_scale_for_level(level);
+                };
+                ch = eval_set_value(cit->second, sc);
+            }
+        }
         double draw = 0.5;
         if (m.draw01) draw = m.draw01();
         r = ch >= 1.0 || draw < ch;
@@ -1006,6 +1036,22 @@ inline TrigCond load_trig_cond(const pugi::xml_node& e,
         c.s[a.name()] = subst_var(a.value(), num, str);
     }
     c.chance = load_num_attr(e, "Chance", 0.0, num, str);
+    // The substituted raw Chance: a `?Method`/`_Set` expression (not fully
+    // numeric) is evaluated at fire time (`eval_cond` Random branch); the
+    // perk `<Set>` num map rides along for the `_X` lookups.
+    {
+        const auto chit = c.s.find("Chance");
+        if (chit != c.s.end() && !chit->second.empty()) {
+            try {
+                std::size_t pos = 0;
+                std::stod(chit->second, &pos);
+                c.chance_expr = pos != chit->second.size();
+            } catch (...) {
+                c.chance_expr = true;
+            }
+        }
+    }
+    c.set_vals = num;
     c.op = load_str_attr(e, "Type", num, str);
     if (c.kind == "Operator") {
         for (const pugi::xml_node n : e.children()) {

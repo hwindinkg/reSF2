@@ -3147,6 +3147,21 @@ void FightController::setup_bus(const PerkSetup& perks) {
         1, sf2::scene::build_side_triggers(perks.enemy_refs, *perks.catalog, bus_.log),
         enemy_items_);
 
+    // The live `<Set>` operands (JS statics) the trigger `<Random Chance>`
+    // expression reads: `p.o.bb()` (level), the two sides' attributes
+    // (`?PlayerAttribute[Me|Enemy]`). `Da.pg`/`?CurrentFight[].isRaid`/
+    // `wd.yV` stay default (the trigger draw uses the fight stream via
+    // `CondCtx.draw01`). Attr changes after setup are OPEN.
+    {
+        sf2::scene::SetValueRuntime& rt = sf2::scene::set_value_runtime();
+        rt.level = static_cast<int>(player_.params.level);
+        rt.is_raid = false;  // dojo/normal fight (`FightRaid` OPEN)
+        rt.me_attrs.clear();
+        for (const auto& kv : player_.params.attributes) rt.me_attrs[kv.first] = kv.second;
+        rt.enemy_attrs.clear();
+        for (const auto& kv : enemy_.params.attributes) rt.enemy_attrs[kv.first] = kv.second;
+    }
+
     // Root `<Triggers>` (JS `Fa.Exb` L708 -> `ra.Dm`): lock-filter the global
     // set per side against the same items/perks the perk bus uses. The lock
     // evaluation reuses the MOVE condition evaluator (`ra.yz` -> `Su.nw` ->

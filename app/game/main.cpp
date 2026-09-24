@@ -1884,6 +1884,13 @@ int main(int argc, char** argv) {
         if (!isxml.empty()) {
             sf2::scene::load_fight_params_from_settings(isxml);
         }
+        {
+            const std::string fxml =
+                slurp("reference/extracted/xml/res/forge.xml");
+            if (!fxml.empty()) {
+                sf2::scene::load_aspect_scale_from_forge(fxml);
+            }
+        }
         const std::string pxml = slurp("reference/extracted/xml/res/perks.xml");
         static const char* kName = "PERK_ITEM_SPECIAL_LIFESTEAL";
         sf2::scene::FighterParams self;

@@ -285,6 +285,29 @@ FightParams& fight_params();
 // Malformed/absent nodes leave the shipped default in place.
 void load_fight_params_from_settings(const std::string& xml_text);
 
+// `ye` (L467424, `ye.g="1A9"`): the forge.xml `<Forge><AspectScale>` table
+// read by `ye.F().gea(level)` (L467806). `gv.FZa` (L467213): a `Level` attr
+// makes the window `[L,L]`; else `[MinLevel(0), MaxLevel(2^31-1)]`.
+void load_aspect_scale_from_forge(const std::string& xml_text);
+
+// `gea(level)` (L467806): the FIRST matching `<Aspect>` row's `Value`, else 0.
+double aspect_scale_for_level(int level);
+
+// The live operands the perk `<Set>` evaluator reads (JS statics):
+// `p.o.bb()` (level), `ca.Ka().Da.type=="FightRaid"` (isRaid), `wd.yV`
+// (DefaultPerksAspect), the two sides' attributes. Populated by the rating +
+// fight paths; `perk_aspect` and the trigger `<Random Chance>` branch read it.
+struct SetValueRuntime {
+    std::function<double()> rand01;  // `Da.pg.jf()` (null -> 0 draw)
+    int level = 1;                   // `p.o.bb()`
+    bool is_raid = false;            // `?CurrentFight[].isRaid`
+    bool is_player = true;           // `?PlayerParameter[Me].isPlayer`
+    double default_perks_aspect = 0.0;  // `wd.yV`
+    std::map<std::string, double> me_attrs;     // `?PlayerAttribute[Me]`
+    std::map<std::string, double> enemy_attrs;  // `?PlayerAttribute[Enemy]`
+};
+SetValueRuntime& set_value_runtime();
+
 // One Attack interval's damage block (JS `Ul` L774): the base Damage value
 // + the sub-<Damage> attribute shifts (SZ) + the Defense names (KP).
 struct IntervalDamage {

@@ -7569,6 +7569,25 @@ float map_battle_rating(App& app, const std::string& battle_name,
         e.player_rating = fattr("PlayerRating", -1.0f);       // `W3`
         e.enemy_rating = fattr("EnemyRating", -1.0f);         // `C_`
         e.rating_correction = fattr("RatingCorrection", 0.0f);  // `w4`
+        // The live `<Set>` operands `perk_aspect` reads (`?RandomAspect`/
+        // `?Aspect`/`?PlayerAttribute[Enemy]`): the player's level + the two
+        // sides' attributes. `isRaid`/`wd.yV`/`Da.pg` stay default (a normal
+        // battle is not a raid; OPEN).
+        {
+            sf2::scene::SetValueRuntime& rt = sf2::scene::set_value_runtime();
+            rt.is_player = true;
+            rt.is_raid = false;
+            rt.default_perks_aspect = 0.0;
+            rt.level = 1;
+            try {
+                rt.level = app.save().load().level;
+            } catch (const std::exception&) {
+            }
+            rt.me_attrs.clear();
+            for (const auto& kv : p.attributes) rt.me_attrs[kv.first] = kv.second;
+            rt.enemy_attrs.clear();
+            for (const auto& kv : e.attributes) rt.enemy_attrs[kv.first] = kv.second;
+        }
         sf2::scene::RatingRule rule;
         rule.present = bw.has_rating_rule;
         rule.player_rating = bw.rating_player;

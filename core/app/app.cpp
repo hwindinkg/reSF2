@@ -621,6 +621,9 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             // CriticalHit rows, Lifesteal (`v.kha`), Shock (`v.Ub`), Magic
             // (`v.jA`). Loaded from the SAME document.
             sf2::scene::load_fight_params_from_settings(settings_xml);
+            // `ye.parse` (L467424): forge.xml `<Forge><AspectScale>` -> the
+            // `gea(level)` table the perk `<Set>` evaluator reads.
+            sf2::scene::load_aspect_scale_from_forge(extracted_xml("forge.xml"));
         } catch (const std::exception&) {
             // Config absent: keep the shipped default "NPivot".
         }

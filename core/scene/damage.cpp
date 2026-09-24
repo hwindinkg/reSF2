@@ -504,8 +504,17 @@ float perk_aspect(const PerkModel& perk, const FightParams& fp) {
     // (`?RandomAspect[min,max]` / `?Aspect[expr]`), not a plain number: the JS
     // reads it through the `Qa` engine (`Wgb` off 688816 / `Ffb` off 689007),
     // so a bare `js_float` would collapse it to 0.
+    const SetValueRuntime& rt = set_value_runtime();
     SetValueCtx ctx;
     ctx.fp = &fp;
+    ctx.level = rt.level;                 // `p.o.bb()`
+    ctx.is_raid = rt.is_raid;             // `?CurrentFight[].isRaid`
+    ctx.is_player = rt.is_player;         // `?PlayerParameter[Me].isPlayer`
+    ctx.default_perks_aspect = rt.default_perks_aspect;  // `wd.yV`
+    ctx.me_attrs = rt.me_attrs;
+    ctx.enemy_attrs = rt.enemy_attrs;
+    ctx.rand01 = rt.rand01;               // `Da.pg.jf()`
+    ctx.aspect_scale = [](int level) { return aspect_scale_for_level(level); };
     for (const auto& kv : perk.set) ctx.set_vals[kv.first] = js_float(kv.second);
     return static_cast<float>(eval_set_value(it->second, ctx));
 }
@@ -1108,6 +1117,61 @@ bool rating_perk_probe() {
                  ratio_resist, exp_resist, pass ? "PASS" : "FAIL");
     std::fflush(stdout);
     return pass;
+}
+
+// --- forge.xml `<AspectScale>` + the live `<Set>` runtime (Wgb/Ffb sources) --
+// `ye` (L467424): the `v7` rows are `<Aspect>` children of `<AspectScale>`.
+// `gv` (L467213): `FZa(a) = a>=fH ? a<=dH : false`, with `fH=dH=Level` when
+// `Level` is present, else `fH=MinLevel(0)`, `dH=MaxLevel(2^31-1)`.
+namespace {
+struct AspectRow {
+    int lo = 0;
+    int hi = 2147483647;
+    double value = 0.0;
+};
+std::vector<AspectRow>& aspect_rows() {
+    static std::vector<AspectRow> rows;
+    return rows;
+}
+}  // namespace
+
+void load_aspect_scale_from_forge(const std::string& xml_text) {
+    std::vector<AspectRow>& rows = aspect_rows();
+    rows.clear();
+    pugi::xml_document doc;
+    if (!doc.load_buffer(xml_text.data(), xml_text.size())) return;
+    const pugi::xml_node root = doc.child("Forge");
+    if (!root) return;
+    const pugi::xml_node scale = root.child("AspectScale");
+    if (!scale) return;
+    for (const pugi::xml_node a : scale.children("Aspect")) {
+        AspectRow r;
+        const pugi::xml_attribute lv = a.attribute("Level");
+        if (lv) {
+            r.lo = r.hi = lv.as_int();
+        } else {
+            const pugi::xml_attribute mn = a.attribute("MinLevel");
+            const pugi::xml_attribute mx = a.attribute("MaxLevel");
+            r.lo = mn ? mn.as_int() : 0;
+            r.hi = mx ? mx.as_int() : 2147483647;
+        }
+        const pugi::xml_attribute v = a.attribute("Value");
+        r.value = v ? v.as_double() : 0.0;
+        rows.push_back(r);
+    }
+}
+
+double aspect_scale_for_level(int level) {
+    // `m5a` (L467806): the FIRST row whose `FZa` window contains `level`.
+    for (const AspectRow& r : aspect_rows()) {
+        if (level >= r.lo && level <= r.hi) return r.value;
+    }
+    return 0.0;
+}
+
+SetValueRuntime& set_value_runtime() {
+    static SetValueRuntime rt;
+    return rt;
 }
 
 }  // namespace sf2::scene
