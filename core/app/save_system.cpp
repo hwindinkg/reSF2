@@ -141,6 +141,31 @@ WarriorSave SaveSystem::load() {
         oi.delivery_upgrade_level = item.attribute("DeliveryUpgradeLevel")
                                         ? item.attribute("DeliveryUpgradeLevel").as_int(-1)
                                         : -1;
+        // `<Enchantments>` rows (JS item `aJa` via `Kia`, `xe.Qd` L692882):
+        // each `<Perk Name>` + its `<Set>` override attrs. Mirrors the
+        // `<Perks>` read just above. `<Set>` attr values are raw expressions
+        // (`?RandomAspect[-30,30]`), so they are kept verbatim, in order.
+        for (pugi::xml_node enc : item.child("Enchantments").children("Perk")) {
+            WarriorSave::ItemEnchantment ie;
+            if (enc.attribute("Name")) ie.name = enc.attribute("Name").value();
+            if (enc.attribute("ItemType")) {
+                const std::string it = enc.attribute("ItemType").value();
+                std::size_t start = 0;
+                for (;;) {  // `m.addRange(b.g2, c.split("|"))`
+                    const std::size_t bar = it.find('|', start);
+                    if (bar == std::string::npos) {
+                        ie.item_types.push_back(it.substr(start));
+                        break;
+                    }
+                    ie.item_types.push_back(it.substr(start, bar - start));
+                    start = bar + 1;
+                }
+            }
+            for (const pugi::xml_attribute a : enc.child("Set").attributes()) {
+                ie.sets.push_back({a.name(), a.value()});
+            }
+            if (!ie.name.empty()) oi.enchantments.push_back(std::move(ie));
+        }
         out.items.push_back(std::move(oi));
     }
 
@@ -513,6 +538,25 @@ void SaveSystem::save(const WarriorSave& w) {
         // `by` round-trip: only materialize a set (>= 0) level.
         if (oi.delivery_upgrade_level >= 0) {
             item.append_attribute("DeliveryUpgradeLevel").set_value(oi.delivery_upgrade_level);
+        }
+        // `<Enchantments>` (JS `xe` L692882; writer L646621 emits
+        // `<Enchantments><Perk Name=".."><Set k="v"/>...</Perk>`). Materialize
+        // the node only when the item carries enchantments (mirrors the lazy
+        // `<Perks>`/`<PerkHistory>` rule above).
+        if (!oi.enchantments.empty()) {
+            pugi::xml_node enc = item.child("Enchantments");
+            if (!enc) enc = item.append_child("Enchantments");
+            for (const WarriorSave::ItemEnchantment& ie : oi.enchantments) {
+                pugi::xml_node p = enc.append_child("Perk");
+                p.append_attribute("Name").set_value(ie.name.c_str());
+                // JS writer emits `<Set>` only when `ll` is non-empty.
+                if (!ie.sets.empty()) {
+                    pugi::xml_node s = p.append_child("Set");
+                    for (const WarriorSave::ItemEnchantment::SetAttr& kv : ie.sets) {
+                        s.append_attribute(kv.key.c_str()).set_value(kv.value.c_str());
+                    }
+                }
+            }
         }
     }
 

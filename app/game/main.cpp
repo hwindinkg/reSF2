@@ -3669,9 +3669,30 @@ int main(int argc, char** argv) {
         // `<Perk Name Level UpgradeLevel>` rows are granted when the name is in
         // the catalog (`d8a`) via `p.o.co.K1a` (port `WarriorSave::learn_perk`).
         if (app.has_fight_assets() && !app.fight_assets().perk_catalog.empty()) {
-            const std::string perk_name =
-                app.fight_assets().perk_catalog.begin()->first;
-            const std::size_t perks_before = app.save().load().perks.size();
+            // `a.st()` = `children[0]` (L1262113): only the FIRST `<Perk>`
+            // child grants. Pick two catalog perks NOT already learned; the
+            // first must be granted, the second (decoy) must NOT.
+            const sf2::app::WarriorSave before = app.save().load();
+            const auto learned = [&before](const std::string& n) {
+                for (const auto& ps : before.perks) {
+                    if (ps.name == n) return true;
+                }
+                return false;
+            };
+            std::string perk_name, decoy;
+            for (const auto& kv : app.fight_assets().perk_catalog) {
+                if (learned(kv.first)) continue;
+                if (perk_name.empty()) {
+                    perk_name = kv.first;
+                } else {
+                    decoy = kv.first;
+                    break;
+                }
+            }
+            if (perk_name.empty()) {
+                perk_name = app.fight_assets().perk_catalog.begin()->first;
+            }
+            const std::size_t perks_before = before.perks.size();
             sf2::app::QuestAction gp;
             gp.tag = "GivePerk";
             gp.attrs["ApplyTo"] = "Player";
@@ -3681,14 +3702,26 @@ int main(int argc, char** argv) {
             pk.attrs["Level"] = "1";
             pk.attrs["UpgradeLevel"] = "0";
             gp.children.push_back(pk);
+            if (!decoy.empty()) {  // the ignored 2nd `<Perk>` child
+                sf2::app::QuestAction pk2;
+                pk2.tag = "Perk";
+                pk2.attrs["Name"] = decoy;
+                pk2.attrs["Level"] = "1";
+                pk2.attrs["UpgradeLevel"] = "0";
+                gp.children.push_back(pk2);
+            }
             sf2::app::QuestJournal pj;
             app.quest_engine().run_action_probe(app, {gp}, pj);
-            bool granted = false;
-            for (const auto& ps : app.save().load().perks) {
+            const auto after = app.save().load().perks;
+            bool granted = false, decoy_granted = false;
+            for (const auto& ps : after) {
                 if (ps.name == perk_name) granted = true;
+                if (!decoy.empty() && ps.name == decoy) decoy_granted = true;
             }
-            check(granted && app.save().load().perks.size() >= perks_before,
-                  "GivePerk ApplyTo=Player -> <Perk Name Level UpgradeLevel> granted");
+            check(granted && !decoy_granted && after.size() >= perks_before,
+                  "GivePerk ApplyTo=Player -> ONLY the first <Perk> child granted (JS a.st())");
+            std::fprintf(stdout, "[qa]   GivePerk first-child: granted=%d decoy=%d\n",
+                         granted ? 1 : 0, decoy_granted ? 1 : 0);
         } else {
             std::fprintf(stdout,
                          "[qa] GivePerk Player probe skipped (no perk catalog)\n");

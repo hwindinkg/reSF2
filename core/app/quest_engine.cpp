@@ -3720,6 +3720,11 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             };
             const std::string apply_to = resolve_apply(attr_or(a.attrs, "ApplyTo"));
             if (apply_to == "Player") {
+                // JS `$n.parse` L555480: `this.ga = a.st()` where
+                // `st(){return this.children[0]}` (L1262113) — ONLY the first
+                // child is cloned; `jXa` -> `C1a` walks that node. So a
+                // `<GivePerk>` carrying several `<Perk>` children grants just
+                // the FIRST one (the port granted every row before).
                 for (const QuestAction& ch : a.children) {
                     if (ch.tag != "Perk") continue;
                     QuestSideEffects::PerkGrant g;
@@ -3733,6 +3738,7 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                         app.has_fight_assets() &&
                         app.fight_assets().perk_catalog.count(g.name) != 0;
                     if (in_catalog) fx.perk_grants.push_back(std::move(g));
+                    break;  // `a.st()` = `children[0]`: the first `<Perk>` only
                 }
             } else if (apply_to == "Item") {
                 // `RWa` (`$n` L555926): `Eba` substitutes the action's attrs

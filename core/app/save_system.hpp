@@ -59,6 +59,22 @@ struct WarriorSave {
     // ships "0"). Gates the shop upgrade plates (`k9 && p.o.qC`, L2255).
     bool show_upgrades = false;
 
+    // One owned-item `<Enchantments><Perk Name>` row (JS `xe`, built by
+    // `xe.Qd` L692882): `name` <- `Name`, `item_types` <- `g2`
+    // (`ItemType.split("|")`), `sets` <- `ll` (the `<Set>` node's attrs, in
+    // document order). E.g. `<Perk Name=".."><Set Aspect="?RandomAspect[-30,30]"/></Perk>`.
+    // The JS save writer (L646621) materializes ONLY `Name` + `<Set>`, so
+    // `item_types` is read-only (parsed, never written back).
+    struct ItemEnchantment {
+        struct SetAttr {
+            std::string key;
+            std::string value;
+        };
+        std::string name;                    // `<Perk Name="..">`
+        std::vector<std::string> item_types; // `g2` (ItemType.split("|"))
+        std::vector<SetAttr> sets;           // `ll` (`<Set>` attrs)
+    };
+
     // The owned items (JS `$g.items`, the users.xml `<Items><Item Name=..>`).
     // `equipped` mirrors the JS `Ru` flag (the item's `Equipped="1"` attr).
     struct OwnedItem {
@@ -77,6 +93,10 @@ struct WarriorSave {
         // `u.I(...,-1)`). `Pa.z2a` writes it (`UT(a.Tg)`) on the timed upgrade
         // path; `Pa.Cba` leaves it untouched.
         int delivery_upgrade_level = -1;
+        // `<Enchantments>` rows (JS item `aJa` via `Kia`/`xe.Qd` L692882;
+        // `<Perk Name><Set k=v/>`). Empty for a plain owned row; the writer
+        // materializes the `<Enchantments>` node only when non-empty.
+        std::vector<ItemEnchantment> enchantments;
     };
     std::vector<OwnedItem> items;
 
