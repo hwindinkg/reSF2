@@ -539,7 +539,22 @@ inline float aspect_curve(float x,
 // `<Set>` -> `set`, each `<RatingEvaluation><Rating>` -> `ratings`, with the
 // `_`-prefix value substitution against the perk's own `<Set>` map. Returns
 // an empty model on a malformed document.
-PerkModel parse_perk_xml(const std::string& perk_xml);
+//
+// `set_override` is the item-enchant `Be.clone(set, rating)` (L1329-1330:
+// `c=d.A("Set"); ... c.set(f[0],f[1])`): the save's `<Enchantments><Perk
+// Name><Set ...>` attributes are written OVER the def's own `<Set>` (the
+// merged map then feeds the `_`-substitution AND the `xc.gX` PerkAspect
+// lookup `perk_aspect`). Empty = the plain def.
+PerkModel parse_perk_xml(
+    const std::string& perk_xml,
+    const std::map<std::string, std::string>& set_override = {});
+
+// `v.Rg.jn(name)` + `Be.clone` (L1328-1330) over a whole perks.xml document:
+// find the `<Perks><Perk Name=name>` def, merge `set_override` over its
+// `<Set>`, and parse it. Empty model when the def is absent/malformed.
+PerkModel parse_perk_def(
+    const std::string& perks_xml, const std::string& name,
+    const std::map<std::string, std::string>& set_override = {});
 
 // `--rating-perk-probe`: JS-exact before/after of the `xc.JBa` perk
 // `<Rating>`/`<Aspect>` branch. True on pass.

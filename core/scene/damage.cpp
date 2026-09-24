@@ -667,11 +667,13 @@ std::vector<RatingAttrPair> rating_side_attrs(
     return out;
 }
 
-PerkModel parse_perk_xml(const std::string& perk_xml) {
+// `Be.parse`/`Jw.parse` body on ONE already-located `<Perk>` node, with the
+// item-enchant `<Set>` override (`Be.clone` L1329-1330 `c.set(f[0],f[1])`,
+// applied OVER the def's own `<Set>` before the `_`-substitution).
+static PerkModel parse_perk_node(
+    const pugi::xml_node& perk,
+    const std::map<std::string, std::string>& ov) {
     PerkModel m;
-    pugi::xml_document doc;
-    if (!doc.load_buffer(perk_xml.data(), perk_xml.size())) return m;
-    const pugi::xml_node perk = doc.document_element();
     if (!perk) return m;
     // `Be.Zjb` (L681500): every `<Set>` attribute -> `iC` (the `_` lookup map).
     if (const pugi::xml_node set = perk.child("Set")) {
@@ -679,6 +681,8 @@ PerkModel parse_perk_xml(const std::string& perk_xml) {
             m.set[a.name()] = a.value();
         }
     }
+    // `Be.clone` (L1329-1330): the enchant's `<Set>` attrs overwrite the def's.
+    for (const auto& kv : ov) m.set[kv.first] = kv.second;
     // `Be.Ujb` (L681500) -> `Jw.parse` (L703284): the `<Rating>` children.
     const pugi::xml_node re = perk.child("RatingEvaluation");
     if (!re) return m;
@@ -706,6 +710,29 @@ PerkModel parse_perk_xml(const std::string& perk_xml) {
         m.ratings.push_back(std::move(pr));
     }
     return m;
+}
+
+PerkModel parse_perk_xml(
+    const std::string& perk_xml,
+    const std::map<std::string, std::string>& set_override) {
+    pugi::xml_document doc;
+    if (!doc.load_buffer(perk_xml.data(), perk_xml.size())) return {};
+    return parse_perk_node(doc.document_element(), set_override);
+}
+
+PerkModel parse_perk_def(
+    const std::string& perks_xml, const std::string& name,
+    const std::map<std::string, std::string>& set_override) {
+    pugi::xml_document doc;
+    if (!doc.load_buffer(perks_xml.data(), perks_xml.size())) return {};
+    const pugi::xml_node root = doc.child("Perks");
+    if (!root) return {};
+    for (const pugi::xml_node p : root.children("Perk")) {
+        if (name == p.attribute("Name").value()) {
+            return parse_perk_node(p, set_override);
+        }
+    }
+    return {};
 }
 
 bool rating_perk_probe() {

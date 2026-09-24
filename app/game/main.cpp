@@ -1410,6 +1410,7 @@ int main(int argc, char** argv) {
     bool headless_loop = false;
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool rating_perk_probe_mode = false;  // --rating-perk-probe
+    bool enchant_stat_probe_mode = false;  // --enchant-stat-probe
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
@@ -1569,6 +1570,11 @@ int main(int argc, char** argv) {
             // input, no sim): the before/after rating with a `<Rating>` perk.
             // Dispatched after the RULE 0 watchdog install (see below).
             rating_perk_probe_mode = true;
+        } else if (arg == "--enchant-stat-probe") {
+            // Item-enchant `<Set>` -> `perk_aspect` -> `Be.eea` -> rating
+            // consumer self-check (no OS input, no sim). Dispatched after the
+            // RULE 0 watchdog install (see below).
+            enchant_stat_probe_mode = true;
         } else if (arg == "--fx-probe") {
             // Targeted FX-bus self-check (no OS input, no sim): exercises the
             // three kinds end to end — spawn (`Yl`/`lwb`), the follow update
@@ -1852,6 +1858,71 @@ int main(int argc, char** argv) {
     // pure-computation self-check can never leave a process behind.
     if (rating_perk_probe_mode) {
         return sf2::scene::rating_perk_probe() ? 0 : 1;
+    }
+
+    // `--enchant-stat-probe`: proves the item-enchant `<Set>` -> `perk_aspect`
+    // -> `Be.eea` -> rating consumer (JS `xc.JBa` L414976-415010 / `oma(xc.gX)`
+    // L414603) against the REAL perks.xml def `PERK_ITEM_SPECIAL_LIFESTEAL`
+    // (the exact shape the `--rating-perk-probe` snippet copies). The save's
+    // enchant `<Set Aspect="4000">` is written over the def's via the
+    // `Be.clone` overwrite. RULE 0: after the watchdog.
+    if (enchant_stat_probe_mode) {
+        const auto slurp = [](const char* path) {
+            std::string out;
+            if (FILE* f = std::fopen(path, "rb")) {
+                char buf[65536];
+                size_t n;
+                while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+                    out.append(buf, n);
+                }
+                std::fclose(f);
+            }
+            return out;
+        };
+        const std::string isxml =
+            slurp("reference/extracted/xml/res/internal_settings.xml");
+        if (!isxml.empty()) {
+            sf2::scene::load_fight_params_from_settings(isxml);
+        }
+        const std::string pxml = slurp("reference/extracted/xml/res/perks.xml");
+        static const char* kName = "PERK_ITEM_SPECIAL_LIFESTEAL";
+        sf2::scene::FighterParams self;
+        self.is_player = true;
+        self.attributes["WeaponDamage"] = 50.0f;
+        self.attributes["BodyDefense"] = 12.0f;
+        sf2::scene::FighterParams other;
+        other.attributes["BodyDefense"] = 5.0f;
+        other.attributes["EnchantmentResistance"] = 54.0f;
+        other.iy.push_back(sf2::scene::AlignDelta{1.0f, 0.0f, 0, 2});
+        const std::vector<sf2::scene::RatingAttrPair> none;
+        const sf2::scene::FightParams& fp = sf2::scene::FightParams::defaults();
+        const float r_no = sf2::scene::warrior_rating(self, other, none, fp);
+        const sf2::scene::PerkModel def =
+            sf2::scene::parse_perk_def(pxml, kName, {});
+        const sf2::scene::PerkModel ench =
+            sf2::scene::parse_perk_def(pxml, kName, {{"Aspect", "4000"}});
+        self.perks.push_back(def);
+        const float r_def = sf2::scene::warrior_rating(self, other, none, fp);
+        self.perks.back() = ench;
+        const float r_ench = sf2::scene::warrior_rating(self, other, none, fp);
+        const bool ok =
+            r_no > 0.0f && def.ratings.size() == 2 &&
+            def.set.count("Aspect") == 1 && def.set.at("Aspect") == "0" &&
+            ench.set.count("Aspect") == 1 && ench.set.at("Aspect") == "4000" &&
+            std::fabs(r_def - r_ench) > 1e-6f;
+        std::fprintf(
+            stdout,
+            "[enchant-stat] def=%s ratings=%zu defAspect=%s enchantAspect=%s\n"
+            "[enchant-stat] rating noPerk=%.9f defSet=%.9f enchantSet=%.9f "
+            "(x%.6f vs x%.6f) delta=%.9f\n"
+            "[enchant-stat] RESULT %s\n",
+            kName, def.ratings.size(),
+            def.set.count("Aspect") ? def.set.at("Aspect").c_str() : "-",
+            ench.set.count("Aspect") ? ench.set.at("Aspect").c_str() : "-",
+            r_no, r_def, r_ench, r_def / r_no, r_ench / r_no, r_ench - r_def,
+            ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return ok ? 0 : 1;
     }
 
     // The `--verify-input` tape + probe expectations are authored on the

@@ -7468,17 +7468,67 @@ const char* const kMapDiffFill[] = {
 // constant): 1.0 lands in `diff1` [0.82,1.3) — the oracle's ZONE_1/BOSS_LYNX.
 constexpr float kMapDefaultRatingRatio = 1.0f;
 
+// JS `xc.Wk()` (L413727) restricted to the RATING consumer (`xc.JBa`
+// L414294 walks `this.Wk()`): the equipped items' `<Enchantments><Perk
+// Name><Set ...>` rows (the save's item enchants) + the save's learned
+// `<Perks>`, resolved against perks.xml and merged with the item's `<Set>`
+// (`Be.clone` L1329-1330). This is exactly what feeds `FighterParams::perks`,
+// read by `warrior_rating`'s `xc.gX` PerkAspect branch (`perk_aspect`) — the
+// enchant `<Set Aspect=...>` consumer that was previously reachable only via
+// `--rating-perk-probe`. NOT ported (Wk remainder): `this.TE`, the owned-vs-
+// catalog `p.BD`/`v.Xz` gates, the `Lv`/`zf.Kia` EnchantmentsCountExclusion
+// budget, and the enemy side's gear perks.
+std::vector<sf2::scene::PerkModel> equipped_rating_perks(App& app) {
+    std::vector<sf2::scene::PerkModel> out;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return out;
+    }
+    static std::string perks_xml;
+    static bool perks_loaded = false;
+    if (!perks_loaded) {
+        perks_loaded = true;
+        std::ifstream in("reference/extracted/xml/res/perks.xml",
+                         std::ios::binary);
+        if (in) {
+            perks_xml.assign((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+        }
+    }
+    if (perks_xml.empty()) return out;
+    const auto push_if = [&out](sf2::scene::PerkModel&& m) {
+        if (m.ratings.empty()) return;  // `JBa` skips `x4.length==0`
+        out.push_back(std::move(m));
+    };
+    for (const auto& pr : w.perks) {
+        if (pr.name.empty()) continue;
+        push_if(sf2::scene::parse_perk_def(perks_xml, pr.name, {}));
+    }
+    for (const auto& oi : w.items) {
+        if (oi.count <= 0) continue;
+        for (const auto& enc : oi.enchantments) {
+            if (enc.name.empty()) continue;
+            std::map<std::string, std::string> ov;
+            for (const auto& kv : enc.sets) ov[kv.key] = kv.value;
+            push_if(sf2::scene::parse_perk_def(perks_xml, enc.name, ov));
+        }
+    }
+    return out;
+}
+
 // `v.OAa(battle)` (L1219): the rating ratio for a battle node. `a` = the
 // player (`v.cw`), `b` = the enemy (the LAST `v.EQ(fight.Xs)` warrior), via
 // `battle.Gz(v.cw(), v.EQ(battle.Xs))` -> `dl.A8a` (L1421-1422).
 //
-// REMANDER (unported): the fight's `<Attributes>` rules (the `k5a`/`j5a` side
-// lists) are not parsed here, so the `dl.A8a` `JBa` path (which only runs when
-// the rule's PlayerRating/EnemyRating is NEGATIVE) receives an empty side list;
-// the perk `<Rating>` Me/Enemy loops + `xc.gX` PerkAspect branch (perks.xml
-// `<Rating>`) are also unported. For the shipped fights the rule has no
-// negative rating, so `c = b.W3` / `d = b.C_` (the Warrior-XML overrides) and
-// `JBa` is not reached — exact there.
+// REMAINDER (unported): the fight's `<Attributes>` rules (the `k5a`/`j5a` side
+// lists) are still not parsed (empty side list), and the enemy gear perks are
+// not modeled (its `PerkSetup` is empty), so only the PLAYER's
+// `<Enchantments>`/learned `<Perks>` feed `p.perks` here. For the shipped
+// fights the rule has no negative rating, so `c = b.W3` / `d = b.C_` (the
+// Warrior-XML overrides) and `JBa` is not reached — exact there; the perk
+// `<Rating>`/PerkAspect branch runs whenever the rating is left negative.
 float map_battle_rating(App& app, const std::string& battle_name,
                         const std::string& zone, int fight_index) {
     try {
