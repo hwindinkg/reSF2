@@ -35,7 +35,10 @@ namespace sf2::app {
 struct WarriorSave {
     int id = 1;
     std::string first_name = "NAME_SHADOW";
-    int money = 0;
+    // `p.o.Tb` (gold). JS numbers are float64 and the shipped item/upgrade
+    // prices reach 1.9e13, so a 32-bit int (2.147e9) cannot represent them.
+    // int64 is exact for every JS integer magnitude here (< 2^53).
+    std::int64_t money = 0;
     int bonus = 50;
     int strength = 3;
     int stamina = 3;
@@ -51,6 +54,10 @@ struct WarriorSave {
     std::string tutorial = "MOVE";
     std::string tactic = "Player";
     std::string current_zone = "ZONE_1";
+    // JS `p.o.qC` (world ctor L247): `u.ka(a.attributes.get("ShowUpgrades"),
+    // false)` on the WARRIOR node — a save attribute (`users_default.xml`
+    // ships "0"). Gates the shop upgrade plates (`k9 && p.o.qC`, L2255).
+    bool show_upgrades = false;
 
     // The owned items (JS `$g.items`, the users.xml `<Items><Item Name=..>`).
     // `equipped` mirrors the JS `Ru` flag (the item's `Equipped="1"` attr).
@@ -62,6 +69,14 @@ struct WarriorSave {
         // u.I(this.ga.attributes.get("UpgradeLevel"))` — the owned item node's
         // `UpgradeLevel` attr, default 0. Read by `?Purchase[x].UpgradeLevel`.
         int upgrade_level = 0;
+        // JS `$g` item `j7` (AcquireType): the node attribute, default
+        // "Item" (`oqb`: `h!=null?h:"Item"`). `Pa.Cba`/`Pa.z2a` set it to
+        // "Upgrade" (`BF(!0)` -> `gla`).
+        std::string acquire_type = "Item";
+        // JS `$g` item `by` (DeliveryUpgradeLevel): parse default -1 (`oqb`:
+        // `u.I(...,-1)`). `Pa.z2a` writes it (`UT(a.Tg)`) on the timed upgrade
+        // path; `Pa.Cba` leaves it untouched.
+        int delivery_upgrade_level = -1;
     };
     std::vector<OwnedItem> items;
 

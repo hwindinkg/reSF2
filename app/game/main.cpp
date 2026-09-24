@@ -2110,12 +2110,13 @@ int main(int argc, char** argv) {
         try {
             sf2::app::SaveSystem ss(save_path, def);
             sf2::app::WarriorSave w = ss.load();
-            const int before = w.money;
+            const std::int64_t before = w.money;
             if (w.money < 50) {
                 w.money = 200;
                 ss.save(w);
-                std::fprintf(stdout, "[loop] seeded purchase money: money=%d (was %d)\n",
-                             w.money, before);
+                std::fprintf(stdout,
+                             "[loop] seeded purchase money: money=%lld (was %lld)\n",
+                             static_cast<long long>(w.money), static_cast<long long>(before));
                 std::fflush(stdout);
             }
         } catch (const std::exception& e) {
@@ -2142,8 +2143,10 @@ int main(int argc, char** argv) {
         try {
             sf2::app::SaveSystem ss(save_path, def);
             sf2::app::WarriorSave w = ss.load();
-            std::fprintf(stdout, "[loop] END save: money=%d exp=%d level=%d weapon=%s items=%zu\n",
-                         w.money, w.experience, w.level, w.weapon.c_str(), w.items.size());
+            std::fprintf(stdout,
+                         "[loop] END save: money=%lld exp=%d level=%d weapon=%s items=%zu\n",
+                         static_cast<long long>(w.money), w.experience, w.level,
+                         w.weapon.c_str(), w.items.size());
             for (const auto& m : w.items) {
                 std::fprintf(stdout, "  %s x%d%s\n", m.name.c_str(), m.count,
                              m.equipped ? " [EQ]" : "");
@@ -2154,8 +2157,9 @@ int main(int argc, char** argv) {
             sf2::app::WarriorSave w2 = ss2.load();
             const bool persist = w2.money == w.money && w2.items.size() == w.items.size() &&
                                  w2.weapon == w.weapon;
-            std::fprintf(stdout, "[loop] save/load after loop: money=%d items=%zu weapon=%s -> %s\n",
-                         w2.money, w2.items.size(), w2.weapon.c_str(),
+            std::fprintf(stdout,
+                         "[loop] save/load after loop: money=%lld items=%zu weapon=%s -> %s\n",
+                         static_cast<long long>(w2.money), w2.items.size(), w2.weapon.c_str(),
                          persist ? "PASS" : "FAIL");
             // D2: the shop BUY + EQUIP steps must have REALLY landed (the
             // driver used to print "step done" for a failed purchase).
@@ -3257,13 +3261,13 @@ int main(int argc, char** argv) {
                 return std::string();
             }
         };
-        const auto base_price = [&](const char* name) -> int {
+        const auto base_price = [&](const char* name) -> std::int64_t {
             for (const sf2::app::CatalogItem& ci : sf2::app::load_full_catalog(app)) {
                 if (ci.name == name) return ci.price;
             }
             return 0;
         };
-        const auto shown_price = [&](const char* name) -> int {
+        const auto shown_price = [&](const char* name) -> std::int64_t {
             return app.quest_engine().offer_price(name, base_price(name));
         };
         // Seed a COPY: own the ZONE_2 weapon so the equip half is observable.
@@ -3453,7 +3457,7 @@ int main(int argc, char** argv) {
         // `rg.S` gates on `p.o.Xfa` then `J0a` deducts. Observables: the save's
         // `Money`/`Bonus`/`<Currencies>` (persisted by `apply_effects`).
         {
-            const auto money_now = [&]() -> int {
+            const auto money_now = [&]() -> std::int64_t {
                 try {
                     return app.save().load().money;
                 } catch (const std::exception&) {
@@ -3476,28 +3480,33 @@ int main(int argc, char** argv) {
                     return -1;
                 }
             };
-            const int m0 = money_now(), b0 = bonus_now(), r0 = ruby_now();
+            const std::int64_t m0 = money_now();
+            const int b0 = bonus_now(), r0 = ruby_now();
             fire_action("GiveCurrency", {{"Type", "Gold"}, {"Value", "500"}});
             fire_action("GiveCurrency", {{"Type", "Bonus"}, {"Value", "7"}});
             fire_action("GiveCurrency", {{"Type", "Ruby"}, {"Value", "3"}});
-            const int m1 = money_now(), b1 = bonus_now(), r1 = ruby_now();
+            const std::int64_t m1 = money_now();
+            const int b1 = bonus_now(), r1 = ruby_now();
             std::fprintf(stdout,
-                         "[qa] CURRENCY give: Money %d->%d Bonus %d->%d Ruby %d->%d\n",
-                         m0, m1, b0, b1, r0, r1);
+                         "[qa] CURRENCY give: Money %lld->%lld Bonus %d->%d Ruby %d->%d\n",
+                         static_cast<long long>(m0), static_cast<long long>(m1), b0, b1, r0, r1);
             std::fflush(stdout);
             check(m1 == m0 + 500 && b1 == b0 + 7 && r1 == r0 + 3,
                   "GiveCurrency Gold/Bonus/Ruby -> money/bonus/currencies");
             // `rg` unaffordable: `Xfa` false -> `<Error>`, `J0a` not called.
             fire_action("TakeCurrency",
                         {{"Type", "Ruby"}, {"Name", "Ruby"}, {"Value", "9999"}});
-            const int m2 = money_now(), b2 = bonus_now(), r2 = ruby_now();
+            const std::int64_t m2 = money_now();
+            const int b2 = bonus_now(), r2 = ruby_now();
             check(m2 == m1 && b2 == b1 && r2 == r1,
                   "TakeCurrency unaffordable -> no write (Xfa/Error branch)");
             // `rg` affordable: `J0a` deducts exactly (`Gold` -> `Fr(Tb-c)`).
             fire_action("TakeCurrency",
                         {{"Type", "Gold"}, {"Name", "Gold"}, {"Value", "200"}});
-            const int m3 = money_now(), b3 = bonus_now(), r3 = ruby_now();
-            std::fprintf(stdout, "[qa] CURRENCY take: Money %d->%d\n", m2, m3);
+            const std::int64_t m3 = money_now();
+            const int b3 = bonus_now(), r3 = ruby_now();
+            std::fprintf(stdout, "[qa] CURRENCY take: Money %lld->%lld\n",
+                         static_cast<long long>(m2), static_cast<long long>(m3));
             std::fflush(stdout);
             check(m3 == m2 - 200 && b3 == b2 && r3 == r2,
                   "TakeCurrency Gold 200 -> money -200 (J0a)");

@@ -162,7 +162,7 @@ private:
     int level_ = 1;
     int quest_logged_ = -1;
     bool training_won_ = false;
-    int seen_money_ = -1;  // last logged money (snapshot change detection)
+    std::int64_t seen_money_ = -1;  // last logged money (snapshot change detection)
 
     // --- Fresh-profile tutorial (JS `StoryTutorialWelcome` chain) ----------
     // The approved `fresh/tutorial-from-0` boot. The beats are NOT hand-coded:
@@ -770,7 +770,7 @@ private:
     int hover_ = -1;      // grid cell hover (row index within the tab)
     int sel_ = 0;         // selected grid row (JS `Oa.xA`/`Za.Ac` L2296)
     int side_hover_ = 0;  // 0 = none, 1 = detail action button (JS `Up`)
-    int money_logged_ = 0;
+    std::int64_t money_logged_ = 0;
     // --- `Gg` list scroll (JS L1883-1893): drag + momentum + snap --------
     // The `Oe` viewer's cell list is the JS `Gg` scroller: `scroll_y_` =
     // `ei.node.ra` (list-container y relative to the viewer top, shifted by

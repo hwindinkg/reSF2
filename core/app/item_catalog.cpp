@@ -436,7 +436,7 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         if (item.attribute("PackLabel")) ci.pack_label = item.attribute("PackLabel").value();
         if (item.attribute("Model")) ci.model = item.attribute("Model").value();
         if (item.attribute("Image")) ci.image = item.attribute("Image").value();
-        ci.price = sf2::data::xml_attr_int(item, "Price", 0);
+        ci.price = item.attribute("Price") ? item.attribute("Price").as_llong() : 0;
         // JS `od` (item ctor): the `BonusPrice` (Ruby/crystal) cost.
         ci.bonus_price = sf2::data::xml_attr_int(item, "BonusPrice", 0);
         ci.level = sf2::data::xml_attr_int(item, "Level", 1);

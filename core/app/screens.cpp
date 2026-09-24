@@ -5653,8 +5653,9 @@ void DojoScreen::update_impl(float dt) {
         if (!money_logged_ || w.money != seen_money_) {
             money_logged_ = true;
             seen_money_ = w.money;
-            std::fprintf(stdout, "[dojo] MONEY %d   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s   TUTORIAL %s STEP %s\n",
-                         w.money, w.level, w.power, w.weapon.c_str(), w.armor.c_str(),
+            std::fprintf(stdout, "[dojo] MONEY %lld   LV %d   POWER %d   WEAPON %s   ARMOR %s   HELM %s   TUTORIAL %s STEP %s\n",
+                         static_cast<long long>(w.money), w.level, w.power, w.weapon.c_str(),
+                         w.armor.c_str(),
                          w.helm.c_str(), w.tutorial.c_str(), w.story_step().c_str());
             std::fflush(stdout);
         }
@@ -9866,15 +9867,17 @@ void ResultsScreen::update_impl(float dt) {
         if (player_won_) {
             // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money),
             // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
-            const int before = w.money;
+            const std::int64_t before = w.money;
             w.money += money_reward_;
             w.experience += exp_reward_;
             // JS `hj.Uo` gems (FLOW_STATIC section 4.4 `emb`): applied to
             // Bonus. No fight source evidenced (always 0 today) — the field
             // flows end-to-end for when gem sources land.
             w.bonus += app().pending_battle().prize_gems;
-            std::fprintf(stdout, "[result] WIN reward money=%d exp=%d (money %d -> %d)\n",
-                         money_reward_, exp_reward_, before, w.money);
+            std::fprintf(stdout,
+                         "[result] WIN reward money=%d exp=%d (money %lld -> %lld)\n",
+                         money_reward_, exp_reward_, static_cast<long long>(before),
+                         static_cast<long long>(w.money));
             // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2):
             // a win records the battle for the `WDa` unlock rule; the fight
             // win count (`yc`/`no`) bumps too.
@@ -9948,8 +9951,9 @@ void ResultsScreen::update_impl(float dt) {
         }
         try {
             app().save().save(w);
-            std::fprintf(stdout, "[result] save: money=%d exp=%d level=%d weapon=%s\n", w.money,
-                         w.experience, w.level, w.weapon.c_str());
+            std::fprintf(stdout, "[result] save: money=%lld exp=%d level=%d weapon=%s\n",
+                         static_cast<long long>(w.money), w.experience, w.level,
+                         w.weapon.c_str());
             std::fflush(stdout);
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[result] save failed: %s\n", e.what());
@@ -10637,7 +10641,7 @@ void shop_apply_slot(WarriorSave& w, const std::string& type, const std::string&
 // item = the live `Discount` offer (`yf.KA`) while one is active, else the
 // list.xml `Price` (`Ofa()`). The shop DISPLAYS (detail plate) and CHARGES
 // (`Pa.iwa` L1228) this value.
-int shop_effective_price(App& app, const CatalogItem& it) {
+std::int64_t shop_effective_price(App& app, const CatalogItem& it) {
     return app.quest_engine().offer_price(it.name, it.price);
 }
 
@@ -10713,13 +10717,14 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     }
     // `Pa.iwa` L1228 money gate `p.o.Tb >= a.jp()`: the charged price is the
     // offer-aware one (`p.o.xa.vu()` -> `yf.KA`), not the raw list.xml `Price`.
-    const int price = shop_effective_price(app, bit);
+    const std::int64_t price = shop_effective_price(app, bit);
     if (bw.money < price) {
         // `Pa.iwa` L1228 else: `v.Bv(a,2)` — the "not enough" notice.
         std::fprintf(stdout,
                      "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH MONEY for %s "
-                     "(need %d, have %d)\n",
-                     bit.name.c_str(), price, bw.money);
+                     "(need %lld, have %lld)\n",
+                     bit.name.c_str(), static_cast<long long>(price),
+                     static_cast<long long>(bw.money));
         // `Pa.iwa` L1228 else: `v.Bv(a,2)` -> the reason string is `p.XPa`
         // ("Coins") and the hub fires `QUEST_EVENT_PURCHASE_UNSUCCESSFUL`.
         log_purchase_fired(
@@ -10746,9 +10751,9 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
         app.save().save(bw);
         seen_ = bw;
         std::fprintf(stdout,
-                     "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%d -> "
+                     "[shop] Pi confirm Pa.iwa (Ec) -> ORDERED %s price=%lld -> "
                      "arrives in %ds (no equip)\n",
-                     bit.name.c_str(), price, bit.delivery_sec);
+                     bit.name.c_str(), static_cast<long long>(price), bit.delivery_sec);
         // `Pa.iwa` L1228: `d=Pa.y2a(a)` truthy -> `p.o.save(); Pa.Wz(a)` fires
         // `QUEST_EVENT_PURCHASE` (the timed order still counts as a purchase).
         log_purchase_fired("Purchase", app.quest_engine().purchase(app, bit.name));
@@ -10769,9 +10774,10 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     app.save().save(bw);
     seen_ = bw;
     std::fprintf(stdout,
-                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%d -> money %d"
+                 "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%lld -> money %lld"
                  " + EQUIPPED ($o)%s\n",
-                 bit.name.c_str(), price, bw.money,
+                 bit.name.c_str(), static_cast<long long>(price),
+                 static_cast<long long>(bw.money),
                  tut_buy ? ", step -> MAP (Ao)" : "");
     // `Pa.iwa` L1228: `c=d=Pa.gI(a,!0,!1)` truthy -> `p.o.Fr(b); p.o.save();
     // Pa.Wz(a)` fires `QUEST_EVENT_PURCHASE` AFTER the save (so a purchase
@@ -10860,29 +10866,14 @@ const std::vector<UpgradeTemplate>& load_upgrade_templates(App& app) {
 // `SaveSystem` does not model it and `save()` preserves it verbatim, so read
 // it from the save file (no save yet -> the template's "0" -> false).
 bool shop_show_upgrades(App& app) {
-    if (!app.save().has_save()) return false;
-    std::ifstream in(app.save().save_path(), std::ios::binary);
-    if (!in) return false;
-    std::vector<char> data((std::istreambuf_iterator<char>(in)),
-                           std::istreambuf_iterator<char>());
-    std::string text(data.begin(), data.end());
-    if (text.size() >= 3 && text.compare(0, 3, "SF2") == 0) {
-        text = SaveSystem::envelope_decode(text);
-    }
-    sf2::data::xml_doc doc;
+    // `p.o.qC` is the WARRIOR `ShowUpgrades` save attribute (JS world ctor
+    // L247). `WarriorSave` now models it; the template ships "0" -> false
+    // when no save exists yet.
     try {
-        doc.parse(text);
+        return app.save().load().show_upgrades;
     } catch (const std::exception&) {
         return false;
     }
-    const pugi::xml_node root = doc.root().first_child();
-    if (!root) return false;
-    // The Warrior lives under `<Warriors><Warrior>` (users_default.xml).
-    pugi::xml_node w = root.child("Warriors").child("Warrior");
-    if (!w) w = root.child("Warrior");
-    if (!w) return false;
-    const pugi::xml_attribute a = w.attribute("ShowUpgrades");
-    return a && std::string(a.value()) == "1";
 }
 
 // `zf.uu` L1260: the owned entry's tier (`Ce`) resolved against the item's
@@ -10897,14 +10888,29 @@ ItemUpgradeState shop_upgrade_state(const CatalogItem& it, int tier, int player_
 // `WarriorSave` models neither `AcquireType` nor `DeliveryUpgradeLevel`, so
 // only the tier + the delivery timer are written (shipped rows carry no
 // `DeliveryTime`, so the timed branch is dead for list.xml data).
-void shop_apply_upgrade(WarriorSave& w, const CatalogItem& it, const UpgradeRow& row) {
+// `Pa.Cba` L1227 (instant): `b.BF(!0)` (`gla("Upgrade")` -> `AcquireType`)
+// then `b.Np(a.Tg)` (UpgradeLevel = the row tier). No delivery field touched.
+void shop_apply_upgrade_instant(WarriorSave& w, const CatalogItem& it,
+                                const UpgradeRow& row) {
     for (WarriorSave::OwnedItem& oi : w.items) {
         if (oi.name != it.name) continue;
-        oi.upgrade_level = row.tc;  // `b.Np(a.Tg)` L1227
+        oi.acquire_type = "Upgrade";  // `BF(!0)`
+        oi.upgrade_level = row.tc;    // `Np(a.Tg)`
         break;
     }
-    if (row.delivery_sec > 0) {
-        w.timers[it.name] = WarriorSave::wall_now() + row.delivery_sec;  // `b.zF` L1227
+}
+
+// `Pa.z2a` L1227-1228 (timed `Ec>0`): `b.zF(p.Dc+a.Ec)` (DeliveryTime) +
+// `b.UT(a.Tg)` (DeliveryUpgradeLevel = the row tier) + `b.BF(!0)`
+// (`AcquireType`). `Np` is NOT called, so the current tier is unchanged.
+void shop_apply_upgrade_timed(WarriorSave& w, const CatalogItem& it,
+                              const UpgradeRow& row) {
+    for (WarriorSave::OwnedItem& oi : w.items) {
+        if (oi.name != it.name) continue;
+        oi.acquire_type = "Upgrade";         // `BF(!0)`
+        oi.delivery_upgrade_level = row.tc;  // `UT(a.Tg)`
+        w.timers[it.name] = WarriorSave::wall_now() + row.delivery_sec;  // `zF`
+        break;
     }
 }
 
@@ -10921,25 +10927,30 @@ bool purchase_upgrade_gold(App& app, const CatalogItem& it, int tier) {
         shop_upgrade_state(it, tier, bw.level, load_upgrade_templates(app));
     if (!st.has_next) return false;  // `c==null -> return false`
     const std::int64_t price = st.next.price;  // `c.mi` (64-bit: up to 1.5e13)
-    if (static_cast<std::int64_t>(bw.money) < price) {
+    if (bw.money < price) {
         std::fprintf(stdout,
                      "[shop] FUa Pa.DYa v.Bv(a,2): NOT ENOUGH GOLD for %s upgrade "
-                     "(need %lld, have %d)\n",
-                     it.name.c_str(), static_cast<long long>(price), bw.money);
+                     "(need %lld, have %lld)\n",
+                     it.name.c_str(), static_cast<long long>(price),
+                     static_cast<long long>(bw.money));
         log_purchase_fired(
             "PurchaseUnsuccessful",
             app.quest_engine().purchase_unsuccessful(app, it.name, 2));
         std::fflush(stdout);
         return false;
     }
-    bw.money -= static_cast<int>(price);
+    bw.money -= price;
     sf2::audio::AudioEngine::instance().play("snd_upgrade");  // `rb.QS` (Cba/z2a)
-    shop_apply_upgrade(bw, it, st.next);
+    if (st.next.delivery_sec > 0) {
+        shop_apply_upgrade_timed(bw, it, st.next);    // `c.Ec>0 ? Pa.z2a(c,b)`
+    } else {
+        shop_apply_upgrade_instant(bw, it, st.next);  // `: Pa.Cba(c,b)`
+    }
     app.save().save(bw);
     std::fprintf(stdout,
-                 "[shop] FUa Pa.DYa -> UPGRADED %s tier %d -> %d price=%lld -> money %d\n",
+                 "[shop] FUa Pa.DYa -> UPGRADED %s tier %d -> %d price=%lld -> money %lld\n",
                  it.name.c_str(), tier, st.next.tc, static_cast<long long>(price),
-                 bw.money);
+                 static_cast<long long>(bw.money));
     log_purchase_fired("Purchase", app.quest_engine().purchase(app, it.name));
     std::fflush(stdout);
     return true;
@@ -10971,7 +10982,7 @@ bool purchase_upgrade_gem(App& app, const CatalogItem& it, int tier) {
     }
     bw.bonus -= price;
     sf2::audio::AudioEngine::instance().play("snd_upgrade");  // `rb.QS` (Cba)
-    shop_apply_upgrade(bw, it, st.next);
+    shop_apply_upgrade_instant(bw, it, st.next);  // `Pa.FYa` -> `Pa.Cba` only
     app.save().save(bw);
     std::fprintf(stdout,
                  "[shop] qVa Pa.FYa -> UPGRADED %s tier %d -> %d price=%dR -> bonus %d\n",
@@ -11196,16 +11207,19 @@ void shop_apply_slot(WarriorSave& w, const std::string& type, const std::string&
 std::string shop_stat_line(const CatalogItem& it) {
     char buf[96];
     if (it.type == "Weapon") {
-        std::snprintf(buf, sizeof(buf), "DMG %d   %dG", it.weapon_damage, it.price);
+        std::snprintf(buf, sizeof(buf), "DMG %d   %lldG", it.weapon_damage,
+                      static_cast<long long>(it.price));
     } else if (it.type == "Armor") {
-        std::snprintf(buf, sizeof(buf), "DEF %d   %dG", it.body_defense, it.price);
+        std::snprintf(buf, sizeof(buf), "DEF %d   %lldG", it.body_defense,
+                      static_cast<long long>(it.price));
     } else if (it.type == "Helm") {
-        std::snprintf(buf, sizeof(buf), "DEF %d   %dG", it.head_defense, it.price);
+        std::snprintf(buf, sizeof(buf), "DEF %d   %lldG", it.head_defense,
+                      static_cast<long long>(it.price));
     } else if (!it.subtype.empty()) {
-        std::snprintf(buf, sizeof(buf), "%s Lv%d   %dG", it.subtype.c_str(), it.level,
-                      it.price);
+        std::snprintf(buf, sizeof(buf), "%s Lv%d   %lldG", it.subtype.c_str(), it.level,
+                      static_cast<long long>(it.price));
     } else {
-        std::snprintf(buf, sizeof(buf), "Lv%d   %dG", it.level, it.price);
+        std::snprintf(buf, sizeof(buf), "Lv%d   %lldG", it.level, static_cast<long long>(it.price));
     }
     std::string out(buf);
     // Timed delivery tag (SHOP `Ec`/DeliveryTime; no live rows carry it —
@@ -11271,10 +11285,10 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
         // `price` = `jp()` (gold), `bonus` = `nn()` (Ruby/crystal, `od`). A
         // `price=0 bonus=N` row is a crystal-only shop item (`Ne.Wub` L2254
         // draws only the `pVa` RubyButton).
-        std::fprintf(stdout, "[shop] item %s (%s) price=%d bonus=%d model=%s\n",
+        std::fprintf(stdout, "[shop] item %s (%s) price=%lld bonus=%d model=%s\n",
                      it.name.c_str(),
-                     it.subtype.empty() ? it.type.c_str() : it.subtype.c_str(), it.price,
-                     it.bonus_price, it.model.c_str());
+                     it.subtype.empty() ? it.type.c_str() : it.subtype.c_str(),
+                     static_cast<long long>(it.price), it.bonus_price, it.model.c_str());
     }
     std::fflush(stdout);
     // Tutorial-buy focus (JS `Ao` S(): `Oa.ska(0, Pca)` — Weapons tab with
@@ -11330,7 +11344,8 @@ void ShopScreen::update_impl(float dt) {
         const WarriorSave w = app().save().load();
         if (w.money != money_logged_) {
             money_logged_ = w.money;
-            std::fprintf(stdout, "[shop] MONEY %d\n", w.money);
+            std::fprintf(stdout, "[shop] MONEY %lld\n",
+                         static_cast<long long>(w.money));
             std::fflush(stdout);
         }
         seen_ = w;  // snapshot for owned/equipped row markers (render reads this)
@@ -11389,7 +11404,7 @@ void ShopScreen::update_impl(float dt) {
             buy_armed_ = -1;  // the list changed under the panel
         } else {
             const CatalogItem& bit = items_[brows[static_cast<std::size_t>(buy_armed_)]];
-            const int b_gold = shop_effective_price(app(), bit);
+            const std::int64_t b_gold = shop_effective_price(app(), bit);
             const int b_gems = shop_effective_bonus(app(), bit);
             const int b_gold_slot = (b_gems > 0 && b_gold > 0) ? 1 : 0;
             const ShopRect gold_pr = shop_price_rect(shop_layout(tab_), b_gold_slot);
@@ -11618,8 +11633,10 @@ void ShopScreen::update_impl(float dt) {
                     arm_preview(app(), it);
                     buy_armed_ = sel;
                     std::fprintf(stdout,
-                                 "[shop] Fhb -> Ex(a,7) Pi panel OPEN for %s (price %d, have %d)\n",
-                                 it.name.c_str(), it.price, w.money);
+                                 "[shop] Fhb -> Ex(a,7) Pi panel OPEN for %s (price %lld, "
+                                 "have %lld)\n",
+                                 it.name.c_str(), static_cast<long long>(it.price),
+                                 static_cast<long long>(w.money));
                     std::fflush(stdout);
                 }
             }
@@ -11637,7 +11654,7 @@ void ShopScreen::update_impl(float dt) {
         // unowned row, or the `FUa`/`qVa` UPGRADE pair for an owned upgradeable
         // one (`k9 && p.o.qC`). `kL` L2254 hides a 0-price plate.
         const bool powned = shop_owned_live(seen_, pit.name);
-        int p_gold = 0;
+        std::int64_t p_gold = 0;
         int p_gems = 0;
         int up_tier = 0;
         bool up_ok = false;
@@ -12071,7 +12088,7 @@ void ShopScreen::render_impl(App& app) {
         // `Ne.Wub` L2254-2255 branch: OWNED -> the `FUa`/`qVa` upgrade plates
         // (`k9 && p.o.qC`; prices `Qi.jp()`/`Qi.nn()`), else the `M8`/`pVa`
         // buy plates (prices `Aa.jp()`/`Aa.nn()`).
-        int gold = 0;
+        std::int64_t gold = 0;
         int gems = 0;
         if (shop_owned_live(seen_, sel_it->name)) {  // `gW` = `re.XDa`
             const int tier = shop_owned_tier(seen_, *sel_it);
@@ -12086,7 +12103,7 @@ void ShopScreen::render_impl(App& app) {
             gold = shop_effective_price(app, *sel_it);
             gems = shop_effective_bonus(app, *sel_it);
         }
-        auto draw_price_plate = [&](int slot, const char* icon, int value) {
+        auto draw_price_plate = [&](int slot, const char* icon, std::int64_t value) {
             const float py = byy0 - static_cast<float>(slot) * (bh + bpad);
             if (!(load_sliced_atlas(app) &&
                   draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, 1.0f))) {
@@ -15190,11 +15207,11 @@ int run_shell_probe(App& app) {
         const UpgradeRow* first = cand.empty() ? nullptr : &cand.front();
         std::fprintf(stdout,
                      "[sps] upgrade WEAPON_KNIVES Tg=%d D6='%s' cands=%zu firstTc=%d "
-                     "gold=%d ruby=%d\n",
+                     "gold=%lld ruby=%d\n",
                      knives != nullptr ? knives->upgrade_level : -1,
                      knives != nullptr ? knives->upgrade_template.c_str() : "",
                      cand.size(), first != nullptr ? first->tc : -1,
-                     first != nullptr ? first->price : -1,
+                     first != nullptr ? static_cast<long long>(first->price) : -1LL,
                      first != nullptr ? first->bonus_price : -1);
         std::fflush(stdout);
         check(knives != nullptr && knives->upgrade_level == 100 && first != nullptr &&
@@ -15255,11 +15272,11 @@ int run_shell_probe(App& app) {
             knives != nullptr
                 ? resolve_item_upgrade(*knives, load_upgrade_templates(app), 100, w.level)
                 : ItemUpgradeState{};
-        const int money0 = w.money;
+        const std::int64_t money0 = w.money;
         const bool ok = knives != nullptr && st.has_next &&
                         purchase_upgrade_gold(app, *knives, 100);
         int tier_after = -1;
-        int money_after = -1;
+        std::int64_t money_after = -1;
         int lvl_after = -1;
         try {
             const WarriorSave nw = app.save().load();
@@ -15271,14 +15288,16 @@ int run_shell_probe(App& app) {
         } catch (const std::exception&) {
         }
         std::fprintf(stdout,
-                     "[sps] FUa dbg has_next=%d nextTc=%d nextPrice=%d wLevel=%d "
+                     "[sps] FUa dbg has_next=%d nextTc=%d nextPrice=%lld wLevel=%d "
                      "reloadLevel=%d\n",
                      st.has_next ? 1 : 0, st.has_next ? st.next.tc : -1,
-                     st.has_next ? st.next.price : -1, w.level, lvl_after);
+                     st.has_next ? static_cast<long long>(st.next.price) : -1LL, w.level,
+                     lvl_after);
         std::fprintf(stdout,
-                     "[sps] FUa upgrade ok=%d tier %d->%d money %d->%d (charged %d)\n",
-                     ok ? 1 : 0, 100, tier_after, money0, money_after,
-                     money0 - money_after);
+                     "[sps] FUa upgrade ok=%d tier %d->%d money %lld->%lld (charged %lld)\n",
+                     ok ? 1 : 0, 100, tier_after, static_cast<long long>(money0),
+                     static_cast<long long>(money_after),
+                     static_cast<long long>(money0 - money_after));
         std::fflush(stdout);
         check(ok && st.has_next && tier_after == st.next.tc &&
                   money0 - money_after == st.next.price,

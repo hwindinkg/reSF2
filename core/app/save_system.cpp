@@ -93,7 +93,7 @@ WarriorSave SaveSystem::load() {
     WarriorSave out;
     out.id = sf2::data::xml_attr_int(warrior, "ID", 1);
     if (warrior.attribute("FirstName")) out.first_name = warrior.attribute("FirstName").value();
-    out.money = sf2::data::xml_attr_int(warrior, "Money", 0);
+    out.money = warrior.attribute("Money") ? warrior.attribute("Money").as_llong() : 0;
     out.bonus = sf2::data::xml_attr_int(warrior, "Bonus", 50);
     out.strength = sf2::data::xml_attr_int(warrior, "Strength", 3);
     out.stamina = sf2::data::xml_attr_int(warrior, "Stamina", 3);
@@ -109,6 +109,7 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tutorial")) out.tutorial = warrior.attribute("Tutorial").value();
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
+    out.show_upgrades = sf2::data::xml_attr_bool(warrior, "ShowUpgrades", false);
     // `p.Dc` snapshot (see `live_clock`); absent in the shipped seed -> 0.
     if (warrior.attribute("GameClock")) {
         try {
@@ -136,6 +137,10 @@ WarriorSave SaveSystem::load() {
         oi.count = sf2::data::xml_attr_int(item, "Count", 1);
         oi.equipped = sf2::data::xml_attr_bool(item, "Equipped", false);
         oi.upgrade_level = sf2::data::xml_attr_int(item, "UpgradeLevel", 0);
+        if (item.attribute("AcquireType")) oi.acquire_type = item.attribute("AcquireType").value();
+        oi.delivery_upgrade_level = item.attribute("DeliveryUpgradeLevel")
+                                        ? item.attribute("DeliveryUpgradeLevel").as_int(-1)
+                                        : -1;
         out.items.push_back(std::move(oi));
     }
 
@@ -457,6 +462,7 @@ void SaveSystem::save(const WarriorSave& w) {
     warrior.attribute("Tutorial").set_value(w.tutorial.c_str());
     warrior.attribute("Tactic").set_value(w.tactic.c_str());
     warrior.attribute("CurrentZone").set_value(w.current_zone.c_str());
+    warrior.attribute("ShowUpgrades").set_value(w.show_upgrades ? "1" : "0");
 
     // Bus mutes (JS `sc.Gpb` L114249): `<Sounds>/<Sound|Music>@Mute` from `ta.$D`
     // (SFX bus = `sound_muted`, `lb.Mz()`) / `ta.ZD` (music bus, `lb.Lz()`).
@@ -498,6 +504,15 @@ void SaveSystem::save(const WarriorSave& w) {
         // item row keeps the shipped shape (no spurious UpgradeLevel="0").
         if (oi.upgrade_level > 0) {
             item.append_attribute("UpgradeLevel").set_value(oi.upgrade_level);
+        }
+        // `j7` round-trip: only materialize a non-default AcquireType so a
+        // plain owned row keeps the shipped shape (no spurious "Item").
+        if (oi.acquire_type != "Item") {
+            item.append_attribute("AcquireType").set_value(oi.acquire_type.c_str());
+        }
+        // `by` round-trip: only materialize a set (>= 0) level.
+        if (oi.delivery_upgrade_level >= 0) {
+            item.append_attribute("DeliveryUpgradeLevel").set_value(oi.delivery_upgrade_level);
         }
     }
 

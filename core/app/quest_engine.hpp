@@ -448,7 +448,7 @@ struct QuestSideEffects {
     struct QuestCurrencyWrite {
         std::string type;    // resolved `Type` ("Gold"/"Bonus"/<currency name>)
         std::string name;    // resolved `Name` (`rg` only; the "Currency" key)
-        int amount = 0;      // resolved `Value` (`Math.trunc`)
+        std::int64_t amount = 0;  // resolved `Value` (`Math.trunc`)
         bool take = false;   // `rg` (deduct) vs `Xn` (grant)
         bool apply = true;   // `rg` affordability failed -> false (Error branch)
     };
@@ -496,7 +496,7 @@ struct EngineMapButton {
 struct EngineItemOffer {
     std::string item;          // `yf.og` (the list.xml Name)
     int percent = 0;           // `yf.TP` (`K.T(e)`; the `<Offer Percent>`)
-    int price = 0;             // `yf.KA` = base * ((100 - percent) / 100)
+    std::int64_t price = 0;    // `yf.KA` = base * ((100 - percent) / 100)
     bool sale = false;         // `yf.V4` (`Pn.S` L1065 `f.V4 = d.G`)
     // `yf.yn`: the `Pn.S` L1065 end time `a = h.G>0 ? p.Dc + h.G + tz : 0`
     // (0 = no expiry). `tz = trunc(ed.getTimezoneOffset())` — a hardcoded
@@ -860,7 +860,7 @@ public:
     // `offer_price` is the `item.uu(p.o.bb())` read (`p.o.xa.vu()` L301): the
     // `yf.KA` override while an active offer exists, else the list.xml base.
     const EngineItemOffer* offer_for(const std::string& item) const;
-    int offer_price(const std::string& item, int base) const;
+    std::int64_t offer_price(const std::string& item, std::int64_t base) const;
     std::size_t offer_count() const { return offers_.size(); }
     // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, L178): the game clock in
     // SECONDS — the SAME `quest_now()` the offer deadlines use. Public so the

@@ -808,7 +808,7 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
         return;
     }
     const CatalogItem* ci = catalog_find(app, item);
-    const int base = ci != nullptr ? ci->price : 0;
+    const std::int64_t base = ci != nullptr ? ci->price : 0;
     EngineItemOffer o;
     o.item = item;
     o.percent = percent;
@@ -838,17 +838,17 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
         if (has) {
             // `l = b.G.JQ(f.G).Ofa() * ((100-e.G)/100)` — the upgrade entry's
             // own `Ofa()` (the item's price at that level).
-            const int ub = it->second[count].price;
+            const std::int64_t ub = it->second[count].price;
             EngineItemOffer u = o;
             u.price = percent > 0
-                          ? static_cast<int>(std::trunc(
+                          ? static_cast<std::int64_t>(std::trunc(
                                 static_cast<double>(ub) * (100.0 - percent) / 100.0))
                           : ub;
             upgrade_offers_[item][count] = u;
             std::fprintf(stdout,
-                         "[quest] Discount %s|%d percent=%d -> upgrade offer price %d "
+                         "[quest] Discount %s|%d percent=%d -> upgrade offer price %lld "
                          "(lB.set)\n",
-                         item.c_str(), count, percent, u.price);
+                         item.c_str(), count, percent, static_cast<long long>(u.price));
         } else {
             std::fprintf(stdout,
                          "[quest] Discount %s|%d percent=%d -> no-op (lB lacks level)\n",
@@ -859,15 +859,16 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
     }
     // `KA` is set ONLY when `e.G>0`; a `Percent="0"` offer keeps the base.
     o.price = percent > 0
-                  ? static_cast<int>(std::trunc(static_cast<double>(base) *
-                                                (100.0 - static_cast<double>(percent)) /
-                                                100.0))
+                  ? static_cast<std::int64_t>(std::trunc(
+                        static_cast<double>(base) *
+                        (100.0 - static_cast<double>(percent)) / 100.0))
                   : base;
     offers_[item] = o;
     std::fprintf(stdout,
-                 "[quest] Discount %s percent=%d period=%lld sale=%d -> price %d end=%lld "
-                 "(base %d, vu)\n",
-                 item.c_str(), percent, period, sale ? 1 : 0, o.price, o.end_time, base);
+                 "[quest] Discount %s percent=%d period=%lld sale=%d -> price %lld end=%lld "
+                 "(base %lld, vu)\n",
+                 item.c_str(), percent, period, sale ? 1 : 0,
+                 static_cast<long long>(o.price), o.end_time, static_cast<long long>(base));
     std::fflush(stdout);
 }
 
@@ -890,7 +891,7 @@ const EngineItemOffer* QuestEngine::offer_for(const std::string& item) const {
     return it == offers_.end() ? nullptr : &it->second;
 }
 
-int QuestEngine::offer_price(const std::string& item, int base) const {
+std::int64_t QuestEngine::offer_price(const std::string& item, std::int64_t base) const {
     const EngineItemOffer* o = offer_for(item);
     if (o == nullptr || !o->active) return base;
     return o->price;
@@ -3253,10 +3254,10 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             } else {
                 // `YDa` L107236: case 1 (`Coins`) -> `p.o.Tb`; case 2 (`Ruby`)
                 // -> `p.o.fd`; `g = a.jp()`/`a.nn()` (the resolved price).
-                const int price =
+                const std::int64_t price =
                     sb == 2 ? catalog_bonus_price(app, bi_name) : bi_cat->price;
-                const int have = sb == 2 ? bc.save.bonus
-                                         : sb == 1 ? bc.save.money : 0;
+                const std::int64_t have = sb == 2 ? bc.save.bonus
+                                                  : sb == 1 ? bc.save.money : 0;
                 if (bc.save_loaded && sb != 0 && have >= price) {
                     QuestSideEffects::QuestCurrencyWrite cw;
                     cw.type = sb == 2 ? "Bonus" : "Gold";  // `vl` / `Fr`
@@ -3421,8 +3422,8 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             std::string cval;
             resolve_cur(attr_or(a.attrs, "Type"), ctype);
             resolve_cur(attr_or(a.attrs, "Value"), cval);
-            const int amount =
-                is_numeric(cval) ? static_cast<int>(to_number(cval)) : 0;
+            const std::int64_t amount =
+                is_numeric(cval) ? static_cast<std::int64_t>(to_number(cval)) : 0;
             QuestSideEffects::QuestCurrencyWrite cw;
             cw.type = ctype;
             cw.amount = amount;
@@ -3439,7 +3440,7 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     known = cc.save_loaded &&
                             cc.save.currencies.find(key) != cc.save.currencies.end();
                 }
-                int have = 0;
+                std::int64_t have = 0;
                 if (known) {
                     if (ctype == "Gold") {
                         have = cc.save.money;
@@ -3622,7 +3623,7 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
         // `Name`). `rg` with `apply=false` is the `<Error>` branch — no write.
         for (const QuestSideEffects::QuestCurrencyWrite& cw : fx.currency_writes) {
             if (!cw.apply) continue;
-            const int d = cw.take ? -cw.amount : cw.amount;
+            const std::int64_t d = cw.take ? -cw.amount : cw.amount;
             if (d == 0) continue;
             if (cw.type == "Gold") {
                 w.money += d;  // `Fr`
