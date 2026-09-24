@@ -6989,13 +6989,44 @@ void MapScreen::start_battle(const Node& n) {
     launch_battle(n);
 }
 
-// `Ur` zone-dot strip geometry (JS L2112-2116, `qk.layout` L2137): one row of
-// dots on the map's bottom bar, 34 px each at a 60 px pitch starting at
-// x=547 (1280-space), centred on the bar. The draw and the click hit-test
-// both read these so they can never drift.
-constexpr float kMapZoneDotX0 = 547.0f;
-constexpr float kMapZoneDotPitch = 60.0f;
-constexpr float kMapZoneDotD = 34.0f;
+// `Ur` zone-strip geometry (JS L2112-2116, `qk.layout` L2137). `Ur.ba`
+// (L2113-2114) derives it from `N.rect.w`, `N.height - Ur.y` and `N.lc`. The
+// port's viewport is fixed 1280x720, so `N.lc = 1280/720 = 1.7778` and the
+// `lc > 1.45` branch always applies; the `lc <= 1.45` branch is unreachable
+// and is not modelled (it needs `KG.za()` / `WG.node.qa()`, containers the
+// port does not build). JS, verbatim, for the live branch:
+//   a = N.rect.w * (.5 + (clamp(lc,1,1.6)-1)/.6 * -.1)      -> 512 at 1280
+//   label `Dk`: `Fa(a-25, b*.7)`, `ua(b*.82)`, `Ia(4)` (right-aligned)
+//   dots `WG`: `la(c / bulbSourceH)`, `C(a+25)`, `D(b/2)`; dot i sits at
+//   `i*80 + bulbSourceW/2`; `c = b*.5` is the dot diameter
+// where `b = N.height - Ur.y` (= `mm.bar_h`). The draw and the click hit-test
+// both read `ur_layout()` so they cannot drift.
+constexpr float kBulbSourcePx = 68.0f;  // bulb/inactive_bulb/red_bulb sourceSize
+
+struct UrLayout {
+    float label_w = 0.0f;   // `Dk.Fa(a-25, ...)` box width
+    float label_h = 0.0f;   // `Dk.Fa(..., b*.7)` box height
+    float label_ua = 0.0f;  // `Dk.ua(b*.82)` font px
+    float dot_d = 0.0f;     // `c = b*.5` dot diameter
+    float dots_x = 0.0f;    // `WG.C(a)` after `a += 25`
+    float dots_cy = 0.0f;   // `Ur.y + b/2` (the bar centre)
+    float scale = 0.0f;     // `WG.la(c / bulbSourceH)`
+};
+
+UrLayout ur_layout(const MapMetrics& mm) {
+    const float lc = kViewW / kViewH;
+    const float b = mm.bar_h;  // `N.height - Ur.y`
+    UrLayout u;
+    u.dot_d = b * 0.5f;
+    u.dots_cy = mm.bar_y + b * 0.5f;
+    u.scale = u.dot_d / kBulbSourcePx;
+    const float a = kViewW * (0.5f + (std::clamp(lc, 1.0f, 1.6f) - 1.0f) / 0.6f * -0.1f);
+    u.label_w = a - 25.0f;
+    u.label_h = b * 0.7f;
+    u.label_ua = b * 0.82f;
+    u.dots_x = a + 25.0f;
+    return u;
+}
 
 // See screens.hpp. The dotted slot is the zone's index among the zones that
 // RENDER a dot (`Vr.HXa` L2123-2124), not its raw index. Only zones with a
@@ -7032,9 +7063,10 @@ bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {   
         if (!any) continue;                // no dot drawn -> no rect
         if (zones_[i].part < 0) continue;  // no map backdrop -> not a map zone
         if (i == zi) {
-            const MapMetrics mm = map_metrics();
-            cx = kMapZoneDotX0 + static_cast<float>(slot) * kMapZoneDotPitch;
-            cy = mm.bar_y + mm.bar_h * 0.5f;
+            const UrLayout u = ur_layout(map_metrics());
+            cx = u.dots_x +
+                 u.scale * (static_cast<float>(slot) * 80.0f + kBulbSourcePx * 0.5f);
+            cy = u.dots_cy;
             return true;
         }
         ++slot;
@@ -7171,7 +7203,7 @@ void MapScreen::update_impl(float dt) {
         for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
             float dot_cx = 0.0f, dot_cy = 0.0f;
             if (!zone_dot_center(zi, dot_cx, dot_cy)) continue;
-            const float dot_half = kMapZoneDotD * 0.5f;
+            const float dot_half = ur_layout(map_metrics()).dot_d * 0.5f;
             if (p.x >= dot_cx - dot_half && p.x <= dot_cx + dot_half &&
                 p.y >= dot_cy - dot_half && p.y <= dot_cy + dot_half) {
                 if (p.pressed && static_cast<int>(zi) != zone_sel_) {
@@ -7781,14 +7813,15 @@ void MapScreen::render_impl(App& app) {
                       UiAlign::Left, 0.0f, 0.0f, 0.0f);
     }
     // `Ur` zone strip (JS L2112-2116, `qk.layout` L2137): the selected zone
-    // name + the zone dots (`inactive_bulb` dots, `bulb` highlight at `q9`).
-    // OPEN: the JS `Ur.ba` label/dot offsets (`Ia(4)` alignment) are not
-    // derived; the measured oracle placement is used.
+    // name (`Dk`) + the zone dots (`WG`, `inactive_bulb`; the selected slot
+    // gets the `bulb` highlight at `q9`). `Ur.ba` (L2113-2114) is JS-exact
+    // through `ur_layout()` (see its comment); the label box is node-local
+    // (0,0) so it sits at `(0, mm.bar_y)` right-aligned (`Ia(4)`).
     if (zone_ok) {
-        const float label_h = mm.bar_h * 0.6f;
-        draw_ui_label(app, 170.0f, mm.bar_y + (mm.bar_h - label_h) * 0.5f, 380.0f,
-                      label_h, loc(app, zones_[zone_sel_].name, zones_[zone_sel_].name),
-                      0.52f, UiAlign::Left, 0.78f, 0.655f, 0.451f);
+        const UrLayout u = ur_layout(mm);
+        draw_ui_label(app, 0.0f, mm.bar_y, u.label_w, u.label_h,
+                      loc(app, zones_[zone_sel_].name, zones_[zone_sel_].name),
+                      u.label_ua / 100.0f, UiAlign::Right, 0.78f, 0.655f, 0.451f);
         // One dot per rendered zone widget (`Vr.HXa` L2123-2124: only zones
         // with an active battle render).
         for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
@@ -7796,9 +7829,9 @@ void MapScreen::render_impl(App& app) {
             if (!zone_dot_center(zi, dot_x, dot_cy)) continue;
             const bool sel = static_cast<int>(zi) == zone_sel_;
             if (!try_draw_atlas_button(app, sel ? "bulb" : "inactive_bulb", dot_x, dot_cy,
-                                       kMapZoneDotD, kMapZoneDotD, 1.0f)) {
-                draw_flat_button(app, "", dot_x, dot_cy, kMapZoneDotD * 0.5f,
-                                 kMapZoneDotD * 0.5f, 0.8f, 0.45f, 0.15f, false);
+                                       u.dot_d, u.dot_d, 1.0f)) {
+                draw_flat_button(app, "", dot_x, dot_cy, u.dot_d * 0.5f,
+                                 u.dot_d * 0.5f, 0.8f, 0.45f, 0.15f, false);
             }
         }
     }
