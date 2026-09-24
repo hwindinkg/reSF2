@@ -1796,11 +1796,14 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
         }
         // `X3a` L498044: `CheckCurrency` -> `K.T(c.dEa())` (L727855),
         // `EnoughCurrency` -> `K.T(v.I3a(c))` (L626221). `dEa` is true when
-        // any `e0()` (`ERuleCurrencyCost`, `oh` L435626: `Kj`=Name,
-        // `an`=Value) has a non-empty `Name` and `Value > 0`. `I3a` is true
-        // when every such rule's summed `Value` per `Name` is covered by the
-        // player balance `p.o.uD(Name)` (`rea` L? — the port models no named
-        // currencies, so the balance is 0 for every name).
+        // any `e0()` (`ERuleCurrencyCost`, `oh` L435626: `Kj`=Name default
+        // "", `an`=Value clamped `>=0`) has a non-empty `Name` and `an > 0`.
+        // `I3a` L626221: for each rule's `Name` (`c`) it sums the `an` of
+        // every rule carrying that `Name` (`e`) and fails when the player
+        // balance `d = p.o.uD(c)` is below it (`if(d<e)return!1`). `uD(a)`
+        // (L138798) = `rea(a).count`, `rea` (L137813) `m.find(this.Ll,
+        // b.currency.name==a)` — the `<Currencies Name=...>` count seeded by
+        // `xf.Jia` L139448 (`u.I(a.attributes.get(d.name))`, absent -> 0).
         if (field == "CheckCurrency" || field == "EnoughCurrency") {
             std::vector<std::pair<std::string, long long>> costs;
             const auto rit = fight_rules_.find(triple);
@@ -1817,6 +1820,7 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
                         } catch (...) {
                         }
                     }
+                    if (val < 0) val = 0;  // `oh.parse` L435626: `an<0 -> 0`
                     costs.emplace_back(ni->second, val);
                 }
             }
@@ -1828,13 +1832,20 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
                 out = any ? "1" : "0";
                 return true;
             }
+            // `I3a` L626221: `d = p.o.uD(c)` (the `<Currencies>` count for the
+            // name; absent -> 0) vs the summed `an` (`e`) of every rule with
+            // that `Name`; `d < e` fails.
+            const WarriorSave& w = ctx.live(app);
             bool enough = true;
             for (const auto& c : costs) {
                 long long need = 0;
                 for (const auto& d : costs) {
                     if (d.first == c.first) need += d.second;
                 }
-                if (need > 0) {  // `uD(Name)` = 0 in the port
+                const auto bit = w.currencies.find(c.first);
+                const long long balance =
+                    bit != w.currencies.end() ? bit->second : 0;
+                if (balance < need) {  // `p.o.uD(c) < e`
                     enough = false;
                     break;
                 }

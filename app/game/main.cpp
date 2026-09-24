@@ -2862,6 +2862,53 @@ int main(int argc, char** argv) {
             std::fprintf(stdout, "[qquery] %-50s %s\n", what, ok ? "PASS" : "FAIL");
             std::fflush(stdout);
         };
+        {
+            // Currency queries (`dEa`/`I3a` L727855/L626221). The shipped
+            // stages.xml has no `<CurrencyCost>` row, so inject synthetic rules
+            // (Ruby 3 + Ruby 7 = need 10; Gold 2) into a synthetic triple. `I3a`
+            // compares `d = p.o.uD(c)` — the `<Currencies Name=...>` count
+            // (`uD` L138798 / `rea` L137813 / `xf.Jia` L139448) — against the
+            // summed `an` per `Name`.
+            const sf2::app::WarriorSave keep = app.save().load();
+            const auto inject = [&](const char* name, const char* value) {
+                sf2::app::FightRule r;
+                r.tag = "CurrencyCost";
+                r.attrs["Name"] = name;
+                r.attrs["Value"] = value;
+                app.quest_engine().inject_fight_rule_for_test(
+                    "TEST|CURRENCY|1", r);
+            };
+            inject("Ruby", "3");
+            inject("Ruby", "7");
+            inject("Gold", "2");
+            const sf2::app::QuestJournal cj;
+            const auto q = [&](const char* e) {
+                return app.quest_engine().resolve_for_test(app, e, cj);
+            };
+            const char* const kCheck = "?Fight[TEST|CURRENCY|1].CheckCurrency";
+            const char* const kEnough = "?Fight[TEST|CURRENCY|1].EnoughCurrency";
+            sf2::app::WarriorSave s5 = keep;
+            s5.currencies.clear();
+            s5.currencies["Ruby"] = 5;    // < need 10
+            app.save().save(s5);
+            const std::string c5 = q(kCheck);
+            const std::string e5 = q(kEnough);
+            sf2::app::WarriorSave s12 = keep;
+            s12.currencies.clear();
+            s12.currencies["Ruby"] = 12;  // >= 10
+            s12.currencies["Gold"] = 2;   // >= 2
+            app.save().save(s12);
+            const std::string e12 = q(kEnough);
+            app.save().save(keep);        // leave the save as found
+            std::fprintf(stdout,
+                         "[qquery] currency Check=%s Enough(Ruby5)=%s "
+                         "Enough(Ruby12,Gold2)=%s\n",
+                         c5.c_str(), e5.c_str(), e12.c_str());
+            std::fflush(stdout);
+            check(c5 == "1", "?Fight.CheckCurrency -> 1 (dEa)");
+            check(e5 == "0", "?Fight.EnoughCurrency Ruby=5 < need 10 -> 0 (I3a)");
+            check(e12 == "1", "?Fight.EnoughCurrency Ruby=12,Gold=2 -> 1 (I3a)");
+        }
         check(fired, "FindLastAvailableFight MATCHED + ran");
         check(!battle_unknown_after, "?Battle[_$Iterator].* answered (not UNKNOWN)");
         check(after_zone == "ZONE_1",

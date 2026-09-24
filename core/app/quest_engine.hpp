@@ -752,6 +752,14 @@ public:
     std::string resolve_for_test(App& app, const std::string& expr,
                                  const QuestJournal& journal);
 
+    // Test hook (`--quest-query-probe`): append one synthetic `<Rules>` leaf
+    // to the `?Fight[triple].*` list so the currency queries
+    // (`CheckCurrency`/`EnoughCurrency`, `dEa`/`I3a` L727855/L626221) can be
+    // exercised — the shipped stages.xml carries no `<CurrencyCost>` row.
+    void inject_fight_rule_for_test(const std::string& triple, FightRule rule) {
+        fight_rules_[triple].push_back(std::move(rule));
+    }
+
     // One fixed step (called by App::update_fixed AFTER the screen update):
     // resumes deferred `Wait` runs (`Ro` L1119) and performs the queued
     // scene/shop navigation (`Gn`/`go`). A no-op while headless (the driver
