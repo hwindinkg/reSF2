@@ -2548,26 +2548,32 @@ int main(int argc, char** argv) {
                 fr.time_left = 1234;
                 fr.randomize_time_left = 9;
                 fr.completed_time = 55;
-                // `?Fight.TimeLeft` proof: the record `TimeLeft` attr (`Gs`,
-                // `Cla` L142896) is the `p.Dc` entry clock. The port's clock
-                // (`quest_now()`) is 0 at this early point, so seed the Duel
-                // fight (`<Fight Name="1" ReplayInterval="14400">`,
-                // stages.xml) with `Gs = clock+100` (>0): `Qe = now-Gs = -100`
-                // -> `TimeLeft = 14400-(-100) = 14500`. (Before/after diff vs
-                // the `Gs<=0 -> Qe=-1 -> Nn+1 = 14401` branch.)
+                // `?Fight.TimeLeft` CLAMP proof (the root fix): the record
+                // `TimeLeft` attr (`Gs`, `Cla` L142896) is the ABSOLUTE `p.Dc`
+                // entry clock. Seed the Duel fight (`<Fight Name="1"
+                // ReplayInterval="14400">`, stages.xml) with `Gs` one second
+                // PAST `Gs+Nn`, i.e. `Gs = now-14401`. With the absolute clock
+                // (`Gs>0`): `Qe = now-Gs = 14401` -> `TimeLeft =
+                // max(14400-14401,0) = 0` — the shipped `DuelInviteFightEnd`
+                // condition (`quests.xml` L2507 `?Fight(ZONE_1|Duel|1).TimeLeft
+                // == 0`) becomes satisfiable. With the old per-process clock
+                // (`now~=0`): `Gs = -14401 <= 0` -> `Qe = -1` -> `TimeLeft =
+                // 14401` (0 unreachable).
                 sf2::app::WarriorSave::FightWins& duel =
                     seeded.fight_record_or_create("ZONE_1|Duel|1");
-                duel.time_left =
-                    static_cast<int>(app.quest_engine().now_seconds()) + 100;
+                duel.time_left = static_cast<int>(
+                    app.quest_engine().now_seconds()) - 14400 - 1;
             }
             seeded.variables.erase("CurrentZone");       // prove the write
             seeded.variables.erase("_CurrentZone");
             app.save().save(seeded);
             const sf2::app::WarriorSave chk = app.save().load();
             std::fprintf(stdout,
-                         "[qquery] seeded: battles=%zu records=%zu hasSurvival=%d\n",
+                         "[qquery] seeded: battles=%zu records=%zu hasSurvival=%d "
+                         "gameClock=%lld\n",
                          chk.battles.size(), chk.battle_records.size(),
-                         chk.has_battle("Survival") ? 1 : 0);
+                         chk.has_battle("Survival") ? 1 : 0,
+                         static_cast<long long>(chk.game_clock));
             {
                 const sf2::app::QuestJournal aj;
                 const char* const fe[] = {
@@ -2817,13 +2823,17 @@ int main(int argc, char** argv) {
                          "[qtimer] BEFORE: ActivateTimer Timer_StarterPack=86400 "
                          "present=%d remaining=%.0f ?Timer[].Value='%s'\n",
                          present ? 1 : 0, rem, qv.c_str());
+            // `t_a` (L292) compares against the SAME `p.Dc` domain the deadline
+            // was armed in, so tick one second past `now+86400` (the old
+            // hardcoded 1e9 sat below the absolute clock).
+            const double tick_now = app.quest_engine().now_seconds() + 86401.0;
             const std::size_t expired =
-                app.quest_engine().run_timer_tick_for_test(app, 1.0e9);
+                app.quest_engine().run_timer_tick_for_test(app, tick_now);
             const std::size_t fires1 = app.quest_engine().timer_end_fires();
             const bool gone =
                 !app.quest_engine().timer_present("Timer_StarterPack");
             std::fprintf(stdout,
-                         "[qtimer] AFTER:  tick(1e9) expired=%zu fires=%zu "
+                         "[qtimer] AFTER:  tick(now+86401) expired=%zu fires=%zu "
                          "present=%d\n",
                          expired, fires1, gone ? 0 : 1);
             timer_ok = present && rem > 86390.0 && qv == "86400" &&

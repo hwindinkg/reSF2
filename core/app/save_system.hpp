@@ -346,6 +346,23 @@ struct BattleRecord {
     // Current wall-clock epoch seconds (Cla(now) analog).
     static std::int64_t wall_now();
 
+    // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, L178): the game clock in
+    // SECONDS — an ABSOLUTE epoch clock, NOT a per-process zero. `Hb.getTime()`
+    // = `Math.trunc(now().getTime()/1E3)` with `now()` = `ed.getDate(N$+
+    // (L.K.time-baa))`, `N$` = `ed.rfa()` = `Math.round(ed.axb+
+    // Date.now()/1E3)` and `ed.axb=0`. Every persisted deadline the quest tree
+    // reads is absolute `p.Dc` seconds — the fight record's `TimeLeft` attr
+    // (`Gs`, `?Fight.TimeLeft`/`Timestamp`) and the `Ct` timer `EndTime`
+    // (`Nv`) — so a 0-based per-process clock can never reach them. The port
+    // persists the clock here and resumes it on load.
+    std::int64_t game_clock = 0;  // `p.Dc` snapshot written by `save`
+
+    // The live `p.Dc` (JS `Hb.instance.getTime()`). Seeded on the first
+    // `SaveSystem::load` (from `game_clock` when present, else `wall_now()`),
+    // advanced by the app tick (`L.K.time`), and stamped back into
+    // `game_clock` by `SaveSystem::save`. `quest_now()` returns it.
+    static double& live_clock();
+
     // Currencies (JS `pG`, L126965/L139448). `xf.Jia` (L139448) reads the
     // counts as ATTRIBUTES of `<Currencies>` keyed by the currency's name
     // (`a.attributes.get(d.name)`), and `GLa` (L137813) writes

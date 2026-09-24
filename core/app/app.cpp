@@ -905,6 +905,10 @@ void App::update_fixed(float dt) {
     if (boot_splash_frames_ > 0) {
         --boot_splash_frames_;
     }
+    // Advance the game clock (`p.Dc`) by the fixed app step — the JS
+    // `L.K.time += a` that `Hb.now()` adds (`Hb.getTime()` L... = `ed.getDate(
+    // N$+(L.K.time-baa))`). `quest_now()`/`?Fight.TimeLeft`/`Timer` all read it.
+    WarriorSave::live_clock() += static_cast<double>(dt);
     screens_->update(dt);
     // Quest live actions: resume deferred `Wait` runs + perform the queued
     // scene/shop navigation. Runs AFTER the screen update so a `mp` push never

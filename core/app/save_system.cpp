@@ -109,6 +109,13 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tutorial")) out.tutorial = warrior.attribute("Tutorial").value();
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
+    // `p.Dc` snapshot (see `live_clock`); absent in the shipped seed -> 0.
+    if (warrior.attribute("GameClock")) {
+        try {
+            out.game_clock = std::stoll(warrior.attribute("GameClock").value());
+        } catch (const std::exception&) {
+        }
+    }
 
     // Bus mutes (JS `sc.ckb` L113759): `<CurrentUser><Sounds>/<Sound|Music>@Mute`.
     // where `a` is the CurrentUser node (`sc.Ju`, `Aa.save(sc.Ju.parent)`).
@@ -356,11 +363,28 @@ WarriorSave SaveSystem::load() {
             }
         }
     }
+
+    // Seed the live `p.Dc` on the FIRST load only (a later `load` must not
+    // rewind the tick-advanced clock). `game_clock` resumes the persisted
+    // absolute domain; a fresh/template save with none starts at real epoch
+    // (`Hb.khb` L... re-syncs `N$=ed.rfa()` on boot).
+    if (WarriorSave::live_clock() <= 0.0) {
+        WarriorSave::live_clock() = out.game_clock > 0
+            ? static_cast<double>(out.game_clock)
+            : static_cast<double>(WarriorSave::wall_now());
+    }
     return out;
 }
 
 std::int64_t WarriorSave::wall_now() {
     return static_cast<std::int64_t>(std::time(nullptr));
+}
+
+// The live `p.Dc` backing store (see `WarriorSave::live_clock`). A process
+// singleton: seeded at the first `load`, advanced by the app tick.
+double& WarriorSave::live_clock() {
+    static double c = 0.0;
+    return c;
 }
 
 // JS `Oqb` (L181): `p.o.EB.A("Root").A("Versions").A("DataVersion")
@@ -500,6 +524,16 @@ void SaveSystem::save(const WarriorSave& w) {
         pugi::xml_attribute mf = warrior.attribute("MapFocus");
         if (!mf) mf = warrior.append_attribute("MapFocus");
         mf.set_value(w.map_focus.c_str());
+    }
+
+    // `p.Dc` snapshot (`live_clock`): always stamp the LIVE clock so the saved
+    // absolute domain tracks the tick (`game_clock` is the `p.Dc` value the
+    // next boot resumes from).
+    {
+        pugi::xml_attribute gc = warrior.attribute("GameClock");
+        if (!gc) gc = warrior.append_attribute("GameClock");
+        gc.set_value(static_cast<long long>(
+            std::llround(WarriorSave::live_clock())));
     }
 
     // Battles (`iF`): replace the <Battle Name> children.

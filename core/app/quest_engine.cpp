@@ -971,17 +971,14 @@ double query_rng01() {
 }
 
 // JS `p.Dc` (L178 `Math.round(Hb.instance.getTime())`, L1218 `v.f0()`): the
-// game clock in SECONDS. The shell has no `Hb` time source, so the port uses
-// the steady clock since first use — same monotonic seconds semantics.
-double quest_now() {
-    static const std::chrono::steady_clock::time_point epoch =
-        std::chrono::steady_clock::now();
-    const double s = std::chrono::duration<double>(
-                         std::chrono::steady_clock::now() - epoch)
-                         .count();
-    // `p.Dc=Math.round(Hb.instance.getTime())` (L178): integer SECONDS.
-    return std::round(s);
-}
+// game clock in SECONDS. `Hb.getTime()` = `Math.trunc(now().getTime()/1E3)`
+// with `now()` = `ed.getDate(N$+(L.K.time-baa))`, `N$` = `ed.rfa()` =
+// `Math.round(ed.axb+Date.now()/1E3)` and `ed.axb=0` — an ABSOLUTE epoch
+// clock advanced by the app tick (`L.K.time`), NOT a per-process zero. The
+// port's `WarriorSave::live_clock()` is that clock (persisted in the save,
+// advanced in `App::update_fixed`), so a saved `?Fight.TimeLeft`/`Timer`
+// deadline is reachable after the clock passes it.
+double quest_now() { return WarriorSave::live_clock(); }
 
 // JS `K.parseInt` for the `Slice` bounds (`Nwb` L957): leading whitespace, an
 // optional sign, then decimal digits; no digits -> NaN, which makes every
