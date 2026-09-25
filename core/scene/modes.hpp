@@ -563,10 +563,10 @@ inline int survival_waves(const StageFight& fight) {
     return total;
 }
 
-// Resolve one survival wave warrior (`efa` at the name level): walk the
-// Number counts, then pick from the wave's Groups (Random via draw01 with
-// NoDoubles memory, else sequential Ix[f%len]). Returns false when the
-// wave is out of range.
+// Resolve one survival wave warrior (`efa`, L89866): walk the Number counts,
+// then pick from the wave's Groups (Random via draw01 with NoDoubles memory,
+// else sequential Ix[f%len]) and MERGE every group (`ur`, L94004) rather than
+// first-match. Returns false when the wave is out of range.
 inline bool resolve_survival_warrior(
     const StageFight& fight, int wave,
     const std::map<std::string, TemplateDef>& templates,
@@ -589,8 +589,18 @@ inline bool resolve_survival_warrior(
     if (slot->groups.empty()) {
         out.template_name = slot->template_name;
     } else {
-        // `efa` group walk: first group with a resolvable pool wins (the
-        // multi-group merge `ur`/`$Wa` is OPEN — single pick implemented).
+        // `efa` group walk (L89866-L90100): EVERY resolvable group
+        // contributes — not a first-match pick. `q=a.groups`; per group `k`
+        // the member `g` is picked, then folded into the accumulator:
+        //   `l==null ? l=g : (l=this.ur(g.node,l), this.$Wa(l))`
+        // So the FIRST member is the base and each later member's node is
+        // merged on top (`ur`, L94004) — later groups OVERRIDE the earlier
+        // stats/items/perks. `ur` NEVER writes `Template` (`.ML`), so
+        // `out.template_name` stays the FIRST resolvable member's template.
+        // `$Wa` (L93528) is `this.pUa.push(a)` — a registry with no field
+        // effect, so it is not modelled. When NO group resolves, `efa` falls
+        // back to a clone of the row (`c.length==0 && c.push(a.clone())`).
+        bool have_base = false;
         for (const StageWarrior::GroupRef& g : slot->groups) {
             const auto it = groups.find(g.name);
             if (it == groups.end() || it->second.members.empty()) continue;
@@ -618,13 +628,29 @@ inline bool resolve_survival_warrior(
                 pick = static_cast<std::size_t>(w) % pool.size();
             }
             const StageWarrior& m = pool[pick];
-            out.template_name = m.template_name.empty() ? slot->template_name : m.template_name;
+            // `l==null ? l=g`: only the first resolvable member stamps the
+            // template (`ur` ignores Template on the merge hops).
+            if (!have_base) {
+                out.template_name =
+                    m.template_name.empty() ? slot->template_name : m.template_name;
+                have_base = true;
+            }
             if (!m.tactic.empty()) out.tactic = m.tactic;
             for (const auto& kv : m.attrs) out.attrs[kv.first] = kv.second;
             if (!m.items.empty()) out.items = m.items;
-            if (!m.perks.empty()) out.perks = m.perks;
-            break;
+            // `ur`'s `<Perks>` hop appends, deduped by Name (L97347).
+            for (const StagePerkRef& pr : m.perks) {
+                bool have = false;
+                for (const StagePerkRef& cur : out.perks) {
+                    if (cur.name == pr.name) {
+                        have = true;
+                        break;
+                    }
+                }
+                if (!have) out.perks.push_back(pr);
+            }
         }
+        if (!have_base) out.template_name = slot->template_name;
     }
     if (!out.template_name.empty()) {
         out.items = template_items(out.template_name, templates);
