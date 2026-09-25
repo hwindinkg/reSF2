@@ -2802,8 +2802,102 @@ int main(int argc, char** argv) {
                      ok ? "PASS" : "FAIL", saw_welcome ? 1 : 0, saw_beat1 ? 1 : 0,
                      saw_beat2 ? 1 : 0, saw_sensei ? 1 : 0, sensei_title.c_str());
         std::fflush(stdout);
+        // --- `eo` `MenuBtnFlashing` guidance (SHOW_DOUBLE_SWEEP -> Dojo) -----
+        // The shipped profile reaches SHOW_DOUBLE_SWEEP at the Profile (level>=2,
+        // `StoryTutorialGoToProfile`), which re-arms `StoryTutorialOpenScene`
+        // (`NextScene=Dojo`) whose desktop Else branch runs `MenuBtnFlashing
+        // BtnName="_NextScene"` (JS `eo.N3a` L1117). Drive Profile -> Dojo by
+        // following that guidance through the internal click path. BEFORE:
+        // step=SHOW_DOUBLE_SWEEP + nav target=Dojo; AFTER: the Dojo `ChangeTab`
+        // fires `StoryTutorialDoubleSweep` (step -> SHOW_BLOCK) and the
+        // guidance clears.
+        sf2::app::QuestEngine& q2 = app.quest_engine();
+        for (int k = 0; k < 12 && q2.has_modal(); ++k) {
+            q2.press_dialog(app, 1);
+            app.run_one_frame();
+        }
+        for (int k = 0; k < 8 && app.screens().current_id() != kScreenDojo; ++k) {
+            app.screens().pop();
+            app.run_one_frame();
+        }
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            w.set_story_step("SHOW_DOUBLE_SWEEP");
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+        const auto tick_n = [&](int n) {
+            for (int k = 0; k < n; ++k) {
+                if (glfwWindowShouldClose(app.renderer().window())) return;
+                app.run_one_frame();
+            }
+        };
+        const auto wait_screen = [&](int id, int maxf) {
+            for (int k = 0; k < maxf; ++k) {
+                if (glfwWindowShouldClose(app.renderer().window())) break;
+                app.run_one_frame();
+                if (app.screens().current_id() == id) return true;
+            }
+            return app.screens().current_id() == id;
+        };
+        // Drive Dojo -> Profile through the screen's own `push` — the same
+        // `wa.mp` navigation the `za` row tap performs — so the ChangeTab edge
+        // that re-arms the guidance always fires (the row tap is gated by the
+        // column's input lock).
+        if (Screen* top = app.screens().top()) top->push(kScreenProfile);
+        const bool on_profile = wait_screen(kScreenProfile, 300);
+        tick_n(30);
+        std::string before_step, before_nav;
+        try {
+            before_step = app.save().load().story_step();
+        } catch (const std::exception&) {
+        }
+        before_nav = q2.nav_flash();
+        std::fprintf(stdout, "[tutreal2] BEFORE profile=%d step=%s nav_flash=%s\n",
+                     on_profile ? 1 : 0, before_step.c_str(), before_nav.c_str());
+        std::fflush(stdout);
+        // Drain the guidance Notification (BlockRaycast=0 in the JS) so its
+        // plate cannot swallow the injected nav taps.
+        for (int k = 0; k < 6 && q2.has_modal(); ++k) {
+            q2.press_dialog(app, 1);
+            app.run_one_frame();
+        }
+        // Follow the guidance: Profile -> Dojo (the flash target), through the
+        // same screen push the nav row tap performs.
+        if (Screen* top = app.screens().top()) top->push(kScreenDojo);
+        const bool on_dojo = wait_screen(kScreenDojo, 300);
+        // `StoryTutorialDoubleSweep` queues a Notification (ReadTime 5.0 s) and
+        // the `SetStoryTutorialStep SHOW_BLOCK` sits in the parked tail the
+        // dialog owns (D1), so wait out the auto-dismiss before reading.
+        std::string after_step;
+        for (int k = 0; k < 1500; ++k) {
+            if (glfwWindowShouldClose(app.renderer().window())) break;
+            app.run_one_frame();
+            try {
+                after_step = app.save().load().story_step();
+            } catch (const std::exception&) {
+            }
+            if (after_step == "SHOW_BLOCK") break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));  // 60 Hz gate clock
+        }
+        const std::string after_nav = q2.nav_flash();
+        std::fprintf(stdout, "[tutreal2] AFTER dojo=%d step=%s nav_flash=%s\n",
+                     on_dojo ? 1 : 0, after_step.c_str(),
+                     after_nav.empty() ? "-" : after_nav.c_str());
+        const bool ok_goto = on_profile && before_step == "SHOW_DOUBLE_SWEEP" &&
+                             before_nav == "Dojo" && on_dojo &&
+                             after_step == "SHOW_BLOCK" && after_nav.empty();
+        std::fprintf(stdout,
+                     "[tutreal2] RESULT profile=%s before_step=%s before_nav=%s "
+                     "dojo=%s after_step=%s after_nav_cleared=%d -> %s\n",
+                     on_profile ? "PASS" : "FAIL",
+                     before_step == "SHOW_DOUBLE_SWEEP" ? "PASS" : "FAIL",
+                     before_nav == "Dojo" ? "PASS" : "FAIL", on_dojo ? "PASS" : "FAIL",
+                     after_step == "SHOW_BLOCK" ? "PASS" : "FAIL",
+                     after_nav.empty() ? 1 : 0, ok_goto ? "PASS" : "FAIL");
+        std::fflush(stdout);
         app.shutdown();
-        return ok ? 0 : 1;
+        return (ok && ok_goto) ? 0 : 1;
     } else if (quest_verify || quest_verify_buy) {
         // --- interactive quest-action verification (internal injection) -----
         // A live app (headless_frames_ == 0, so the engine EXECUTES actions
