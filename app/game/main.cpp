@@ -1575,6 +1575,112 @@ int main(int argc, char** argv) {
             // consumer self-check (no OS input, no sim). Dispatched after the
             // RULE 0 watchdog install (see below).
             enchant_stat_probe_mode = true;
+        } else if (arg == "--mode-probe") {
+            // Mode series advance + reward proof (JS `Onb` L209117 win
+            // handler -> `mfb` L205744 `Rk++`/`Zb=pf[Rk]` -> `D0(i)`
+            // L728049 reward row). App-free + no OS input: walks a tournament
+            // and a survival series through `advance_series`/`resolve_*`/
+            // `reward_for`.
+            std::vector<char> sdata;
+            {
+                std::ifstream in("reference/extracted/xml/res/stages.xml",
+                                 std::ios::binary);
+                sdata.assign(std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>());
+            }
+            std::vector<sf2::scene::StageBattle> battles;
+            std::map<std::string, sf2::scene::TemplateDef> tmpl;
+            std::map<std::string, sf2::scene::GroupDef> grps;
+            const bool parsed = sf2::scene::parse_stages(
+                std::string(sdata.begin(), sdata.end()), battles, tmpl, grps);
+            bool pass = parsed;
+            std::fprintf(stdout, "[modeprobe] parse=%d battles=%zu\n",
+                         parsed ? 1 : 0, battles.size());
+            const sf2::scene::StageBattle* tourn = nullptr;
+            for (const auto& b : battles) {
+                if (b.type == "TOURNAMENT" && b.fights.size() > 1) {
+                    tourn = &b;
+                    break;
+                }
+            }
+            if (tourn != nullptr) {
+                sf2::scene::ModeSeries s;
+                sf2::scene::ModeFight f0, f1;
+                const bool r0 = sf2::scene::resolve_tournament_fight(
+                    *tourn, 0, tmpl, grps, f0);
+                const bool adv =
+                    sf2::scene::advance_series(*tourn, s, true);
+                const bool r1 = sf2::scene::resolve_tournament_fight(
+                    *tourn, s.fight_index, tmpl, grps, f1);
+                std::fprintf(
+                    stdout,
+                    "[modeprobe] TOURNAMENT '%s' BEFORE fight=0 enemy='%s' "
+                    "reward m=%d e=%d\n",
+                    tourn->name.c_str(), f0.enemy.template_name.c_str(),
+                    f0.reward.money, f0.reward.exp);
+                std::fprintf(
+                    stdout,
+                    "[modeprobe] TOURNAMENT '%s' AFTER  advance=%d fight=%d "
+                    "enemy='%s' reward m=%d e=%d\n",
+                    tourn->name.c_str(), adv ? 1 : 0, s.fight_index,
+                    f1.enemy.template_name.c_str(), f1.reward.money,
+                    f1.reward.exp);
+                sf2::scene::ModeSeries s2;
+                const bool adv_lose =
+                    sf2::scene::advance_series(*tourn, s2, false);
+                std::fprintf(stdout,
+                             "[modeprobe] TOURNAMENT loss: advance=%d fight=%d "
+                             "(expect 0/0)\n",
+                             adv_lose ? 1 : 0, s2.fight_index);
+                pass = pass && r0 && adv && r1 && s.fight_index == 1 &&
+                       !adv_lose;
+            } else {
+                std::fprintf(stdout,
+                             "[modeprobe] no TOURNAMENT battle with >1 fight\n");
+                pass = false;
+            }
+            const sf2::scene::StageBattle* surv = nullptr;
+            for (const auto& b : battles) {
+                if (b.type == "SURVIVAL" && !b.fights.empty()) {
+                    surv = &b;
+                    break;
+                }
+            }
+            if (surv != nullptr) {
+                const sf2::scene::StageFight& f = surv->fights[0];
+                const int total = sf2::scene::survival_waves(f);
+                sf2::scene::ModeSeries s;
+                sf2::scene::ResolvedWarrior w0, w1;
+                std::vector<std::string> u0, u1;
+                auto draw = []() { return 0.5; };
+                const bool r0 = sf2::scene::resolve_survival_warrior(
+                    f, 0, tmpl, grps, draw, u0, w0);
+                const int m0 =
+                    sf2::scene::reward_for(surv->type, f, 0, true).money;
+                const bool adv =
+                    sf2::scene::advance_series(*surv, s, true);
+                const bool r1 = sf2::scene::resolve_survival_warrior(
+                    f, s.wave, tmpl, grps, draw, u1, w1);
+                const int m1 =
+                    sf2::scene::reward_for(surv->type, f, s.wave, true).money;
+                std::fprintf(stdout,
+                             "[modeprobe] SURVIVAL '%s' waves=%d BEFORE wave=0 "
+                             "enemy='%s' reward m=%d\n",
+                             surv->name.c_str(), total,
+                             w0.template_name.c_str(), m0);
+                std::fprintf(stdout,
+                             "[modeprobe] SURVIVAL '%s' AFTER  advance=%d "
+                             "wave=%d enemy='%s' reward m=%d\n",
+                             surv->name.c_str(), adv ? 1 : 0, s.wave,
+                             w1.template_name.c_str(), m1);
+                pass = pass && r0 && adv && r1 && s.wave == 1 && total > 1;
+            } else {
+                std::fprintf(stdout, "[modeprobe] no SURVIVAL battle\n");
+                pass = false;
+            }
+            std::fprintf(stdout, "[modeprobe] %s\n", pass ? "PASS" : "FAIL");
+            std::fflush(stdout);
+            return pass ? 0 : 1;
         } else if (arg == "--fx-probe") {
             // Targeted FX-bus self-check (no OS input, no sim): exercises the
             // three kinds end to end — spawn (`Yl`/`lwb`), the follow update

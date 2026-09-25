@@ -8758,50 +8758,27 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 sb = &b;
                 break;
             }
-            sf2::scene::ModeFight mf;
-            bool resolved = false;
             if (sb != nullptr && !sb->fights.empty()) {
-                if (sb->type == "SURVIVAL") {
-                    // One Fight carries every wave (`z6a` = sum of Number).
-                    const sf2::scene::StageFight& f = sb->fights[0];
-                    mf.rounds = f.rounds;
-                    mf.round_time = f.round_time;
-                    mf.health_recovery = f.health_recovery;
-                    mf.rules = f.rules;
-                    mf.location = sb->location;
-                    mf.music = sb->music;
-                    mf.reward = sf2::scene::reward_for(sb->type, f, 0, false);
-                    std::vector<std::string> used;
-                    resolved = sf2::scene::resolve_survival_warrior(
-                        f, 0, templates, groups,
-                        [this]() {
-                            return static_cast<double>(fight_->fight_draw01());
-                        },
-                        used, mf.enemy);
-                } else {
-                    resolved = sf2::scene::resolve_tournament_fight(
-                        *sb, 0, templates, groups, mf);
-                }
+                // Persist the zone-scoped battle + pools for the series
+                // cursor (`Onb`/`mfb` re-resolve the next row per win).
+                mode_battle_ = *sb;
+                mode_templates_ = templates;
+                mode_groups_ = groups;
+                mode_active_ = true;
+                mode_series_ = sf2::scene::ModeSeries();
             }
-            if (resolved) {
-                // The resolved warrior's item NAMES -> the catalog
-                // Type/SubType/Name rows (the same shape the live
-                // `resolve_enemy_loadout` builds).
-                BattleWarriorInfo mw;
-                mw.items = mf.enemy.items;
-                sf2::scene::BattleParams mrow;
-                resolve_enemy_loadout(app(), mw, mrow);
-                const sf2::scene::ModeSetup setup =
-                    sf2::scene::mode_setup_from_fight(mf, mrow.enemy_owned);
+            sf2::scene::ModeSetup setup;
+            if (mode_active_ && resolve_mode_setup(0, 0, setup)) {
                 fight_->apply_mode_setup(setup);
                 std::fprintf(stdout,
                              "[mode] %s setup: rounds=%d time=%d recovery=%.3f "
                              "enemy_perks=%zu enemy_items=%zu dmgP=%.0f dmgE=%.0f "
-                             "noBullets=%d\n",
+                             "noBullets=%d reward m=%d e=%d\n",
                              battle.type.c_str(), setup.rounds, setup.round_time,
                              setup.health_recovery, setup.enemy.perks.size(),
                              setup.enemy.owned.size(), setup.player_damage_factor,
-                             setup.enemy_damage_factor, setup.no_bullets ? 1 : 0);
+                             setup.enemy_damage_factor, setup.no_bullets ? 1 : 0,
+                             setup.reward.money, setup.reward.exp);
                 std::fflush(stdout);
             } else {
                 std::fprintf(stdout, "[mode] %s: no resolved row (battle='%s')\n",
@@ -8813,6 +8790,44 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
             std::fflush(stderr);
         }
     }
+}
+
+// The live mode series cursor -> a `ModeSetup` (JS `v.EQ`/`p.F().efa`
+// warrior generation + `reward_for` reward row). Tournament indexes the
+// battle's `<Fight>` rows (`Rk`); survival indexes the waves inside the one
+// fight (`z6a` sum of warrior `Number`).
+bool FightScreen::resolve_mode_setup(int fight_index, int wave,
+                                     sf2::scene::ModeSetup& out) {
+    if (!mode_active_ || mode_battle_.fights.empty()) return false;
+    sf2::scene::ModeFight mf;
+    bool resolved = false;
+    if (mode_battle_.type == "SURVIVAL") {
+        const sf2::scene::StageFight& f = mode_battle_.fights[0];
+        mf.rounds = f.rounds;
+        mf.round_time = f.round_time;
+        mf.health_recovery = f.health_recovery;
+        mf.rules = f.rules;
+        mf.location = mode_battle_.location;
+        mf.music = mode_battle_.music;
+        mf.reward = sf2::scene::reward_for(mode_battle_.type, f, wave, false);
+        std::vector<std::string> used;
+        resolved = sf2::scene::resolve_survival_warrior(
+            f, wave, mode_templates_, mode_groups_,
+            [this]() { return static_cast<double>(fight_->fight_draw01()); },
+            used, mf.enemy);
+    } else {
+        resolved = sf2::scene::resolve_tournament_fight(
+            mode_battle_, fight_index, mode_templates_, mode_groups_, mf);
+    }
+    if (!resolved) return false;
+    // The resolved warrior's item NAMES -> the catalog Type/SubType/Name
+    // rows (the same shape the live `resolve_enemy_loadout` builds).
+    BattleWarriorInfo mw;
+    mw.items = mf.enemy.items;
+    sf2::scene::BattleParams mrow;
+    resolve_enemy_loadout(app(), mw, mrow);
+    out = sf2::scene::mode_setup_from_fight(mf, mrow.enemy_owned);
+    return true;
 }
 
 // JS `sc.OD` (`Af.oUa` L2472) key table -> the native GLFW binding.
@@ -9549,11 +9564,38 @@ void FightScreen::update_impl(float dt) {
     // Battle end -> Results (JS `bea` L413 -> `v.kD` L622187 -> the
     // results; `qxa` L1213 pops back to the map).
     if (fight_->battle_over() && !results_pushed_) {
+        const bool player_won =
+            fight_->winner() != nullptr && fight_->winner()->is_player;
+        // JS `Onb` (L209117): a mode win with a next series row advances
+        // INSIDE the battle (`mfb` L205744 `Rk++`/`Zb=pf[Rk]`) instead of
+        // ending it. The won row's reward is consumed by the next
+        // `apply_mode_setup` (or, on the terminal win, granted at Results via
+        // `D0(Rk)` L728049). No `results_pushed_` here: the advance resets
+        // `battle_over_`, so the next fight's end is handled too.
+        if (mode_active_ && player_won &&
+            sf2::scene::advance_series(mode_battle_, mode_series_, true)) {
+            sf2::scene::ModeSetup next;
+            if (resolve_mode_setup(mode_series_.fight_index, mode_series_.wave,
+                                   next)) {
+                fight_->begin_next_mode_fight(next);
+                std::fprintf(stdout,
+                             "[mode] advance -> fight=%d wave=%d (reward m=%d "
+                             "e=%d)\n",
+                             mode_series_.fight_index, mode_series_.wave,
+                             next.reward.money, next.reward.exp);
+                std::fflush(stdout);
+                return;
+            }
+        }
         results_pushed_ = true;
-        const bool player_won = fight_->winner() != nullptr && fight_->winner()->is_player;
         PendingBattle& pb = app().pending_battle();
         pb.has_result = true;
         pb.player_won = player_won;
+        // The terminal mode win grants the final row's reward (JS `D0(Rk)`).
+        if (mode_active_ && player_won) {
+            pb.reward_money = fight_->mode_reward().money;
+            pb.reward_exp = fight_->mode_reward().exp;
+        }
         // Quest FightEnd (JS `ha.RA("FightEnd")`): records the triple for
         // later ChangeTab evaluations and fires quests listening for it
         // (tutorial chain: none — ChangeTab rows read the triple instead).

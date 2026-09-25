@@ -2516,6 +2516,9 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     battle_.rounds = setup.rounds;
     battle_.round_time = setup.round_time;
     battle_.health_recovery = static_cast<float>(setup.health_recovery);
+    // JS `D0(i)` (L728049) via `S6a`/`PU` (L621758): the mode row's reward is
+    // consumed at setup time and granted on the terminal win.
+    mode_reward_ = setup.reward;
     player_.params.attributes["DamageFactor"] +=
         static_cast<float>(setup.player_damage_factor);
     set_no_bullets_replenish(setup.no_bullets);
@@ -2988,6 +2991,33 @@ void FightController::apply_round_result(round_result result, const FightFighter
         between_rounds_recover();   // JS `NA` (L414)
         round_start();              // JS `Z2` (L408) via `tx`/`wca`/`vhb`
     }
+}
+
+// JS `mfb` (L205744): advance the series in the SAME battle object — the
+// `Rk++` + `Zb=pf[Rk]` enemy swap after a won fight. The port resets the
+// per-fight round state (rounds won, round number, terminal flags), keeps the
+// fighters' HP (`mfb` runs `NA` = the +HealthRecovery heal, then continues),
+// and re-applies the next `ModeSetup` (enemy rebuild + that row's reward).
+void FightController::begin_next_mode_fight(const ModeSetup& setup) {
+    const float heal = battle_.health_recovery;
+    player_.hp = std::min(player_.max_hp, player_.hp + heal);
+    enemy_.hp = std::min(enemy_.max_hp, enemy_.hp + heal);
+    battle_over_ = false;
+    winner_ = nullptr;
+    player_.rounds_won = 0;
+    enemy_.rounds_won = 0;
+    player_.is_winner = false;
+    enemy_.is_winner = false;
+    phase_ = fight_phase::idle;
+    apply_mode_setup(setup);
+    round_.number = 0;
+    round_init();
+    enter_start_stance();
+    std::fprintf(stdout,
+                 "[mode] next fight armed: enemy='%s' rounds=%d reward m=%d e=%d\n",
+                 enemy_.name.c_str(), battle_.rounds, setup.reward.money,
+                 setup.reward.exp);
+    std::fflush(stdout);
 }
 
 // JS `bea` (L413): the battle end — the winner is fixed, the fight stops.

@@ -1471,6 +1471,13 @@ public:
     // rebuild (items/tactic/attrs/perks). Called post-init by the
     // battle flow when a stages.xml battle lands.
     void apply_mode_setup(const ModeSetup& setup);
+    // JS `mfb` (L205744): the next series row's enemy swap (`Rk++`,
+    // `Zb=pf[Rk]`) inside the SAME battle object. Resets the per-fight round
+    // state and re-applies the next `ModeSetup` (enemy rebuild + reward).
+    void begin_next_mode_fight(const ModeSetup& setup);
+    // The mode row's reward consumed by `apply_mode_setup` (JS `D0(i)`
+    // L728049 via `PU`/`bea`); the terminal win's results grant reads it.
+    const StageReward& mode_reward() const { return mode_reward_; }
 
     // Per-frame fight update (JS `ca.Ea` L385 -> `ia` L388). `dt` is the
     // fixed 60 Hz step (1/60). Runs the phase machine, the per-fighter
@@ -1709,6 +1716,9 @@ private:
     sf2::scene::TrigBus bus_;      // perk trigger bus (`tb`; ZOa registers)
     sf2::scene::PerkSetup perk_setup_;  // stashed for per-round Yka
     bool no_bullets_replenish_ = false;  // `ERuleNoBulletsReplenishment`
+    // The mode row's reward (JS `D0(i)` L728049) consumed by
+    // `apply_mode_setup`; the terminal win's results grant reads it back.
+    StageReward mode_reward_;
     const std::map<std::string, sf2::scene::TacticDef>* tactic_defs_ = nullptr;
     std::vector<std::string> player_items_;  // equipped names (Item conds)
     std::vector<std::string> enemy_items_;

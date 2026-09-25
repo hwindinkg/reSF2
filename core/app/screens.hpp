@@ -37,11 +37,13 @@
 // so the `za` chrome art resolves. A flat fallback still covers a real
 // per-frame miss (never a silent blank).
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "app/fight_assets.hpp"
+#include "scene/modes.hpp"
 #include "app/act_player.hpp"
 #include "app/item_catalog.hpp"
 #include "app/save_system.hpp"
@@ -650,6 +652,21 @@ private:
     std::vector<sf2::scene::OwnedItem> player_owned_;
     std::unique_ptr<sf2::scene::FightController> fight_;
     bool results_pushed_ = false;
+    // --- mode series state (JS `Da.sR` / `Onb` / `mfb`) ------------------
+    // The zone-scoped mode battle + the parsed pools, the live cursor
+    // (`Rk`=fight_index / wave), and the granted reward. `mode_active_` gates
+    // every mode-only branch (only FightTournament/FightSurvival set it).
+    bool mode_active_ = false;
+    sf2::scene::StageBattle mode_battle_;
+    std::map<std::string, sf2::scene::TemplateDef> mode_templates_;
+    std::map<std::string, sf2::scene::GroupDef> mode_groups_;
+    sf2::scene::ModeSeries mode_series_;
+    int mode_reward_money_ = 0;
+    int mode_reward_exp_ = 0;
+    // Resolve the live series cursor into a `ModeSetup` (JS `v.EQ`/
+    // `p.F().efa` warrior generation + `reward_for`). False when the row does
+    // not resolve. Defined in screens.cpp (needs `resolve_enemy_loadout`).
+    bool resolve_mode_setup(int fight_index, int wave, sf2::scene::ModeSetup& out);
     bool key_state_[16] = {};
     // The keyboard directional state (JS `gu` + the `Za.bbb` key-pair table).
     KeyInputState keys_;
