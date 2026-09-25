@@ -10465,9 +10465,12 @@ void FightScreen::render_impl(App& app) {
     }
     if (paused_) {
         // `Dr.Qa` (L2065): the SAME `E.Zxa` horizontal gradient as the fight
-        // (`E.Eua` stops #00000020/80/80/80/20), tweened `wh(6,1,.25)` so the
-        // node alpha settles at .25: overlay = gradient alpha * 0.25.
-        draw_kk_gradient(ren, 0.0f, 0.0f, kViewW, kViewH, 0.25f);
+        // (`E.Eua` stops #00000020/80/80/80/20). The ctor seeds `wa(0)` then
+        // `wh(6,1,.25)`: `$w.wh` case 6 tweens alpha (`zS=tqb`->`wa`) from the
+        // current 0 to target `1` over `.25` s (`Nh.start(from,to,duration,
+        // easing)`), so the settled node alpha is 1.0 — the `.25` is the fade
+        // DURATION, not the opacity.
+        draw_kk_gradient(ren, 0.0f, 0.0f, kViewW, kViewH, 1.0f);
         // `Dr` pause dialog (JS L2018; PAUSE_STATIC §3): `res/fight/pause.*`
         // frames — `Pause` title, `PauseMusic_on/off`, `PauseSound_on/off`,
         // `play` (resume), `home` (quit). Flat fallback only on a genuine
