@@ -1411,6 +1411,7 @@ int main(int argc, char** argv) {
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool rating_perk_probe_mode = false;  // --rating-perk-probe
     bool enchant_stat_probe_mode = false;  // --enchant-stat-probe
+    bool perk_set_probe_mode = false;  // --perk-set-probe
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
@@ -1581,6 +1582,12 @@ int main(int argc, char** argv) {
             // consumer self-check (no OS input, no sim). Dispatched after the
             // RULE 0 watchdog install (see below).
             enchant_stat_probe_mode = true;
+        } else if (arg == "--perk-set-probe") {
+            // The saved `<Perks><Perk><Set>` row carried through `PerkState`
+            // (read + write) and fed to `parse_perk_def` (JS `ur` off 97352 +
+            // `Ji.vva`/`Gt.$jb`) instead of the previous `{}`. Dispatched after
+            // the RULE 0 watchdog install (see below).
+            perk_set_probe_mode = true;
         } else if (arg == "--mode-probe") {
             // Mode series advance + reward proof (JS `Onb` L209117 win
             // handler -> `mfb` L205744 `Rk++`/`Zb=pf[Rk]` -> `D0(i)`
@@ -1970,6 +1977,92 @@ int main(int argc, char** argv) {
     // pure-computation self-check can never leave a process behind.
     if (rating_perk_probe_mode) {
         return sf2::scene::rating_perk_probe() ? 0 : 1;
+    }
+
+    // `--perk-set-probe`: proves the saved warrior `<Perks><Perk><Set>` row is
+    // carried through `PerkState` (read + write) and used by `parse_perk_def`
+    // (JS `ur` off 97352 clones each saved row WITH its `<Set>`;
+    // `Ji.vva`/`Gt.$jb` off 144221/556432 read/write the child), NOT dropped
+    // to `{}`. Synthetic save: inject a `<Perk>` row WITH `<Set
+    // Aspect="4000"/>`, round-trip it, then resolve the real perks.xml def.
+    if (perk_set_probe_mode) {
+        static const char* kPerkName = "PERK_ITEM_SPECIAL_LIFESTEAL";
+        const std::string tmp_path = "reference/saves/perk_set_probe.xml";
+        std::string base;
+        {
+            std::ifstream in("reference/extracted/xml/res/users_default.xml",
+                             std::ios::binary);
+            base.assign((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+        }
+        bool file_ok = false;
+        const std::string close_w = "</Warrior>";
+        const size_t at = base.rfind(close_w);
+        if (!base.empty() && at != std::string::npos) {
+            const std::string row =
+                "<Perks><Perk Name=\"" + std::string(kPerkName) +
+                "\" Level=\"1\" UpgradeLevel=\"0\">"
+                "<Set Aspect=\"4000\" /></Perk></Perks>";
+            base.insert(at, row);
+            std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+            out.write(base.data(), static_cast<std::streamsize>(base.size()));
+            file_ok = out.good();
+        }
+        bool read_ok = false, write_ok = false, resolve_ok = false;
+        std::string def_aspect = "-", row_aspect = "-";
+        if (file_ok) {
+            try {
+                sf2::app::SaveSystem ss(tmp_path, tmp_path);
+                sf2::app::WarriorSave w = ss.load();
+                read_ok = !w.perks.empty() &&
+                          w.perks[0].set.count("Aspect") == 1 &&
+                          w.perks[0].set.at("Aspect") == "4000";
+                if (read_ok) {
+                    row_aspect = w.perks[0].set.at("Aspect");
+                    ss.save(w);  // write it back
+                    sf2::app::WarriorSave w2 = ss.load();
+                    write_ok = !w2.perks.empty() &&
+                               w2.perks[0].set.count("Aspect") == 1 &&
+                               w2.perks[0].set.at("Aspect") == "4000";
+                    std::string pxml;
+                    {
+                        std::ifstream in2(
+                            "reference/extracted/xml/res/perks.xml",
+                            std::ios::binary);
+                        pxml.assign((std::istreambuf_iterator<char>(in2)),
+                                    std::istreambuf_iterator<char>());
+                    }
+                    if (!pxml.empty()) {
+                        const sf2::scene::PerkModel d0 =
+                            sf2::scene::parse_perk_def(pxml, kPerkName, {});
+                        const sf2::scene::PerkModel d1 =
+                            sf2::scene::parse_perk_def(pxml, kPerkName,
+                                                       w2.perks[0].set);
+                        if (d0.set.count("Aspect") == 1) {
+                            def_aspect = d0.set.at("Aspect");
+                        }
+                        resolve_ok = def_aspect == "0" &&
+                                     d1.set.count("Aspect") == 1 &&
+                                     d1.set.at("Aspect") == "4000" &&
+                                     !d0.ratings.empty() &&
+                                     d0.ratings.size() == d1.ratings.size();
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "[perk-set] error: %s\n", e.what());
+            }
+        }
+        const bool ok = file_ok && read_ok && write_ok && resolve_ok;
+        std::fprintf(stdout,
+                     "[perk-set] row Set: read=%s write=%s value=%s; "
+                     "parse def Aspect {} = %s, row Set = %s -> resolve=%s\n"
+                     "[perk-set] RESULT %s\n",
+                     read_ok ? "PASS" : "FAIL", write_ok ? "PASS" : "FAIL",
+                     row_aspect.c_str(), def_aspect.c_str(),
+                     resolve_ok ? "4000" : "-", resolve_ok ? "PASS" : "FAIL",
+                     ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return ok ? 0 : 1;
     }
 
     // `--enchant-stat-probe`: proves the item-enchant `<Set>` -> `perk_aspect`

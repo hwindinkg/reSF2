@@ -316,6 +316,12 @@ WarriorSave SaveSystem::load() {
         if (p.attribute("Name")) ps.name = p.attribute("Name").value();
         ps.level = sf2::data::xml_attr_int(p, "Level", 0);
         ps.upgrade_level = sf2::data::xml_attr_int(p, "UpgradeLevel", 0);
+        // JS `Gt.$jb` (off 556432): read the row's `<Set>` attribute map.
+        if (pugi::xml_node s = p.child("Set")) {
+            for (pugi::xml_attribute a : s.attributes()) {
+                ps.set[a.name()] = a.value();
+            }
+        }
         if (!ps.name.empty()) out.perks.push_back(std::move(ps));
     }
 
@@ -798,6 +804,14 @@ void SaveSystem::save(const WarriorSave& w) {
                 p.append_attribute("Name").set_value(ps.name.c_str());
                 p.append_attribute("Level").set_value(ps.level);
                 p.append_attribute("UpgradeLevel").set_value(ps.upgrade_level);
+                // JS `Ji.vva` (off 144221): write the row's `<Set>` back.
+                if (!ps.set.empty()) {
+                    pugi::xml_node s = p.append_child("Set");
+                    for (const auto& kv : ps.set) {
+                        s.append_attribute(kv.first.c_str())
+                            .set_value(kv.second.c_str());
+                    }
+                }
             }
         }
     }

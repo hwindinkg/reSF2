@@ -3172,12 +3172,13 @@ void FightController::setup_bus(const PerkSetup& perks) {
     // `build_side_triggers` then inserts the def's own triggers verbatim (the
     // empty-`set_num`/`set_str` path), exactly like `Wk`'s raw `AK` entries.
     std::vector<sf2::scene::ItemPerkRef> player_refs;
-    player_refs.reserve(perks.learned.size() + perks.player_refs.size());
-    for (const std::string& n : perks.learned) {
-        if (n.empty()) continue;
-        sf2::scene::ItemPerkRef r;
-        r.name = n;
-        player_refs.push_back(std::move(r));
+    player_refs.reserve(perks.learned_refs.size() + perks.player_refs.size());
+    // JS `Wk` L811-812: `m.addRange(a,this.AK)` — the save `<Perks>` rows
+    // (`AK`) with their `<Set>` overrides (`Ji.vva`/`Gt.$jb`) come FIRST,
+    // then the per-item `Oa`. The previous code synthesized empty-set refs
+    // from `learned`, dropping the row's `<Set>`.
+    for (const sf2::scene::ItemPerkRef& r : perks.learned_refs) {
+        if (!r.name.empty()) player_refs.push_back(r);
     }
     player_refs.insert(player_refs.end(), perks.player_refs.begin(),
                        perks.player_refs.end());

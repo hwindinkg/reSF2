@@ -425,6 +425,11 @@ struct BattleRecord {
         std::string name;         // `Ji.Ba`
         int level = 0;            // `Ji.ZB` (the learned tier)
         int upgrade_level = 0;    // `Ji.Ce` (`Ih.PQ()` = the def `Tc`)
+        // The row's `<Set>` attribute map (JS `Ji.vva` off 144221 writes it
+        // from `Gt.ll`, `Gt.$jb` off 556432 reads it). The saved warrior's
+        // `<Perks>` rows are cloned by `ur` (off 97352) WITH this `<Set>`,
+        // and `Wk` merges them (`AK`) ahead of the per-item `Oa`.
+        std::map<std::string, std::string> set;
     };
     std::vector<PerkState> perks;
 

@@ -1357,6 +1357,10 @@ struct PerkSetup {
     // live set by `Wk`). `Bm.he` (L753-754) scans this set for a move's
     // `<Perk Name=..>` lock; the player's move list is built from it.
     std::vector<std::string> learned;
+    // The save `<Perks>` rows as resolved refs (JS `xc.AK`, `Wk` L811-812),
+    // each carrying the row's `<Set>` override (`Ji.vva`/`Gt.$jb`). Same
+    // names as `learned`; the trigger bus (`Wk`) uses these with the Set.
+    std::vector<sf2::scene::ItemPerkRef> learned_refs;
     const std::map<std::string, sf2::scene::TacticDef>* tactics = nullptr;
 };
 

@@ -4904,12 +4904,18 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
     for (const auto& oi : w.items) {
         if (oi.count > 0 && oi.equipped) equipped.push_back(oi.name);
     }
-    // The save's learned perks (`Bt.KS.Oa`/`Ht`, merged into `parameters.Oa`
-    // by `Wk` L811-812). `Bm.he` (L753-754) scans them for a move's `<Perk
-    // Name=..>` lock — this is what admits `DoubleSweep` after the lesson.
+    // The save's perks (`xc.AK`, merged into the live set first by `Wk`
+    // L811-812; the saved warrior's `<Perks>` rows are cloned by `ur` off
+    // 97352 WITH their `<Set>` override). `Bm.he` (L753-754) scans the names
+    // for a move's `<Perk Name=..>` lock — this admits `DoubleSweep` after
+    // the lesson; the trigger bus resolves `learned_refs` with the `<Set>`.
     for (const auto& pr : w.perks) {
         if (pr.name.empty()) continue;
         ps.learned.push_back(pr.name);
+        sf2::scene::ItemPerkRef ref;
+        ref.name = pr.name;
+        ref.set_str = pr.set;  // `<Set>` override (JS `Ji.vva`)
+        ps.learned_refs.push_back(std::move(ref));
     }
     add_items(equipped, ps.player_items, ps.player_refs);
     return ps;
@@ -7580,7 +7586,9 @@ constexpr float kMapDefaultRatingRatio = 1.0f;
 // (`Be.clone` L1329-1330). This is exactly what feeds `FighterParams::perks`,
 // read by `warrior_rating`'s `xc.gX` PerkAspect branch (`perk_aspect`) — the
 // enchant `<Set Aspect=...>` consumer that was previously reachable only via
-// `--rating-perk-probe`. NOT ported (Wk remainder): `this.TE`, the owned-vs-
+// `--rating-perk-probe`. The save `<Perks>` rows now carry their `<Set>`
+// override (`Ji.vva`/`Gt.$jb`, off 144221/556432) into `pr.set` instead of
+// the previous `{}`. NOT ported (Wk remainder): the owned-vs-
 // catalog `p.BD`/`v.Xz` gates, the `Lv`/`zf.Kia` EnchantmentsCountExclusion
 // budget, and the enemy side's gear perks.
 std::vector<sf2::scene::PerkModel> equipped_rating_perks(App& app) {
@@ -7609,7 +7617,7 @@ std::vector<sf2::scene::PerkModel> equipped_rating_perks(App& app) {
     };
     for (const auto& pr : w.perks) {
         if (pr.name.empty()) continue;
-        push_if(sf2::scene::parse_perk_def(perks_xml, pr.name, {}));
+        push_if(sf2::scene::parse_perk_def(perks_xml, pr.name, pr.set));
     }
     for (const auto& oi : w.items) {
         if (oi.count <= 0) continue;
