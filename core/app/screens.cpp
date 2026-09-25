@@ -10058,49 +10058,67 @@ void FightScreen::render_impl(App& app) {
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player
     // fill), HealthBarBlue_Full (enemy fill), HealthBar_Hit/Blue_Hit (leak),
-    // Round_Done/Undone (pips). `Sf.layout` (L2036-2038) computes, with
-    // ma.Kq = the screen rect (J=0, N=W, P=0, W=H):
-    //   d = clamp(W/H, .4, 1.5); e = clamp(d, 1, 1.1);
-    //   c0 = min(W,H)/2; f = c0*.07 (+ (1-d)*200 when d<1);
+    // Round_Done/Undone (pips). `Sf.layout` (JS offset 1049169) computes,
+    // with `ma.Kq` the fight viewport rect (J=0, N=view W, P/W projected):
+    //   b = N-J; d = clamp(b/(W-P), .4, 1.5); c0 = min(b, W-P)/2;
+    //   e = clamp(d,1,1.1); f = c0*.07 (+(1-d)*200 when d<1);
+    //   g = 1+(clamp(d,1,1.5)-1)/.5*.1; c = c0/675*g;
+    //   panel centers = (J+N)/2 ∓ 520*c*e; panel Y = P+150*c+f*g.
+    // The `Br` bar frame is `uL(330)` x `Pb(43)` (`lk.bMa` L2028).
+    // `ma.Kq` (JS `ma.Sya`, sf2.502f0946.js offset 944457): the fight
+    // viewport rect every `Sf`/`kk` layout reads. J=0, N = screen width, and
+    // P/W = the PROJECTED arena top/bottom: `Sya` projects the arena's world
+    // half-height `e/2`, where `e = m$a() = Lb.height * Bj` (= the active
+    // location height * the layer zoom `Bj`). The native camera's
+    // `world_to_screen_y` is the port of that projection, so P/W come from
+    // the live camera (no calibration constants).
+    const float kq_j = 0.0f;
+    const float kq_n = kViewW;
+    const float kq_extent = camera.arena_h * camera.layer_zoom;  // m$a()
+    const float kq_p = camera.world_to_screen_y(-kq_extent * 0.5f);  // ma.Kq.P
+    const float kq_w = camera.world_to_screen_y(kq_extent * 0.5f);   // ma.Kq.W
+
+    // `Sf.layout` (JS offset 1049169) — JS-exact:
+    //   b = N-J; d = clamp(b/(W-P), .4, 1.5); c0 = min(b, W-P)/2;
+    //   e = clamp(d, 1, 1.1); f = c0*.07 (+ (1-d)*200 when d<1);
     //   g = 1 + (clamp(d,1,1.5)-1)/.5*.1; c = c0/675*g;
-    //   bar centers = W/2 ∓ 520*c*e; bar Y = P + 150*c + f*g.
-    // At 1280x720: d=1.5, e=1.1, g=1.1, c=0.5867, f=25.2 -> centers
-    // 304.4/975.6, y=115.7. Bar frame 425x43 (`Br` uL(425)/krb L2011-2012;
-    // PORT_AUDIT_UI §2.6).
-    const float hud_d = std::clamp(kViewW / kViewH, 0.4f, 1.5f);
+    //   `Id`/`je` panel centres = (J+N)/2 ∓ 520*c*e, panel Y = P+150*c+f*g,
+    //   panel scale `la(c)`; `lk.bMa` (L2028) hangs the `Br` bar `uL(330)`
+    //   at local x +130 (player) / -460 (enemy) — centres ±295 — `D(-50)`,
+    //   the frame strip `Pb(43)`.
+    const float hud_b = kq_n - kq_j;
+    const float kq_h = (kq_w - kq_p) > 1.0f ? (kq_w - kq_p) : kViewH;  // W-P
+    const float hud_d = std::clamp(hud_b / kq_h, 0.4f, 1.5f);
+    const float hud_c0 = std::min(hud_b, kq_h) * 0.5f;
     const float hud_e = std::clamp(hud_d, 1.0f, 1.1f);
-    const float hud_c0 = std::min(kViewW, kViewH) * 0.5f;
     const float hud_f = hud_c0 * 0.07f + (hud_d < 1.0f ? (1.0f - hud_d) * 200.0f : 0.0f);
     const float hud_g = 1.0f + (std::clamp(hud_d, 1.0f, 1.5f) - 1.0f) / 0.5f * 0.1f;
     const float hud_c = hud_c0 / 675.0f * hud_g;
-    // [fix(fight HUD): oracle-matched `lk` anchors] The oracle HUD measures,
-    // at 1280x720, bar rects x393..602 / x678..887 (w≈209), y≈90..118 (h≈30),
-    // portrait circles centred (310,131)/(970,131) r≈80, and the pause button
-    // centred under the timer. `Sf.layout` places the `lk` panels at
-    // `W/2 ∓ 520*c*e` (L2036-2037) and `lk.bMa` hangs the bar/portrait/name
-    // off them; the native view is a fixed 1280x720 (`kViewW`/`kViewH`), so
-    // the anchors are expressed directly in view px.
-    //
-    // The oracle capture (`fight_stance`) pins the panel scale: the `Br` bar
-    // is `uL(330)` design units (`lk.bMa` L2028) and measures 178 px wide,
-    // so c = 178/330 = 0.5394. The bar art is a 1-px x 43 vertical strip
-    // (HealthBar_Empty/_Full/_Hit) whose opaque band is frame rows 8..34 of
-    // 43, so a rect h = 43*c = 23.2..24.8 places the solid band at the
-    // capture's orange rows y90..104 (rect y = 90 - 8*(h/43)). The prior
-    // 209x30 @ y90 was ~31 px too wide and 6 px too low.
-    // OPEN: the exact `ma.Kq` J/P projection at 16:9 (`Sya` L1834) is not
-    // re-derived here (the port FightCamera reports Kq_h = 720 -> c=0.5867,
-    // the capture implies Kq_h = 662 -> c=0.5394; other owner). The
-    // constants are calibrated to the oracle capture, JS structure cited.
-    const float bar_w = 183.0f;   // `Br.uL(330)`; oracle fill spans x392..571 (180 px)
-    const float bar_h = 24.8f;    // `Br.Pb(43)`: opaque band = frame rows 7..33
-    const float bar_y = 86.4f;    // `al.node.D(-50)`: band pinned to oracle y90..106
-    const float bar_cx_player = 481.5f;
-    const float bar_cx_enemy = 797.0f;
-    (void)hud_d;
-    (void)hud_e;
-    (void)hud_f;
-    (void)hud_g;
+    const float hud_cx = (kq_j + kq_n) * 0.5f;
+    const float panel_player_x = hud_cx - 520.0f * hud_c * hud_e;
+    const float panel_enemy_x = hud_cx + 520.0f * hud_c * hud_e;
+    const float panel_y = kq_p + 150.0f * hud_c + hud_f * hud_g;
+    const float bar_w = 330.0f * hud_c;                               // `Br.uL(330)`
+    const float bar_h = 43.0f * hud_c;                                // `Br.Pb(43)`
+    const float bar_y = panel_y - 50.0f * hud_c;                      // `al.D(-50)`
+    const float bar_cx_player = panel_player_x + 295.0f * hud_c;      // `al` centre +295
+    const float bar_cx_enemy = panel_enemy_x - 295.0f * hud_c;
+    {
+        static bool hud_geom_logged = false;  // one-shot geometry trace
+        if (!hud_geom_logged) {
+            hud_geom_logged = true;
+            std::fprintf(stdout,
+                         "[fight] hud kq=(%.1f,%.1f,%.1f,%.1f) c=%.5f bar_w=%.1f "
+                         "bar_h=%.1f bar_y=%.1f cx=%.1f/%.1f\n",
+                         static_cast<double>(kq_j), static_cast<double>(kq_n),
+                         static_cast<double>(kq_p), static_cast<double>(kq_w),
+                         static_cast<double>(hud_c), static_cast<double>(bar_w),
+                         static_cast<double>(bar_h), static_cast<double>(bar_y),
+                         static_cast<double>(bar_cx_player),
+                         static_cast<double>(bar_cx_enemy));
+            std::fflush(stdout);
+        }
+    }
     const float p_ratio = fight_->player().max_hp > 0.0f
                               ? std::clamp(fight_->player().hp / fight_->player().max_hp, 0.0f, 1.0f)
                               : 0.0f;
