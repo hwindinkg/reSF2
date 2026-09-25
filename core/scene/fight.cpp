@@ -4809,7 +4809,7 @@ FightController::BattlePrize FightController::prize(int base_coins) const {
     p.first_strike = battle_first_hit_ && battle_first_by_player_;
     p.max_combo = player_.max_combo;
     p.shocks = player_.shocks_dealt;
-    p.style_value = 0;  // style untracked -> Turtle 0 (OPEN)
+    p.style_value = prize_fh_.b6;  // `b6` -> `Fh.HNa` EAa row key (L2055)
     // Exact `Fh.lXa` (L2054-2056): prize-base `a` = the head prize `ph`
     // (OPEN D0-table value -> base coins used); coins `b` = base;
     // gems 0; Ia/epF/UiF/UbF = 5/2/1/3; pk EAa order; kq = 0

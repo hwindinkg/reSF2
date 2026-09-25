@@ -98,6 +98,7 @@ struct PendingBattle {
     int prize_first_coins = 0;
     int prize_combo_coins = 0;
     int prize_style_coins = 0;
+    int prize_style_level = 0;  // `b6`: EAa style index 0..5 (`Fh.HNa`)
     int prize_shock_coins = 0;
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;

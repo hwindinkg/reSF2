@@ -763,6 +763,7 @@ private:
     int prize_first_coins_ = 0;
     int prize_combo_coins_ = 0;
     int prize_style_coins_ = 0;
+    int prize_style_level_ = 0;  // `b6`: EAa style index -> the row key
     int prize_shock_coins_ = 0;
     // `oc.OY` ruby (`Fh.lXa` arg `c`, L2054-2055; `oc.mOa = oc.OY`). The
     // goldPrize row's `Or.x_` (`Lr.ZMa` L2078) renders it as the `Qw` sub-row.

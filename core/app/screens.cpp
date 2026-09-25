@@ -6527,6 +6527,7 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
     pb.prize_gems = 0;
     pb.prize_combo = 0;
     pb.prize_shocks = 0;
+    pb.prize_style_level = 0;
     pb.prize_perfect = false;
     pb.prize_first = false;
     // The owned items feed the FightScreen's move list (`ra.Hza`).
@@ -9643,6 +9644,7 @@ void FightScreen::update_impl(float dt) {
             pb.prize_first_coins = prize.coins_first;
             pb.prize_combo_coins = prize.coins_combo;
             pb.prize_style_coins = prize.coins_style;
+            pb.prize_style_level = prize.style_value;
             pb.prize_shock_coins = prize.coins_shock;
             if (player_won) pb.reward_money = prize.coins_total;
         }
@@ -10506,6 +10508,7 @@ void ResultsScreen::update_impl(float dt) {
                 prize_first_coins_ = pb.prize_first_coins;
                 prize_combo_coins_ = pb.prize_combo_coins;
                 prize_style_coins_ = pb.prize_style_coins;
+                prize_style_level_ = pb.prize_style_level;
                 prize_shock_coins_ = pb.prize_shock_coins;
                 // `oc.OY` ruby (`Fh.lXa` arg `c` L2054-2055 -> `oc.mOa`): the
                 // goldPrize row's `Or.x_` (`Lr.ZMa` L2078).
@@ -10704,7 +10707,7 @@ void ResultsScreen::render_impl(App& app) {
     // last is `v1a(Math.trunc(Hi.ap), b)` = the star row. The oracle
     // `results_lose`/`results_win` show all 7 rows ALWAYS (even on a loss).
     // Labels are the lang keys goldPrize/goldPerfect/goldFirstStrike/
-    // goldCombo/goldShock/goldPassiveStyle (EN fallback — the oracle is EN).
+    // goldCombo/goldShock + the style row `Fh.EAa(b6)` (EN fallback — the oracle is EN).
     struct KkRow {
         const char* key;
         const char* fallback;
@@ -10722,7 +10725,8 @@ void ResultsScreen::render_impl(App& app) {
         {"goldCombo", "MAX COMBO x{0}", prize_combo_coins_, prize_combo_, true,
          false},
         {"goldShock", "SHOCK x{0}", prize_shock_coins_, prize_shocks_, true, false},
-        {"goldTurtleStyle", "PASSIVE STYLE", prize_style_coins_, 0, false, false},
+        {sf2::scene::style_prize_key(prize_style_level_), "PASSIVE STYLE",
+         prize_style_coins_, 0, false, false},
         // Star row (`Pr`/`v1a`, L2078): `Pr(Math.trunc(Hi.ap), m6)` — the exp
         // counter beside the star, the total money beside the gold.
         {"", "", exp_reward_, 0, false, true},
@@ -10839,6 +10843,10 @@ void ResultsScreen::render_impl(App& app) {
             std::snprintf(buf, sizeof(buf), " r%d=%.2f/%.2f", i, s, c);
             line += buf;
         }
+        // Style row proof (`Fh.EAa` L2055): the live `b6` high-water mark +
+        // the row localization key the meter selects (was hardcoded Turtle).
+        line += " style=" + std::to_string(prize_style_level_) + "/" +
+                sf2::scene::style_prize_key(prize_style_level_);
         std::fprintf(stdout, "%s\n", line.c_str());
         std::fflush(stdout);
     }

@@ -1303,11 +1303,26 @@ private:
 // Fh counters init 0; `d6`++ only via victory `gXa` (post-lXa, so 0 at
 // reward time with fresh-per-battle Fh); `c6`/`e6` via strike flags
 // (`cvb`/`yvb`: first-hit/crit-shock of the round); `jU` never set (0);
-// `b6` max style (untracked -> Turtle 0). `pk` = EAa order
+// `b6` max style reached (the `Gr.Gua` high-water mark -> the `Fh.HNa`
+// row key + the `pk[b6]` DZ term). `pk` = EAa order
 // (Turtle 0, Hard 3, Brutal 6, Aggressive 9, Crazy 12, Fantastic 15).
 struct PrizeFh {
     int d6 = 0, c6 = 0, jU = 0, e6 = 0, b6 = 0;
 };
+// `Fh.EAa` (L2055): the style high-water mark `b6` (0..5) -> the Results
+// row's localization key. The JS spelling "goldAgressiveStyle" (one 'g')
+// is deliberate (the loc XML uses it verbatim). `KDa` (L2091) clamps `b6`
+// to `pk.length-1`, so anything >=5 is Fantastic.
+inline const char* style_prize_key(int level) {
+    switch (level) {
+        case 0: return "goldTurtleStyle";
+        case 1: return "goldHardStyle";
+        case 2: return "goldBrutalStyle";
+        case 3: return "goldAgressiveStyle";
+        case 4: return "goldCrazyStyle";
+        default: return "goldFantasticStyle";
+    }
+}
 struct PrizeKx {
     double rva = 0, py = 0, oy = 0, p3 = 0, ep = 0, ui = 0, dz = 0, ub = 0;
     double m6 = 0, mOa = 0;
@@ -1590,7 +1605,7 @@ public:
     // Battle prize breakdown (JS `v.kD`/`bzb`/`Fh.lXa`, FLOW_STATIC 4.3).
     // Factors from internal_settings `<RewardsPrize>` (verified values):
     // Perfect $Ia=5, FirstStrike ep=2, ComboCount Ui=1, Shock Ub=3,
-    // Styles pk (Turtle 0 .. Fantastic 15; port: style untracked -> 0).
+    // Styles pk (Turtle 0 .. Fantastic 15; `b6` = the live high-water mark).
     // Totals come from exact `fh_lxa` below (`m6`/`mOa`); `coins_bonus`
     // is the performance part (total minus base) for the results display.
     // `gems_bonus` (`hj.Uo`) has no evidenced fight source (Bonus stays
@@ -1600,7 +1615,7 @@ public:
         bool first_strike = false;  // player landed the battle's first hit
         int max_combo = 0;         // player's best consecutive run
         int shocks = 0;            // player's shock hits
-        int style_value = 0;       // style factor (untracked -> Turtle 0)
+        int style_value = 0;       // `b6`: EAa style index 0..5 (JS `Fh.HNa`)
         int coins_bonus = 0;       // m6 minus base (display)
         int coins_total = 0;       // m6: what the player receives
         int gems_bonus = 0;        // mOa (no fight source evidenced)
