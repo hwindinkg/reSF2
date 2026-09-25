@@ -1479,6 +1479,7 @@ int main(int argc, char** argv) {
     // lines and the `[fight] summary` decide whether the JS would let the
     // player win or the port mis-resolves the loss.
     bool boss_loss_probe = false;
+    bool enemy_move_probe = false;
     // --d3-probe: force a named move on the player and print the attacker's
     // part set the OLD way (yD(4) only) vs the NEW way (the xqb union over
     // every active type-4 interval), then the hit_test result. Proves the D3
@@ -1861,6 +1862,8 @@ int main(int argc, char** argv) {
             round_log = true;
         } else if (arg == "--boss-hit-probe") {
             boss_hit_probe = true;
+        } else if (arg == "--enemy-move-probe") {
+            enemy_move_probe = true;
         } else if (arg == "--boss-loss-probe") {
             boss_loss_probe = true;
         } else if (arg == "--d3-probe") {
@@ -5977,6 +5980,78 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return react_at >= 0 ? 0 : 1;
+    } else if (enemy_move_probe) {
+        // [probe, authorised] `--enemy-move-probe`: boot a fight, leave BOTH
+        // fighters to the AI/idle (NO input), and log the ENEMY's per-frame
+        // chosen move + world_x + moves_started. This is the locomotion
+        // divergence probe: if the enemy picks `StepForward` (the `<Step>`
+        // <CautiousMovements> group, tacticSettings.xml) but `ex` never
+        // changes, the root motion / move start is dropping the translation.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("BOSS_LYNX") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[emove] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        int guard = 0;
+        while (guard < 20000 && app.screens().current_id() == kScreenFight &&
+               fs->fight_frame() < 160) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++guard;
+        }
+        const float ex0 = fs->enemy_world_x();
+        std::fprintf(stdout,
+                     "[emove] live f=%d guard=%d px=%.1f ex=%.1f gap=%.1f\n",
+                     fs->fight_frame(), guard,
+                     static_cast<double>(fs->player_world_x()),
+                     static_cast<double>(ex0),
+                     static_cast<double>(ex0 - fs->player_world_x()));
+        std::fflush(stdout);
+        float prev_x = fs->enemy_world_x();
+        float min_x = prev_x, max_x = prev_x;
+        for (int f = 0; f < 600; ++f) {
+            glfwPollEvents();
+            app.run_one_frame();
+            const float ex = fs->enemy_world_x();
+            if (ex < min_x) min_x = ex;
+            if (ex > max_x) max_x = ex;
+            std::fprintf(stdout,
+                         "[emove] f=%d move=%s ex=%.2f px=%.2f dx=%+.2f "
+                         "started=%d efac=%+.0f\n",
+                         f, fs->enemy_current_move().c_str(),
+                         static_cast<double>(ex),
+                         static_cast<double>(fs->player_world_x()),
+                         static_cast<double>(ex - prev_x),
+                         fs->enemy_moves_started(),
+                         static_cast<double>(fs->enemy_facing()));
+            std::fflush(stdout);
+            prev_x = ex;
+        }
+        std::fprintf(stdout,
+                     "[emove] done: ex0=%.1f min=%.1f max=%.1f span=%.2f "
+                     "started=%d px=%.1f\n",
+                     static_cast<double>(ex0), static_cast<double>(min_x),
+                     static_cast<double>(max_x),
+                     static_cast<double>(max_x - min_x),
+                     fs->enemy_moves_started(),
+                     static_cast<double>(fs->player_world_x()));
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (boss_loss_probe) {
         // [probe] Drive a COMPETENT scripted player through a full BOSS fight
         // via the internal `inject_game_key` path (NO OS input): approach the

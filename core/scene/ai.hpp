@@ -29,6 +29,7 @@
 //     per-slot QuickAttack/Evade scoring, the weighted roulette pick
 //     (`jL`), and the returned move.
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -425,8 +426,14 @@ struct AiFightState {
     // ai_demo/golden paths stay byte-identical.
     std::function<float(const std::string&, int)> my_bone_world_x;
     // Cautious-movements condition: whether the enemy is playing a
-    // cautious animation (JS `fCa` — body-part anim in `P.nG`).
+    // cautious animation (JS `fCa` - body-part anim in `P.nG`).
     bool enemy_cautious = false;
+    // `Math.random` analog (JS `uf.OKa.RGa` L2471) for the `Gc.Pkb` tail's
+    // uniform `Aua` pick. The `Md.jL` roulette uses the `Da.pg` stream
+    // (`next01`); the final uniform pick uses `Math.random`, a DIFFERENT
+    // stream. Injected by the fight (`FightController::math_random01`); when
+    // unset the controller falls back to `next01` (documented divergence).
+    std::function<float()> math_random;
 };
 
 // The AI controller (JS `de`).
@@ -452,6 +459,10 @@ public:
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
     // move name, or "" when no move should start this frame.
     std::string update(const AiFightState& st);
+    // The tactic's `type` (JS `Md.getType` L642): 0=Normal, 1=Random,
+    // 2=Tabular. `wd.Anb` (L499) dispatches on it: `type==1` -> `hJa`
+    // (the Random path), `type==2` -> `Ykb` (the `de.ia` / Tabular path).
+    int tactic_type() const { return tactic_ != nullptr ? tactic_->type : 0; }
     // Seeds the owned DaPrng (JS `Da.IT`/`L.web` L67-68: `pg=new Rk(seed)`).
     // Without an explicit roll01 override, ALL draws (QJa, dqb, jL, slots)
     // come from this stream in JS call order.
@@ -704,6 +715,31 @@ private:
     // (= two `B0()` words) on the shared `Da.pg`; no draw when the enemy is
     // not playing (`b.Pe == false` -> `Fl == -1`).
     int j0_draw() const;
+
+    // JS `wd.hJa` (L500) - the Random-tactic decision (`Anb` L499
+    // `a.type==1`). Sets `Vb.data=null` and calls `ca.Vgb` -> `Gc.Vkb`
+    // (`Ih(2,a,!0)`), which makes the fighter's `Gc.EZa` candidates carry
+    // `eb=true` so the per-frame `Gc.DK(c=false)` tail calls `Pkb` (the
+    // tactic roulette) instead of the uniform key tail. Returns the chosen
+    // move name, or "" for no decision. `hJa`'s `tG`/`wN` countdown is
+    // modelled here (`tG_`/`wN_`), reset when the fighter starts a move or
+    // goes idle (`wd.x3` -> `Mka(0)`).
+    std::string update_random(const AiFightState& st);
+    // JS `jc.jJ` (L697) + `vm.ccb` (L749): the first `<Keys>` condition's
+    // key-combo signature (`vm.xn`) of a move's condition tree, used by
+    // `Pkb`'s tail to group the mirror/direction variants of the roulette
+    // pick before the final `Aua` max-priority pick.
+    static std::string keys_signature(const MoveDef& m);
+    // `tG`/`wN` (JS `wd.tG`/`wd.wN`, L491/L500) for the `hJa` countdown.
+    int tG_ = -1;
+    bool wN_ = false;
+    const MoveDef* last_random_move_ = nullptr;
+    // `Math.random` analog for the `Pkb` tail's uniform pick (`uf.sja`).
+    std::function<float()> math_random_fn_;
+    float math_roll() const {
+        if (math_random_fn_) return math_random_fn_();
+        return roll01();
+    }
 };
 
 } // namespace sf2::scene

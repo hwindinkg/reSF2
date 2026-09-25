@@ -1234,6 +1234,24 @@ std::string AiController::update(const AiFightState& st) {
     // An injected source overrides the owned DaPrng stream (ai_demo uses
     // mt19937); otherwise ALL draws come from `prng_` in JS call order.
     roll01_fn_ = st.roll01;
+    math_random_fn_ = st.math_random;
+
+    // JS `wd.Anb` (L499): `a.type==1 ? this.hJa() : a.type==2 && this.Ykb()`
+    // - a `Type=="Random"` tactic (`Md.getType` L642 `"Random"->1`) drives
+    // the `hJa` path (Vkb/`Pkb`), NOT `de.ia`. The `NoTables` Beginner
+    // template has no `.dat` tables, so the old unconditional `de.ia` pass
+    // found nothing and the enemy never moved.
+    if (tactic_->type == 1) {
+        // `wd.x3` (L508) `a.Mka(0)` / `wd.Z2` (L522) `this.Mka(-1)`: a
+        // started animation (incl. the idle loop restart) arms the `hJa`
+        // countdown; nothing else does. The port observes the current-move
+        // pointer (a `nullptr` gap is the idle loop restart).
+        if (st.current_move == nullptr || st.current_move != last_random_move_) {
+            tG_ = 0;
+        }
+        last_random_move_ = st.current_move;
+        return update_random(st);
+    }
 
     // Snapshot the features (JS mQ L620).
     mq(st);
@@ -1384,6 +1402,150 @@ std::string AiController::update(const AiFightState& st) {
     }
     mW_ && (XW_ = false);
     return "";
+}
+
+// JS `jc.jJ` (L697) + `vm.ccb` (L749): the first `<Keys>` condition node of
+// a move's condition tree and its key-combo signature (`vm.xn`). `jc.zAa`
+// (L700-701) returns the first condition of type 4 (`vm` = `<Keys>`), walking
+// the `<Operator>` (type 8) groups depth-first. `Pkb`'s tail compares the
+// candidate's signature with the roulette pick's (`g.ccb(e.xn)` =
+// `this.xn.$ga(a)` = combo multiset equality, respecting `Not`).
+std::string AiController::keys_signature(const MoveDef& m) {
+    std::vector<const Cond*> stack;
+    for (auto it = m.conditions.rbegin(); it != m.conditions.rend(); ++it) {
+        stack.push_back(&*it);
+    }
+    while (!stack.empty()) {
+        const Cond* c = stack.back();
+        stack.pop_back();
+        if (c->type == "Keys") return c->keys;
+        for (auto it = c->children.rbegin(); it != c->children.rend(); ++it) {
+            stack.push_back(&*it);
+        }
+    }
+    return "";
+}
+
+// JS `wd.hJa` (L500) - the Random-tactic decision. `Anb` (L499) calls it when
+// the tactic `type==1`. Its body:
+//   hJa(a=true){ if(a){ if(tG>0){tG--;return} tG==0&&(wN=!0,tG=-1);
+//                if(!wN)return; wN=!1 }
+//                Vb.data=null; ca.Ka().Vgb(Vb) }
+// `ca.Vgb` (L388) -> `Gc.Vkb` (L671) -> `Ih(2,Vb,!0)`: the next `Gc.DK(c=false)`
+// pass sees `eb=true` candidates and routes them through `Pkb` (L674-676):
+// the `M7.Wcb` mirror filter, the `va.Ts` `<Tactics><Conditions>` filter (via
+// `de.V1`, already inside `v1`), the `Md.jL` `<AnimationWeights>` roulette,
+// then the tail's `jJ/ccb` mirror grouping and `DK(a,d,!0)` max-`priority`
+// uniform pick (`uf.sja` = `Math.random`).
+std::string AiController::update_random(const AiFightState& st) {
+    // The `hJa` countdown (`tG`/`wN`).
+    if (tG_ > 0) {
+        --tG_;
+        return "";
+    }
+    if (tG_ == 0) {
+        wN_ = true;
+        tG_ = -1;
+    }
+    if (!wN_) return "";
+    wN_ = false;
+
+    // `de.jL` (L598) refreshes `iN` via `mQ` before the `Md.jL` roulette;
+    // the candidate condition pass reads the same feature set.
+    mq(st);
+
+    // `Gc.EZa` (L676): the event is `Ih(2,...)` = the type-2
+    // `<KeyPressed/>` slot. Candidates are MY OWN moves whose Events carry
+    // type 2 and whose conditions (`f.Yz(b,null,g)`, `v1`) pass; all carry
+    // `eb=true` (the `Vkb` event), so `DK(c=false)` puts them in `d`.
+    std::vector<const MoveDef*> cands;
+    if (st.my_moves != nullptr) {
+        for (const MoveDef* m : *st.my_moves) {
+            if (m == nullptr || !m->has_event("KeyPressed")) continue;
+            if (!v1(*m, st)) continue;
+            cands.push_back(m);
+        }
+    }
+    if (cands.empty()) {
+        fk_ = -1;
+        return "";
+    }
+
+    // `Pkb` (L674-675): drop `f` when any OTHER candidate's name is in
+    // `f.animation.M7.$Q` (`g.Wcb(l.animation)` false) - `f` has a
+    // higher-priority mirror superior also present.
+    std::vector<const MoveDef*> keep;
+    keep.reserve(cands.size());
+    for (std::size_t i = 0; i < cands.size(); ++i) {
+        const MoveDef* f = cands[i];
+        bool ok = true;
+        for (std::size_t k = 0; k < cands.size(); ++k) {
+            if (k == i) continue;
+            if (std::find(f->mirror_exclusive.begin(),
+                          f->mirror_exclusive.end(),
+                          cands[k]->name) != f->mirror_exclusive.end()) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) keep.push_back(f);
+    }
+    if (keep.empty()) {
+        fk_ = -1;
+        return "";
+    }
+
+    // `Md.jL` (L639-640): the weighted roulette over the surviving candidates
+    // (`iCa` matches the `<AnimationWeights>` name, falling through to the
+    // unnamed `<Animation Base=..>` default). Draws the `Da.pg` stream.
+    std::vector<AiCandidate> rou;
+    rou.reserve(keep.size());
+    for (const MoveDef* m : keep) rou.push_back({m->name, 0});
+    const int ci = pick(rou);
+    if (ci < 0) {
+        fk_ = -1;
+        return "";
+    }
+    const MoveDef* chosen = keep[static_cast<std::size_t>(ci)];
+
+    // `Pkb` tail (L675-676): keep the candidates whose `jJ().xn` matches the
+    // chosen's (`g.ccb(e.xn)`); a null `jJ` on either side pushes
+    // unconditionally. Then `DK(a,d,!0)` takes the max-`priority` (`Aua`,
+    // non-`Rha`) group and picks uniformly (`uf.sja` = `Math.random`).
+    const std::string sig = keys_signature(*chosen);
+    std::vector<const MoveDef*> d;
+    d.reserve(keep.size());
+    for (const MoveDef* m : keep) {
+        const std::string s = keys_signature(*m);
+        if (sig.empty() || s.empty() || s == sig) d.push_back(m);
+    }
+    std::vector<const MoveDef*> f;
+    for (const MoveDef* m : d) {
+        if (m->no_animation) continue;  // `Rha` -> the `g` group (unused)
+        const int ap = m->priority;
+        const int bp = f.empty() ? 0 : f.front()->priority;
+        if (ap >= bp) {
+            if (ap > bp) f.clear();
+            f.push_back(m);
+        }
+    }
+    if (f.empty()) {
+        fk_ = -1;
+        return "";
+    }
+    std::size_t idx = 0;
+    if (f.size() > 1) {
+        float r = math_roll();
+        if (r < 0.0f) r = 0.0f;
+        if (r >= 1.0f) r = 0.9999999f;
+        idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
+        if (idx >= f.size()) idx = f.size() - 1;
+    }
+    dbg_.branch = "random/hJa";
+    dbg_.fk = 6;  // the `<AnimationWeights>` stage (`Md.jL`)
+    dbg_.wb = static_cast<int>(f.size());
+    fk_ = 6;
+    return f[idx]->name;
 }
 
 } // namespace sf2::scene
