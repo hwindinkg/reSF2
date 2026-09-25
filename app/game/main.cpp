@@ -1402,6 +1402,12 @@ static void install_watchdog(int seconds) {
     }).detach();
 }
 
+// [dojo-cam-probe] Runtime probe for the dojo hub camera `Io`/zoom/factor
+// decomposition (printed from DojoScreen::render_impl when armed). Gated so a
+// normal launch never prints it. `--dojo-cam-probe` also implies hidden+watchdog
+// (any flag does), so it can never leave a visible window behind.
+bool g_dojo_cam_probe = false;
+
 int main(int argc, char** argv) {
     std::string res_root = "reference/www/res";
     std::string save_path = "reference/saves/save.xml";
@@ -1546,6 +1552,10 @@ int main(int argc, char** argv) {
             profile_avatar_probe = true;
         } else if (arg == "--fidelity-tour") {
             fidelity_tour = true;
+        } else if (arg == "--dojo-cam-probe") {
+            // Prints the hub camera decomposition once per ready frame (see
+            // screens.cpp). Combine with `--headless N` to exit deterministically.
+            g_dojo_cam_probe = true;
         } else if (arg == "--quest-verify") {
             quest_verify = true;
         } else if (arg == "--changetab-probe") {

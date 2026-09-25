@@ -58,6 +58,10 @@
 #include "texture.hpp"
 #include "xml_doc.hpp"
 
+// [dojo-cam-probe] Armed by `--dojo-cam-probe` (defined in app/game/main.cpp).
+// Prints the hub camera `Io`/zoom/factor decomposition once per ready frame.
+extern bool g_dojo_cam_probe;
+
 namespace sf2::app {
 
 namespace {
@@ -6592,6 +6596,7 @@ void DojoScreen::render_impl(App& app) {
         // needed — not modelled.
         float focus_x = -1.0f;
         float fighter_span = -1.0f;
+        float probe_player_x = 0.0f, probe_enemy_x = 0.0f;  // [dojo-cam-probe]
         {
             // JS `Ut.Al` (L826) recomputes `Io = Lb.width/2 - a.x` EVERY
             // frame from `a` = `ql`'s `this.Go.ma` (the fighter midpoint, fed
@@ -6604,20 +6609,27 @@ void DojoScreen::render_impl(App& app) {
             // same space `default_camera`'s focus uses.
             float player_x = assets.dojo.player_spawn_x();
             float enemy_x = assets.dojo.enemy_spawn_x();
-            if (dojo_fight_ != nullptr) {
-                const float pw = dojo_fight_->player().fighter.world_x();
-                const float ew = dojo_fight_->enemy().fighter.world_x();
-                // Guard the unassigned-anchor case (both zero) the old
-                // `sample`-only path hit; the live controller writes the
-                // spawns via `set_world_pos` on build.
-                if (pw != 0.0f || ew != 0.0f) {
-                    player_x = pw;
-                    enemy_x = ew;
-                }
-            }
+            // Hub framing is the SPAWN-anchored CoM midpoint: `kHubFocusDelta`
+            // is exactly `831.5 - 800` (the spawn midpoint -> the oracle
+            // focus 800 -> Io 180). `Fighter::world_x()` must NOT feed this:
+            // the probe (`--dojo-cam-probe`) measured the hub viewer's fighter
+            // container x DRIFTING 695.3 -> 712.5 over the first frames (the
+            // `FightNone` idle clip's root motion moves the container), which
+            // panned the whole static hub ~16px left at capture. The oracle hub
+            // camera is static Io=180, so the focus is the anchored spawn CoM.
             focus_x = (player_x + enemy_x) * 0.5f;
             fighter_span = std::fabs(enemy_x - player_x);
+            // The `arrow` marker still tracks the LIVE player (JS `Ut.kyb`
+            // L825 reads `c.x`), matching the drawn figure.
             hub_player_loc_x = player_x;
+            if (dojo_fight_ != nullptr) {
+                const float pw = dojo_fight_->player().fighter.world_x();
+                if (pw != 0.0f) {
+                    hub_player_loc_x = pw;
+                }
+            }
+            probe_player_x = player_x;
+            probe_enemy_x = enemy_x;
         }
         // Hub framing correction vs the oracle `dojo_hub`/`dojo_menu_open`:
         // the JS `Ut.Al` focus is the raw fighter midpoint (`wd.mea(Rw,pF)`,
@@ -6630,10 +6642,65 @@ void DojoScreen::render_impl(App& app) {
         // oracle frame. OPEN: whether the residual is a model-root vs
         // container-position difference or the effective `arena_w` is not
         // statically traced (core/scene is out of this stream's scope).
+        const float probe_focus_raw = focus_x;
         constexpr float kHubFocusDelta = -31.5f;
         focus_x += kHubFocusDelta;
         assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
         have_hub_cam = true;
+        // [dojo-cam-probe] Decompose the hub camera: the arena geometry, the
+        // raw/final focus, the live camera translate+zoom, and one unambiguous
+        // Factor-1 static (the left lamp) projected through the SAME transform
+        // the renderer uses. `io_eff` is solved back out of the lamp's screen x
+        // so the 180 -> 167.5 deficit can be localised (focus feed vs factor vs
+        // effective arena_w). Capped to a few frames to show settling.
+        if (g_dojo_cam_probe) {
+            static int probe_n = 0;
+            if (probe_n < 4) {
+                float lamp_x = 0.0f, lamp_factor = 0.0f, lamp_ls = 0.0f, lamp_sx = 0.0f;
+                for (const auto& L : assets.dojo.layers()) {
+                    for (const auto& sp : L->sprites) {
+                        if (sp && sp->texture_name == "_0009_lamp_left") {
+                            lamp_x = sp->transform.x;
+                            lamp_factor = L->factor;
+                            lamp_ls = (L->type == 2 || L->scaling) ? hub_cam.layer_zoom
+                                                                   : 1.0f;
+                            lamp_sx = hub_cam.world_to_screen_x(lamp_x * lamp_ls,
+                                                                lamp_factor);
+                        }
+                    }
+                }
+                const float oracle_lamp_x = 335.4f;
+                const float io_eff =
+                    lamp_factor != 0.0f
+                        ? ((lamp_sx - hub_cam.view_w * 0.5f) / hub_cam.zoom +
+                           hub_cam.center_x - lamp_x) /
+                              lamp_factor
+                        : 0.0f;
+                std::fprintf(
+                    stdout,
+                    "[dojoprobe] n=%d arena_w=%.1f arena_h=%.1f "
+                    "player_x=%.3f enemy_x=%.3f focus_raw=%.3f focus_final=%.3f "
+                    "arena_center_x=%.4f\n",
+                    probe_n, assets.dojo.arena_width(), assets.dojo.arena_height(),
+                    probe_player_x, probe_enemy_x, probe_focus_raw, focus_x,
+                    hub_cam.arena_center_x);
+                std::fprintf(
+                    stdout,
+                    "[dojoprobe] n=%d cam center_x=%.4f center_y=%.4f zoom=%.6f "
+                    "layer_zoom=%.6f view_w=%.1f view_h=%.1f\n",
+                    probe_n, hub_cam.center_x, hub_cam.center_y, hub_cam.zoom,
+                    hub_cam.layer_zoom, hub_cam.view_w, hub_cam.view_h);
+                std::fprintf(
+                    stdout,
+                    "[dojoprobe] n=%d lamp world_x=%.3f factor=%.3f "
+                    "layer_scale=%.3f screen_x=%.4f io_eff=%.4f "
+                    "oracle_x=%.1f delta_px=%.2f\n",
+                    probe_n, lamp_x, lamp_factor, lamp_ls, lamp_sx, io_eff,
+                    oracle_lamp_x, lamp_sx - oracle_lamp_x);
+                std::fflush(stdout);
+                ++probe_n;
+            }
+        }
         assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
