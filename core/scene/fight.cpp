@@ -2950,12 +2950,22 @@ void FightController::apply_round_result(round_result result, const FightFighter
     player_.kh = true;
     enemy_.kh = true;
 
-    // JS `Onb` (L411) FIRST statement: `this.Ta.XF(!1)` — hide the whole
-    // 3-D view (the fighters + the location draw) for the round transition.
-    // It stays hidden through `ZK()`/`NA()`/`Z2()` (the round-reset
-    // reposition) until `FNa` (L409) re-shows it, so the reset never draws a
-    // visible teleport. The HUD (the ROUND/K.O. plate + bars) keeps drawing.
-    set_scene_visible(false);
+    // Battle end: the winner reached `round.eL` (Rounds) — JS `Onb` (L411)
+    // `a = wo.nB.ng >= round.eL`. Computed here (before the visibility gate)
+    // because `Onb` chooses the `XF(!1)` branch by `a`.
+    const bool battle_end = w.rounds_won >= round_.length;
+
+    // JS `Onb` (L411): `this.Ta.XF(!1)` runs ONLY in the round-transition
+    // branches — `(!a&&c)||(a&&b)` (the mode-series advance) and the trailing
+    // `else` (the next round). The battle-end branch (`a ? this.bea(...)`,
+    // L413) NEVER hides the view (`bea` has no `XF`), so the arena stays drawn
+    // behind the `kk` results dialog. Hiding unconditionally here made the
+    // Results screen render on black. It stays hidden through `ZK()`/`NA()`/
+    // `Z2()` (the round-reset reposition) until `FNa` (L409) re-shows it, so
+    // the reset never draws a visible teleport. The HUD keeps drawing.
+    if (!battle_end) {
+        set_scene_visible(false);
+    }
 
     // The K.O. finish plate (JS `Cr.GZ` L2024, type 6/7, `fu(1.166)`).
     // `GZ` has no `ca.vhb` (L410) case, so its expiry does NOT dispatch —
@@ -2973,9 +2983,6 @@ void FightController::apply_round_result(round_result result, const FightFighter
     enter_end_stance();
     history_.push_back(oc);
 
-    // Battle end: the winner reached `round.eL` (Rounds) — JS Onb
-    // `a = wo.nB.ng >= round.eL` -> `a ? bea(nB)`.
-    const bool battle_end = w.rounds_won >= round_.length;
     if (battle_end) {
         end_battle(w);
     } else if (cur_banner_ == banner_kind::ko) {
