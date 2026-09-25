@@ -126,6 +126,12 @@ public:
     // top and is activated.
     void push(std::unique_ptr<Screen> screen);
 
+    // Push with an explicit navigation source scene. The empty-stack boot
+    // edge needs this: JS mounts Preloader(0) -> Loader(2) -> Dojo(3), so the
+    // boot `ChangeTab` carries SceneFrom="Loader" (`wa.mp` L933 -> `v.qwa`),
+    // not the empty port stack's "" (None).
+    void push(std::unique_ptr<Screen> screen, const std::string& nav_from);
+
     // Pop the top screen (the JS `B` on the top state). When the stack
     // becomes empty the app stays on a blank screen.
     void pop();
@@ -151,6 +157,10 @@ public:
     App& app() const { return app_; }
 
 private:
+    // Shared push body (both overloads): activates the screen, pushes it and
+    // fires the navigation edge (`quest_nav`) with the given source scene.
+    void push_impl(std::unique_ptr<Screen> screen, const std::string& nav_from);
+
     App& app_;
     std::vector<std::unique_ptr<Screen>> stack_;
 };

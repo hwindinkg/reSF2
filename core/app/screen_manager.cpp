@@ -105,6 +105,19 @@ void ScreenManager::push(std::unique_ptr<Screen> screen) {
     if (screen == nullptr) {
         return;
     }
+    const std::string nav_from =
+        stack_.empty() ? std::string() : quest_scene_name(stack_.back()->id());
+    push_impl(std::move(screen), nav_from);
+}
+
+void ScreenManager::push(std::unique_ptr<Screen> screen, const std::string& nav_from) {
+    if (screen == nullptr) {
+        return;
+    }
+    push_impl(std::move(screen), nav_from);
+}
+
+void ScreenManager::push_impl(std::unique_ptr<Screen> screen, const std::string& nav_from) {
     // The JS transition (ae) deactivates the covered screen: when a new
     // screen is pushed, the previous top goes to the inactive "leaving"
     // state (Te(5)) and only the new top updates. The shell mirrors that
@@ -114,8 +127,6 @@ void ScreenManager::push(std::unique_ptr<Screen> screen) {
     }
     screen->set_state(kStateActive);
     const ScreenId pushed_id = screen->id();
-    const std::string nav_from =
-        stack_.empty() ? "" : quest_scene_name(stack_.back()->id());
     std::fprintf(stdout, "[screen] push %s (id=%d) — stack now %zu\n", screen->name().c_str(),
                  static_cast<int>(screen->id()), stack_.size() + 1);
     std::fflush(stdout);

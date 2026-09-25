@@ -772,16 +772,21 @@ void App::boot() {
     // boot overlay (JS `Rg` L1967 / `ad` L1969, PORT_AUDIT_UI §4.12); the
     // Dojo is pushed immediately so screen ids/inputs stay deterministic,
     // and the overlay is draw-only (skipped when headless).
-    std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3)\n");
-    std::fflush(stdout);
     boot_splash_total_ = kBootSplashFrames;
     boot_splash_frames_ = kBootSplashFrames;
-    screens_->push(make_screen(*screens_, kScreenDojo));
-    // Quest-engine boot events, in the JS order: the application start
-    // (`QUEST_EVENT_START_APPLICATION`, the `AttachScripts_*` quests attach
-    // their zone files here) precedes the session start (`v.uwb` ->
-    // QUEST_EVENT_SESSION, fired from the loader). The Dojo push above
-    // already fired ChangeTab + SceneLoaded for the boot edge.
+
+    // JS boot order, cited (`sf2.502f0946.js`): the Preloader's `Ev` modules
+    // run at 95% BEFORE any scene is mounted — `bp.start` (offset 596328 /
+    // `bp.g="243"`) raises `QUEST_EVENT_START_APPLICATION`, then `dp.start`
+    // (596700 / `dp.g="245"`) calls `v.owb(); v.uwb()` -> `ha.F().Sf(
+    // "QUEST_EVENT_SESSION")` (`v.uwb` offset 623231). Only AFTER both does
+    // the Loader mount the scene (`ad.load` 1014478 / `Zd.load` 946574), and
+    // that `wa.mp` ChangeTab (SceneFrom=Loader(2)) is the edge the shipped
+    // `tutorial_quests.xml` chain observes (StoryTutorialWelcome on a fresh
+    // NOT-END profile). The old order fired the Dojo ChangeTab FIRST and the
+    // session events after — the tutorial then only ever ran when a harness
+    // re-fired the Loader->Dojo edge (`set_fresh_tutorial`). This restores
+    // the JS-exact order: session start, then the scene edge.
     try {
         QuestJournal j;
         try {
@@ -792,6 +797,12 @@ void App::boot() {
         quest_engine().fire(*this, "SessionStart", j);
     } catch (const std::exception&) {
     }
+
+    std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3)\n");
+    std::fflush(stdout);
+    // The Loader->Dojo edge (`ad.load` by `TGa`): the logical source scene is
+    // Loader(2), never the empty boot stack's "" (None).
+    screens_->push(make_screen(*screens_, kScreenDojo), "Loader");
 }
 
 void App::set_fresh_tutorial(bool on) {
