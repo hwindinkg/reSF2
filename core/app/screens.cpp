@@ -9841,13 +9841,18 @@ void FightScreen::render_impl(App& app) {
     // the fight-start focus 831.5 -> Io = 148.5.
     camera.arena_center_x = arena_half - cam.center_x;
     ren.begin_frame(camera);
-    // [M2 — scene/camera visibility gate] JS `XF` (L370):
-    // `(Za.F().isVisible=a) ? this.aha=a : this.ia.visible(a)`. While the
-    // round transition is hidden (`Onb` L411 `XF(!1)` .. `FNa` L409
-    // `XF(!0)`) the whole 3-D view is skipped: the location layers, the
-    // fighters, the spawned children, the hit sparks/magic and the markers.
-    // Only the HUD below (`Ar`/`Sf`) still draws. The gate body keeps its
-    // original indentation so the change stays a surgical 2-line diff.
+    // [M2 — scene/camera visibility gate] JS `XF` (L370) ->
+    // `this.ia.visible(a)`: `Ut.visible` (L826) runs
+    // `this.Rf.go.setActive(a)` where `Rf = new tl` — the `tl` ctor (L842) is
+    // the FIGHTER/EFFECTS RenderContainer (`qh = new ev`, the ModelsViewer,
+    // plus the two `Xm` effect runners `Gq`/`Hq`). It hides ONLY that
+    // container; the LOCATION layers are attached separately (`tl.init` L843
+    // `a.hn.go.nd(this.go)`) and keep rendering. While the round transition is
+    // hidden (`Onb` L411 `XF(!1)` .. `FNa` L409 `XF(!0)`) the fighters, the
+    // spawned children, the hit sparks/magic and the markers are skipped; the
+    // location layers still draw (the `else` below), so the plate backdrop
+    // keeps the arena. Only the HUD (`Ar`/`Sf`) draws on top. The gate body
+    // keeps its original indentation so the change stays surgical.
     if (fight_->scene_visible()) {
     // [fix(render): arena layer order] The original game draws the fighters
     // INSIDE the ModelsViewer (Type=2) layer — background layers first, then
@@ -10197,6 +10202,22 @@ void FightScreen::render_impl(App& app) {
     // 728px spans y[-4,724]).
     draw_scene_letterbox(ren, camera);
     }  // [M2] end of the scene/camera visibility-gated 3-D draws
+    else {
+        // [fix(round-plate backdrop)] JS `XF(!1)` hides ONLY the `tl`
+        // fighter/effects RenderContainer (`Ut.visible` L826 ->
+        // `Rf.go.setActive(!1)`); the location layers stay drawn. The port
+        // gated the WHOLE 3-D draw, so the ROUND plate's `E.q1a` vertical
+        // gradient (`E.Eua` stops `#00000020/80/80/80/20`) composited over the
+        // opaque black clear — the user's "фон чёрный". Draw the location
+        // layers alone here (fighters/effects/sparks/magic/markers stay
+        // hidden) so the ROUND plate backdrop keeps the arena, like FIGHT.
+        const std::size_t fl = assets.fight_location.fighter_layer();
+        const std::size_t nl = assets.fight_location.layers().size();
+        assets.fight_location.render_layers(ren, camera, 0, fl);
+        if (fl != sf2::scene::LocationScene::npos) {
+            assets.fight_location.render_layers(ren, camera, fl + 1, nl);
+        }
+    }
 
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player
