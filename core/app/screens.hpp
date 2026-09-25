@@ -960,6 +960,27 @@ public:
     // immediate-resume fallback? Latch, cleared when the beat is not parked.
     bool block_preview_completed() const { return block_preview_completed_; }
 
+    // --- [probe] `--profile-avatar-probe` ---------------------------------
+    // The persistent `Pi` avatar (`vb.Ad` = `new Pi`, L2196): the player's
+    // worn hero (`Pi.Lb`) playing its idle clip. `avatar_bones` /
+    // `avatar_clip_frames` identify the model + clip; `avatar_frame` advances
+    // every update (the JS `Pi.ia` -> `Jc.ia()` pose), proving the avatar is
+    // ANIMATED rather than a static frame-0 backdrop.
+    int avatar_bones() const { return static_cast<int>(avatar_model_.bones.size()); }
+    int avatar_clip_frames() const {
+        return avatar_clip_ != nullptr ? static_cast<int>(avatar_clip_->frames.size()) : 0;
+    }
+    int avatar_frame() const { return avatar_frame_; }
+    std::string avatar_clip_name() const { return avatar_clip_name_; }
+    bool avatar_ready() const { return avatar_ok_; }
+    // The `$r.Op.pa` -> `Ad.kg` two-stage chain (`$r.mhb` L1150052 -> `vb.Zkb`
+    // L1131024 -> `vb.DK` L1131507 -> `Pi.kg` -> `vb.lS` L1131503).
+    // `trigger_show` performs the SAME `start_show` the VIEW click runs.
+    bool trigger_show(App& app);
+    bool show_chain_completed() const { return show_completed_; }
+    bool show_running() const { return show_vp_ != 0 || show_playing_; }
+    int show_move_frames() const { return show_move_frames_; }
+
     // The folded Moves tab row (JS Profile sub-view `qv`; same rule as the
     // deleted standalone MovesScreen — build_move_list_locks over the save's
     // owned items, display only).
@@ -1102,6 +1123,37 @@ private:
     bool block_preview_armed_ = false;  // armed once per parked beat
     bool block_preview_completed_ = false;  // the clip-end publisher fired
     bool arm_block_preview(App& app);   // build the body + the selected move clip
+
+    // --- the persistent `Pi` avatar (`vb.Ad` = `new Pi`, L2196) ------------
+    // JS `Pi.Lb` (Pi ctor L439, reached at L1130810 `this.Ad=new Pi`) = the
+    // player's worn hero: the `xc.cM` part list (`fighter_model_names` over the
+    // save's Skeleton/Weapon/Armor/Helm) merged, tinted the player colour
+    // (`p.o_.XCa()`, L1130810) and playing the `Pi` idle clip. `draw_pi_fighter`
+    // applies the `Pi` transform (scale 1.8, translate (offset, 412), local
+    // y -93).
+    std::unique_ptr<sf2::scene::Fighter> avatar_fighter_;
+    sf2::scene::Model avatar_model_;
+    const sf2::data::anim_clip* avatar_clip_ = nullptr;  // owned by FightAssets
+    std::string avatar_clip_name_;
+    int avatar_frame_ = 0;
+    bool avatar_tried_ = false;
+    bool avatar_ok_ = false;
+    bool ensure_avatar(App& app);   // build the player's hero once (lazy)
+
+    // The two-stage Show chain `$r.Op.pa` -> `Ad.kg` (`vb.Zkb`/`DK`/`lS`).
+    // `show_vp_` = JS `Vp` (0 idle / 2 fade-out-then-play / 1 fade-in);
+    // `show_stored_` = `q6` (the move stored by `Zkb`); `show_playing_` = `wga`
+    // (the move is on `Ad`); `show_lesson_` = the playback was armed by the
+    // parked lesson (so its end resumes the lesson instead of the UI fade);
+    // `show_completed_` latches the chain end for the probe.
+    bool start_show(App& app);   // `$r.mhb` -> `vb.Zkb` (store move, Vp=2)
+    int show_vp_ = 0;
+    float show_t_ = 0.0f;        // `UL`
+    std::string show_stored_;
+    bool show_playing_ = false;
+    bool show_lesson_ = false;
+    bool show_completed_ = false;
+    int show_move_frames_ = 0;
 
     // `uk` cell hit rects captured during render (so update_impl hit-tests
     // the SAME wrapping layout the renderer produced). `index` = perk_rows_.

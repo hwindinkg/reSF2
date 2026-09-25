@@ -1434,6 +1434,10 @@ int main(int argc, char** argv) {
     // --tutorial-showblock-probe: park a synthetic beat-4 gate and assert the
     // EquipmentScreen profile-avatar animation END resumes it (JS `Fo` L1126).
     bool tutorial_showblock_probe = false;
+    // --profile-avatar-probe: the persistent `Pi` profile avatar (the player's
+    // worn hero model + its idle animation/pose) + the `$r.Op.pa` -> `Ad.kg`
+    // two-stage Show chain (VIEW button -> move playback -> UI restore).
+    bool profile_avatar_probe = false;
     bool replay_mode = false;
     bool verify_input = false;
     bool fx_probe = false;  // --fx-probe: targeted FX-bus self-check (no OS input)
@@ -1537,6 +1541,8 @@ int main(int argc, char** argv) {
             tutorial_real_verify = true;
         } else if (arg == "--tutorial-showblock-probe") {
             tutorial_showblock_probe = true;
+        } else if (arg == "--profile-avatar-probe") {
+            profile_avatar_probe = true;
         } else if (arg == "--fidelity-tour") {
             fidelity_tour = true;
         } else if (arg == "--quest-verify") {
@@ -2536,6 +2542,58 @@ int main(int argc, char** argv) {
         std::fflush(stdout);
         app.shutdown();
         return (selfcheck_ok && census_ok) ? 0 : 1;
+    } else if (profile_avatar_probe) {
+        // --- profile-avatar probe: the `Pi` model + animation/pose -----------
+        // JS `vb.Ad = new Pi` (sf2.502f0946.js L1130810): the profile avatar is
+        // the player's worn hero (`Pi.Lb`) playing its idle clip (`Pi.ia` ->
+        // `Jc.ia()`); `$r.Op.pa` (L1150052) -> `vb.Zkb` (L1131024) -> `vb.DK`
+        // (L1131507) plays the selected move on `Ad`, and `Ad.kg` (L1131503
+        // `lS`) restores the UI. HIDDEN window (RULE 0), no OS input.
+        glfwHideWindow(app.renderer().window());
+        app.set_auto_attack(false);
+        app.set_headless_frames(1);
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        app.run_one_frame();
+        auto* av = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        if (av == nullptr) {
+            std::fprintf(stdout, "[avatarprobe] FAIL: no Profile screen on top\n");
+            std::fflush(stdout);
+            app.shutdown();
+            return 1;
+        }
+        av->select_tab(1, "");   // the folded Moves tab (the `$r` panel lives here)
+        for (int i = 0; i < 8; ++i) app.run_one_frame();
+        const int bones = av->avatar_bones();
+        const int clip_frames = av->avatar_clip_frames();
+        const int f0 = av->avatar_frame();
+        for (int i = 0; i < 20; ++i) app.run_one_frame();
+        const int f1 = av->avatar_frame();
+        const bool model_ok = bones > 0 && clip_frames > 0;
+        const bool animated = clip_frames > 1 && f1 != f0;
+        std::fprintf(stdout,
+                     "[avatarprobe] model=%s bones=%d clip=%s frames=%d pose f%d->f%d "
+                     "animated=%d\n",
+                     model_ok ? "PLAYER-HERO" : "MISSING", bones,
+                     av->avatar_clip_name().c_str(), clip_frames, f0, f1, animated ? 1 : 0);
+        std::fflush(stdout);
+        // `$r.Op.pa` -> `Ad.kg`: the VIEW button chain.
+        const bool started = av->trigger_show(app);
+        bool saw_run = false, saw_done = false;
+        int frames = 0;
+        for (; frames < 1200; ++frames) {
+            app.run_one_frame();
+            if (av->show_running()) saw_run = true;
+            if (av->show_chain_completed()) { saw_done = true; break; }
+        }
+        const bool ok = model_ok && animated && started && saw_run && saw_done;
+        std::fprintf(stdout,
+                     "[avatarprobe] %s show started=%d ran=%d done=%d move_frames=%d "
+                     "frames=%d\n",
+                     ok ? "PASS" : "FAIL", started ? 1 : 0, saw_run ? 1 : 0,
+                     saw_done ? 1 : 0, av->show_move_frames(), frames);
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
     } else if (tutorial_showblock_probe) {
         // --- [tutorial beat 4] `StoryTutorialShowBlock` avatar-anim-end -------
         // The JS `Fo` (sf2.502f0946.js L1126) resumes the parked lesson on the

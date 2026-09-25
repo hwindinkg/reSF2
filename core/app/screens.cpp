@@ -13675,6 +13675,68 @@ void EquipmentScreen::achiev_claim(int index) {
     }
 }
 
+// --- the persistent `Pi` avatar (`vb.Ad` = `new Pi`, L2196) ----------------
+// JS `vb.ZWa` (L1130810) creates the avatar and `XOa(null, 4, I.yoa)` selects
+// the hero type; the model is the player's worn hero (`Pi.Lb`), tinted the
+// player colour (`a.Qs(p.o_.XCa())`). Built once, then `Pi.ia` -> `Jc.ia()`
+// advances its idle clip every update.
+bool EquipmentScreen::ensure_avatar(App& app) {
+    if (!avatar_tried_) {
+        avatar_tried_ = true;
+        if (!app.has_fight_assets()) return false;
+        FightAssets& assets = app.fight_assets();
+        std::vector<std::string> names;
+        try {
+            const WarriorSave w = app.save().load();
+            names = {w.skeleton, w.weapon, w.armor, w.helm};
+        } catch (const std::exception&) {
+        }
+        const std::vector<std::string> model_names = fighter_model_names(app, names);
+        if (!model_names.empty() && !model_names[0].empty()) {
+            avatar_model_ = assets.merge_names(model_names);
+        }
+        if (avatar_model_.bones.empty()) avatar_model_ = assets.merged;
+        const std::string idle =
+            find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+        const auto it = idle.empty() ? assets.clips.end() : assets.clips.find(idle);
+        if (!avatar_model_.bones.empty() && it != assets.clips.end() &&
+            !it->second.frames.empty()) {
+            avatar_fighter_ = std::make_unique<sf2::scene::Fighter>();
+            avatar_fighter_->set_model(avatar_model_);
+            avatar_fighter_->set_color(assets.dojo.root_color());  // `p.o_.XCa()`
+            avatar_clip_ = &it->second;
+            avatar_clip_name_ = it->first;
+            avatar_frame_ = 0;
+            avatar_ok_ = true;
+            std::fprintf(stdout,
+                         "[profile] Pi avatar: model %zu bones, idle clip %s (%zu frames)\n",
+                         avatar_model_.bones.size(), avatar_clip_name_.c_str(),
+                         avatar_clip_->frames.size());
+            std::fflush(stdout);
+        }
+    }
+    return avatar_ok_;
+}
+
+// `$r.mhb` (L1150052) -> `vb.Zkb` (L1131024): store the SELECTED move (`q6`)
+// and start the Show chain (`qab` hides the UI, `Vp=2`). Guarded exactly like
+// the JS (`this.Vp!=0 || this.wga`).
+bool EquipmentScreen::start_show(App& app) {
+    (void)app;
+    if (show_vp_ != 0 || show_playing_) return false;
+    show_stored_ = shown_move();
+    if (show_stored_.empty()) return false;
+    show_vp_ = 2;
+    show_t_ = 0.0f;
+    show_completed_ = false;
+    std::fprintf(stdout, "[profile] profile_BtnShow clicked -> Show %s\n",
+                 show_stored_.c_str());
+    std::fflush(stdout);
+    return true;
+}
+
+bool EquipmentScreen::trigger_show(App& app) { return start_show(app); }
+
 // [tutorial beat 4] Build the profile avatar's `Pi` move-preview: the save's
 // worn body + the SELECTED Moves-tab clip (JS `Fo.rF(1,..)` L1126 selects the
 // hero and the `$r` panel's move, `Lc` L2234). Returns false when nothing
@@ -13734,52 +13796,101 @@ bool EquipmentScreen::arm_block_preview(App& app) {
 }
 
 void EquipmentScreen::update_impl(float dt) {
-    (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
     // screen's input (the Profile tab strip included).
     if (quest_modal_consume(app())) return;
-    // [tutorial beat 4] `StoryTutorialShowBlock` (JS `Fo` L1126): the profile
-    // avatar model plays the selected move; the lesson resumes on the model's
-    // animation END (`Ad.kg` -> `oHa` -> `Cxa`). Parked-only; the JS
-    // `aDa()==null` branch resumes immediately.
+    // The `Pi` avatar (`vb.Ad`, L2196) idle animation (`Pi.ia` -> `Jc.ia()`):
+    // advance the idle clip each frame UNLESS the Show preview owns the model.
+    ensure_avatar(app());
+    if (avatar_ok_ && avatar_clip_ != nullptr && !avatar_clip_->frames.empty() &&
+        !block_preview_active_) {
+        avatar_frame_ = (avatar_frame_ + 1) % static_cast<int>(avatar_clip_->frames.size());
+    }
+    // [Show chain] `$r.Op.pa` -> `Ad.kg` (JS `$r.mhb` L1150052 -> `vb.Zkb`
+    // L1131024 -> `vb.DK` L1131507 -> `Pi.kg` -> `vb.lS` L1131503): the VIEW
+    // button stores the selected move (`q6`) and hides the UI (`Vp=2`); after
+    // the 0.5s fade (`vb.aa` L1129721 case 2) `DK()` plays it on `Ad`; the
+    // `Ad.kg` animation END resets `Ad` and fades the UI back (`Vp=1` ->
+    // `kvb`). `--tutorial-showblock-probe`: the parked lesson (`Fo` L1126)
+    // reuses the SAME `Ad` playback and resumes on its end.
     {
+        constexpr float kShowFade = 0.5f;   // `vb.aa`: `this.UL/.5` L1129721
         auto& q = app().quest_engine();
-        if (q.tutorial_gate_beat() != 4) {
-            block_preview_armed_ = false;
-            block_preview_active_ = false;
-            block_preview_fighter_.reset();
-            block_preview_clip_ = nullptr;
-            block_preview_frame_ = 0;
-            block_preview_completed_ = false;
-        } else {
-            if (!block_preview_armed_) {
-                block_preview_armed_ = true;
+        const bool lesson = q.tutorial_gate_beat() == 4;
+        if (show_vp_ == 2) {   // `aa` case 2: fade out, then `DK()`
+            show_t_ += dt;
+            if (show_t_ >= kShowFade) {
+                show_vp_ = 0;
+                show_lesson_ = false;
                 if (!arm_block_preview(app())) {
-                    std::fprintf(stdout,
-                                 "[profile] ShowBlock: no avatar model/clip -> "
-                                 "immediate resume (`aDa()==null`)\n");
-                    std::fflush(stdout);
-                    q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
-                }
-            }
-            if (block_preview_active_ && block_preview_clip_ != nullptr &&
-                !block_preview_clip_->frames.empty()) {
-                if (block_preview_frame_ + 1 <
-                    static_cast<int>(block_preview_clip_->frames.size())) {
-                    ++block_preview_frame_;
+                    // `Ad.DK` resolved no clip -> nothing to play; fade back.
+                    show_vp_ = 1;
+                    show_t_ = 0.0f;
                 } else {
-                    // The `Pi` model's animation END (`Ad.kg` L1126) resumes the
-                    // parked lesson (`oHa` -> `Cxa` -> `sa()`).
+                    show_playing_ = true;
+                    show_move_frames_ = static_cast<int>(block_preview_clip_->frames.size());
+                    std::fprintf(stdout,
+                                 "[profile] profile_BtnShow -> Ad plays %s (%d frames)\n",
+                                 show_stored_.c_str(), show_move_frames_);
+                    std::fflush(stdout);
+                }
+                show_stored_.clear();
+            }
+        } else if (show_vp_ == 1) {   // `aa` case 1: fade the UI back in
+            show_t_ += dt;
+            if (show_t_ >= kShowFade) {
+                show_vp_ = 0;
+                show_completed_ = true;
+                std::fprintf(stdout,
+                             "[profile] profile_BtnShow -> Ad.kg end, UI restored\n");
+                std::fflush(stdout);
+            }
+        }
+        if (!lesson) {
+            block_preview_armed_ = false;
+            // Do NOT drop the model while the Show playback owns it (`wga`).
+            if (!show_playing_) {
+                block_preview_active_ = false;
+                block_preview_fighter_.reset();
+                block_preview_clip_ = nullptr;
+                block_preview_frame_ = 0;
+                block_preview_completed_ = false;
+            }
+        } else if (!block_preview_armed_) {
+            block_preview_armed_ = true;
+            show_playing_ = false;
+            show_lesson_ = true;
+            if (!arm_block_preview(app())) {
+                std::fprintf(stdout,
+                             "[profile] ShowBlock: no avatar model/clip -> "
+                             "immediate resume (`aDa()==null`)\n");
+                std::fflush(stdout);
+                q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
+            }
+        }
+        if (block_preview_active_ && block_preview_clip_ != nullptr &&
+            !block_preview_clip_->frames.empty()) {
+            if (block_preview_frame_ + 1 <
+                static_cast<int>(block_preview_clip_->frames.size())) {
+                ++block_preview_frame_;
+            } else {
+                // The `Pi` model's animation END (`Ad.kg`).
+                block_preview_completed_ = true;
+                block_preview_active_ = false;
+                block_preview_fighter_.reset();
+                block_preview_clip_ = nullptr;
+                block_preview_frame_ = 0;
+                if (show_lesson_) {   // the parked lesson resumes (`oHa`->`Cxa`)
+                    show_lesson_ = false;
                     std::fprintf(stdout,
                                  "[profile] ShowBlock block anim-end -> lesson resumes\n");
                     std::fflush(stdout);
-                    block_preview_completed_ = true;
-                    block_preview_active_ = false;
-                    block_preview_fighter_.reset();
-                    block_preview_clip_ = nullptr;
-                    block_preview_frame_ = 0;
                     q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
+                } else if (show_playing_) {   // `lS` -> `kvb` (fade the UI back)
+                    show_playing_ = false;
+                    show_vp_ = 1;
+                    show_t_ = 0.0f;
                 }
             }
         }
@@ -13889,6 +14000,25 @@ void EquipmentScreen::update_impl(float dt) {
                 return;
             }
         }
+        // `$r.Op.pa` (L1150052): the right-panel `profile_BtnShow` button opens
+        // the Show chain (`vb.Zkb` -> `Ad` plays the selected move -> `Ad.kg`).
+        // Same rect the renderer draws (`$r.ba` L2234): `rp.width()*.72` x 46,
+        // centred at `(rp.J + rp.width()/2, rp.W - 70)`.
+        if (!move_rows_.empty()) {
+            const ProfileLayout cpl = profile_layout();
+            const ShopRect& rp = cpl.right_slot;
+            const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
+            const float bx2 = rp.J + rp.width() * 0.5f;
+            const float by2 = rp.W - 70.0f;
+            if (p.x >= bx2 - bw2 * 0.5f && p.x <= bx2 + bw2 * 0.5f &&
+                p.y >= by2 - bh2 * 0.5f && p.y <= by2 + bh2 * 0.5f) {
+                if (p.pressed) {
+                    sf2::audio::AudioEngine::instance().play("snd_click_1");
+                    start_show(app());
+                }
+                return;
+            }
+        }
     }
     // --- Tab 2 ACHIEVEMENTS: the cell reward button (`as.zhb` L2211 ->
     // `vb.exb` L2199 -> `yt.sca` L296 + money/bonus payout).
@@ -13918,23 +14048,36 @@ void EquipmentScreen::update_impl(float dt) {
 
 void EquipmentScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
+    // The `$r` Show chain hides the profile UI (`vb.qab` L1131112: `XB`/`kC`/
+    // `zh` off, `Vp=2`) and restores it after `Ad.kg` (`vb.kvb` L1131520).
+    const bool cinematic = show_vp_ != 0 || show_playing_;
     // --- Backdrop: the destination `dojo_shop` art (`Pi.Qa`, L439) ---------
     // JS `vb extends ma` (L2189): `this.Ad = new Pi` (L2196) and `Ea` calls
     // `this.Tya(this.Ad)` (L2195). `Pi` renders `Qa = R.$(E.get(752))` =
     // `locations/dojo_shop/bg.{image}` under `ma.Tya` (L1832) — a dedicated
     // destination background, NOT the dojo location layers.
-    draw_destination_backdrop(app, 0.6392156862745098f);  // JS `Z.Ena` (L2479)
+    // `Zkb` (L1131024) whitens `Qa` for the Show (`Qa.sf() = 1`); `lS`
+    // (L1131503) restores the shared `Z.Ena` scrim.
+    draw_destination_backdrop(app, cinematic ? 1.0f : 0.6392156862745098f);
     if (block_preview_active_ && block_preview_fighter_ != nullptr &&
         block_preview_clip_ != nullptr) {
         // JS `$r.Op.Vg(!0)` (L2234): the `Pi` avatar model plays the selected
-        // move (the parked `StoryTutorialShowBlock` lesson waits on its end).
+        // move (the `$r` Show or the parked lesson waits on its end).
         draw_pi_fighter(ren, *block_preview_fighter_, *block_preview_clip_,
                         block_preview_frame_);
+    } else if (ensure_avatar(app)) {
+        // The persistent `Pi` avatar (`vb.Ad` = `new Pi`, L2196): the player's
+        // worn hero playing its idle clip (`Pi.ia` -> `Jc.ia()` advances it in
+        // update_impl).
+        draw_pi_fighter(ren, *avatar_fighter_, *avatar_clip_, avatar_frame_);
     } else {
         draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
                                backdrop_fig_ok_, backdrop_idle_);
     }
     draw_destination_dim(ren);
+    // `qab` (L1131112): during the Show only the `Pi` avatar + bg are visible;
+    // the parchment chrome / side panels / tab strip are hidden until `kvb`.
+    if (cinematic) return;
 
     WarriorSave w;
     try {
