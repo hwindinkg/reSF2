@@ -6643,8 +6643,29 @@ void DojoScreen::render_impl(App& app) {
         // container-position difference or the effective `arena_w` is not
         // statically traced (core/scene is out of this stream's scope).
         const float probe_focus_raw = focus_x;
-        constexpr float kHubFocusDelta = -31.5f;
-        focus_x += kHubFocusDelta;
+        // JS `Ut.Al` (L826) feeds `Io = Lb.width/2 - Go.ma` from the LIVE
+        // smoothed focus EVERY frame (`ql`'s per-frame `c3a` ->
+        // `ia.Al(this.Go.ma)`), and `Ut.Al` L827 applies it to every layer as
+        // `b.Wrb(this.Io*b.bp)` (`bp` = the layer `Factor`). The hub's own
+        // `FightNone` controller already reproduces `Go.ma` (`tyb`/`dZa` ->
+        // `framing_sya_impl`, this frame's live COM midpoint run through the
+        // exact JS spring), so read it back instead of the pinned spawn value:
+        // a constant focus kept `Io` constant, so the location layers never
+        // parallaxed while the fighters moved — the "static dojo background"
+        // regression (f4f86ecc).
+        // Rest calibration: the oracle `dojo_hub` frame inverts to `Io = 180`
+        // (`focus 800`). The settled live focus (the hub viewers' smoothed COM
+        // midpoint) is 848.79 for this location, so the delta that lands the
+        // settled rest on the oracle is `800 - 848.79 = -48.79` (the previous
+        // `-31.5` was calibrated against the spawn midpoint 831.5, which is NOT
+        // the live focus base — using it here panned the whole hub 17px left).
+        constexpr float kHubFocusDeltaLive = -48.79f;   // live smoothed-focus base -> 800
+        constexpr float kHubFocusDeltaSpawn = -31.5f;   // spawn-midpoint base -> 800
+        if (dojo_fight_ != nullptr) {
+            focus_x = dojo_fight_->camera().center_x + kHubFocusDeltaLive;
+        } else {
+            focus_x += kHubFocusDeltaSpawn;
+        }
         assets.dojo.default_camera(hub_cam, kViewW, kViewH, focus_x, fighter_span);
         have_hub_cam = true;
         // [dojo-cam-probe] Decompose the hub camera: the arena geometry, the
