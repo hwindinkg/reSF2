@@ -1146,7 +1146,21 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // this the old code pinned the model to the spawn y and dropped the clip's
     // vertical root travel (the "floating / twitching legs" report).
     render_offset_y_ = 0.0f;
-    if (move.align.has_align) {
+    // [FIX cross-fighter absolute align — JS `Te.Gub` L559] A `<Position
+    // Object="Animation"/>` (or `<Pivot Object="Animation"/>`) makes the align
+    // ABSOLUTE: `d = 0` and `e` is a controller `Fk` (a buffer->world origin),
+    // which `compute_align` now stores in full in `align_*`. The clip is thus
+    // placed directly in world space, so the extra render offset must be 0
+    // (the old stale value double-placed the throw victim ~960u off).
+    const bool align_absolute =
+        move.align.has_align && (move.align.pos_object == "Animation" ||
+                                 move.align.pivot_object == "Animation");
+    if (align_absolute) {
+        render_offset_ = 0.0f;
+        render_offset_y_ = 0.0f;
+        render_offset_valid_ = true;
+        align_pivot_u_ = -1;
+    } else if (move.align.has_align) {
         const int pv = model_.bone_by_name(move.align.pivot_part);
         const int an = model_.bone_by_name(fighter_pivot_bone());
         // [F1/F3] The `<Align><Pivot Part>` node the JS actually anchors on is
@@ -1871,6 +1885,7 @@ void Fighter::compute_align(const MoveDef& move) {
     // e/f/g = the Position object's position (JS `Gub` L559), in solver
     // (clip) space: `currentNode.ma` / `L7a(i).ma` are the posed positions.
     float ex = 0.0f, ey = 0.0f, ez = 0.0f;
+    int e_idx = -1;  // node `e` was read from (jk 1/4), for the world-space Fk
     auto posed = [&](int idx, float& ox, float& oy, float& oz) {
         if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
         if (sol_ma_.size() != n * 3) return;
@@ -1888,8 +1903,10 @@ void Fighter::compute_align(const MoveDef& move) {
             if (j >= 0) pi = j;
         }
         posed(pi, ex, ey, ez);
+        e_idx = pi;
     } else if (jk == 4) { // EObjectPivot: posed pivot node (`currentNode.ma`)
         posed(align_idx, ex, ey, ez);
+        e_idx = align_idx;
     } else if (jk == 2) { // EObjectAnimation: ANOTHER controller's `Fk`
         // JS `Gub` L559 `case "EObjectAnimation": g=c.Fk; e=g.x; f=g.y;
         // g=g.z;` where `c = this.BBa(a.b4)` (L563). `BBa` maps the resolved
@@ -1908,12 +1925,33 @@ void Fighter::compute_align(const MoveDef& move) {
     ex += f * al.shift_x;  // JS `e += this.hd()*a.dja`
     ey += al.shift_y;      // JS `f += a.eja`
 
-    // JS `c=this.Fk; c.x=e-d.x; c.y=f-d.y; c.z=g-d.z` — the RAW `Fk` vector,
-    // stored BEFORE the per-axis `Gla` selection so a cross-fighter align of
-    // the OTHER controller (jk == 2) reads it verbatim.
-    fk_x_ = ex - dx;
-    fk_y_ = ey - dy;
-    fk_z_ = ez - dz;
+    // [FIX cross-fighter Fk — JS `Te.Gub` L559] `e` (`L7a(i).ma` /
+    // `currentNode.ma`) is the POSED node in NODE space: `Te.eda` (L556)
+    // writes `ma = buffer + j8` every frame and each previous `Gla` shift
+    // already accumulated the buffer->world origin, so `Fk = e - d` is that
+    // origin, NOT a clip-local delta. The port stores the clip-local solver
+    // (`sol_ma_`) and places via `render_offset_`, so the world node is
+    // `(sol_ma_[i] - sol_ma_[anchor]) + world_*` — this is the value a
+    // cross-fighter `<Position Player="Enemy" Object="Animation"/>` reads as
+    // `e = opponent.Fk` (jk == 2 already carries a controller `Fk` = world).
+    float wx = ex, wy = ey, wz = ez;
+    if (jk != 2 && e_idx >= 0) {
+        const int anchor_w = model_.bone_by_name(fighter_pivot_bone());
+        if (anchor_w >= 0 && static_cast<std::size_t>(anchor_w) < n &&
+            sol_ma_.size() == n * 3) {
+            const std::size_t u = static_cast<std::size_t>(e_idx);
+            const std::size_t a = static_cast<std::size_t>(anchor_w);
+            wx = (sol_ma_[u * 3] - sol_ma_[a * 3]) + world_x_ + f * al.shift_x;
+            wy = (sol_ma_[u * 3 + 1] - sol_ma_[a * 3 + 1]) + world_y_ + al.shift_y;
+            wz = ez;
+        }
+    }
+    // JS `c=this.Fk; c.x=e-d.x; c.y=f-d.y; c.z=g-d.z` — the RAW `Fk` vector
+    // (buffer->world), stored BEFORE the per-axis `Gla` selection so a
+    // cross-fighter align of the OTHER controller (jk == 2) reads it verbatim.
+    fk_x_ = wx - dx;
+    fk_y_ = wy - dy;
+    fk_z_ = wz - dz;
 
     // `Gla` selects the per-axis component (X/Z here; `ShiftY` when Y is not
     // an align axis).
