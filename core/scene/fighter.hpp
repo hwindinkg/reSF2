@@ -485,6 +485,8 @@ public:
     // onto the thrower's clip-space origin. Set by the fight each round.
     void set_opponent(Fighter* o) { opponent_ = o; }
     const Fighter* opponent() const { return opponent_; }
+    // [probe] Throw diagnostics (--verify-place): dump the align/Fk/root state.
+    void debug_throw_probe(const char* tag) const;
     void set_world_pos(float x, float y) {
         world_x_ = x;
         world_y_ = y;

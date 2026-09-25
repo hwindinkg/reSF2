@@ -9104,6 +9104,13 @@ float FightScreen::enemy_world_x() const {
     return fight_ != nullptr ? fight_->enemy().fighter.world_x() : 0.0f;
 }
 
+// [probe] Throw diagnostics (--verify-place): the thrower + victim align/Fk.
+void FightScreen::debug_throw_probe(const char* tag) const {
+    if (fight_ == nullptr) return;
+    fight_->player().fighter.debug_throw_probe(tag);
+    fight_->enemy().fighter.debug_throw_probe(tag);
+}
+
 // [probe] The M2 round-transition hide flag (JS `Ta.XF` L370 -> the whole
 // 3-D view's `isVisible`) and the camera centre x. Read-only.
 bool FightScreen::scene_visible() const {

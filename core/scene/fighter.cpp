@@ -1048,6 +1048,36 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     clip_mirror_ = (enemy_x_ - world_x_) >= 0.0f ? 1 : -1;
     mirror_x_ = clip_mirror_ < 0;
     mirror_prepend_ = mirror_x_ && move.no_interp;
+    // [FIX clip mirror — JS `Ae.Wl` L704 -> `Vi.SBa` L10B] For a move whose
+    // `<SetDirection>` uses `Object="Wall"` (all `?V` throw-fall moves:
+    // `From Enemy Wall Back` -> `To Enemy Wall Front`, e.g. moves.xml
+    // ThrowThroughTheBackV), the JS sign is NOT `sign(enemy - me)`.
+    // `SBa` (L10B) = `sign(to.OQ - from.OQ)` with `OQ -> nt -> q9a` (L10B):
+    //   `q9a(a,b){ let c = pe==2 ? a.Mla : (pe==3 ? a.Nla : a.Wl);
+    //              return c>0==qga ? b.yu : b.zu }`
+    // where `qga = (Part=="Back")`, `yu`/`zu` are the arena left/right walls
+    // (`yu<zu`), and `Mla`/`Nla` are the resolved ENEMY/Parent controller's
+    // clip mirror (`hd()`; `a.Mla = d!=null ? d.hd() : 1` L10C). With
+    // `yu<zu` the Back->Front form returns `Mla` and the Front->Back form its
+    // negation. The port's unconditional Me->Enemy re-derivation gave +1 for
+    // the throw victim where the JS Wall form yields the THROWER's mirror
+    // (-1), mirroring the victim's clip the wrong way (victim slam ~728u off).
+    if (move.set_direction.has &&
+        (move.set_direction.from_obj == "Wall" ||
+         move.set_direction.to_obj == "Wall")) {
+        const std::string& who = (move.set_direction.from_obj == "Wall")
+                                     ? move.set_direction.from_player
+                                     : move.set_direction.to_player;
+        float cm = 1.0f;  // JS `c = x.hd()`, null controller -> 1
+        if (who == "Enemy" && opponent_ != nullptr) {
+            cm = (opponent_->clip_mirror_ < 0) ? -1.0f : 1.0f;
+        }
+        clip_mirror_ = (move.set_direction.from_part == "Back")
+                           ? (cm < 0.0f ? -1 : 1)
+                           : (cm < 0.0f ? 1 : -1);
+        mirror_x_ = clip_mirror_ < 0;
+        mirror_prepend_ = mirror_x_ && move.no_interp;
+    }
 
     // [F3] JS `Te.Peb` L560: `this.rw = Te.MYa(this.model, this.Ua, this.hd(),
     // this.jc.Kh(2).data)` — decided ONCE here (the buffer has already been
@@ -2747,6 +2777,28 @@ void StrikeMemory::round_factor(double factor) {
     };
     scale(mine_);
     scale(theirs_);
+}
+
+// [probe, authorised] --verify-place throw decomposition: the rendered root
+// (`world_x_` = JS `Fe().ma`), the controller `Fk` (the cross-fighter align
+// source), the per-move align shift/constant, the authored root offset `j8`,
+// and the clip-space anchor (`world - align - render_offset - j8`). Read-only.
+void Fighter::debug_throw_probe(const char* tag) const {
+    const char* mv = current_move_ != nullptr ? current_move_->name.c_str() : "-";
+    const float clip_anchor =
+        world_x_ - align_x_ - render_offset_ - j8_x_;
+    std::fprintf(stdout,
+                 "[fk] %-6s mv=%-24s wx=%9.2f wy=%8.2f fk=%9.2f "
+                 "align=(%8.2f,%7.2f,%7.2f) j8=%7.2f roff=(%8.2f,%7.2f) "
+                 "clip_anchor=%8.2f pivot_u=%d solver_world=%d facing=%+.0f "
+                 "cmirror=%+.0f sub=%d\n",
+                 tag, mv, world_x_, world_y_, fk_x_, align_x_, align_y_,
+                 align_z_, j8_x_, render_offset_, render_offset_y_,
+                 clip_anchor, align_pivot_u_, solver_world_ ? 1 : 0,
+                 static_cast<double>(facing_),
+                 static_cast<double>(clip_mirror_),
+                 subframe_);
+    std::fflush(stdout);
 }
 
 } // namespace sf2::scene

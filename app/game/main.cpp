@@ -5081,6 +5081,7 @@ int main(int argc, char** argv) {
                                      fs->enemy_world_x(), fs->enemy_facing());
                         for (int vf = 0; vf < 48; ++vf) {
                             app.run_one_frame();
+                            if (vf < 8 || (vf % 8) == 0) fs->debug_throw_probe("T");
                             std::fprintf(stdout,
                                          "[victim] t=%d thrower='%s' x=%.1f f=%+.0f "
                                          "| victim='%s' x=%.1f f=%+.0f\n",

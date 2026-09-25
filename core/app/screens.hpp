@@ -567,6 +567,9 @@ public:
     void place_fighters(float me_x, float enemy_x);
     float player_world_x() const;
     float enemy_world_x() const;
+    // [probe] Throw diagnostics (`--verify-place`): prints both fighters'
+    // align/Fk/root state for the throw-victim decomposition.
+    void debug_throw_probe(const char* tag) const;
     int player_move_frame() const;
     // [probe] Round-transition frame log hooks (JS `XF` L370): the whole 3-D
     // view's visibility (`camera_.visible`, the M2 round-transition hide) and

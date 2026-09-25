@@ -1166,6 +1166,33 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
             }
         }
 
+        // <SetDirection> (JS `Fa.hjb` L719 -> `Vi.Zca` L10B): own, else the
+        // first inherited template that carries one. `mh` = presence; From/To
+        // (Player/Object/Part) feed `SBa` (the clip-mirror `Ae.Wl`).
+        auto parse_set_direction = [](pugi::xml_node sd, SetDirectionDef& d) {
+            d.has = true;
+            if (pugi::xml_node f = sd.child("From")) {
+                if (pugi::xml_attribute p = f.attribute("Player")) d.from_player = p.value();
+                if (pugi::xml_attribute o = f.attribute("Object")) d.from_obj = o.value();
+                if (pugi::xml_attribute p = f.attribute("Part")) d.from_part = p.value();
+            }
+            if (pugi::xml_node t = sd.child("To")) {
+                if (pugi::xml_attribute p = t.attribute("Player")) d.to_player = p.value();
+                if (pugi::xml_attribute o = t.attribute("Object")) d.to_obj = o.value();
+                if (pugi::xml_attribute p = t.attribute("Part")) d.to_part = p.value();
+            }
+        };
+        if (pugi::xml_node sd = move.child("SetDirection")) {
+            parse_set_direction(sd, def.set_direction);
+        } else {
+            for (pugi::xml_node tpl_node : templates) {
+                if (pugi::xml_node sd = tpl_node.child("SetDirection")) {
+                    parse_set_direction(sd, def.set_direction);
+                    break;
+                }
+            }
+        }
+
         // <Velocity> (JS `Fa.ykb` L721-722): `b = move.A("Velocity")`, else
         // the first inherited template that has one. Fields X/Y/Z -> `wua`,
         // Ax/Ay/Az -> `Coa`, SaveVelocity -> `qta`.

@@ -500,6 +500,17 @@ struct Rotation {
     float shift_y = 0.0f;            // `ee.jx` (<Position ShiftY>)
 };
 
+// JS `Vi` (L10B): a move's `<SetDirection>` (`Ae.vj`; `mh` = presence,
+// `SBa` = the sign it resolves). The common `Me -> Enemy` node form reduces to
+// `sign(enemy - me)` (the port's unconditional re-derivation); the Wall form
+// (`Object="Wall"`) resolves against a controller's arena wall and needs the
+// Player/Object fields kept here.
+struct SetDirectionDef {
+    bool has = false;                 // JS `Vi.mh`
+    std::string from_player = "Me", from_obj = "Pivot", from_part;
+    std::string to_player = "Me", to_obj = "Pivot", to_part;
+};
+
 // A move definition (JS `jc`).
 struct MoveDef {
     std::string name;
@@ -587,6 +598,7 @@ struct MoveDef {
     // 1 `<SetEndStage>`, 1 `<ZoomEffect>`).
     std::vector<MoveAction> actions;   // <Actions> (own + template)
     Align align;                       // <Align>
+    SetDirectionDef set_direction;     // <SetDirection> (`Ae.vj`)
     Velocity velocity;                 // <Velocity> (JS `jc.wua`/`Coa`/`qta`)
     Rotation rotation;                 // <Rotation> (JS `jc.zX`/`AX`)
     // Event names (JS `kz.create` L771-772 + `tb.D6a` L763): "KeyPressed"
