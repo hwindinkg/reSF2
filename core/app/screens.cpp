@@ -6729,13 +6729,60 @@ void DojoScreen::render_impl(App& app) {
                                        app.fight_assets().dojo.arena_floor()
                                  : 200.0f;
         if (dojo_fight_ != nullptr && have_hub_cam) {
+            // JS `ca.LXa` (char 217387): every frame the hub container is
+            // shifted by `e = Ta.Du.ma - Σ(Eu.ma·VR)/ΣVR` (the frame reads
+            // `e=this.Ta.Du.ma; e.x-=b; e.y=0; e.z=0` with
+            // `b=Σ(Eu.ma.x·VR)/ΣVR`). `Ta.Du.ma` is the "Camera" node
+            // (`this.Du=new Vc("Camera")` char 184117) set by `ca.tyb`
+            // (char 184390) from the two fixed ModelsViewer spawns:
+            // `a=wd.mea(Rw,pF)`. `wd.mea` (char 272507) delegates to `Dl.mea`
+            // (char 295576):
+            //   `a=a.ma;b=b.ma;return new H(a.x+(b.x-a.x)*.5,
+            //    a.y+(b.y-a.y)*.5,a.z+(b.z-a.z)*.5,1)`
+            // i.e. the PLAIN (unweighted) midpoint — the anchor is the fixed
+            // spawn midpoint, exactly `anchor_mid_x` below.
+            // The subtrahend is the group COM over `ca.PW` (the live
+            // combatants, `this.PW.length>1&&this.LXa(this.PW)` char 197765);
+            // `Eu = new Vc("_CenterOfMass_")` (char 292614),
+            // `VR = Esb() = Σ weight` (char 293426). For the hub's two mirror
+            // combatants the weights are equal, so it reduces to the PLAIN
+            // midpoint of the two live COMs — NOT a mass-weighted COM (the
+            // mass weighting was the misread: it regressed 34.907 -> 38.647).
+            // `-arena_half` is the container->arena-centered projection the
+            // fight's `project()` applies (`com_x()` is location space,
+            // spawns 690/973).
+            const sf2::scene::Fighter& hub_player = dojo_fight_->player().fighter;
+            const sf2::scene::Fighter& hub_enemy = dojo_fight_->enemy().fighter;
+            const float anchor_mid_x =
+                (app.fight_assets().dojo.player_spawn_x() +
+                 app.fight_assets().dojo.enemy_spawn_x()) *
+                0.5f;
+            const float group_com_x =
+                (hub_player.com_x() + hub_enemy.com_x()) * 0.5f;
+            const float container_x = -arena_half + (anchor_mid_x - group_com_x);
+            // [dojo-lxa-probe] the live COM / anchor / applied `e` across the
+            // first idle frames (under `--dojo-cam-probe`).
+            if (g_dojo_cam_probe) {
+                static int lxa_n = 0;
+                if (lxa_n < 4) {
+                    std::fprintf(stdout,
+                                 "[dojolxa] n=%d frame=%d anchor_mid_x=%.4f "
+                                 "group_com_x=%.4f e=%.4f container_x=%.4f "
+                                 "com_p=%.4f com_e=%.4f\n",
+                                 lxa_n, dojo_fight_->frame(), anchor_mid_x,
+                                 group_com_x, anchor_mid_x - group_com_x,
+                                 container_x, hub_player.com_x(),
+                                 hub_enemy.com_x());
+                    std::fflush(stdout);
+                    ++lxa_n;
+                }
+            }
             // The container->location offset is the same `project()` the fight
-            // applies (-arena_half, +contY); `draw_dojo_figure`'s offset args
-            // are exactly that transform (the model scale stays 1).
-            draw_dojo_figure(ren, hub_cam, dojo_fight_->enemy().fighter, 1.0f,
-                             -arena_half, cont_y);
-            draw_dojo_figure(ren, hub_cam, dojo_fight_->player().fighter, 1.0f,
-                             -arena_half, cont_y);
+            // applies (-arena_half, +contY) plus the `ca.LXa` `e`;
+            // `draw_dojo_figure`'s offset args are exactly that transform (the
+            // model scale stays 1). Enemy first (z=-.001), then the player.
+            draw_dojo_figure(ren, hub_cam, hub_enemy, 1.0f, container_x, cont_y);
+            draw_dojo_figure(ren, hub_cam, hub_player, 1.0f, container_x, cont_y);
             // JS `Ut.V0a` (L831) + `Ut.kyb` (L825): the flashing `arrow`
             // marker (atlas `E.get(268)` = the controller atlas, frame
             // `y.OQa` = "arrow") is a child of the location `go` node,
