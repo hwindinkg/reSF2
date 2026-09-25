@@ -4085,6 +4085,16 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                          fx.set_vars.size());
             std::fflush(stdout);
         }
+        // The LIVE map rebuild (JS `Ya.bKa` L2129): a battle-write action
+        // refreshes the current map screen (`Aj.S` L1109 `d=Ya.get();
+        // ...&&d.bKa()`) so the node shows immediately, not only on a map
+        // re-entry. `Ya.get()` is the map only while it is the top screen.
+        if (!fx.battle_writes.empty()) {
+            Screen* top = app.screens().top();
+            if (auto* map = dynamic_cast<MapScreen*>(top)) {
+                map->refresh_nodes();
+            }
+        }
         // `sh` `BuyItem` `SB!=3` (`S` L526709 -> `v.fZ` -> `VYa` L620099 ->
         // `Pa.Wz` L1234): the commit succeeded, so fire `QUEST_EVENT_PURCHASE`
         // for each bought item — the SAME call the Shop's buy uses

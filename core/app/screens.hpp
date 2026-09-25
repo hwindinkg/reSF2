@@ -364,6 +364,15 @@ public:
     // CurrentZone and written back on a dot tap).
     int zone_selected() const { return zone_sel_; }
 
+    // JS `Ya.bKa` (L2129) — the LIVE map rebuild: `this.ue.clear();
+    // this.ue.sY()` re-reads every battle button from the save. The quest
+    // battle-write actions call it on the live map (`Aj.S` L1109:
+    // `d=Ya.get(); d!=null&&((!c&&a||c&&!a)&&d.bKa())`) so a ShowBattle/
+    // SetBattleVisibility lands WITHOUT a map re-entry. Recomputes every
+    // node's `active`/`visible`/`locked`/`pip_beaten`/`variant` from the
+    // save, then re-targets the `Rr` panel.
+    void refresh_nodes();
+
     struct Node {
         std::string name;
         std::string alias;     // stages.xml Alias — the JS `Qr.Bka(a.Cg)`
@@ -467,6 +476,9 @@ private:
     // Re-targets `Rr` to the node named in a MapFocus string (the `Ya.Uw` +
     // `ue.tea` focus rule, incl. the BOSSES/first-visible fallbacks).
     void apply_map_focus(const std::string& battle);
+    // The per-node state recompute (`WDa` L256 / `Qr.lla` L2094 / `Xr`
+    // L2133-2136 / `Lc.eJ` L1405) shared by the ctor and `refresh_nodes`.
+    void recompute_node_states(const WarriorSave& w);
     // The plate rect for live map-button registry index `i` (JS `Wr.qFa`
     // L2179). Shared by the draw and the hit test so the rect a player taps is
     // exactly the rect that was painted.

@@ -6924,6 +6924,85 @@ void DojoScreen::render_impl(App& app) {
 // MapScreen
 // ---------------------------------------------------------------------------
 
+// The per-node state recompute shared by the ctor and `refresh_nodes`
+// (`WDa` L256 / `Qr.lla` L2094 / `Qr` L2092 locked / `Xr` L2133-2136 pips /
+// `Lc.eJ` L1405 variant). `w` is the just-loaded save; `fight_wins_` is
+// already in sync with it.
+void MapScreen::recompute_node_states(const WarriorSave& w) {
+    for (std::size_t i = 0; i < zones_.size(); ++i) {
+        for (auto& n : zones_[i].nodes) {
+            const WarriorSave::BattleRecord* rec = w.find_battle(n.zone, n.name);
+            const bool has_rec = rec != nullptr;
+            const bool hidden = has_rec && rec->hidden;
+            n.active = has_rec;                 // `WDa` (JS L256)
+            n.visible = n.active && !hidden;    // `Qr.lla` (JS L2094)
+            // `Qr` (L2092) `let b=a.tt()` = the `<Battle>` record's `Locked`
+            // (`Lc.tt()` L1406 -> `hl.tt` L278). The button then picks
+            // `BattleBtnLock/locked_<icon>` over `BattleBtnBase/base_<icon>`.
+            n.locked = has_rec && rec->locked;
+            // `Xr` pip lit state (L2133-2136): the pip count is the rendered
+            // `<Fight>` count, minus the last for boss families (`Xr` ctor
+            // L2134 `a.type!="FightBosses"&&...||--d`). Pip `k` is lit when
+            // `dl.status==1` = `YL` L111266 `c.no >= a.repeat`.
+            int pip_n = static_cast<int>(n.fight_names.size());
+            if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE" ||
+                n.type == "FINAL_BATTLE_TITAN") {
+                --pip_n;
+            }
+            if (pip_n < 0) pip_n = 0;
+            n.pip_beaten.assign(static_cast<std::size_t>(pip_n), false);
+            auto wins_for = [&w](const std::string& ids) -> int {
+                for (const WarriorSave::FightWins& fw : w.fights) {
+                    if (fw.name == ids) return fw.wins;
+                }
+                return 0;
+            };
+            for (int k = 0; k < pip_n; ++k) {
+                const std::string ids =
+                    n.zone + "|" + n.name + "|" + n.fight_names[k];
+                int wins = wins_for(ids);
+                if (wins == 0 && pip_n == 1) wins = wins_for(n.name);
+                n.pip_beaten[static_cast<std::size_t>(k)] = wins >= 1;
+            }
+            // JS `Lc.eJ()` (L1405) — the node variant read by `VEa` (L2132).
+            // `ag` is the FULL `<Fight>` count (`D0a` L1408); `status==1` is
+            // `repeat>0 && CompletedCount>=repeat`. `ag==0` returns 1.
+            bool all_fights_beaten = true;
+            for (int k = 0; k < n.fight_count; ++k) {
+                const std::size_t kk = static_cast<std::size_t>(k);
+                const std::string ids =
+                    n.zone + "|" + n.name + "|" +
+                    (kk < n.fight_names.size() ? n.fight_names[kk] : std::string());
+                int wins = wins_for(ids);
+                if (wins == 0 && n.fight_count == 1) wins = wins_for(n.name);
+                const int repeat =
+                    kk < n.fight_replays.size() ? n.fight_replays[kk] : 0;
+                if (!(repeat > 0 && wins >= repeat)) all_fights_beaten = false;
+            }
+            n.variant = all_fights_beaten ? 1 : 2;
+        }
+    }
+}
+
+// JS `Ya.bKa` (L2129) — the LIVE map rebuild `ue.clear(); ue.sY()`. The
+// battle-write quest actions refresh the live map (`Aj.S` L1109), so a
+// node unlocked by a quest action (e.g. the tournament after the zone-1
+// ladder) appears WITHOUT a map re-entry. `Ya.get()` (L2131) is the map only
+// while it is the current screen, so the caller gates on that.
+void MapScreen::refresh_nodes() {
+    WarriorSave w;
+    try {
+        w = app().save().load();
+    } catch (const std::exception&) {
+        return;
+    }
+    fight_wins_ = w.fights;
+    recompute_node_states(w);
+    apply_map_focus(applied_focus_);
+    std::fprintf(stdout, "[map] live node refresh (%zu zones)\n", zones_.size());
+    std::fflush(stdout);
+}
+
 MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     // JS `Ya.init` (L2125): `lb.rJ||lb.OS()` — the Map inherits the menu
     // track (guard no-op when the Dojo already set it) and REPLAYS it when a
@@ -6965,82 +7044,7 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     // ZONE_1 capture is exactly this: on the tutorial save only
     // `ZONE_1|BOSS_LYNX|` is recorded, so Рысь is the only node on the map.
     // (This replaces the old native "record-less base is playable" hybrid.)
-    for (std::size_t i = 0; i < zones_.size(); ++i) {
-        for (auto& n : zones_[i].nodes) {
-            const WarriorSave::BattleRecord* rec = map_save.find_battle(n.zone, n.name);
-            const bool has_rec = rec != nullptr;
-            const bool hidden = has_rec && rec->hidden;
-            n.active = has_rec;                 // `WDa` (JS L256)
-            n.visible = n.active && !hidden;    // `Qr.lla` (JS L2094)
-            // `Qr` (L2092) `let b=a.tt()` = the `<Battle>` record's `Locked`
-            // (`Lc.tt()` L1406 -> `hl.tt` L278). The button then picks
-            // `BattleBtnLock/locked_<icon>` over `BattleBtnBase/base_<icon>`.
-            // The old port used `!n.active`, which is ALWAYS false for a
-            // visible node (`visible = active && !hidden`), so the `locked_*`
-            // art was never drawn.
-            n.locked = has_rec && rec->locked;
-            // `Xr` pip lit state (L2133-2136): the pip count is the rendered
-            // `<Fight>` count, minus the last for boss families (`Xr` ctor
-            // L2134 `a.type!="FightBosses"&&...||--d`). Pip `k` is lit when
-            // `dl.status==1` = `YL` L111266 `c.no >= a.repeat` (the `il`
-            // record's `CompletedCount` >= `<Fight Replays>`; every shipped
-            // row carries `Replays="1"`). The record key is the `hb` triple
-            // `zone|battle|<Fight Name>` (`il.Atb` L143548). The direct-boot
-            // path records the bare battle name, so a single-fight node
-            // falls back to it.
-            int pip_n = static_cast<int>(n.fight_names.size());
-            if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE" ||
-                n.type == "FINAL_BATTLE_TITAN") {
-                --pip_n;
-            }
-            if (pip_n < 0) pip_n = 0;
-            n.pip_beaten.assign(static_cast<std::size_t>(pip_n), false);
-            auto wins_for = [&map_save](const std::string& ids) -> int {
-                for (const WarriorSave::FightWins& fw : map_save.fights) {
-                    if (fw.name == ids) return fw.wins;
-                }
-                return 0;
-            };
-            for (int k = 0; k < pip_n; ++k) {
-                const std::string ids =
-                    n.zone + "|" + n.name + "|" + n.fight_names[k];
-                int wins = wins_for(ids);
-                if (wins == 0 && pip_n == 1) wins = wins_for(n.name);
-                n.pip_beaten[static_cast<std::size_t>(k)] = wins >= 1;
-            }
-            // JS `Lc.eJ()` (L1405) — the node variant read by `VEa` (L2132).
-            // `ag` is the FULL `<Fight>` count (JS `D0a` L1408), not the `Xr`
-            // pip count. `dl.status==1` (`YL` L220) = `repeat>0 &&
-            // CompletedCount>=repeat` for the non-replayable branch; the
-            // `VEa` names are TOURNAMENT/CHALLENGE, never a `*Replayable`
-            // type (whose `Eyb` L1414 branch differs). status 3 cannot occur
-            // (see `Node::variant`), so `eJ()==2` iff `ag>0` and not every
-            // fight is beaten.
-            // `ag==0` -> `DAa(1)==0==ag` -> JS returns 1 (vacuous), so the
-            // accumulator starts true and only a non-status-1 fight clears it.
-            bool all_fights_beaten = true;
-            for (int k = 0; k < n.fight_count; ++k) {
-                const std::size_t kk = static_cast<std::size_t>(k);
-                const std::string ids =
-                    n.zone + "|" + n.name + "|" +
-                    (kk < n.fight_names.size() ? n.fight_names[kk] : std::string());
-                int wins = wins_for(ids);
-                if (wins == 0 && n.fight_count == 1) wins = wins_for(n.name);
-                const int repeat =
-                    kk < n.fight_replays.size() ? n.fight_replays[kk] : 0;
-                if (!(repeat > 0 && wins >= repeat)) all_fights_beaten = false;
-            }
-            n.variant = all_fights_beaten ? 1 : 2;
-            std::fprintf(stdout, "[map] node %s variant=%d fights=%d\n",
-                         n.name.c_str(), n.variant, n.fight_count);
-            {
-                int lit = 0;
-                for (bool b : n.pip_beaten) lit += b ? 1 : 0;
-                std::fprintf(stdout, "[map] node %s pips=%d beaten=%d\n", n.name.c_str(),
-                             pip_n, lit);
-            }
-        }
-    }
+    recompute_node_states(map_save);
     // MapFocus (JS `Ya.bKa` L2129 focuses the save's MapFocus `p.o.ys` via
     // `m5`): highlight the node named in MapFocus first (e.g.
     // ZONE_1|BOSS_LYNX|1 quest focus `qo` L1086), else the first BOSSES
@@ -8275,6 +8279,16 @@ void draw_boss_roster(App& app, sf2::render::Renderer& ren,
         if (!draw_user_image(app, r.entries[i].image, cx, kCy, d, d, a)) {
             draw_user_image(app, "avatar_masked", cx, kCy, d, d, a);
         }
+        // JS `jk.init` L2062: `b>e&&h.completed()` — every entry BEFORE the
+        // current index is struck through (`Kr.completed` L2057 adds the
+        // `E.get(1)`/`y.iTa` = "botCompleted" overlay to the entry node).
+        // The overlay is a child of the entry `Kr` node (so it tracks the row
+        // scroll) but NOT of `Hf`, so the state-3 `Hf.node.wa(1+-.5*a)` dim
+        // does not touch it — only the state-0 row fade does.
+        if (r.index > i) {
+            try_draw_atlas_button(app, "botCompleted", cx, kCy, 255.0f, 258.0f,
+                                  r.row_alpha);
+        }
     }
 }
 
@@ -8660,7 +8674,36 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // Fight 1 is the Punchbag dummy (FirstName="Punchbag" NotAI="1"
     // NotAnimation="1", stages.xml L12); BOSS_LYNX Fight 1 is a Warrior
     // template with neither flag (L78).
-    const BattleWarriorInfo bw = battle_warrior(battle_name_, app().pending_battle().zone);
+    // JS `ca.hCa` L432: `f.uP=a.index` — the boss ladder is ON the `<Fight>`
+    // at `dl.index` (the count of this battle's recorded wins), and the `jk`
+    // roster is scrolled to it. The launched enemy must be that SAME
+    // `<Fight>`'s warrior, not always the first: the roster index and the
+    // fought enemy previously DIVERGED (the scroll stopped on the next
+    // opponent while `<Fight>` 1 was re-fought). The ladder index rides
+    // `pending_battle().fight_triple` as the 1-based ordinal
+    // (`zone|battle|<n>`, `hb.toString` L1416) written by `launch_battle`.
+    int pending_fight_index = 0;
+    {
+        const std::string& ft = app().pending_battle().fight_triple;
+        const std::size_t p1 = ft.find('|');
+        const std::size_t p2 = (p1 == std::string::npos) ? std::string::npos
+                                                         : ft.find('|', p1 + 1);
+        if (p2 != std::string::npos) {
+            try {
+                pending_fight_index = std::stoi(ft.substr(p2 + 1)) - 1;
+            } catch (const std::exception&) {
+                pending_fight_index = 0;
+            }
+        }
+        if (pending_fight_index < 0) pending_fight_index = 0;
+    }
+    BattleWarriorInfo bw =
+        battle_warrior(battle_name_, app().pending_battle().zone, pending_fight_index);
+    // An ordinal past the battle's `<Fight>` count (a cleared-ladder replay)
+    // has no row; fall back to the first so the VS/HUD never go blank.
+    if (bw.attrs.empty() && bw.first_name.empty()) {
+        bw = battle_warrior(battle_name_, app().pending_battle().zone, 0);
+    }
     // `first_name` is a lang key (`NAME_SHIN`) resolved for display (JS `ur`).
     app().pending_battle().enemy_name =
         bw.first_name.empty() ? "Enemy" : loc(app(), bw.first_name, bw.first_name);
