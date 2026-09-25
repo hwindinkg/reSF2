@@ -32,13 +32,23 @@
 
 namespace sf2::scene {
 
+// One `<Perk Name="X"><Set k="v"/></Perk>` row of a Warrior/Template
+// `<Perks>` (JS `ur` clones the `<Set>` children onto the warrior's `AK`).
+// The mode path KEEPS the ref (name + `<Set>`) so `Wk()` (L811) can merge the
+// `<Set>` overrides onto the live trigger, exactly as the stage path's
+// `equipped_perks` does for the first warrior.
+struct StagePerkRef {
+    std::string name;
+    std::map<std::string, std::string> set;  // `<Set>` attrs (raw)
+};
+
 // One Fight <Warrior> (or <Template> member / group member).
 struct StageWarrior {
     std::string template_name;  // Template= ("" = inline/base)
     std::string tactic;  // Tactic= (Beginner/Standard/...)
     std::map<std::string, std::string> attrs;  // all other attrs (stats)
     std::vector<std::string> items;  // <Items><Item Name>
-    std::vector<std::string> perks;  // <Perks><Perk Name>
+    std::vector<StagePerkRef> perks;  // <Perks><Perk Name + <Set>>
     struct GroupRef {
         std::string name;
         bool random = false;  // Random="1" (eb)
@@ -125,6 +135,11 @@ struct StageFight {
 
 struct StageBattle {
     std::string name, type, location, music;
+    // The stages.xml `<Zone Name>` the battle sits in. The SAME battle name
+    // repeats across zones with different Warriors/Rules (`Duel`/`Tournament`/
+    // `Challenge`/...), so a resolver must zone-scope exactly as
+    // `app::battle_warrior` does — never the document's first name match.
+    std::string zone;
     std::vector<StageFight> fights;
 };
 
@@ -145,7 +160,7 @@ struct ResolvedWarrior {
     std::string tactic;
     std::map<std::string, std::string> attrs;
     std::vector<std::string> items;
-    std::vector<std::string> perks;
+    std::vector<StagePerkRef> perks;  // name + `<Set>` refs (JS `xc.AK`)
 };
 
 // One resolved fight to run.
@@ -274,7 +289,18 @@ inline StageWarrior parse_warrior(const pugi::xml_node& w) {
     const pugi::xml_node perks = w.child("Perks");
     if (perks) {
         for (const pugi::xml_node p : perks.children("Perk")) {
-            if (p.attribute("Name")) out.perks.push_back(p.attribute("Name").value());
+            if (!p.attribute("Name")) continue;
+            StagePerkRef ref;
+            ref.name = p.attribute("Name").value();
+            // JS `ur`: `e.A("Set")` is cloned onto the perk (`hXa`), so the
+            // `<Set>` overrides survive resolution (the mode path's `Wk()`).
+            const pugi::xml_node set = p.child("Set");
+            if (set) {
+                for (const pugi::xml_attribute a : set.attributes()) {
+                    ref.set[a.name()] = a.value();
+                }
+            }
+            out.perks.push_back(std::move(ref));
         }
     }
     const pugi::xml_node groups = w.child("Groups");
@@ -404,6 +430,7 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
             for (const pugi::xml_node b : z.children("Battle")) {
                 StageBattle battle;
                 if (b.attribute("Name")) battle.name = b.attribute("Name").value();
+                if (z.attribute("Name")) battle.zone = z.attribute("Name").value();
                 if (b.attribute("Type")) battle.type = b.attribute("Type").value();
                 if (b.attribute("Location")) battle.location = b.attribute("Location").value();
                 if (b.attribute("Music")) battle.music = b.attribute("Music").value();
@@ -688,7 +715,10 @@ struct ModeEnemy {
     // Locks items for the enemy move list (Type / SubType / Name).
     std::vector<OwnedItem> owned;
     std::map<std::string, double> attrs;  // numeric stat overrides
-    std::vector<std::string> perk_names;  // Warrior <Perks> (enemy_refs)
+    // The resolved warrior's own `<Perks>` with their `<Set>` refs. These are
+    // the FIRST input of `Wk()` (L811) — before the equipped items' catalog
+    // perks — so a mode enemy's `<Set>` overrides must ride along.
+    std::vector<StagePerkRef> perks;
 };
 
 // Whole-fight setup applied post-init (`FightController::apply_mode_setup`).
@@ -727,7 +757,7 @@ inline ModeSetup mode_setup_from_fight(
         } catch (...) {
         }
     }
-    out.enemy.perk_names = mf.enemy.perks;
+    out.enemy.perks = mf.enemy.perks;
     for (const StageRule& r : mf.rules) {
         if (r.tag == "Attributes") {
             const auto di = r.attrs.find("DamageFactor");

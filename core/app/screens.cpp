@@ -8724,6 +8724,95 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         std::fprintf(stdout, "  %s\n", m->name.c_str());
     }
     std::fflush(stdout);
+
+    // ---- Tournament/Survival mode setup (JS `Da` mode path) --------------
+    // Live stage battles resolve their enemy through the `<Warrior>` path
+    // above; the mode path (`FightController::apply_mode_setup` — the JS
+    // rounds/time/recovery + per-side DamageFactor + enemy rebuild) had ZERO
+    // callers. When the battle type is `FightTournament`/`FightSurvival`,
+    // resolve the series row and drive it: tournament via
+    // `resolve_tournament_fight`, survival via `resolve_survival_warrior` +
+    // `reward_for` (the JS `v.EQ` / `p.F().efa` warrior generation).
+    if (battle.type == "FightTournament" || battle.type == "FightSurvival") {
+        try {
+            std::vector<char> sdata;
+            {
+                std::ifstream in("reference/extracted/xml/res/stages.xml",
+                                 std::ios::binary);
+                sdata.assign(std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>());
+            }
+            std::vector<sf2::scene::StageBattle> battles;
+            std::map<std::string, sf2::scene::TemplateDef> templates;
+            std::map<std::string, sf2::scene::GroupDef> groups;
+            sf2::scene::parse_stages(std::string(sdata.begin(), sdata.end()),
+                                     battles, templates, groups);
+            const sf2::scene::StageBattle* sb = nullptr;
+            const std::string& want_zone = app().pending_battle().zone;
+            for (const sf2::scene::StageBattle& b : battles) {
+                if (b.name != battle_name_) continue;
+                // The same battle name repeats across zones with different
+                // Warriors/Rules, so zone-scope exactly as `battle_warrior`
+                // (fall back to the first name match when the zone is unset).
+                if (!want_zone.empty() && b.zone != want_zone) continue;
+                sb = &b;
+                break;
+            }
+            sf2::scene::ModeFight mf;
+            bool resolved = false;
+            if (sb != nullptr && !sb->fights.empty()) {
+                if (sb->type == "SURVIVAL") {
+                    // One Fight carries every wave (`z6a` = sum of Number).
+                    const sf2::scene::StageFight& f = sb->fights[0];
+                    mf.rounds = f.rounds;
+                    mf.round_time = f.round_time;
+                    mf.health_recovery = f.health_recovery;
+                    mf.rules = f.rules;
+                    mf.location = sb->location;
+                    mf.music = sb->music;
+                    mf.reward = sf2::scene::reward_for(sb->type, f, 0, false);
+                    std::vector<std::string> used;
+                    resolved = sf2::scene::resolve_survival_warrior(
+                        f, 0, templates, groups,
+                        [this]() {
+                            return static_cast<double>(fight_->fight_draw01());
+                        },
+                        used, mf.enemy);
+                } else {
+                    resolved = sf2::scene::resolve_tournament_fight(
+                        *sb, 0, templates, groups, mf);
+                }
+            }
+            if (resolved) {
+                // The resolved warrior's item NAMES -> the catalog
+                // Type/SubType/Name rows (the same shape the live
+                // `resolve_enemy_loadout` builds).
+                BattleWarriorInfo mw;
+                mw.items = mf.enemy.items;
+                sf2::scene::BattleParams mrow;
+                resolve_enemy_loadout(app(), mw, mrow);
+                const sf2::scene::ModeSetup setup =
+                    sf2::scene::mode_setup_from_fight(mf, mrow.enemy_owned);
+                fight_->apply_mode_setup(setup);
+                std::fprintf(stdout,
+                             "[mode] %s setup: rounds=%d time=%d recovery=%.3f "
+                             "enemy_perks=%zu enemy_items=%zu dmgP=%.0f dmgE=%.0f "
+                             "noBullets=%d\n",
+                             battle.type.c_str(), setup.rounds, setup.round_time,
+                             setup.health_recovery, setup.enemy.perks.size(),
+                             setup.enemy.owned.size(), setup.player_damage_factor,
+                             setup.enemy_damage_factor, setup.no_bullets ? 1 : 0);
+                std::fflush(stdout);
+            } else {
+                std::fprintf(stdout, "[mode] %s: no resolved row (battle='%s')\n",
+                             battle.type.c_str(), battle_name_.c_str());
+                std::fflush(stdout);
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[mode] setup failed: %s\n", e.what());
+            std::fflush(stderr);
+        }
+    }
 }
 
 // JS `sc.OD` (`Af.oUa` L2472) key table -> the native GLFW binding.

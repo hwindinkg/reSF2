@@ -1440,6 +1440,11 @@ public:
     // (`de.ia`) and conditions (`Random`) - uses this ONE stream unless a
     // `roll01` override was injected (the demo/probe path).
     void set_seed(std::uint32_t seed) { prng_.seed(seed); }
+    // The shared fight draw exposed to the app's mode resolver: the JS mode
+    // battle generation (`p.F().efa` group Random picks) draws on the SAME
+    // global `Da.pg` stream (`Rk.jf`). Called once at fight setup, AFTER
+    // `set_seed`, so survival waves pick from the live stream.
+    float fight_draw01() { return draw01(); }
 
 // Perk setup for fight init (`ZOa`/`Pma` analog, §5.4/§5.7): the parsed
 // perk catalog (res/perks.xml) + per-side equipped item→perk bindings

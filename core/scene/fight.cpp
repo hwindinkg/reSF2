@@ -2537,9 +2537,13 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
         if (it != tactic_defs_->end()) enemy_.ai->set_tactic(&it->second);
     }
     perk_setup_.enemy_refs.clear();
-    for (const std::string& pn : setup.enemy.perk_names) {
+    for (const sf2::scene::StagePerkRef& pr : setup.enemy.perks) {
+        if (pr.name.empty()) continue;
         sf2::scene::ItemPerkRef ref;
-        ref.name = pn;
+        ref.name = pr.name;
+        // JS `Wk()` (L811): the warrior's own `<Perks>` come FIRST, each with
+        // its `<Set>` overrides (`ur` cloned them onto `AK`).
+        ref.set_str = pr.set;
         perk_setup_.enemy_refs.push_back(std::move(ref));
     }
     sample_enemy_idle();
