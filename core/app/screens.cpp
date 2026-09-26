@@ -4491,7 +4491,21 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         if (!fight) return out;
         // `dl.z8a()` (L1428): the fight's `<RatingEvaluation>` rule (`qn`
         // L881: `eVa`/`yUa`/`jVa`; `u.H` leaves an absent attr at 0).
-        if (const pugi::xml_node re = fight.child("RatingEvaluation")) {
+        //
+        // The rule lives under the fight's `<Rules>`, NOT directly on
+        // `<Fight>`: every one of stages.xml's `<RatingEvaluation>` nodes is
+        // `/Zones/Zone/Battle/Fight/Rules/RatingEvaluation` (or deeper, under
+        // `Battle/Rules/RandomRule/ComplexRule`). Reading it as a direct
+        // `<Fight>` child therefore returned null for EVERY shipped fight, so
+        // `has_rating_rule` stayed false, `PlayerRating`/`EnemyRating`/
+        // `RatingCorrection` were never read, and the `A8a` ratio fell through
+        // to the degenerate `warrior_rating` path with an empty side list —
+        // collapsing every fight onto the same tier (the neutral 1.0 ->
+        // `diff1` "Нормально"). Search `<Rules>` first, then the `<Fight>`
+        // itself so a hand-edited stage without `<Rules>` still resolves.
+        pugi::xml_node re = fight.child("Rules").child("RatingEvaluation");
+        if (!re) re = fight.child("RatingEvaluation");
+        if (re) {
             out.has_rating_rule = true;
             if (re.attribute("PlayerRating"))
                 out.rating_player = re.attribute("PlayerRating").as_float();
