@@ -33,6 +33,8 @@
 #include <optional>
 #include <string>
 
+#include <pugixml.hpp>
+
 #include "scene/physics.hpp"
 
 namespace sf2::scene {
@@ -643,13 +645,32 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
 // One `ERuleAttributes` rule for the `dl.qAa` (L1428) split.
 struct RatingSideRule {
     int apply_to = 3;                  // `mc()` (1 Player / 2 Bot / 3 All)
+    // `xFa`/`wFa` (JS `bb.Ajb` L455854: `e.xFa=c.first; e.wFa=c.second`, where
+    // `c = Zf(a,0,2147483647)` is the `<Level Min Max>` range). `Lb.d_a()` =
+    // `c_a(p.o.bb())` = `level>=xFa && level<=wFa` gates the rule through
+    // `Ti()`; a rule with no `<Level>` wrapper keeps the 0..INT_MAX default.
+    int min_level = 0;
+    int max_level = 2147483647;
     std::map<std::string, int> attrs;  // the `hea()` attribute map
 };
 
 // `dl.qAa(side)` (L1428): `side==1` (`k5a`) takes the NON-Defense attrs of
 // Player/All rules (and the Defense attrs of Bot rules); `side==2` (`j5a`)
-// the mirror. `Cb(name,"Defense")` = `name` contains "Defense".
+// the mirror. `Cb(name,"Defense")` = `name` contains "Defense". `level` is
+// `p.o.bb()`; a rule outside `[min_level,max_level]` is skipped (`Ti()`).
 std::vector<RatingAttrPair> rating_side_attrs(
-    const std::vector<RatingSideRule>& rules, int side);
+    const std::vector<RatingSideRule>& rules, int side, int level);
+
+// `bb.OE`/`bb.M3`/`bb.xe`/`Zi` (L453078/455854/454581/433102): the fight's
+// `<Rules>/<Attributes>` -> `RatingSideRule` list.
+//   `ApplyTo`: Player->1, Bot->2, All->3, anything else 0.
+//   `Zi`'s ctor pre-seeds `wB` with every `v.wv` name at 0; `Zi.parse` then
+//   ADDS each XML attribute except Round/ApplyTo/Eclipse/WarriorPower, and
+//   fans `WarriorPower` out to every `v.wv` name.
+//   A `<Level Min Max>` child (`bb.Ajb`) stamps its range onto each rule; the
+//   gate itself is applied by `rating_side_attrs` (`Ti()`), as in JS.
+std::vector<RatingSideRule> parse_rating_side_rules(
+    const pugi::xml_node& rules,
+    const std::map<std::string, float>& wv = {});
 
 }  // namespace sf2::scene

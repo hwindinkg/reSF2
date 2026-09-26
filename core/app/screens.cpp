@@ -4170,7 +4170,7 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                             }
                         }
                     }
-                    const pugi::xml_node warriors = fight.child("Warriors");
+        const pugi::xml_node warriors = fight.child("Warriors");
                     if (!warriors) continue;
                     for (pugi::xml_node wr = warriors.child("Warrior"); wr;
                          wr = wr.next_sibling("Warrior")) {
@@ -4413,6 +4413,10 @@ struct BattleWarriorInfo {
     float rating_enemy = 0.0f;       // yUa (EnemyRating)
     float rating_correction = 0.0f;  // jVa (RatingCorrection)
     bool has_rating_rule = false;
+    // `dl.k5a()`/`dl.j5a()` (JS L732465) over `this.jh()`: the fight's
+    // `<Rules>/<Attributes>` rules, `ApplyTo` mapped to 1/2/3 and the
+    // `<Level Min Max>` range stamped on each (`bb.Ajb`, L455854).
+    std::vector<sf2::scene::RatingSideRule> side_rules;
 };
 
 // `StageWarrior::Delta` -> `damage.hpp` `AlignDelta` (same fields, float).
@@ -4514,6 +4518,14 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             if (re.attribute("RatingCorrection"))
                 out.rating_correction = re.attribute("RatingCorrection").as_float();
         }
+        // `dl.k5a()`/`dl.j5a()` (JS L732465) walk `this.jh()` = the fight's
+        // `<Rules>` and pick up every `ERuleAttributes`. stages.xml ships 2478
+        // `<Attributes>` DIRECTLY under `<Rules>` (975 `ApplyTo="Player"`, 1645
+        // `ApplyTo="Bot"`) plus 142 inside `<Level Min Max>` blocks, so this
+        // list is what makes the `2^((q-r)*l)` DamageFactor term non-unity.
+        out.side_rules = sf2::scene::parse_rating_side_rules(
+            fight.child("Rules"),
+            sf2::scene::FightParams::defaults().align_target_attributes);
         const pugi::xml_node warriors = fight.child("Warriors");
         if (!warriors) return out;
         const pugi::xml_node w = warriors.child("Warrior");
@@ -7838,8 +7850,9 @@ std::vector<sf2::scene::PerkModel> enemy_rating_perks(
 // player (`v.cw`), `b` = the enemy (the LAST `v.EQ(fight.Xs)` warrior), via
 // `battle.Gz(v.cw(), v.EQ(battle.Xs))` -> `dl.A8a` (L1421-1422).
 //
-// REMAINDER (unported): the fight's `<Attributes>` rules (the `k5a`/`j5a` side
-// lists) are still not parsed (empty side list), and the enemy gear perks are
+// The fight's `<Attributes>` rules (the `k5a`/`j5a` side lists) ARE parsed now
+// (`parse_rating_side_rules` + `rating_side_attrs`), so the `2^((q-r)*l)`
+// DamageFactor term is live. REMAINDER (unported): the enemy gear perks are
 // not modeled (its `PerkSetup` is empty), so only the PLAYER's
 // `<Enchantments>`/learned `<Perks>` feed `p.perks` here. For the shipped
 // fights the rule has no negative rating, so `c = b.W3` / `d = b.C_` (the
@@ -7919,7 +7932,19 @@ float map_battle_rating(App& app, const std::string& battle_name,
         rule.player_rating = bw.rating_player;
         rule.enemy_rating = bw.rating_enemy;
         rule.rating_correction = bw.rating_correction;
-        return sf2::scene::rating_ratio(p, e, rule, {}, {}, {},
+        // `h = k5a()` (Player) / `k = j5a()` (Bot), gated on the player level
+        // (`Ti()`). These are the lists `xc.Bua` folds onto each clone before
+        // `A8a` reads the DamageFactor attribute off it.
+        int level = 1;
+        try {
+            level = app.save().load().level;
+        } catch (const std::exception&) {
+        }
+        const std::vector<sf2::scene::RatingAttrPair> side1 =
+            sf2::scene::rating_side_attrs(bw.side_rules, 1, level);
+        const std::vector<sf2::scene::RatingAttrPair> side2 =
+            sf2::scene::rating_side_attrs(bw.side_rules, 2, level);
+        return sf2::scene::rating_ratio(p, e, rule, side1, side2, {},
                                         sf2::scene::FightParams::defaults());
     } catch (const std::exception&) {
         return kMapDefaultRatingRatio;
@@ -7946,6 +7971,86 @@ float map_battle_rating_cached(App& app, const std::string& battle_name,
     std::fflush(stdout);
     cache[sig] = r;
     return r;
+}
+
+// Defined below; the probe reports the tier each ratio lands in.
+int map_difficulty_level(float rating_ratio);
+
+// `--map-difficulty-probe`: print the per-fight rating ratio + `diff` tier for
+// every shipped `<Fight>`, together with the two side lists the `2^((q-r)*l)`
+// DamageFactor term consumes. This is the OBSERVATION harness for the side-list
+// port: before it, every row read `DamageFactor q=0 r=0 term=1.000000`.
+bool map_difficulty_probe(App& app) {
+    sf2::data::xml_doc doc;
+    const std::string path = "reference/extracted/xml/res/stages.xml";
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::fprintf(stderr, "[mapdiff] cannot open %s\n", path.c_str());
+        return false;
+    }
+    std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+    const pugi::xml_node zones = doc.root().first_child().child("Zones");
+    if (!zones) return false;
+    const sf2::scene::FightParams fp = sf2::scene::FightParams::defaults();
+    int level = 1;
+    try {
+        level = app.save().load().level;
+    } catch (const std::exception&) {
+    }
+    std::printf("[mapdiff] player level=%d  DamageFactor.Base=%.6f attr=%s\n",
+                level, static_cast<double>(fp.damage_factor_base),
+                fp.damage_factor_attr.c_str());
+    std::printf("[mapdiff] %-22s %-18s %5s  %8s %4s  %7s %7s %10s %10s %4s\n",
+                "zone", "battle", "fight", "ratio", "tier", "dfPlayer",
+                "dfBot", "exponent", "term", "R");
+    int fights = 0;
+    int non_unity = 0;
+    for (const pugi::xml_node z : zones.children("Zone")) {
+        const std::string zone = z.attribute("Name").value();
+        for (const pugi::xml_node b : z.children("Battle")) {
+            const std::string battle = b.attribute("Name").value();
+            int fi = 0;
+            for (const pugi::xml_node f : b.children("Fight")) {
+                const int index = fi++;
+                const BattleWarriorInfo bw = battle_warrior(battle, zone, index);
+                if (bw.attrs.empty()) continue;
+                const std::vector<sf2::scene::RatingAttrPair> s1 =
+                    sf2::scene::rating_side_attrs(bw.side_rules, 1, level);
+                const std::vector<sf2::scene::RatingAttrPair> s2 =
+                    sf2::scene::rating_side_attrs(bw.side_rules, 2, level);
+                const auto df = [&fp](
+                                    const std::vector<sf2::scene::RatingAttrPair>& l) {
+                    for (const sf2::scene::RatingAttrPair& p : l) {
+                        if (p.first == fp.damage_factor_attr) return p.second;
+                    }
+                    return 0.0f;
+                };
+                const float dfp = df(s1);
+                const float dfb = df(s2);
+                const float ratio =
+                    map_battle_rating(app, battle, zone, index);
+                const float exponent = (dfb - dfp) * fp.damage_factor_base;
+                const float term = std::pow(2.0f, exponent);
+                const int tier = map_difficulty_level(ratio);
+                if (term != 1.0f) ++non_unity;
+                ++fights;
+                std::printf(
+                    "[mapdiff] %-22s %-18s %5d  %8.4f %4d  %7.0f %7.0f "
+                    "%10.4f %10.6f %4d\n",
+                    zone.c_str(), battle.c_str(), index,
+                    static_cast<double>(ratio), tier,
+                    static_cast<double>(dfp), static_cast<double>(dfb),
+                    static_cast<double>(exponent), static_cast<double>(term),
+                    static_cast<int>(bw.side_rules.size()));
+            }
+        }
+    }
+    std::printf("[mapdiff] fights=%d non-unity-DamageFactor=%d\n", fights,
+                non_unity);
+    std::fflush(stdout);
+    return fights > 0;
 }
 
 // `Wc` level index from the rating ratio (JS `Wc.ba` L2163: the LAST

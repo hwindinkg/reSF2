@@ -1416,6 +1416,7 @@ int main(int argc, char** argv) {
     bool headless_loop = false;
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool rating_perk_probe_mode = false;  // --rating-perk-probe
+bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool enchant_stat_probe_mode = false;  // --enchant-stat-probe
     bool perk_set_probe_mode = false;  // --perk-set-probe
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
@@ -1557,6 +1558,11 @@ int main(int argc, char** argv) {
             // Prints the hub camera decomposition once per ready frame (see
             // screens.cpp). Combine with `--headless N` to exit deterministically.
             g_dojo_cam_probe = true;
+        } else if (arg == "--map-difficulty-probe") {
+            // Per-fight rating ratio + `diff` tier + the DamageFactor side
+            // deltas behind `2^((q-r)*l)`. No OS input, no simulation.
+            // Dispatched after the RULE 0 watchdog install (see below).
+            map_difficulty_probe_mode = true;
         } else if (arg == "--quest-verify") {
             quest_verify = true;
         } else if (arg == "--changetab-probe") {
@@ -2345,6 +2351,13 @@ int main(int argc, char** argv) {
             if (boot_au.music_muted() != boot_w.music_muted) boot_au.set_music_muted(boot_w.music_muted);
         } catch (const std::exception&) {
         }
+    }
+
+    // `--map-difficulty-probe`: dispatched after the RULE 0 watchdog install
+    // (above) AND after `App` boot, so the per-fight rating/tier walk can never
+    // leave a process behind and can read the live save.
+    if (map_difficulty_probe_mode) {
+        return sf2::app::map_difficulty_probe(app) ? 0 : 1;
     }
 
     if (!dump_clip.empty()) {

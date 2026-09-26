@@ -1291,6 +1291,11 @@ int map_fight_index(App& app, const std::string& name, int fight_count);
 // 1-based fight ordinal minus 1 (the `map_fight_index` convention). Returns -1
 // when the triple is malformed (the JS `p.Wv` miss -> `a=-1`).
 int map_fight_difficulty_level(App& app, const std::string& fight_triple);
+// `--map-difficulty-probe`: walk EVERY shipped `<Fight>`, print its per-fight
+// rating ratio, the resolved `diff` tier, and the DamageFactor side deltas the
+// `2^((q-r)*l)` term was built from. Pure read + arithmetic, no OS input and
+// no simulation; returns true when at least one fight was observed.
+bool map_difficulty_probe(App& app);
 // The live Map screen's `Ur` strip, for probes/drivers — null-safe (returns
 // false / -1 when the Map is not the top screen).
 bool map_zone_dot_center(App& app, std::size_t zi, float& cx, float& cy);

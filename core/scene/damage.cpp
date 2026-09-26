@@ -838,6 +838,19 @@ float warrior_rating(const FighterParams& self, const FighterParams& other,
     return c;
 }
 
+// `xc.Bua(list)` (JS L417872): add each `Ba` delta onto the fighter's attribute
+// map. `get(e,f) && set(e, f.G + (d|0))` — `f` is a fresh `ja(0)`, so an absent
+// attribute starts at 0; the `&&` short-circuit never fires because a `ja` is
+// always truthy. ACCUMULATES, so a name listed by two rules gets both deltas.
+static void apply_side_attrs(FighterParams& w,
+                             const std::vector<RatingAttrPair>& list) {
+    for (const RatingAttrPair& p : list) {
+        const auto it = w.attributes.find(p.first);
+        const float base = (it != w.attributes.end()) ? it->second : 0.0f;
+        w.attributes[p.first] = base + static_cast<float>(static_cast<int>(p.second));
+    }
+}
+
 float rating_ratio(const FighterParams& a, const FighterParams& b,
                    const RatingRule& rule,
                    const std::vector<RatingAttrPair>& side1_attrs,
@@ -857,10 +870,19 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
     } else if (d < 0.0f) {
         d = warrior_rating(b, a, side2_attrs, fp);  // `d<0 -> b.JBa(a,k)`
     }
+    // `t=b.clone(); x=a.clone(); t.Bua(k); x.Bua(h); t.attributes.get(n,q);
+    // x.attributes.get(n,r)` (JS L728750-728752): the side lists are applied to
+    // the CLONES first, so `q` (the enemy) and `r` (the player) already carry
+    // their side's `<Attributes DamageFactor>` delta. Reading the bare units
+    // (as this port did) left both at 0, making `2^((q-r)*l)` identically 1.
+    FighterParams tb = b;  // `t` = the enemy clone
+    FighterParams xa = a;  // `x` = the player clone
+    apply_side_attrs(tb, side2_attrs);
+    apply_side_attrs(xa, side1_attrs);
     // `l = v.ACa()` (DamageFactor Base), `n = v.zCa()` (DamageFactor attr).
     const float l = fp.damage_factor_base;
-    const float q = b.attr(fp.damage_factor_attr);
-    const float r = a.attr(fp.damage_factor_attr);
+    const float q = tb.attr(fp.damage_factor_attr);
+    const float r = xa.attr(fp.damage_factor_attr);
     // Resistance: `x = z.vX` (rule), `z = p.o.Pw.c0(z.eta)` (save). The
     // caller resolves the save half; a missing entry is 0.
     float k = 1.0f, h = 1.0f;
@@ -879,9 +901,11 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
 }
 
 std::vector<RatingAttrPair> rating_side_attrs(
-    const std::vector<RatingSideRule>& rules, int side) {
+    const std::vector<RatingSideRule>& rules, int side, int level) {
     std::vector<RatingAttrPair> out;
     for (const RatingSideRule& r : rules) {
+        // `Lb.Ti()` -> `d_a()` -> `c_a(p.o.bb())`: the `<Level Min Max>` gate.
+        if (level < r.min_level || level > r.max_level) continue;
         const bool non_defense = (r.apply_to == side || r.apply_to == 3);
         for (const auto& kv : r.attrs) {
             const bool is_defense = kv.first.find("Defense") != std::string::npos;
@@ -889,6 +913,64 @@ std::vector<RatingAttrPair> rating_side_attrs(
                 out.push_back(RatingAttrPair{kv.first, static_cast<float>(kv.second)});
             }
         }
+    }
+    return out;
+}
+
+// `bb.OE`/`bb.M3`/`bb.xe` + the `Zi` ctor/`parse` (L453078/455854/454581/433102).
+// One `<Attributes>` node -> one `RatingSideRule` (the `wB` map + `Li` + range).
+static RatingSideRule rating_side_rule_from_node(
+    const pugi::xml_node& node, const std::map<std::string, float>& wv) {
+    RatingSideRule r;
+    // `bb.xe`: `c = c!=null?c:"All"; Player->1 / Bot->2 / All->3 / else 0`.
+    const char* at = node.attribute("ApplyTo").value();
+    const std::string ats = at != nullptr ? at : "All";
+    r.apply_to = ats == "Player" ? 1 : (ats == "Bot" ? 2 : (ats == "All" ? 3 : 0));
+    // `Zi` ctor: `for(c of v.wv) wB.set(c.name, 0)` — pre-seeded at 0.
+    for (const auto& kv : wv) r.attrs[kv.first] = 0;
+    // `Zi.parse`: skip the four non-attribute names, ADD the rest.
+    for (const pugi::xml_attribute a : node.attributes()) {
+        const std::string k = a.name();
+        const float v = a.as_float();
+        if (k == "Round" || k == "ApplyTo" || k == "Eclipse" ||
+            k == "WarriorPower") {
+            if (k == "WarriorPower") {
+                // `Zi.parse`: `WarriorPower` adds its value to EVERY `v.wv` name.
+                for (const auto& kv : wv) r.attrs[kv.first] += static_cast<int>(v);
+            }
+            continue;
+        }
+        r.attrs[k] += static_cast<int>(v);
+    }
+    return r;
+}
+
+std::vector<RatingSideRule> parse_rating_side_rules(
+    const pugi::xml_node& rules, const std::map<std::string, float>& wv) {
+    std::vector<RatingSideRule> out;
+    if (!rules) return out;
+    // `bb.OE`: `<Level>` is a conditional container (its children get the
+    // range); every other child is a rule pushed as-is.
+    for (const pugi::xml_node child : rules.children()) {
+        const std::string name = child.name();
+        if (name == "Level") {
+            // `bb.Ajb`: `Zf(a,0,2147483647)` = [Min, Max] with the defaults.
+            int lo = 0, hi = 2147483647;
+            if (const pugi::xml_attribute mn = child.attribute("Min"))
+                lo = mn.as_int(0);
+            if (const pugi::xml_attribute mx = child.attribute("Max"))
+                hi = mx.as_int(2147483647);
+            for (const pugi::xml_node g : child.children()) {
+                if (std::string(g.name()) != "Attributes") continue;
+                RatingSideRule r = rating_side_rule_from_node(g, wv);
+                r.min_level = lo;
+                r.max_level = hi;
+                out.push_back(std::move(r));
+            }
+            continue;
+        }
+        if (name != "Attributes") continue;
+        out.push_back(rating_side_rule_from_node(child, wv));
     }
     return out;
 }
