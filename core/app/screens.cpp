@@ -16346,6 +16346,37 @@ bool run_quest_dialog_selfcheck(App& app) {
                      dialog_image_ref(dn.image).file_name == dn.image);
     }
 
+    // --- `Fight` action `Name` resolution (JS `Sn.S` L548832 `c.fc(this.Ba,b)`).
+    // The dialog plate runs `<Fight Name="_$Fight">` (Zone1Guard2Greetings,
+    // zone_1/story.xml L190); the action must resolve the journal triple BEFORE
+    // the map/node lookup — else the plate silently closes the dialog (the
+    // reported "В бой only closes the dialog" bug).
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("fight_resolve");
+        d.journal.fight = "ZONE_1|BOSS_LYNX|2";
+        QuestAction fa;
+        fa.tag = "Fight";
+        fa.attrs["Name"] = "_$Fight";
+        d.button_actions.push_back(fa);
+        q.push_dialog_for_test(d);
+        const std::vector<std::string> fights = q.press_dialog(app, 1);
+        dlg_case("Sn Fight Name=\"_$Fight\" resolves to the journal triple",
+                 fights.size() == 1 && fights[0] == "ZONE_1|BOSS_LYNX|2");
+    }
+    {
+        q.clear_dialogs();
+        EngineDialog d = probe_dialog("fight_literal");
+        QuestAction fl;
+        fl.tag = "Fight";
+        fl.attrs["Name"] = "Punchbag|Bosses|1";
+        d.button_actions.push_back(fl);
+        q.push_dialog_for_test(d);
+        const std::vector<std::string> fights = q.press_dialog(app, 1);
+        dlg_case("Sn Fight literal Name stays literal (Punchbag|Bosses|1)",
+                 fights.size() == 1 && fights[0] == "Punchbag|Bosses|1");
+    }
+
     q.clear_dialogs();  // the D8/D9/D10 parse cases leave their queued dialogs
 
     // --- D13: nav #5 opens the Settings `un` dialog over the current screen. -

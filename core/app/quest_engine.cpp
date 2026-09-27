@@ -2727,7 +2727,31 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             req.reopen = attr_bool01(attr_or(a.attrs, "ReopenScene"));
             fx.navigate.push_back(std::move(req));
         } else if (t == "Fight") {
-            fx.fight_requests.push_back(attr_or(a.attrs, "Name"));
+            // JS `Sn` (the `Fight` action, `g="1EB"` L548832): `parse` keeps the
+            // raw `Name` (`this.Ba`), and `S(a)` resolves it through a fresh
+            // journal — `c.fc(this.Ba,b)` — BEFORE the lookup. The shipped quest
+            // plates carry `_$Fight` (the live triple, e.g.
+            // `Zone1Guard2Greetings`, zone_1/story.xml L190) and the
+            // `_CurrentDuel`/`_CurrentChallenge` quest vars. Pushing the RAW
+            // attr failed the map-node lookup and silently closed the dialog —
+            // the reported "the dialog's В бой only closes the dialog" bug.
+            std::string name = attr_or(a.attrs, "Name");
+            EvalCtx c;
+            c.journal = journal;
+            c.iterator = iterator;
+            c.locals = &locals;
+            c.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                c.story_step = w.story_step();
+                c.level = w.level;
+                c.save = w;
+                c.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            std::string resolved;
+            if (resolve_token(app, name, c, resolved)) name = resolved;
+            fx.fight_requests.push_back(name);
         } else if (t == "FightEnd") {
             // `Tn.S` (`class Tn`, factory `EFightEnd` L485079): `if(ca.Ka()!=
             // null) if(a=ba.Nj(a,Delay),a>0){...new Re(function(){b.kD(!1)},a)}
