@@ -12572,6 +12572,11 @@ void ShopScreen::update_impl(float dt) {
                 std::fflush(stdout);
                 break;
             }
+            // `yl.Oda` L153001 fires `QUEST_EVENT_DELIVERY` with `ta.item=a.ib`
+            // at the moment a delivery is granted; capture the name BEFORE
+            // `seen_ = w2` (which replaces the map `kv` references — a latent
+            // use-after-free in the pre-fix log line).
+            const std::string dname = kv.first;
             WarriorSave w2;
             try {
                 w2 = app().save().load();
@@ -12579,14 +12584,17 @@ void ShopScreen::update_impl(float dt) {
                 break;
             }
             WarriorSave::OwnedItem oi;
-            oi.name = kv.first;
+            oi.name = dname;
             oi.count = 1;
             w2.items.push_back(oi);
-            w2.timers.erase(kv.first);
+            w2.timers.erase(dname);
             app().save().save(w2);
             seen_ = w2;
-            std::fprintf(stdout, "[shop] delivery claimed: %s (Vxa notify)\n",
-                         kv.first.c_str());
+            // `yl.Oda` (L153001): `ha.F().ta.item=a.ib; ha.F().Sf(
+            // "QUEST_EVENT_DELIVERY")` -> `NotificationGeneral` (quests.xml
+            // L443-457, `<Delivery/>`).
+            log_purchase_fired("Delivery", app().quest_engine().deliver(app(), dname));
+            std::fprintf(stdout, "[shop] delivery claimed: %s (Oda)\n", dname.c_str());
             std::fflush(stdout);
             break;
         }

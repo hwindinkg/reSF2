@@ -4634,6 +4634,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
             check(qc, "ShowUpgrades -> <Warrior ShowUpgrades=1> (qub/Cr)");
         }
+        // --- Q3 `Delivery` (`yl.Oda` L153001): the missing `QUEST_EVENT_DELIVERY`
+        // fire site. `NotificationGeneral` (quests.xml L443-457) is the
+        // `<Delivery/>` quest (empty conditions, first action a `DeliveryItems`
+        // `Foreach`). BEFORE this fix no port fire existed, so it never ran.
+        {
+            const std::vector<std::string> fired =
+                app.quest_engine().deliver(app, "WEAPON_KNIVES");
+            bool hit = false;
+            for (const std::string& n : fired) hit = hit || n == "NotificationGeneral";
+            std::fprintf(stdout, "[qa] DELIVERY: fired %zu ->", fired.size());
+            for (const std::string& n : fired) std::fprintf(stdout, " %s", n.c_str());
+            std::fprintf(stdout, "  NotificationGeneral=%d\n", hit ? 1 : 0);
+            std::fflush(stdout);
+            check(hit, "Delivery -> NotificationGeneral runs (quests.xml L443)");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

@@ -5335,6 +5335,17 @@ std::vector<std::string> QuestEngine::purchase_unsuccessful(
     return fire(app, "PurchaseUnsuccessful", j);
 }
 
+// JS `yl.Oda` (L153001): `a!=null&&(a.Nz()?this.f_.push(a):this.e_.push(a),
+// this.pK.Z(a), ha.F().ta.item=a.ib, ha.F().Sf("QUEST_EVENT_DELIVERY"),...)`
+// and `yl.g4a` (L153484): `...b=ha.F().ta, ... b.Jf.*=..., ha.F().Sf(
+// "QUEST_EVENT_DELIVERY")`. Both set `ta.item` to the delivered item (`a.ib`)
+// then fire the event. The port's grant point (shop claim) is the analog.
+std::vector<std::string> QuestEngine::deliver(App& app, const std::string& item) {
+    QuestJournal j;
+    j.item = item;  // `ta.item=a.ib`
+    return fire(app, "Delivery", j);
+}
+
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
                                            const QuestJournal& journal) {
     std::vector<std::string> fired;

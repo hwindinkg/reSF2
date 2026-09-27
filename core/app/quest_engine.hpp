@@ -624,6 +624,15 @@ public:
     std::vector<std::string> purchase_unsuccessful(App& app, const std::string& item,
                                                    int code);
 
+    // JS `yl.Oda` (L153001) / `yl.g4a` (L153484): the DELIVERY dispatch. Sets
+    // `ha.F().ta.item = a.ib` (the delivered item's name) then fires
+    // `QUEST_EVENT_DELIVERY` (`NotificationGeneral`, quests.xml L443-457,
+    // reads `<Delivery/>`). `Oda` runs when a pending order's timer elapses
+    // (`Bma` tick L152796), when an instant delivery is bought (`hwa` L630974)
+    // and on post-fight loot (L106030); the port's single grant point is the
+    // shop's ready-delivery claim. Returns the fired quest names.
+    std::vector<std::string> deliver(App& app, const std::string& item);
+
     // Records the last fight triple (Bj Nb/Qv analog; set on FightEnd).
     // ChangeTab/SceneLoaded journals leave fight empty and inherit this.
     void note_fight(const std::string& name, const std::string& result);
