@@ -959,6 +959,77 @@ void App::poll_input() {
             }
         }
     }
+
+    // --- the real gamepad (JS `rf.Y3` @1242643 -> `hu` @234244) ------------
+    // Poll the first gamepad, fold its face buttons + left-stick pseudo-buttons
+    // (100..103, deadzone `rf.O6` = 0.5) into the held index set, merge the
+    // harness injection, and route each CHANGED index as a `hu` edge. The JS
+    // `rf` also emits noise events, hence the edge (not level) routing.
+    gamepad_held_.clear();
+    for (const auto& kv : gamepad_injected_) {
+        if (kv.second) gamepad_held_.insert(kv.first);
+    }
+    if (glfwJoystickIsGamepad(GLFW_JOYSTICK_1) == GLFW_TRUE) {
+        GLFWgamepadstate gs;
+        if (glfwGetGamepadState(GLFW_JOYSTICK_1, &gs) == GLFW_TRUE) {
+            for (int b = 0; b < GLFW_GAMEPAD_BUTTON_LAST; ++b) {
+                if (gs.buttons[b] == GLFW_PRESS) gamepad_held_.insert(b);
+            }
+            for (int axis = 0; axis < 2; ++axis) {
+                const float v = gs.axes[axis];
+                const int lo = 100 + axis * 2;
+                if (v < -0.5f) {
+                    gamepad_held_.insert(lo);
+                } else if (v > 0.5f) {
+                    gamepad_held_.insert(lo + 1);
+                }
+            }
+        }
+    }
+    if (screens_ != nullptr && screens_->top() != nullptr) {
+        for (const int idx : gamepad_held_) {
+            if (gamepad_prev_.count(idx) == 0) {
+                route_gamepad_input(*screens_->top(), idx, true);
+            }
+        }
+        for (const int idx : gamepad_prev_) {
+            if (gamepad_held_.count(idx) == 0) {
+                route_gamepad_input(*screens_->top(), idx, false);
+            }
+        }
+    }
+    gamepad_prev_ = gamepad_held_;
+
+    // --- the JS `fb` debug/cheat keys (@222987) ---------------------------
+    // Ctrl-gated (`c&1`) and keydown-only. The `Gz` code comes from the full
+    // keyboard map; only the fight screen decodes the actions.
+    {
+        const bool ctrl =
+            glfwGetKey(renderer_->window(), GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+            glfwGetKey(renderer_->window(), GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+        static const int kDebugKeys[34] = {
+            GLFW_KEY_0, GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4,
+            GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9,
+            GLFW_KEY_B, GLFW_KEY_M, GLFW_KEY_U,
+            GLFW_KEY_F1, GLFW_KEY_F3, GLFW_KEY_F4, GLFW_KEY_F5, GLFW_KEY_F6,
+            GLFW_KEY_F7, GLFW_KEY_F10, GLFW_KEY_F11, GLFW_KEY_F12,
+            GLFW_KEY_MINUS, GLFW_KEY_EQUAL,
+            GLFW_KEY_KP_0, GLFW_KEY_KP_1, GLFW_KEY_KP_2, GLFW_KEY_KP_3,
+            GLFW_KEY_KP_4, GLFW_KEY_KP_5, GLFW_KEY_KP_6, GLFW_KEY_KP_7,
+            GLFW_KEY_KP_8, GLFW_KEY_KP_9,
+        };
+        for (int di = 0; di < 34; ++di) {
+            const bool now_down =
+                glfwGetKey(renderer_->window(), kDebugKeys[di]) == GLFW_PRESS;
+            if (now_down && debug_keys_down_[di] == 0 && screens_ != nullptr &&
+                screens_->top() != nullptr) {
+                route_debug_key(*screens_->top(),
+                                sf2::app::FightScreen::js_code_for_glfw(kDebugKeys[di]),
+                                ctrl, true);
+            }
+            debug_keys_down_[di] = now_down ? 1 : 0;
+        }
+    }
 }
 
 void App::update_fixed(float dt) {

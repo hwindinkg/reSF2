@@ -5810,6 +5810,69 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fprintf(stdout,
                          "[tape] dojo KEY diagonal W(->%d)+D(->%d) expect 1->2 %s\n",
                          d1, d2, (d1 == 1 && d2 == 2) ? "PASS" : "FAIL");
+            // JS `Gz` keymap + `fb` debug decode (data assertions, no sim).
+            {
+                const int gz_fail =
+                    sf2::app::FightScreen::js_code_for_glfw(32) != 32 ||
+                    sf2::app::FightScreen::js_code_for_glfw(48) != 48 ||
+                    sf2::app::FightScreen::js_code_for_glfw(65) != 65 ||
+                    sf2::app::FightScreen::js_code_for_glfw(290) != 121 ||
+                    sf2::app::FightScreen::js_code_for_glfw(301) != 132 ||
+                    sf2::app::FightScreen::js_code_for_glfw(265) != 133 ||
+                    sf2::app::FightScreen::js_code_for_glfw(264) != 136 ||
+                    sf2::app::FightScreen::js_code_for_glfw(320) != 137 ||
+                    sf2::app::FightScreen::js_code_for_glfw(334) != 147 ||
+                    sf2::app::FightScreen::js_code_for_glfw(256) != 156 ||
+                    sf2::app::FightScreen::js_code_for_glfw(283) != 175 ||
+                    sf2::app::FightScreen::js_code_for_glfw(302) != 0;
+                const int fb_fail =
+                    sf2::app::FightScreen::debug_action_for_code(48) != 22 ||
+                    sf2::app::FightScreen::debug_action_for_code(137) != 22 ||
+                    sf2::app::FightScreen::debug_action_for_code(121) != 13 ||
+                    sf2::app::FightScreen::debug_action_for_code(135) != 3 ||
+                    sf2::app::FightScreen::debug_action_for_code(999) != 0;
+                std::fprintf(stdout,
+                             "[tape] JS Gz keymap + fb debug decode: %s\n",
+                             (gz_fail || fb_fail) ? "FAIL" : "PASS");
+                std::fflush(stdout);
+            }
+            // (a1) the REAL GAMEPAD source on the hub (JS `rf` @1242512 ->
+            //      `hu` @234244 -> `Za.gamepad` -> `ca.N0a`). Inject the
+            //      `rf.Y3` axis0-high pseudo-button 101 ("forward") through the
+            //      app's OWN injection; `App::poll_input` merges it and routes
+            //      the edge, so the `$ab` binding control 3 must fire.
+            app.inject_gamepad_button(101, true);
+            for (int i = 0; i < 4; ++i) app.run_one_frame();
+            const int pad_ctl = ds->dojo_last_key_type();
+            app.inject_gamepad_button(101, false);
+            for (int i = 0; i < 2; ++i) app.run_one_frame();
+            std::fprintf(stdout,
+                         "[tape] dojo PAD axis0+ (btn 101) -> control %d (expect 3) %s\n",
+                         pad_ctl, pad_ctl == 3 ? "PASS" : "FAIL");
+            // Diagonal: axis1- (up, 102) then axis0+ (101) -> control 2, not
+            // up(1)+forward(3) (JS `hu.Oba` first-satisfied latch).
+            app.inject_gamepad_button(102, true);
+            app.run_one_frame();
+            const int pd1 = ds->dojo_last_key_type();
+            app.inject_gamepad_button(101, true);
+            app.run_one_frame();
+            const int pd2 = ds->dojo_last_key_type();
+            app.inject_gamepad_button(101, false);
+            app.inject_gamepad_button(102, false);
+            app.run_one_frame();
+            std::fprintf(stdout,
+                         "[tape] dojo PAD diagonal up(->%d)+fwd(->%d) expect 1->2 %s\n",
+                         pd1, pd2, (pd1 == 1 && pd2 == 2) ? "PASS" : "FAIL");
+            // Punch face button (index 0 = A) -> control 9.
+            app.inject_gamepad_button(0, true);
+            app.run_one_frame();
+            const int ppunch = ds->dojo_last_key_type();
+            app.inject_gamepad_button(0, false);
+            app.run_one_frame();
+            std::fprintf(stdout,
+                         "[tape] dojo PAD button 0 (A) -> control %d (expect 9) %s\n",
+                         ppunch, ppunch == 9 ? "PASS" : "FAIL");
+            std::fflush(stdout);
             // Clear the running move before the pad probes: a punch delivered
             // inside a move's `Uninterrupt` window cannot start (JS `vm.he`
             // L749 gates every attack on `CurrentInterval Uninterrupt Not=1`).

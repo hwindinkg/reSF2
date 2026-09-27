@@ -262,6 +262,15 @@ public:
     // app.cpp (needs the full ScreenManager type).
     void inject_key(int glfw_key, bool down);
 
+    // Test hook: inject a raw gamepad button edge (JS `rf`/`hu`). `index` is a
+    // `Gamepad.buttons` index 0..15 or an `rf.Y3` axis pseudo-button 100..103.
+    // The injected state PERSISTS (like the click steps) and is merged with
+    // the real GLFW pad in `poll_input`; edges route through
+    // `route_gamepad_input`. Set `down=false` to release. No OS input.
+    void inject_gamepad_button(int index, bool down) {
+        gamepad_injected_[index] = down;
+    }
+
     // The player's fight auto-attack (drives the FightController; the
     // FightScreen wires it at battle start when set).
     void set_auto_attack(bool on) { auto_attack_ = on; }
@@ -427,6 +436,14 @@ private:
     // a phantom release of the partner key (holding D fired on_key(D,true) +
     // on_key(RIGHT,false) every tick — cancelled Holds and re-fired taps).
     std::set<int> fight_keys_down_;
+    // The raw gamepad button state (JS `rf.Ep`): the held index set last poll
+    // plus the harness-injected overrides. `gamepad_prev_` is the previous
+    // poll's set, so a change emits one `route_gamepad_input` edge.
+    std::set<int> gamepad_held_;
+    std::set<int> gamepad_prev_;
+    std::unordered_map<int, bool> gamepad_injected_;
+    // The `fb` debug-key held edges (the `kDebugKeys` table order).
+    int debug_keys_down_[34] = {};
     bool injected_click_pending_ = false;
     int injected_click_steps_ = 0;  // remaining fixed steps the click stays pressed
     double injected_x_ = 0.0;

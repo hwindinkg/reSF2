@@ -1092,6 +1092,18 @@ constexpr KeyboardBinding kKeyboardBindings[] = {
     {1, 0, -1}, {5, 2, -1}, {7, 3, -1}, {3, 1, -1}  // the cardinals
 };
 
+// The REAL gamepad bindings (JS `Za.$ab` @233304, `hu.De(control, ...buttons)`
+// @233296): control <- raw button indices. 100/101 = axis0 low/high, 102/103 =
+// axis1 low/high (JS `rf.Y3` @1242697 `f=100+f*2`, deadzone `rf.O6` = 0.5), so
+// the left stick feeds the SAME 8-way sector the keyboard does; 0..3 are the
+// face buttons (A/B/X/Y -> punch/kick/ranged/magic).
+struct GamepadBinding { int control; int a; int b; };  // b < 0 = single
+constexpr GamepadBinding kGamepadBindings[] = {
+    {2, 102, 101}, {8, 102, 100}, {4, 103, 101}, {6, 103, 100},  // diagonals
+    {1, 102, -1}, {5, 103, -1}, {7, 100, -1}, {3, 101, -1},      // cardinals
+    {10, 1, -1}, {9, 0, -1}, {11, 3, -1}, {12, 2, -1},           // abilities
+};
+
 // A GLFW key -> the physical movement slot, or -1 when it is not a movement
 // key. The WASD keys are the JS `Af.oUa` directions (key(1)/(3)/(5)/(7)); the
 // arrows are the desktop aliases folded in only when opted in. They share the
@@ -5815,6 +5827,61 @@ void DojoScreen::on_key(int glfw_key, bool down) {
     std::fflush(stdout);
 }
 
+// The hub's real gamepad source (JS `Za.gamepad` -> `hu`; the hub owns its own
+// `Za` just like the fight). Same `$ab` bindings as `FightScreen`.
+void DojoScreen::evaluate_dojo_gamepad() {
+    int sector = 0;
+    for (const GamepadBinding& b : kGamepadBindings) {
+        if (b.control > 8) continue;
+        if (dojo_pad_held_.count(b.a) && (b.b < 0 || dojo_pad_held_.count(b.b))) {
+            sector = b.control;
+            break;
+        }
+    }
+    if (sector != dojo_pad_sector_) {
+        if (dojo_fight_ != nullptr) {
+            if (dojo_pad_sector_ != 0) {
+                dojo_fight_->player_input(
+                    static_cast<sf2::scene::key_type>(dojo_pad_sector_),
+                    sf2::scene::press_type::release);
+            }
+            if (sector != 0) {
+                dojo_fight_->player_input(static_cast<sf2::scene::key_type>(sector),
+                                          sf2::scene::press_type::tap);
+            }
+        }
+        std::fprintf(stdout, "[dojo] gamepad sector %d -> %d\n", dojo_pad_sector_,
+                     sector);
+        std::fflush(stdout);
+        dojo_pad_sector_ = sector;
+        if (sector != 0) dojo_last_key_type_ = sector;
+    }
+    for (const GamepadBinding& b : kGamepadBindings) {
+        if (b.control <= 8) continue;
+        const bool now = dojo_pad_held_.count(b.a) != 0;
+        if (now == dojo_pad_btn_down_[b.control]) continue;
+        dojo_pad_btn_down_[b.control] = now;
+        if (dojo_fight_ != nullptr) {
+            dojo_fight_->player_input(static_cast<sf2::scene::key_type>(b.control),
+                                      now ? sf2::scene::press_type::tap
+                                          : sf2::scene::press_type::release);
+        }
+        dojo_last_key_type_ = b.control;
+        std::fprintf(stdout, "[dojo] gamepad control %d %s\n", b.control,
+                     now ? "down" : "up");
+        std::fflush(stdout);
+    }
+}
+
+void DojoScreen::on_gamepad_input(int index, bool down) {
+    if (down) {
+        dojo_pad_held_.insert(index);
+    } else {
+        dojo_pad_held_.erase(index);
+    }
+    evaluate_dojo_gamepad();
+}
+
 DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
     // Menu music (JS `lb.OS()` -> `ta.Ut("menu")` under the `lb.rJ` guard,
     // L1276-1277; the FightNone hub ctor calls it).
@@ -9313,9 +9380,102 @@ int FightScreen::desktop_alias_for_glfw(int glfw_key) {
     }
 }
 
+// The full JS `Gz` keyboard map (@10792): GLFW key -> the numeric code the
+// `Os.v` table stores. Letters/digits keep ASCII (GLFW == `Gz`), F1..F12 are
+// 121..132, the arrows 133..136 (Up,Left,Right,Down), the numpad 137..154, and
+// the named keys are spelled out. 0 = not in `Gz` (no `ey.hi` entry).
+int FightScreen::js_code_for_glfw(int glfw_key) {
+    switch (glfw_key) {
+        // F1..F12: GLFW 290..301 -> JS 121..132.
+        case 290: return 121; case 291: return 122; case 292: return 123;
+        case 293: return 124; case 294: return 125; case 295: return 126;
+        case 296: return 127; case 297: return 128; case 298: return 129;
+        case 299: return 130; case 300: return 131; case 301: return 132;
+        // Arrows: GLFW Up/Left/Right/Down 265/262/263/264 -> JS 133..136.
+        case 265: return 133;  // ArrowUp
+        case 262: return 134;  // ArrowLeft
+        case 263: return 135;  // ArrowRight
+        case 264: return 136;  // ArrowDown
+        // Numpad: GLFW KP_0..9 320..329 -> JS EKeyNumpad0..9 137..146.
+        case 320: return 137; case 321: return 138; case 322: return 139;
+        case 323: return 140; case 324: return 141; case 325: return 142;
+        case 326: return 143; case 327: return 144; case 328: return 145;
+        case 329: return 146;
+        case 334: return 147;  // NumpadAdd
+        case 330: return 148;  // NumpadDecimal
+        case 332: return 149;  // NumpadMultiply
+        case 333: return 150;  // NumpadSubtract
+        case 336: return 151;  // NumpadEqual
+        case 335: return 153;  // NumpadEnter
+        case 331: return 154;  // NumpadDivide
+        case 282: return 155;  // NumLock
+        case 256: return 156;  // Escape
+        case 259: return 157;  // Backspace
+        case 258: return 158;  // Tab
+        case 257: return 159;  // Enter
+        case 341: return 160;  // ControlLeft
+        case 345: return 161;  // ControlRight
+        case 340: return 162;  // ShiftLeft
+        case 344: return 163;  // ShiftRight
+        case 342: return 164;  // AltLeft
+        case 346: return 165;  // AltRight
+        case 266: return 166;  // PageUp
+        case 267: return 167;  // PageDown
+        case 260: return 168;  // Insert
+        case 261: return 169;  // Delete
+        case 268: return 170;  // Home
+        case 269: return 171;  // End
+        case 280: return 172;  // CapsLock
+        case 284: return 173;  // Pause
+        case 281: return 174;  // ScrollLock
+        case 283: return 175;  // PrintScreen
+        default: break;
+    }
+    // Space(32), Quote(39), Comma(44), Minus(45), Period(46), Slash(47),
+    // Digit0..9(48..57), Semicolon(59), Equal(61), KeyA..Z(65..90),
+    // BracketLeft(91), Backslash(92), BracketRight(93), Backquote(96): the
+    // GLFW ASCII code IS the `Gz` code.
+    if (glfw_key == 32 || glfw_key == 39 ||
+        (glfw_key >= 44 && glfw_key <= 57) || glfw_key == 59 ||
+        glfw_key == 61 || (glfw_key >= 65 && glfw_key <= 93) ||
+        glfw_key == 96) {
+        return glfw_key;
+    }
+    return 0;
+}
+
+// The JS `fb.IE` (@222987) action decode: `Gz` code -> `fb.Lf` action id.
+int FightScreen::debug_action_for_code(int js_code) {
+    switch (js_code) {
+        case 48: case 137: return 22;  // Digit0 / Numpad0
+        case 49: case 138: return 4;
+        case 50: case 139: return 5;
+        case 51: case 140: return 9;
+        case 52: case 141: return 10;
+        case 53: case 142: return 6;
+        case 54: case 143: return 7;
+        case 55: case 144: return 18;
+        case 56: case 145: return 20;
+        case 57: case 146: return 21;
+        case 66: return 15;   // KeyB
+        case 77: return 8;    // KeyM
+        case 85: return 16;   // KeyU
+        case 121: return 13;  // F1
+        case 123: return 11;  // F3
+        case 45: case 124: return 1;   // Minus / F4
+        case 125: return 2;   // F5
+        case 126: return 23;  // F6
+        case 127: return 24;  // F7
+        case 130: return 17;  // F10
+        case 131: return 14;  // F11
+        case 132: return 12;  // F12
+        case 61: case 135: return 3;   // Equal / ArrowRight
+        default: return 0;
+    }
+}
+
 void FightScreen::on_key(int glfw_key, bool down) {
     // Every key edge resets the reported key_type: an unbound key, the Esc
-    // pause control and Enter all leave it 0 (they produce no fight key).
     last_input_key_type_ = 0;
     // JS `Af.oUa` (L2472) is the BROWSER key map and binds exactly ten keys.
     // `App::poll_input` (app.cpp) additionally polls the arrows, Space, Esc
@@ -9388,6 +9548,107 @@ void FightScreen::inject_game_key(int key_type_index, bool down) {
         fight_->player_input(static_cast<sf2::scene::key_type>(key_type_index),
                              down ? sf2::scene::press_type::tap
                                   : sf2::scene::press_type::release);
+    }
+}
+
+// --- the real gamepad source (JS `rf` + `hu`) -----------------------------
+// The `Za.$ab` bindings and evaluator are declared with the shared input
+// tables above (`kGamepadBindings`, `evaluate_gamepad_bindings`).
+
+// JS `hu.Oba`: the FIRST satisfied directional binding wins (the `TD` latch),
+// so the diagonals (registered first) beat the cardinals. Emits the sector
+// change the keyboard path emits.
+void FightScreen::evaluate_gamepad_bindings() {
+    int sector = 0;
+    for (const GamepadBinding& b : kGamepadBindings) {
+        if (b.control > 8) continue;
+        if (pad_held_.count(b.a) && (b.b < 0 || pad_held_.count(b.b))) {
+            sector = b.control;
+            break;
+        }
+    }
+    if (sector != pad_sector_) {
+        if (fight_ != nullptr) {
+            if (pad_sector_ != 0) {
+                fight_->player_input(static_cast<sf2::scene::key_type>(pad_sector_),
+                                     sf2::scene::press_type::release);
+            }
+            if (sector != 0) {
+                fight_->player_input(static_cast<sf2::scene::key_type>(sector),
+                                     sf2::scene::press_type::tap);
+            }
+        }
+        std::fprintf(stdout, "[fight] gamepad sector %d -> %d\n", pad_sector_, sector);
+        std::fflush(stdout);
+        pad_sector_ = sector;
+        if (sector != 0) last_input_key_type_ = sector;
+    }
+    for (const GamepadBinding& b : kGamepadBindings) {
+        if (b.control <= 8) continue;
+        const bool now = pad_held_.count(b.a) != 0;
+        if (now == pad_btn_down_[b.control]) continue;
+        pad_btn_down_[b.control] = now;
+        if (fight_ != nullptr) {
+            fight_->player_input(static_cast<sf2::scene::key_type>(b.control),
+                                 now ? sf2::scene::press_type::tap
+                                     : sf2::scene::press_type::release);
+        }
+        last_input_key_type_ = b.control;
+        std::fprintf(stdout, "[fight] gamepad control %d %s\n", b.control,
+                     now ? "down" : "up");
+        std::fflush(stdout);
+    }
+}
+
+void FightScreen::on_gamepad_input(int index, bool down) {
+    if (down) {
+        pad_held_.insert(index);
+    } else {
+        pad_held_.erase(index);
+    }
+    evaluate_gamepad_bindings();
+}
+
+void FightScreen::on_debug_key(int js_code, bool ctrl, bool down) {
+    // JS `fb.IE` (@222987): `if(!((c&1)<=0))` — Ctrl (mod bit 1) is REQUIRED,
+    // and the dispatch runs on keydown only (it hangs off the keydown
+    // notifier `L.K.Kfa().IE`).
+    if (!ctrl || !down) return;
+    const int action = debug_action_for_code(js_code);
+    if (action == 0) return;
+    // The `fb.Lf` bodies (@223021) call fight-controller internals
+    // (`ca.Ka()` -> `b.wn`/`b.LEa`/`b.fA`/`b.yb`/`b.pb`) with no 1:1 native
+    // surface. The one port-mapped cheat is case 22
+    // (`b.pb.pga=!b.pb.pga`, the fight pause flag), routed to `paused_`.
+    if (action == 22) {
+        if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
+            paused_ = !paused_;
+            std::fprintf(stdout, "[fight] debug key Ctrl+0 -> pause %s\n",
+                         paused_ ? "ON" : "OFF");
+            std::fflush(stdout);
+        }
+        return;
+    }
+    std::fprintf(stdout,
+                 "[debug] Ctrl key code %d -> fb action %d (unported: no "
+                 "ca.Ka() surface)\n",
+                 js_code, action);
+    std::fflush(stdout);
+}
+
+void route_gamepad_input(Screen& top, int index, bool down) {
+    if (auto* fs = dynamic_cast<FightScreen*>(&top)) {
+        fs->on_gamepad_input(index, down);
+        return;
+    }
+    if (auto* ds = dynamic_cast<DojoScreen*>(&top)) {
+        ds->on_gamepad_input(index, down);
+    }
+}
+
+void route_debug_key(Screen& top, int js_code, bool ctrl, bool down) {
+    if (auto* fs = dynamic_cast<FightScreen*>(&top)) {
+        fs->on_debug_key(js_code, ctrl, down);
     }
 }
 

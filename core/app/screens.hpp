@@ -85,6 +85,15 @@ struct KeyInputState {
     int sector = 0;     // last movement control emitted (1-8, 0 = neutral)
 };
 
+// Routes a raw gamepad button edge (JS `rf`/`hu`) to the screen that owns a
+// `Za` pad — the fight and the dojo hub. No-op on every other screen (the JS
+// `Za.F()` is only live in those). Defined in screens.cpp.
+void route_gamepad_input(Screen& top, int index, bool down);
+
+// Routes a JS `fb` debug/cheat key edge (the `Gz` code + Ctrl) to the screen
+// that decodes it (the fight). No-op elsewhere. Defined in screens.cpp.
+void route_debug_key(Screen& top, int js_code, bool ctrl, bool down);
+
 // The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen
 // the game boots into: the dojo location layer stack + the `FightNone`
 // ModelViewer (player idle + Punchbag enemy) + the shared `za` top chrome
@@ -106,6 +115,10 @@ public:
     // override the base `Screen::on_key` swallowed every key and only the
     // on-screen pad worked.
     void on_key(int glfw_key, bool down) override;
+
+    // The real gamepad source (JS `Za.gamepad` -> `hu`) routed by
+    // `App::poll_input`. Same control path as the keyboard (`player_input`).
+    void on_gamepad_input(int index, bool down);
 
     // The desktop key-alias gate (arrows/Space) - the SAME flag every other
     // screen uses (`Af.oUa` L2472 binds only the ten JS keys; the arrows/Space
@@ -147,6 +160,11 @@ private:
     bool dojo_fight_tried_ = false;
     bool dojo_fight_ok_ = false;
     PadInputState dojo_pad_;  // the shared on-screen gamepad interaction state
+    // The real gamepad source (JS `hu`) for the hub, same bindings as the fight.
+    std::set<int> dojo_pad_held_;
+    int dojo_pad_sector_ = 0;
+    bool dojo_pad_btn_down_[16] = {};
+    void evaluate_dojo_gamepad();
     KeyInputState dojo_keys_;  // the hub's keyboard directional state (JS `gu`)
     // The desktop key-alias gate (arrows/Space), the SAME flag every other
     // screen uses (ON by default; see `set_desktop_key_aliases` above). The
@@ -535,6 +553,27 @@ public:
     // build ("controls barely respond"), so the desktop map is ON by default.
     static int desktop_alias_for_glfw(int glfw_key);
 
+    // The full JS `Gz` keyboard map (@10792): a GLFW key -> the `KeyboardEvent`
+    // numeric code the JS `Os.v` table (`ey.hi(a.code)`, @1245632) produces
+    // (letters/digits keep ASCII, F1..F12 -> 121..132, arrows -> 133..136,
+    // numpad -> 137..154, the rest spelled out). 0 = the key is not in `Gz`.
+    static int js_code_for_glfw(int glfw_key);
+
+    // The JS `fb` debug/cheat key dispatch (`fb.IE` @222987): the `Gz` code ->
+    // the `fb.Lf` action id (0 = none), Ctrl-gated (`c&1`). Data only — the
+    // action BODIES call fight-controller internals (`ca.Ka()`) the port does
+    // not expose 1:1; see `on_debug_key`.
+    static int debug_action_for_code(int js_code);
+
+    // A raw GAMEPAD button edge (JS `rf`/`hu`): `index` is a `Gamepad.buttons`
+    // index 0..15, or 100..103 for the `rf.Y3` axis pseudo-buttons (100/101 =
+    // axis0 low/high, 102/103 = axis1 low/high). The multi-button bindings
+    // (`Za.$ab`, control <- button set) are evaluated over the held set.
+    void on_gamepad_input(int index, bool down);
+
+    // The JS `fb` key edge (Ctrl held): dispatch the decoded debug action.
+    void on_debug_key(int js_code, bool ctrl, bool down);
+
     // The desktop key map toggle. DEFAULT ON: the windowed desktop port
     // accepts the JS ten keys PLUS the arrows/Space/Esc. Turn it OFF to get
     // the byte-exact `Af.oUa` table only (the `--input-tape js` fidelity run,
@@ -725,6 +764,17 @@ private:
     // The joystick/button interaction state (JS `ze.nia/Qgb/oia`, `fu.nia/oia`),
     // read by the shared `update_pad_input` and by `draw_gamepad`.
     PadInputState pad_;
+
+    // --- the real gamepad source (JS `rf` + `hu`, the `Za.gamepad` slot) ----
+    // `pad_held_` is the held raw button-index set (0..15 + 100..103); the
+    // movement controls 1..8 select `pad_sector_` exactly like `hu.Oba`, and
+    // the ability controls 9..14 follow `pad_btn_down_`. Fed by
+    // `App::poll_input` (real GLFW pad) and by `App::inject_gamepad_button`.
+    std::set<int> pad_held_;
+    int pad_sector_ = 0;
+    bool pad_btn_down_[16] = {};
+    // Evaluates the `Za.$ab` bindings over `pad_held_` (JS `hu.Oba`).
+    void evaluate_gamepad_bindings();
 
     // --- VS intro (JS `ik`, g="419", L2069-2074) --------------------------
     // The pre-fight VS screen the oracle `fight_intro` shows: the full-screen

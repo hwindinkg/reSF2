@@ -8,8 +8,8 @@ design_approved: false
 design_override: true
 steps_complete: [0, 1, 2, 3, 4, 5, 6, 7, 8]
 steps_pending: [9]
-last_action: "Gate re-run done locally (be7ab16c): determinism+fidelity PASS, AI/timer still stub; MASTER_TODO refreshed; phase-2 lineref scan started"
-next_action: "Phase 2: §9 breakdown + lineref suspects; push only on user word"
+last_action: "Pushed b4536a9f: the 6 user-reported dojo/map/fight bugs fixed - (1) the dojo background now parallaxes with the moving camera (it was frozen; Io 195.5->180.0, lamp 354.05->333.85), (2) the ROUND plate backdrop is the JS alpha-0.5 gradient (the else-branch had skipped the location layers; the .25 is a stop position, not alpha), (3) the ENEMY now moves (the port always took the Tabular path for a Type=Random tactic; implemented the JS hJa/Vgb Random path - started 0->9, DoubleStepForward, span 699.91), (4) the throw no longer carries the victim far (clip_mirror re-derived unconditionally; ThrowThroughTheBackV has SetDirection -> the thrower mirror; gap -746.2u -> +86.2u), (5) the map refreshes live on quest actions + the enemy carousel strikes every index before the current one (index from ca.hCa/f.uP; was always <Fight> 0), (6) the tutorial go-to-dojo flow VERIFIED advancing (step SHOW_DOUBLE_SWEEP -> SHOW_BLOCK on the Dojo ChangeTab) with the JS-exact 15s lesson hold - needs a live repro if still seen"
+next_action: "human: run play.cmd and retest the 6 items; for the sensei 'go to dojo' note the exact path (screen+tap) and whether the 15s lesson hold was mistaken for a hang; remaining OPEN: the fight headless capture harness does not image the FightScreen frame (a verification gap), the map node-select/panels oracle captures invalid, the Da.pg reseed, Jbb/replayable, the full Pi rig, --clean-first MSB4018 env"
 blockers: []
 freshnessStatus: "fresh"
 lastUpdatedAt: 2026-07-22T01:55:39.834+03:00
@@ -73,4 +73,4 @@ Initialized at 2026-07-22T01:55:39.834+03:00
 plan_file: E:\reSF2\.planning\phases\phase-5\PLAN.md
 design_override_reason: "Backend-only task — no UI changes needed. Design requirement is a false positive."
 confirmed_at: 2026-07-29
-task_type: "complex"
+task_type: "re-port"
