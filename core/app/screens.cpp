@@ -4104,7 +4104,13 @@ MapFightButtonRect map_fight_button_rect(const MapMetrics& mm) {
     r.h = cw * 0.2f;                        // `tj.Pb(c*.2)`
     r.w = 600.0f * (r.h / 112.0f);          // `Bb` ctor `xc(600)`
     r.cx = body_x + body_w * 0.5f;
-    r.cy = body_y + body_h - r.h * 0.5f;
+    // `Rr.layout` L2102: `this.tj.C((a.J+a.N)*.5); this.tj.D(a.W -
+    // this.tj.qa()/2*2)`. `a.W` is the body rect's BOTTOM (`a.W = f+(e-f) =
+    // wc.Xy`, the content height); `C`/`D` are the node CENTRE, so the button
+    // centre sits one FULL button height above the content bottom
+    // (`qa()/2*2 == qa()`), NOT one half height. The old `- r.h*.5` placed the
+    // FIGHT plate ~27 px too low (oracle centre ~608, port ~631).
+    r.cy = body_y + body_h - r.h;
     return r;
 }
 
@@ -8355,7 +8361,10 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         const int per_row = (pips > 12) ? 10 : 6;
         const int rows = (pips + per_row - 1) / per_row;
         const float g = body_w / static_cast<float>(per_row);
-        const float h = (xr_h - pip_label_h) / static_cast<float>(rows);
+        // `Xr.ba` L2135: `this.wba.D(c); this.mdb(a, b*.7)` — the pip grid
+        // gets height `b*.7` where `b` is the Xr height (`body_h*.3` from
+        // `pk.ba`), i.e. `body_h*.21`, NOT `xr_h - label`.
+        const float h = (xr_h * 0.7f) / static_cast<float>(rows);
         const float pip = std::min(g, h);
         for (int i = 0; i < pips; ++i) {
             const int row = i / per_row;
