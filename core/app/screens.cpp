@@ -9386,6 +9386,13 @@ int FightScreen::enemy_moves_started() const {
     return fight_ != nullptr ? fight_->enemy().moves_started : 0;
 }
 
+// [probe, authorised] `--tactic <Name>`: force the enemy's tactic on the
+// live fight (the per-tactic locomotion audit). No behaviour change unless
+// the flag is passed.
+bool FightScreen::force_enemy_tactic(const std::string& name) {
+    return fight_ != nullptr && fight_->force_enemy_tactic(name);
+}
+
 float FightScreen::player_facing() const {
     return fight_ != nullptr ? static_cast<float>(fight_->player().fighter.facing())
                              : 0.0f;

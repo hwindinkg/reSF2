@@ -808,7 +808,11 @@ int AiController::quick_slots(const AiFightState& st) {
             const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
             for (const MoveDef* m : group) {
                 if (!v1(*m, st)) continue;
-                wb_.push_back({m->name, strict_end(*m)});
+                // JS `Pqb` L606: the quick-slot wait is `h.$I()` =
+                // `vBa(P.s$a())` = `0<b ? i0(b+1) : 0` (SUB-FRAME, L697), not
+                // the raw `strict_end`. A raw wait (often 1) made the AI
+                // re-decide every frame and restart the move (no translation).
+                wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
                 ++added;
             }
         }
@@ -976,19 +980,19 @@ int AiController::pqb(const AiFightState& st) {
         dbg_.enemy_attack_end = attack_end(*st.enemy_move);
     }
 
-    // Facing lock (JS L604): `b6a(b)*b.hd()>0` — when the direction toward
-    // the enemy matches my facing... wait — the JS is `b6a(b)` where b =
-    // the OPPONENT's anim controller; `b6a` returns sign(opponent.x -
-    // my.x) — the direction toward me FROM the opponent... no. Let me
-    // re-derive: `b6a(a){a=a.Fe();let b=this.Ji.Fe();return a.ma.x-b.ma.x
-    // >=0?1:-1}` — a = opponent body, b = my body → sign(opponent.x -
-    // my.x) = the direction from me TOWARD the opponent. Then `b6a(b) *
-    // b.hd()` — b.hd() = the OPPONENT's facing. If the direction toward
-    // the opponent has the same sign as the opponent's facing... that
-    // means the opponent faces AWAY from me. So: when the opponent faces
-    // away, the AI watches (doesn't attack).
+    // Facing lock (JS L604): `if(this.b6a(b)*b.hd()>0)`.
+    //   `b6a(b)` = `a.Fe().ma.x - this.Ji.Fe().ma.x >= 0 ? 1 : -1` (L603)
+    //     where a = the OPPONENT (`b = a.da`), `this.Ji` = me → the sign of
+    //     (opponent.x − my.x), the direction from me TOWARD the opponent.
+    //   `b.hd()` = the OPPONENT's `Te.hd()` = `return this.FX` (L547) — the
+    //     CLIP MIRROR `sign(me.x − opp.x)` (set by `Te.Skb` L551 `rub(Ae.Wl)`,
+    //     `Vi.SBa` L704) — NOT the `b6a` facing. So the product is
+    //     `sign(opp−me) * sign(me−opp)` = −1: the lock does NOT fire for a
+    //     normally-facing opponent. The port previously fed the opponent's
+    //     `facing_` (== `b6a`), making the product `+1` every frame, so the
+    //     AI took this branch unconditionally and returned 0 (stood still).
     const int dir_to_opp = b6a(st);
-    if (dir_to_opp * st.enemy_facing > 0) {
+    if (dir_to_opp * st.enemy_clip_mirror > 0) {
         dbg_.branch = "facing-lock";
         pH_ = F8_ = true;
         oC_ = 3;
@@ -1180,7 +1184,7 @@ int AiController::pqb(const AiFightState& st) {
             if (moves_ != nullptr) {
                 for (const std::string& grp : tactic_->evade_throw_dodges) {
                     for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
-                        wb_.push_back({m->name, strict_end(*m)});
+                        wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
                     }
                 }
             }
@@ -1193,7 +1197,7 @@ int AiController::pqb(const AiFightState& st) {
             if (moves_ != nullptr) {
                 for (const std::string& grp : tactic_->cautious_movements) {
                     for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
-                        wb_.push_back({m->name, strict_end(*m)});
+                        wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
                     }
                 }
             }

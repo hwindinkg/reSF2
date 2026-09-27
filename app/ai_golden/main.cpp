@@ -181,7 +181,7 @@ int main() {
         st.enemy_max_hp = 100.0f;
         st.my_x = 0.0f;
         st.enemy_x = 200.0f;
-        st.enemy_facing = -1;  // facing me: past the Pqb facing lock
+        st.enemy_clip_mirror = -1;  // opp clip mirror: past the Pqb facing lock
         st.enemy_move_frame = 30;
         st.my_anim = "Idle";
         st.enemy_anim = "Idle";

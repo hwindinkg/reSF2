@@ -457,7 +457,7 @@ int main(int argc, char** argv) {
             st.my_y = me.fighter.world_y();
             st.enemy_x = foe.fighter.world_x();
             st.my_facing = me.fighter.facing();
-            st.enemy_facing = foe.fighter.facing();
+            st.enemy_clip_mirror = foe.fighter.clip_mirror();
             st.my_anim = me.fighter.current_move() ? me.fighter.current_move()->name : "";
             st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
             st.enemy_move = foe.fighter.current_move();

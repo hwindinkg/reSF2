@@ -602,6 +602,14 @@ public:
     std::string player_last_decision() const;
     int player_moves_started() const;
 
+    // [probe, authorised] `--tactic <Name>`: force the ENEMY's tactic by
+    // name (the tactic_settings.xml `<Tactic Name=..>`) on the live fight,
+    // overriding the battle's shipped tactic. Used by `--enemy-move-probe`
+    // to audit EVERY shipped enemy tactic's locomotion. Returns false when
+    // the name is unknown or the fight is not live. No behaviour change
+    // unless the flag is passed.
+    bool force_enemy_tactic(const std::string& name);
+
     // The player's last move decision (JS `Gc.DK` `c == false`, L673-674),
     // rendered as `cands=<name>@<prio>,... f=<name>,... draw=<v>|- idx=<i>
     // <picked> ukb=<name>`. "" when no decision has run. The

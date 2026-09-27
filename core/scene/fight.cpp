@@ -5211,7 +5211,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.my_y = me.fighter.world_y();
         st.enemy_x = foe.fighter.world_x();
         st.my_facing = me.fighter.facing();
-        st.enemy_facing = foe.fighter.facing();
+        // JS `b.hd()` (L547 `Te.hd(){return this.FX}`): the OPPONENT's CLIP
+        // MIRROR, not its `b6a` facing (`fighter.facing()`), or the `Pqb`
+        // facing-lock fires every frame and the AI never issues a move.
+        st.enemy_clip_mirror = foe.fighter.clip_mirror();
         st.my_anim = me.fighter.current_move() ? me.fighter.current_move()->name : "";
         st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
         st.enemy_move = foe.fighter.current_move();

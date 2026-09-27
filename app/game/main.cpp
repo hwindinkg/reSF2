@@ -63,6 +63,7 @@ void print_usage(const char* argv0) {
                   "                  [--quest-query-probe] [--quest-action-probe]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
                   "                  [--round-log] [--fx-probe] [--hit-audit]\n"
+                  "                  [--enemy-move-probe] [--tactic <Name>]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
                    "                   (0 disables; default 900)\n"
                    "  --windowed       open the VISIBLE interactive window (the ONLY\n"
@@ -1481,6 +1482,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // player win or the port mis-resolves the loss.
     bool boss_loss_probe = false;
     bool enemy_move_probe = false;
+    // `--tactic <Name>`: force the ENEMY's tactic by name (the
+    // tactic_settings.xml `<Tactic Name=..>`), overriding the battle's
+    // shipped tactic. Used by `--enemy-move-probe` to audit EVERY shipped
+    // enemy tactic's locomotion (the per-tactic before/after). Empty = the
+    // battle's own tactic.
+    std::string tactic_override;
     // --d3-probe: force a named move on the player and print the attacker's
     // part set the OLD way (yD(4) only) vs the NEW way (the xqb union over
     // every active type-4 interval), then the hit_test result. Proves the D3
@@ -1870,6 +1877,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             boss_hit_probe = true;
         } else if (arg == "--enemy-move-probe") {
             enemy_move_probe = true;
+        } else if (arg == "--tactic" && i + 1 < argc) {
+            tactic_override = argv[++i];
         } else if (arg == "--boss-loss-probe") {
             boss_loss_probe = true;
         } else if (arg == "--d3-probe") {
@@ -6113,6 +6122,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fprintf(stderr, "[emove] no fight screen\n");
             app.shutdown();
             return 1;
+        }
+        // `--tactic <Name>`: force the enemy's tactic (the per-tactic audit).
+        if (!tactic_override.empty()) {
+            const bool ok = fs->force_enemy_tactic(tactic_override);
+            std::fprintf(stdout, "[emove] tactic override=%s ok=%d\n",
+                         tactic_override.c_str(), ok ? 1 : 0);
+            std::fflush(stdout);
         }
         int guard = 0;
         while (guard < 20000 && app.screens().current_id() == kScreenFight &&

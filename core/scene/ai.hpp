@@ -351,8 +351,12 @@ struct AiFightState {
     float my_x = 0.0f;                       // `oa.Fe().ma.x`
     float enemy_x = 0.0f;
     float my_y = 0.0f;
-    int my_facing = 1;                       // `da.hd()`
-    int enemy_facing = 1;
+    int my_facing = 1;                       // `da.hd()` = MY clip mirror (`Te.FX`)
+    // JS `Pqb` (L604) `b.hd()` = the OPPONENT's `Te.hd()` = `this.FX` (L547),
+    // the CLIP MIRROR (`sign(me_x - opp_x)`), NOT the `b6a` facing (`sign(opp_x
+    // - me_x)`). Feeding the `b6a` value made `b6a(b)*b.hd()` always `+1`, so
+    // the facing-lock fired every frame and the AI returned 0 (never moved).
+    int enemy_clip_mirror = 1;
     // My / enemy current animation names (`da.Ua.name`).
     std::string my_anim;
     std::string enemy_anim;

@@ -1562,6 +1562,19 @@ public:
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
+    // [probe, authorised] `--tactic <Name>`: force the ENEMY's tactic by
+    // name (the tactic_settings.xml `<Tactic Name=..>`) on the live fight,
+    // overriding the battle's shipped tactic. Returns false when the name
+    // is unknown or the fight has no tactic table. No behaviour change
+    // unless the flag is passed.
+    bool force_enemy_tactic(const std::string& name) {
+        if (tactic_defs_ == nullptr || enemy_.ai == nullptr) return false;
+        const auto it = tactic_defs_->find(name);
+        if (it == tactic_defs_->end()) return false;
+        tactic_ = &it->second;
+        enemy_.ai->set_tactic(tactic_);
+        return true;
+    }
     // [dojo lesson] The PLAYER fighter's animation START since the last drain
     // (JS `Te.x3` L508 -> `Gc.Pf` L671: the model's `Pf` event the lesson
     // handlers `Bo`/`Do`/`Eo` listen on, sf2 L1121/L1123/L1125). `name` is the
