@@ -11968,8 +11968,15 @@ ShopLayout shop_layout(int tab) {
     l.uw_y = vp.uw_y;
     l.spacing = vp.spacing;
     l.scroll_inset = l.viewer.width() * 0.08f;          // Fg.Pn .08 (L2262)
-    l.roll_h = 30.0f;                                   // vk (`Vaa(30)` L2261)
-    l.list_h = l.viewer.height() - 2.0f * l.roll_h;     // scroll.Xy (L1870)
+    // `Fg.ba(a,b,c)` (@962809) sets `this.vk = this.Dl==null ? 0 : c`. The
+    // `Oe` ctor runs `scroll.Vaa(30)` (@1163862) which creates BOTH `Zh` rails
+    // (`Dl = [end,end]`, non-null) BEFORE layout, so when `Oe.Pn` later calls
+    // `scroll.ba(w,h,w*.08)` the THIRD arg wins: `vk = w*.08`, NOT the 30
+    // stored by `Vaa` (that value only survives while `Dl==null`). Hence
+    // `Xy = h - 2*vk` and `content.D(vk)` use `w*.08`, exactly like the
+    // `Xd`/profile path (`profile_scroll_h`). The old fixed 30 was wrong.
+    l.roll_h = l.viewer.width() * 0.08f;                // vk = c (`Fg.ba` @962809)
+    l.list_h = l.viewer.height() - 2.0f * l.roll_h;     // scroll.Xy (Fg.ba @962809)
     l.cell_w = l.viewer.width() - 2.0f * l.scroll_inset - 8.0f;  // scroll.Gv-8
     l.cell_h = vp.uw_y * (l.cell_w / vp.uw_x);          // ff.qa (L1893/L2262)
     l.cell_step = l.cell_h + vp.spacing;                // Gg.ba (L1885)
@@ -12040,7 +12047,7 @@ void draw_shop_scroll(App& app, sf2::render::Renderer& ren, const ShopRect& v) {
                           false);
     try_draw_atlas_button(app, "paper_edge_right", v.N - c * 0.5f, cy, c, h, 1.0f, true,
                           false);
-    constexpr float kRollH = 30.0f;                  // vk (`Fg(500,800,0,30)`)
+    const float kRollH = v.width() * 0.08f;  // vk = c (`Fg.ba`, @962809)
     constexpr float kCapSrcW = 101.0f, kCapSrcH = 114.0f;  // roll_end 101x114
     const float capw = kCapSrcW * (kRollH / kCapSrcH);
     const float midw = std::max(w - 2.0f * capw, 10.0f);
@@ -13435,8 +13442,11 @@ void ShopScreen::render_impl(App& app) {
         // (`V(K.T(this.bc.xf))`, L2307, shown only when `xf>0`). The name/price
         // belong to the `bc` detail panel — the old native drew them IN the cell
         // (invented: the oracle centre column shows only the art + "★ 1").
-        bool drawn = draw_item_image(app, it.image, cx, cy - ch * 0.04f, cw * 0.8f, ch * 0.8f,
-                                     0.95f);
+        // `ns.ba` (@1186046): `var c=this.ce.x*.8; Bk.kLa(c, ce.y*.8);
+        // Bk.C(ce.x/2); Bk.D(ce.y/2)` — the item image is aspect-fit (`kLa` =
+        // `la(min(a/fa.x,b/fa.y))`, @828371) and centred EXACTLY on the cell
+        // (`ce/2`), at alpha 1. The old `cy - ch*.04` / 0.95f were invented.
+        bool drawn = draw_item_image(app, it.image, cx, cy, cw * 0.8f, ch * 0.8f, 1.0f);
         if (!drawn) {
             const float r = equipped ? 0.72f : (selected ? 0.75f : (hovered ? 0.7f : 0.5f));
             const float g = equipped ? 0.60f : (selected ? 0.62f : (hovered ? 0.56f : 0.4f));
