@@ -747,6 +747,29 @@ private:
     std::string vs_enemy_name_;
     std::string vs_player_image_;    // users/images stem (JS `Hf`)
     std::string vs_enemy_image_;
+
+    // --- Combo callout (JS `Gr` g="40E" + `Hx` g="40D" + `Ix` g="410") -----
+    // The HUD consumer of the `iu` combo signal. The prior run ported the
+    // signal (`combo_announced`/`combos_announced` on FightFighter) but not
+    // its renderer. JS chain: `wd.Vx.Jt` (`iu`, g="C5") -> `wd.sHa` forwards
+    // to `wd.Jt` -> the fight owner's `Ihb(a)` handler -> `mb.Ax(qb, a.aw(),
+    // a.sP)` -> `Sf.Ax` -> the fighter's `lk.Jh` (`Gr`). `Gr.Ax(hq, sP)`
+    // finds the first type-3 element or makes one (`f1a`), sets its `count`
+    // = `Qq(3, sP)` = `pCa()+sP` (Combo.Time + the move's `Ul.sP`), sets the
+    // label to the count `hq`, and fires UI event 0/1. `Gr.ia` ticks the
+    // element `count` and slides it (`Ix.move`) 400 local units toward the
+    // centre over 0.5 s. This is the "COMBO" banner + the hit count.
+    struct ComboElement {
+        int count = 0;      // `Ix.count` remaining life frames
+        float time = 0.0f;  // `Ix.time` slide clock (seconds)
+        bool fp = false;    // `Ix.fp` fade latch
+        int value = 0;      // `Hx` label text (the announced combo count)
+    };
+    struct ComboTracker {
+        int last_signal = 0;                  // `combos_announced` high-water
+        std::vector<ComboElement> elements;   // `Gr.Gu`
+    };
+    ComboTracker combo_callout_[2];           // [0]=player, [1]=enemy
 };
 
 // The battle results — native results flow (JS `v.kD` L622187 -> the

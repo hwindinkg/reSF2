@@ -10784,6 +10784,126 @@ void FightScreen::render_impl(App& app) {
                   kPipW, e_done);
     }
 
+    // --- Combo counter (JS `Gr` g="40E" / `Hx` g="40D" / `Ix` g="410"): the
+    // HUD consumer of the `iu` combo signal the previous run ported ------
+    // `wd.Vx.Jt` (the `iu` ladder, g="C5") is forwarded by `wd.sHa`
+    // (`this.Jt.Z(this)`) to `wd.Jt`; the fight owner's `Ihb(a)` handler
+    // (offset 214045) calls `mb.Ax(a.parameters.qb, a.aw(), a.sP)` ->
+    // `Sf.Ax` -> the fighter's `Gr`. `Gr.Ax(hq,sP)` requires `hq>=v.aw()`
+    // (MinHits 3): it reuses or creates (`f1a`) a type-3 element, sets the
+    // label to `hq` and its life to `Qq(3,sP)=v.pCa()+sP` (Combo.Time + the
+    // move's `Ul.sP`), then fires UI event 0/1. `Gr.ia` + `Ix.move` slide
+    // the element from the screen edge toward `pe==0?+400:-400` local over
+    // 0.5 s (ease-out `dc.Ln`), hold `count` frames, then back (ease-in
+    // `dc.KK`) and remove it. `Hx` image = the callouts "combo" frame (id
+    // 1310, 188x48); the label = digits.fnt (id 1308), colour
+    // `Na.cd(16777087)` = (255,255,127). Positions are in the port's
+    // screen-space HUD (`Gr.node` is a child of the `lk` panel, scaled `c`).
+    {
+        const bool combo_live =
+            !paused_ && !fight_->round_wait() && !fight_->battle_over();
+        if (!combo_live) {
+            // `Gr.Ew` (`Hqa`) hides the elements while paused/hidden.
+            combo_callout_[0].elements.clear();
+            combo_callout_[1].elements.clear();
+        } else {
+            load_callouts_atlas(app);
+            sf2::data::atlas_frame combo_fr;
+            int combo_tw = 0, combo_th = 0;
+            unsigned int combo_gl = 0;
+            const bool have_combo =
+                app.get_atlas_frame("combo", &combo_fr, &combo_tw, &combo_th, &combo_gl);
+            const float nat_w = (combo_fr.source_w > 0 ? static_cast<float>(combo_fr.source_w)
+                                                       : static_cast<float>(combo_fr.w)) * hud_c;
+            const float nat_h = (combo_fr.source_h > 0 ? static_cast<float>(combo_fr.source_h)
+                                                       : static_cast<float>(combo_fr.h)) * hud_c;
+            const sf2::data::font* cfnt = app.digits_font();
+            const unsigned int ctex = app.digits_texture();
+            const int combo_time = sf2::scene::fight_params().combo_time;    // `v.pCa()`
+            const int min_hits = sf2::scene::fight_params().combo_min_hits;  // `v.aw()`
+            constexpr float kSlide = 0.5f;  // `Ix.move` 0.5 s
+            for (int side = 0; side < 2; ++side) {
+                const sf2::scene::FightFighter& f =
+                    (side == 0) ? fight_->player() : fight_->enemy();
+                ComboTracker& tr = combo_callout_[side];
+                // `Ihb`: on each `wd.Jt` fire (`combos_announced` bump).
+                if (f.combos_announced != tr.last_signal) {
+                    tr.last_signal = f.combos_announced;
+                    const int hq = f.combo_announced;  // `aw()` = `Vx.Ui`
+                    if (hq >= min_hits) {
+                        // JS `a.sP` = the active attack interval's `<Combo
+                        // Time>` (`Ul.sP`, parse offset 396204). No shipped
+                        // `moves.xml` attack interval carries a `<Combo>` child
+                        // (verified), so `sP` is 0 for every shipped move; the
+                        // port's `Interval::combo_time` mirrors the field.
+                        const int s_p = 0;
+                        const int life = std::max(0, combo_time + s_p);  // `Qq(3,sP)`
+                        ComboElement* el =
+                            tr.elements.empty() ? nullptr : &tr.elements.front();
+                        if (el == nullptr) {
+                            tr.elements.push_back(ComboElement{});
+                            el = &tr.elements.back();
+                        }
+                        el->count = life;
+                        el->value = hq;
+                        static bool combo_logged = false;
+                        if (!combo_logged) {
+                            combo_logged = true;
+                            std::fprintf(stdout,
+                                         "[fight] combo callout side=%d value=%d life=%d "
+                                         "sP=%d c=%.5f edge=%.1f\n",
+                                         side, hq, life, s_p, static_cast<double>(hud_c),
+                                         static_cast<double>(side == 0 ? 0.0f : kViewW));
+                            std::fflush(stdout);
+                        }
+                    }
+                }
+                const float start_x = (side == 0) ? 0.0f : kViewW;
+                const float end_x = (side == 0) ? (panel_player_x + 400.0f * hud_c)
+                                                : (panel_enemy_x - 400.0f * hud_c);
+                int stack = 0;
+                for (std::size_t i = 0; i < tr.elements.size();) {
+                    ComboElement& e = tr.elements[i];
+                    // `Ix.move`: time += frame; a=min(1,time/.5);
+                    // b = fp ? (1-a)^2 (`KK`) : 1-(1-a)^2 (`Ln`).
+                    e.time += 1.0f / 60.0f;
+                    const float a = std::min(1.0f, e.time / kSlide);
+                    const float b = e.fp ? (1.0f - a) * (1.0f - a)
+                                         : 1.0f - (1.0f - a) * (1.0f - a);
+                    const float ex = start_x + (end_x - start_x) * b;
+                    const float ey =
+                        panel_y + (200.0f + 100.0f * static_cast<float>(stack)) * hud_c;
+                    if (have_combo) {
+                        try_draw_atlas_button(app, "combo", ex, ey, nat_w, nat_h, 1.0f);
+                    }
+                    if (cfnt != nullptr && ctex != 0) {
+                        // `Hx.init` label: box height = image height
+                        // (`Fa(100, image.qa())`); digits design size 90 ->
+                        // scale = h/90.
+                        const float nscale = nat_h / 90.0f;
+                        const std::string v = std::to_string(e.value);
+                        app.draw_text_centered(*cfnt, ctex, ex, ey - nat_h * 0.5f, v, nscale,
+                                               1.0f, 1.0f, 127.0f / 255.0f, 1.0f);
+                    }
+                    // `Gr.azb`: while sliding (`a<1`) `count` is untouched;
+                    // once landed `count--`; at 0 -> `fp=true, time=0`.
+                    if (e.count > 0) {
+                        if (a >= 1.0f && --e.count == 0) {
+                            e.fp = true;
+                            e.time = 0.0f;
+                        }
+                    } else if (a >= 1.0f) {
+                        tr.elements.erase(tr.elements.begin() +
+                                          static_cast<std::ptrdiff_t>(i));
+                        continue;
+                    }
+                    ++stack;
+                    ++i;
+                }
+            }
+        }
+    }
+
     // The round plate (JS `Cr` L2021-2026): over the fight + HUD, UNDER the
     // gamepad. Atlas art only - no text and no tween (see draw_fight_banner).
     draw_fight_banner(app, *fight_);
