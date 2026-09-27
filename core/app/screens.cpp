@@ -646,6 +646,21 @@ void draw_closing_dialog(App& app, sf2::render::Renderer& ren);
 // falls through to `this.sa()`, so the port advances without displaying.
 void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) {
     if (!is_top) return;  // layered stack: only the top screen draws the modal
+    // `Rd` (L1078843): the live `zn` ActScreen overlay. JS draws it on its own
+    // `mc.K.cf` child above the scene — a black dim + the current line, 1 s
+    // fade-in / hold per `Frames/60` / 1 s fade-out (`aa` steps 0-5). Placed
+    // here because every screen's render calls `draw_quest_modal` last.
+    if (app.quest_engine().has_act_overlay()) {
+        const float a = app.quest_engine().act_overlay_alpha();
+        const float dim[] = {0.0f,   0.0f,   kViewW, 0.0f,   0.0f,   kViewH,
+                             kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
+        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f * a);
+        draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
+                        kViewH * 0.16f,
+                        loc(app, app.quest_engine().act_overlay_text(),
+                            app.quest_engine().act_overlay_text()),
+                        0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    }
     // D13: `Wb` owns ONE top dialog — the Settings `un` (case 310) draws here
     // too, over the CURRENT screen (it is opened by the `za` nav #5).
     draw_settings_dialog(app, ren);

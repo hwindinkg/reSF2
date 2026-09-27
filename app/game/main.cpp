@@ -4516,6 +4516,124 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             app.screens().pop();
             app.run_one_frame();
         }
+        // --- Q10 `Switch` (`Go` g="20A" L565534): the matching `<Case>` runs,
+        // a non-matching one does not, and `<Default>` runs when none match.
+        const auto var_is = [&](const char* name) -> bool {
+            try {
+                const sf2::app::WarriorSave wv = app.save().load();
+                auto it = wv.variables.find(name);
+                if (it == wv.variables.end()) {
+                    it = wv.variables.find(std::string("_") + name);
+                }
+                return it != wv.variables.end() && it->second == "1";
+            } catch (const std::exception&) {
+                return false;
+            }
+        };
+        {
+            const auto mk_switch = [](const char* val) {
+                sf2::app::QuestAction sw;
+                sw.tag = "Switch";
+                sw.attrs["Value"] = val;
+                for (const char* cv : {"GameCenter", "GooglePlayGames"}) {
+                    sf2::app::QuestAction c;
+                    c.tag = "Case";
+                    c.attrs["Value"] = cv;
+                    sf2::app::QuestAction sv;
+                    sv.tag = "SetVariable";
+                    sv.attrs["Name"] = std::string("SW_") + cv;
+                    sv.attrs["Value"] = "1";
+                    c.children.push_back(sv);
+                    sw.children.push_back(c);
+                }
+                sf2::app::QuestAction df;
+                df.tag = "Default";
+                sf2::app::QuestAction svd;
+                svd.tag = "SetVariable";
+                svd.attrs["Name"] = "SW_DEF";
+                svd.attrs["Value"] = "1";
+                df.children.push_back(svd);
+                sw.children.push_back(df);
+                return sw;
+            };
+            sf2::app::QuestJournal sj;
+            app.quest_engine().run_action_probe(app, {mk_switch("GooglePlayGames")}, sj);
+            const bool gp = var_is("SW_GooglePlayGames");
+            const bool gc = var_is("SW_GameCenter");
+            const bool df = var_is("SW_DEF");
+            std::fprintf(stdout,
+                         "[qa] SWITCH value=GooglePlayGames -> GP=%d GC=%d DEF=%d\n",
+                         gp ? 1 : 0, gc ? 1 : 0, df ? 1 : 0);
+            std::fflush(stdout);
+            check(gp && !gc && !df, "Switch: matching <Case> runs, others skipped");
+            sf2::app::QuestJournal sj2;
+            app.quest_engine().run_action_probe(app, {mk_switch("Nintendo")}, sj2);
+            const bool df2 = var_is("SW_DEF");
+            std::fprintf(stdout, "[qa] SWITCH value=Nintendo -> DEF=%d\n", df2 ? 1 : 0);
+            std::fflush(stdout);
+            check(df2, "Switch: no match -> <Default> runs");
+        }
+        // --- Q2 `ActScreen` (`zn` g="1D0" L524831): the shipped shape
+        // (`<ActScreen Lock="Silent"><Line Text Frames="240"/></ActScreen>`,
+        // sensei_arc.xml L37) -> a live overlay + the recorded result.
+        {
+            const std::size_t a0 = app.quest_engine().act_actions;
+            sf2::app::QuestAction as;
+            as.tag = "ActScreen";
+            as.attrs["Lock"] = "Silent";
+            sf2::app::QuestAction line;
+            line.tag = "Line";
+            line.attrs["Text"] = "ActScreenSensei1";
+            line.attrs["Frames"] = "240";
+            as.children.push_back(line);
+            sf2::app::QuestJournal aj;
+            app.quest_engine().run_action_probe(app, {as}, aj);
+            const bool live = app.quest_engine().has_act_overlay();
+            const std::string atx = app.quest_engine().act_overlay_text();
+            std::fprintf(stdout, "[qa] ACTSCREEN: actions %zu->%zu live=%d text=%s\n",
+                         a0, app.quest_engine().act_actions, live ? 1 : 0, atx.c_str());
+            std::fflush(stdout);
+            check(app.quest_engine().act_actions == a0 + 1 && live &&
+                      atx == "ActScreenSensei1",
+                  "ActScreen -> Rd overlay live (Line/Frames; was UNKNOWN)");
+        }
+        // --- Q5 `ChangePlayerAvatar` (`Fn` g="1D7" L528814): the persisted
+        // `<Warrior Avatar>` write (`Fka`/`Cr` L78838).
+        {
+            const std::string before_av = app.save().load().avatar;
+            fire_action("ChangePlayerAvatar", {{"Avatar", "avatar_human"}});
+            const std::string after_av = app.save().load().avatar;
+            std::fprintf(stdout, "[qa] AVATAR: %s -> %s\n",
+                         before_av.empty() ? "(none)" : before_av.c_str(),
+                         after_av.c_str());
+            std::fflush(stdout);
+            check(after_av == "avatar_human",
+                  "ChangePlayerAvatar -> <Warrior Avatar=avatar_human> persisted");
+        }
+        // --- Q7 `SetSessionSettings` (`ro` g="203" L561637): `xLa` writes
+        // `<SessionSettings><ShowDojoDisciple Value="1"/>`.
+        {
+            fire_action("SetSessionSettings",
+                        {{"Name", "ShowDojoDisciple"}, {"Value", "1"}});
+            const sf2::app::WarriorSave w = app.save().load();
+            const auto it = w.session_settings.find("ShowDojoDisciple");
+            const bool row = it != w.session_settings.end() && it->second == "1";
+            std::fprintf(stdout,
+                         "[qa] SESSIONSETTINGS: ShowDojoDisciple row=%d bool=%d\n",
+                         row ? 1 : 0, w.show_dojo_disciple ? 1 : 0);
+            std::fflush(stdout);
+            check(row && w.show_dojo_disciple,
+                  "SetSessionSettings -> <SessionSettings> row + bool (xLa)");
+        }
+        // --- Q7 `ShowUpgrades` (`yo` g="216" L570440): `qub` -> `qC` +
+        // `gka("ShowUpgrades","1")` (JS `Cr` L78838).
+        {
+            fire_action("ShowUpgrades", {});
+            const bool qc = app.save().load().show_upgrades;
+            std::fprintf(stdout, "[qa] SHOWUPGRADES: qC=%d\n", qc ? 1 : 0);
+            std::fflush(stdout);
+            check(qc, "ShowUpgrades -> <Warrior ShowUpgrades=1> (qub/Cr)");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

@@ -376,6 +376,7 @@ WarriorSave SaveSystem::load() {
     // (`g$a` L271). Absent in the seed -> both default 0.
     out.disciple = false;
     out.show_dojo_disciple = false;
+    out.session_settings.clear();
     if (pugi::xml_node ss = warrior.child("SessionSettings")) {
         if (pugi::xml_node d = ss.child("Disciple")) {
             out.disciple = sf2::data::xml_attr_int(d, "Value", 0) > 0;
@@ -383,7 +384,17 @@ WarriorSave SaveSystem::load() {
         if (pugi::xml_node s = ss.child("ShowDojoDisciple")) {
             out.show_dojo_disciple = sf2::data::xml_attr_int(s, "Value", 0) > 0;
         }
+        // `xLa` L133949 generic rows: keep every child's raw `Value` so an
+        // unknown `<Name Value>` written by a `SetSessionSettings` action
+        // round-trips.
+        for (pugi::xml_node c : ss.children()) {
+            if (c.type() != pugi::node_element) continue;
+            out.session_settings[c.name()] = c.attribute("Value").as_string("");
+        }
     }
+    // `p.o.ga.set("Avatar", a)` (JS `Fn`/`Fka` -> `Cr` L78838): the player
+    // avatar name on the `<Warrior>` node; absent in the seed -> "".
+    out.avatar = warrior.attribute("Avatar").as_string("");
 
     // Delivery timers (`yl`/`Ct` under save `<Timers>`, L250: `Uaa/BXa`
     // set, `gJ` get, `H4` clear). Child schema `<Timer Name Due>` is the
@@ -816,20 +827,32 @@ void SaveSystem::save(const WarriorSave& w) {
         }
     }
 
+    // `Fn`/`Fka` -> `Cr("Avatar", a)` (L78838): write the `<Warrior Avatar>`
+    // attribute only when set (the seed has none, so an unset avatar leaves
+    // the file byte-identical).
+    if (!w.avatar.empty()) {
+        pugi::xml_attribute av = warrior.attribute("Avatar");
+        if (!av) av = warrior.append_attribute("Avatar");
+        av.set_value(w.avatar.c_str());
+    }
     // Session settings (JS `Aka`/`xLa` L264): `Y0`/`g$a` (L271) materialize
-    // their defaults on read, so the native writes both rows every save.
+    // their defaults on read, so the known two rows are always written; every
+    // other loaded/written `<Name Value>` row round-trips too.
     {
         pugi::xml_node ss = warrior.child("SessionSettings");
         if (!ss) ss = warrior.append_child("SessionSettings");
-        const auto set_val = [&ss](const char* tag, bool on) {
-            pugi::xml_node n = ss.child(tag);
-            if (!n) n = ss.append_child(tag);
-            pugi::xml_attribute v = n.attribute("Value");
-            if (!v) v = n.append_attribute("Value");
-            v.set_value(on ? 1 : 0);
-        };
-        set_val("Disciple", w.disciple);
-        set_val("ShowDojoDisciple", w.show_dojo_disciple);
+        std::map<std::string, std::string> rows = w.session_settings;
+        rows["Disciple"] = w.disciple ? "1" : "0";
+        rows["ShowDojoDisciple"] = w.show_dojo_disciple ? "1" : "0";
+        std::vector<pugi::xml_node> old;
+        for (pugi::xml_node c : ss.children()) {
+            if (c.type() == pugi::node_element) old.push_back(c);
+        }
+        for (const pugi::xml_node& c : old) ss.remove_child(c);
+        for (const auto& kv : rows) {
+            pugi::xml_node n = ss.append_child(kv.first.c_str());
+            n.append_attribute("Value").set_value(kv.second.c_str());
+        }
     }
 
     // Achievement counters (`yt.parse` L294 always materializes <Counters>).

@@ -3878,6 +3878,126 @@ QuestEngine::ActionRest QuestEngine::run_actions(
         } else if (t == "UpdateShopItems") {
             // `Po` (`EUpdateShopItems`, L570290): `Oa.get()!=null && a.Imb()`.
             fx.update_shop_items = true;
+        } else if (t == "Switch") {
+            // `Go` (`ESwitch` g="20A", factory L486682; class L565534).
+            //   `S`: `b = ba.cg(a, this.Mb)` (the resolved `Value`); for each
+            //   `Z7` case `c = ba.cg(a, f.value)`; on `b == c` run
+            //   `f.actions.S(a)` and RETURN; else `this.m8.S(a)` (the
+            //   `<Default>` `Yb`). `parse` pushes a case only when the child
+            //   carries a `Value` attr. Equality is STRING equality of the
+            //   resolved values; an unresolved token keeps its raw text.
+            EvalCtx sc;
+            sc.journal = journal;
+            sc.iterator = iterator;
+            sc.locals = &locals;
+            sc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                sc.level = w.level;
+                sc.save = w;
+                sc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            const auto sres = [&](const std::string& raw) -> std::string {
+                if (raw.empty()) return raw;
+                if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+                std::string out = raw;
+                if (!resolve_token(app, raw, sc, out)) out = raw;
+                return out;
+            };
+            const std::string sw = sres(attr_or(a.attrs, "Value"));
+            const QuestAction* match = nullptr;
+            const QuestAction* dflt = nullptr;
+            for (const QuestAction& ch : a.children) {
+                if (ch.tag == "Default") {
+                    if (dflt == nullptr) dflt = &ch;
+                    continue;
+                }
+                if (ch.tag != "Case") continue;
+                const auto vit = ch.attrs.find("Value");
+                if (vit == ch.attrs.end()) continue;  // `parse` skips it
+                if (match == nullptr && sres(vit->second) == sw) match = &ch;
+            }
+            const QuestAction* chosen = match != nullptr ? match : dflt;
+            if (chosen != nullptr) {
+                ActionRest sub = run_actions(app, chosen->children, journal, fx,
+                                             locals, quest, depth + 1, iterator);
+                if (sub.suspended) {
+                    sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
+                    return sub;
+                }
+            }
+        } else if (t == "ActScreen") {
+            // `zn` (`EActScreen` g="1D0", factory L484178; class L524831).
+            //   `parse`: `this.Jo = Text ?? ""`; `Cjb` walks EVERY child
+            //     (`Text ?? ""`, `Frames`) -> `qb` pushed to `this.lf`.
+            //   `S`: `lf.length>0 ? bvb(a) : zvb(a)`; `bvb` ->
+            //     `v.$ub(lf, this.sa)`, `zvb` -> `v.Zub(this.Jo, this.sa)`
+            //     (`v.Zub/$ub` = `Rd.create().$i`/`.fm`, L624745); then
+            //     `a=Ya.get(); a!=null&&a.pzb()`.
+            // `Rd.aa` (L1078843): 1 s fade-in (step 0); step 3 advances each
+            //   line after `qb.value/60` s (`Frames/60`); step 4 (`zvb`,
+            //   `lines==null`) waits `ed(5)` = 5 s; step 5 = 1 s fade-out;
+            //   step 6 = the completion (`this.sa()`); step 7 = 0.5 s + end.
+            // The port collapses the async overlay to a synchronous action
+            // (the documented async->sync contract) but DISPLAYS it for the
+            // real duration and keeps the chain ORDER (act before the next
+            // action), unlike the dropped UNKNOWN.
+            QuestSideEffects::ActOverlay ov;
+            if (!a.children.empty()) {
+                for (const QuestAction& ch : a.children) {
+                    ov.lines.push_back(
+                        quest_var(app, locals, attr_or(ch.attrs, "Text")));
+                    const std::string fr = attr_or(ch.attrs, "Frames");
+                    ov.seconds.push_back(
+                        is_numeric(fr) ? static_cast<float>(to_number(fr)) / 60.0f
+                                       : 0.0f);
+                }
+            } else {
+                ov.lines.push_back(quest_var(app, locals, attr_or(a.attrs, "Text")));
+                ov.seconds.push_back(5.0f);  // `zvb` -> `$i` -> `ed(5)`
+                ov.single = true;
+            }
+            act_lines = ov.lines;
+            act_line_secs = ov.seconds;
+            act_hold = 0.0f;
+            for (float s : act_line_secs) act_hold += s < 0.0f ? 0.0f : s;
+            act_total = 1.0f + act_hold + 1.0f;  // fade-in + hold + fade-out
+            act_elapsed = 0.0f;
+            act_alpha = 0.0f;
+            act_text = act_lines.empty() ? std::string() : act_lines.front();
+            act_active = !act_lines.empty();
+            ++act_actions;
+            fx.act_overlays.push_back(std::move(ov));
+            // `Ya.get()!=null && a.pzb()` (`pzb` L1096388): the current
+            // screen's refresh hook; no port equivalent -> no-op.
+        } else if (t == "ChangePlayerAvatar") {
+            // `Fn` (`EChangePlayerAvatar` g="1D7", factory L484500; class
+            // L528814): `parse` -> `Zg = Avatar ?? ""`; `S` serialises the
+            // resolved avatar (`tfa`: `new oc`/`new yb`, `c.jk(this.ta)`,
+            // `c.fc(this.Zg,b)`, `a.G=b.toString()`) then `p.o.Fka(a.G)`.
+            // `Fka` (L138903): `this.Ca!=null&&(this.Ca.Hf=a)` (the live
+            // fighter model) + `Cr("Avatar", a)` -> `this.ga.set(..);save()`
+            // (L78838). The port has no avatar model stock, so only the
+            // persisted `<Warrior Avatar>` write is applied.
+            fx.avatar_writes.push_back(
+                quest_var(app, locals, attr_or(a.attrs, "Avatar")));
+        } else if (t == "SetSessionSettings") {
+            // `ro` (`ESetSessionSettings` g="203", factory L486048; class
+            // L561637): `parse` -> `KGa=Name`, `vPa=Value`; `S` ->
+            // `p.o.xLa(KGa,vPa); p.o.save()`. `xLa` (L133949): find/create
+            // `<SessionSettings>`; find/create the child `Name`; `set("Value")`.
+            fx.session_settings.emplace_back(
+                quest_var(app, locals, attr_or(a.attrs, "Name")),
+                quest_var(app, locals, attr_or(a.attrs, "Value")));
+        } else if (t == "ShowUpgrades") {
+            // `yo` (`EShowUpgrades` g="216", factory L486342; class L570440):
+            // `S` -> `p.o.qub(); a=Oa.get(); a!=null&&a.refresh(); this.sa()`.
+            // `qub` (L128976): `this.qC=!0; this.gka("ShowUpgrades",true)` ->
+            // `Cr` (L78838) -> `this.ga.set("ShowUpgrades","1"); save()`. The
+            // live-shop `refresh()` has no port hook (the Shop re-reads `qC`
+            // on construction), so the save write is the applied effect.
+            fx.show_upgrades = true;
         } else if (t == "Line" || t == "Button" || t == "Then" || t == "Else" ||
                    t == "Conditions") {
             ActionRest sub = run_actions(app, a.children, journal, fx, locals, quest,
@@ -4126,6 +4246,36 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                          cp.quest_name.c_str(), found->file_name.c_str(),
                          cp.screen_index, cp.checkpoint_index);
             std::fflush(stdout);
+        }
+        // `Fn` `ChangePlayerAvatar` -> `Fka` -> `Cr("Avatar", a)` (L138903/
+        // L78838): the persisted `<Warrior Avatar>` write.
+        for (const std::string& av : fx.avatar_writes) {
+            if (w.avatar != av) {
+                w.avatar = av;
+                dirty = true;
+            }
+        }
+        // `yo` `ShowUpgrades` -> `qub` -> `gka("ShowUpgrades",true)`.
+        if (fx.show_upgrades && !w.show_upgrades) {
+            w.show_upgrades = true;
+            dirty = true;
+        }
+        // `ro` `SetSessionSettings` -> `xLa(Name,Value)` (L133949): the
+        // `<SessionSettings><Name Value>` write; the `Disciple`/
+        // `ShowDojoDisciple` bool views follow the written value.
+        for (const auto& kv : fx.session_settings) {
+            if (kv.first.empty()) continue;
+            auto it = w.session_settings.find(kv.first);
+            if (it == w.session_settings.end() || it->second != kv.second) {
+                w.session_settings[kv.first] = kv.second;
+                dirty = true;
+            }
+            const bool on = !kv.second.empty() && kv.second != "0";
+            if (kv.first == "Disciple") {
+                w.disciple = on;
+            } else if (kv.first == "ShowDojoDisciple") {
+                w.show_dojo_disciple = on;
+            }
         }
         if (dirty) {
             app.save().save(w);
@@ -4572,6 +4722,32 @@ std::string QuestEngine::resolve_for_test(App& app, const std::string& expr,
 }
 
 void QuestEngine::tick(App& app) {
+    // `Rd.aa` (L1078843): advance the live act overlay every fixed step (the
+    // app fixed delta is 1/60 s). Runs even headless so the state can't wedge.
+    if (act_active) {
+        act_elapsed += 1.0f / 60.0f;
+        if (act_elapsed >= act_total) {
+            act_active = false;
+            act_alpha = 0.0f;
+        } else if (act_elapsed < 1.0f) {
+            act_alpha = act_elapsed;  // step 0 fade-in
+        } else if (act_elapsed < 1.0f + act_hold) {
+            act_alpha = 1.0f;  // steps 1-3 hold
+            const float t = act_elapsed - 1.0f;
+            float acc = 0.0f;
+            for (std::size_t k = 0; k < act_line_secs.size(); ++k) {
+                const float s = act_line_secs[k] < 0.0f ? 0.0f : act_line_secs[k];
+                if (t < acc + s || k + 1 == act_lines.size()) {
+                    act_text = act_lines[k];
+                    break;
+                }
+                acc += s;
+            }
+        } else {
+            act_alpha = 1.0f - (act_elapsed - (1.0f + act_hold));  // step 5 fade-out
+            if (act_alpha < 0.0f) act_alpha = 0.0f;
+        }
+    }
     if (app.headless()) {
         // The driver paths never auto-run: drop anything queued so a stale
         // request can never fire later (defensive; enqueue is gated too).

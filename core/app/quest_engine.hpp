@@ -520,6 +520,28 @@ struct QuestSideEffects {
     // `FightEnd` (JS `Tn.S`): `ca.Ka().kD(!1)` — end the live fight. The
     // engine records it; the fight scene consumes the request.
     std::vector<std::string> fight_end_requests;
+    // `Fn` (`EChangePlayerAvatar` g="1D7" L528814): `p.o.Fka(resolved)` ->
+    // `Cr("Avatar", a)` (L138903/L78838) writes `<Warrior Avatar="...">` and
+    // saves. One resolved avatar name per action, in order.
+    std::vector<std::string> avatar_writes;
+    // `yo` (`EShowUpgrades` g="216" L570440): `p.o.qub()` -> `qC=!0` +
+    // `gka("ShowUpgrades",true)` -> `Cr` writes `<Warrior ShowUpgrades="1">`.
+    bool show_upgrades = false;
+    // `ro` (`ESetSessionSettings` g="203" L561637): `p.o.xLa(Name,Value)` ->
+    // find/create `<SessionSettings><Name Value="...">` + save. Resolved
+    // (name, value) pairs, in order (last wins).
+    std::vector<std::pair<std::string, std::string>> session_settings;
+    // `zn` (`EActScreen` g="1D0" L524831): the act overlay. `zn.S` plays
+    // `lf` (each child -> `qb(Text, Frames)`) via `v.$ub` or, with no child,
+    // the `Text` attr via `v.Zub`; the `Rd` overlay (L1078843) advances each
+    // line after `Frames/60` s (single: `ed(5)` = 5 s) then calls the
+    // completion (`this.sa()`). One entry per ActScreen action.
+    struct ActOverlay {
+        std::vector<std::string> lines;  // resolved `Text` per child/attr
+        std::vector<float> seconds;      // `Frames/60`, or 5 for `Text`
+        bool single = false;             // `zvb` (`v.Zub`) path
+    };
+    std::vector<ActOverlay> act_overlays;
     std::vector<std::string> unknown;             // unhandled tags
     // Shop-offer controller actions (`nt` g="5B", `p.Cw`): `CheckOffersStart`
     // (`Jn` L531140 -> `p.Cw.a_a()`), `ChangeOfferState` (`En` L528761 ->
@@ -839,6 +861,25 @@ public:
     // `sh` `BuyItem` `SB!=3`: purchased items whose `QUEST_EVENT_PURCHASE` was
     // fired (the `v.fZ` commit path). Monotonic; used by `--quest-action-probe`.
     std::size_t purchase_actions() const { return purchase_actions_; }
+
+    // --- `zn` (`EActScreen`) live overlay (JS `Rd` L1078843) --------------
+    // One `Rd` instance per ActScreen (JS `Rd.create()` keeps them on
+    // `Rd.d8`); the port keeps ONE live overlay (the shipped acts never
+    // overlap). Public so the draw layer + `--quest-action-probe` read it.
+    // `aa` (L1078843): 1 s fade-in -> hold (`Frames/60` per line, or the
+    // `$i` 5 s) -> 1 s fade-out.
+    bool act_active = false;
+    std::vector<std::string> act_lines;  // resolved `Text` per line
+    std::vector<float> act_line_secs;    // `Frames/60` (or 5 for `Text`)
+    float act_elapsed = 0.0f;            // seconds since start
+    float act_hold = 0.0f;               // sum(act_line_secs)
+    float act_total = 0.0f;              // 1 + hold + 1 (fade-in/out)
+    float act_alpha = 0.0f;              // current fade alpha
+    std::string act_text;                // current line
+    std::size_t act_actions = 0;         // ActScreen overlays displayed
+    bool has_act_overlay() const { return act_active; }
+    const std::string& act_overlay_text() const { return act_text; }
+    float act_overlay_alpha() const { return act_alpha; }
     // The list.xml `BonusPrice` (`catalog_bonus_price`) — the Ruby price
     // `BuyItem Currency="Ruby"` charges. Public for the probe.
     int bonus_price(App& app, const std::string& name) const {

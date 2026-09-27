@@ -59,6 +59,14 @@ struct WarriorSave {
     // ships "0"). Gates the shop upgrade plates (`k9 && p.o.qC`, L2255).
     bool show_upgrades = false;
 
+    // `p.o.ga.set("Avatar", a)` (JS `Fn`/`Fka` -> `Cr` L78838): the player's
+    // avatar name (`<Warrior Avatar="...">`). Absent in the seed -> "".
+    std::string avatar;
+    // `p.o.xLa(Name,Value)` (L133949): every raw `<SessionSettings><Name
+    // Value>` row. The `disciple`/`show_dojo_disciple` bools above are derived
+    // views of the `Disciple`/`ShowDojoDisciple` rows.
+    std::map<std::string, std::string> session_settings;
+
     // One owned-item `<Enchantments><Perk Name>` row (JS `xe`, built by
     // `xe.Qd` L692882): `name` <- `Name`, `item_types` <- `g2`
     // (`ItemType.split("|")`), `sets` <- `ll` (the `<Set>` node's attrs, in
