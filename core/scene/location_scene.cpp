@@ -1105,9 +1105,10 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     // The hub-statics layer zoom Bj (JS `Ut.xCa` L831): min(nC/(span+300),1),
     // then max(Bj, NW) with NW = nC/width. nC = viewW/(viewH/arenaH).
     float layer_zoom = 1.0f;
+    float n_c = view_w;  // `Ut.mwa` (L823): nC = b/Ira (b = N.width)
     {
         const float ira = e > 0.0f ? view_h / e : 1.0f;
-        const float n_c = ira > 0.0f ? view_w / ira : view_w;
+        n_c = ira > 0.0f ? view_w / ira : view_w;
         const float xca = n_c / (span + 300.0f) < 1.0f ? n_c / (span + 300.0f) : 1.0f;
         const float nw = arena_w_ > 0.0f ? n_c / arena_w_ : 1.0f;
         layer_zoom = xca > nw ? xca : nw;
@@ -1116,6 +1117,22 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
         }
     }
     camera.layer_zoom = layer_zoom;
+    // JS `Ut.Al` L826-827 pano clamp, mirroring `framing_sya_impl`:
+    //   d = (Lb.width - v.LC.oGa)*Bj*.5 - nC*.5;  this.Io = clamp(Io, -d, d)
+    // (oGa = internal_settings `<CameraSettings MaxWidthDelta="50">`). Here Io
+    // is carried in `arena_center_x` (center_x = 0), so clamp it directly. The
+    // shipped dojo spawn frame is well inside the bound (Io = +148.5 vs
+    // d = +457), so this is inert at the captured states but stops the hub
+    // over-panning for off-center focuses / edge spawns.
+    {
+        const float d_io =
+            (arena_w_ - kMaxWidthDelta) * layer_zoom * 0.5f - n_c * 0.5f;
+        if (camera.arena_center_x < -d_io) {
+            camera.arena_center_x = -d_io;
+        } else if (camera.arena_center_x > d_io) {
+            camera.arena_center_x = d_io;
+        }
+    }
     // JS ma.Sya L1833: `e = m$a() = Lb.height * Bj` is the zoom denominator
     // (W5/D11), not the raw arena height.
     float f = e > 0.0f ? view_h / (e * layer_zoom) : 1.0f;
@@ -1135,7 +1152,11 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     // in by render_layer, NOT the projection (D1/W1).
     camera.center_y = 0.0f;
     if (aspect < 1.0f) {
-        camera.center_y += std::round((view_h - e * camera.zoom) / 2.0f) / camera.zoom * 0.5f;
+        // JS `Sya` L1833: `c<1&&b.D(round((N.height-e*f)/2)/f*.5)` with
+        // `e = m$a() = Lb.height*Bj` (NOT the raw arena height) and `f` the
+        // render zoom. Inert at 16:9 (aspect > 1).
+        camera.center_y += std::round((view_h - e * layer_zoom * camera.zoom) / 2.0f) /
+                          camera.zoom * 0.5f;
     }
 }
 

@@ -144,7 +144,11 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     // arena view — the floor stays fully covered). n_c = the mwa half-view
     // width (computed above in the zoom section); the clamp uses the
     // LAYER zoom Bj (Ut.Al's d formula), not the camera zoom.
-    const float d_io = (cam.arena_w - 0.0f) * 0.5f * cam.zoom_layer - n_c * 0.5f;
+    // `oGa` = `v.LC.oGa` = the internal_settings `<CameraSettings
+    // MaxWidthDelta="50">` attr (Ult.H default 0; the shipped file carries
+    // 50 — see `internal_settings.xml`). The previous `0.0f` under-clamped
+    // by 25*Bj world px per side.
+    const float d_io = (cam.arena_w - kMaxWidthDelta) * 0.5f * cam.zoom_layer - n_c * 0.5f;
     const float center = cam.arena_w * 0.5f;
     cam.center_x = cam.go_x_ < center - d_io   ? center - d_io
                 : cam.go_x_ > center + d_io ? center + d_io
