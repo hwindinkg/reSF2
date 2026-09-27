@@ -4260,6 +4260,15 @@ void battle_music(const std::string& battle_name, std::string& out_track) {
     }
 }
 
+// [entry audio] Set by `MapScreen::start_battle` when the fight entry already
+// fired the battle-enter gong + battle track; consumed (and cleared) by the
+// FightScreen ctor so a DIRECT boot (`--fight`, the drivers) still fires them.
+// JS `v.Am` L1216 (`p.o.save(), d && rb.Wkb()`) + `ai.aa` case 0 L2007
+// (`Ut()`), both BEFORE the `jk` opponent scroll the port draws on the Map.
+namespace {
+bool g_entry_audio_done = false;
+}  // namespace
+
 // The reward of a battle's first non-zero <Reward> (JS `tt.bm` L116924).
 void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp) {
     out_money = 0;
@@ -7282,6 +7291,24 @@ void MapScreen::start_battle(const Node& n) {
             return;
         }
     }
+    // JS `v.Am` (L1216): `p.o.save(), d && rb.Wkb()` — the battle-enter GONG
+    // fires at battle REGISTRATION, right after the `FightEnter` quest event
+    // and BEFORE the fight screen is pushed. JS `ai.aa` case 0 (L2007) then
+    // runs `Ut()` (the battle track, `ta.Ut(this.Da.tp)` L2008) BEFORE the
+    // `jk` opponent scroll (`this.lca(...)`). The port draws that roster on
+    // THIS screen, so BOTH side effects must fire HERE — not in the
+    // FightScreen ctor, which only runs after the scroll. That deferral is
+    // exactly the reported bug: "music + battle-enter sound appear only after
+    // scrolling the opponents".
+    {
+        sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+        au.play("snd_gong");
+        std::string track;
+        battle_music(n.name, track);
+        if (!track.empty()) au.play_music(track);
+        au.reset_music_guard();  // JS `ai.Ut` L2008: `lb.rJ=!1`
+    }
+    g_entry_audio_done = true;
     // JS `ai.aa` case 0 (L2007): `this.TF.lD.length>1 && this.TF.eE`
     // -> `lca(this.TF.lD, this.TF.uP, this.TF.Y1)` = the `jk` opponent
     // scroll (`this.Ws = this.Qo(jk)`, L2009), whose `qd` (state 4) ->
@@ -8632,6 +8659,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
       location_(location),
       reward_money_(reward_money),
       reward_exp_(reward_exp) {
+    // [entry audio] The Map's `start_battle` fires the battle-enter gong and
+    // the battle track at the fight-ENTRY point (JS `v.Am` L1216 `rb.Wkb()`;
+    // `ai.aa` case 0 L2007 `Ut()`), BEFORE the `jk` roster it draws. A direct
+    // boot (`--fight`, the drivers) never goes through the Map, so the ctor
+    // still fires both. Consume the flag so the NEXT entry re-arms it.
+    const bool entry_audio_from_map = g_entry_audio_done;
+    g_entry_audio_done = false;
     // An EMPTY owned list means "resolve from the save" — the direct boot
     // (`--fight`/`--verify-input`/`--input-tape`/capture drivers) and the
     // Map/Dojo launch then build the IDENTICAL player move list from the same
@@ -8648,16 +8682,24 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // Fight music (JS `ta.Ut(this.Da.tp)`, L2008): the battle's Music attr
     // from stages.xml; battles without one (Training dummy) keep playing
     // whatever is current (no invented fallback).
+    //
+    // JS `ai.aa` case 0 (L2007) runs `Ut()` BEFORE the `jk` opponent scroll
+    // (`lca`). The port draws that scroll on the MAP, so the Map's
+    // `start_battle` already fired the gong + track at the entry point.
+    // Only a DIRECT boot (which never goes through the Map) plays them here.
     {
         std::string track;
         battle_music(battle_name_, track);
-        if (!track.empty()) {
-            sf2::audio::AudioEngine::instance().play_music(track);
+        if (!entry_audio_from_map) {
+            if (!track.empty()) {
+                sf2::audio::AudioEngine::instance().play_music(track);
+            }
+            // JS `ai.Ut()` (L2008): `ta.Ut(this.Da.tp); lb.rJ=!1`. The fight
+            // start plays the battle track directly (bypassing `lb.OS`) and
+            // clears the menu guard, so the fight-end `lb.OS()` (L384)
+            // restores the menu.
+            sf2::audio::AudioEngine::instance().reset_music_guard();
         }
-        // JS `ai.Ut()` (L2008): `ta.Ut(this.Da.tp); lb.rJ=!1`. The fight start
-        // plays the battle track directly (bypassing `lb.OS`) and clears the
-        // menu guard, so the fight-end `lb.OS()` (L384) restores the menu.
-        sf2::audio::AudioEngine::instance().reset_music_guard();
     }
 
     // The on-screen gamepad art (JS `Za`): the ui/controller atlas
@@ -9023,6 +9065,9 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // BEFORE init — `setup_bus` (inside init) lock-filters + registers it per
     // side, and per-round re-registers (`setup_bus` L1504) keep it live.
     fight_->set_global_triggers(&assets.global_triggers);
+    // The battle-enter gong (`init_locks` -> `rb.Wkb`) already fired at the Map
+    // entry (`start_battle`); suppress the ctor's copy so it never double-plays.
+    fight_->set_silent_entry(entry_audio_from_map);
     fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
                        assets.tactics_sets, tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
@@ -9849,6 +9894,11 @@ void FightScreen::update_impl(float dt) {
                 std::fprintf(stdout, "[fight] pause QUIT (Dr.home -> caller)\n");
                 std::fflush(stdout);
                 paused_ = false;
+                // JS `ai.B()` teardown (L384): leaving the fight restores the
+                // MENU track (`lb.OS()`). Popping here reveals the already-built
+                // Map, whose ctor `play_music_once("menu")` never re-runs, so
+                // the battle track would otherwise keep playing in the menu.
+                sf2::audio::AudioEngine::instance().play_music_once("menu");
                 manager().pop();
                 return;
             }
@@ -10981,6 +11031,13 @@ void ResultsScreen::update_impl(float dt) {
         // manager first — the first pop destroys `this`, so a second
         // `manager()` call would re-read a freed member (use-after-free).
         ScreenManager& mgr = manager();
+        // JS `ai.B()` fight teardown (L384): `this.Da.type!="FightNone"&&lb.OS()`
+        // — LEAVING the fight restores the MENU track. The Map/Dojo ctors call
+        // `play_music_once("menu")` only at CONSTRUCTION, so popping back to an
+        // already-built Map left the battle track running (the reported "battle
+        // music keeps playing in the menu"). The guard was cleared at the fight
+        // start, so this replays the menu track exactly once.
+        sf2::audio::AudioEngine::instance().play_music_once("menu");
         mgr.pop();
         mgr.pop();
     }
