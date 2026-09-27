@@ -10768,9 +10768,12 @@ void FightScreen::render_impl(App& app) {
 
     // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
     // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.
-    const int timer =
-        std::max(0, fight_->round().time_nf);  // JS `Sf.iPa` (L2036)
-    const std::string tstr = std::to_string(std::max(0, timer));
+    // JS `Sf.iPa` (sf2.502f0946.js @1048646), VERBATIM:
+    //   `this.NF=this.xU/60|0; this.NF!=this.fma&&(this.fma=this.NF,
+    //    this.Kp.V(K.T((this.NF<10?"0":null)+Math.max(0,this.NF))),...)`
+    // The seconds are zero-padded to two digits while below 10 ("09", "00").
+    const int timer = std::max(0, fight_->round().time_nf);
+    const std::string tstr = (timer < 10 ? "0" : "") + std::to_string(timer);
     {
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
         unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
@@ -10801,38 +10804,78 @@ void FightScreen::render_impl(App& app) {
 
     // Rounds — the `lk` SECOND row: the name-frame base (`lk.Sh = Fr`,
     // whose `Qp = Mx` L2088 draws `background = R.$(E.get(1294), y.UU)`
-    // `uL(165)`) plus the round pips (`Er` L2021-2022: `e = count==2?40:32`,
-    // `f = e/2`, step `e+f`, frames `y.UU` undone / `y.LQa` done, `Pb(43)`).
-    // In the capture the row sits BELOW the bar (panel-local y 0 vs the bar's
-    // -50): the `Mx` base rides the bar's OUTER end (player x388..472 = 84 px
-    // ≈ 165*c) and the pips step INWARD (player 535, 500 -> 22 px wide,
-    // 35 px step; `round.eL == 2` gives exactly 2 pips). The old code rode
-    // the pips ON the bar — the capture shows them on their own row.
-    constexpr float kPipW = 22.0f;     // `Er` e=40 * 0.5394
-    constexpr float kPipStep = 35.0f;  // `Er` (e+f)=60 * 0.5394
-    constexpr float kPipH = 24.8f;     // `Pb(43)` * c + opaque-band fit
+    // `uL(165)`) plus the round pips.
+    //
+    // JS `Er` ctor (sf2.502f0946.js @1041188), VERBATIM:
+    //   `this.oT=m.l();let c=a==0?-1:1,d=0,e=b==2?40:32,f=e/2,g=0;
+    //    for(;g<b;){++g;let h=R.$(E.get(1294),y.UU,this.node);
+    //      a==0?(h.C(-e+d),d-=e+f):(h.C(d),d+=e+f);
+    //      h.xc(e);h.BL(25*c);h.Pb(43);this.oT.push(h)}`
+    // So: width `e = count==2?40:32`, pitch `e+f = 1.5*e`, height `Pb(43)`,
+    // and `BL(25*c)` — `BL(a)` (sf2.502f0946.js @820321) is SKEW-X, NOT a
+    // rotation: `BL(a){a==0?...:this.oO=Math.tan(Math.min(a,60)*deg2rad);...}`
+    // i.e. `oO = tan(25 deg)`; `K$a()` returns `atan(oO)` back in degrees.
+    // Player `type==0` -> `c=-1` -> skew -25 deg, enemy -> +25 deg; the
+    // oracle's pip side edges slide by ~tan(25) per row (measured 496->500
+    // over 8 rows), which a rotation (variable-width cross-section) would not
+    // produce — confirming the skew read. The container anchor is `lk.kva`
+    // (L2028): player `130+330-tan25*43`, enemy `-(130+330)+tan25*43`
+    // (panel-local, scaled `la(c)`); the captured pip-0 left edges (player
+    // 535, enemy 722) are that scaled anchor.
+    //
+    // All lengths scale by the `Sf.layout` panel scale `hud_c` (JS `la(c)`).
+    constexpr float kPipTan25 = 0.46630765815499860f;  // tan(25 deg) — JS `BL`
     constexpr float kPipY = 116.4f;
-    constexpr float kBaseW = 84.0f;    // `Mx` base `uL(165)` * 0.5394
+    constexpr float kBaseW = 84.0f;    // `Mx` base `uL(165)` (captured-fit)
+    constexpr float kBaseH = 24.8f;    // `Pb(43)` (captured-fit)
     const int rounds_total = fight_->round().length;
-    auto draw_row2 = [&](const char* frame, float x, float w, bool done) {
-        if (app.draw_atlas_rect(frame, x, kPipY, w, kPipH, 1.0f)) return;
-        float dv[12] = {x, kPipY, x + w, kPipY, x, kPipY + kPipH,
-                        x + w, kPipY, x + w, kPipY + kPipH, x, kPipY + kPipH};
+    const float pip_e = (rounds_total == 2 ? 40.0f : 32.0f) * hud_c;  // JS `e`
+    const float pip_h = 43.0f * hud_c;                                // JS `Pb(43)`
+    const float pip_pitch = pip_e * 1.5f;                             // JS `e+f`
+    // The axis-aligned `Mx` base strip (no `BL` in the JS — `Fr.Qp` only
+    // `uL(165)`); rides the bar's OUTER end at the captured x.
+    auto draw_base = [&](const char* frame, float x, float w) {
+        if (app.draw_atlas_rect(frame, x, kPipY, w, kBaseH, 1.0f)) return;
+        float dv[12] = {x, kPipY, x + w, kPipY, x, kPipY + kBaseH,
+                        x + w, kPipY, x + w, kPipY + kBaseH, x, kPipY + kBaseH};
+        ren.draw_triangles(dv, 6, 0.19f, 0.10f, 0.08f, 1.0f);
+    };
+    // One skewed pip: `h.xc(e); h.BL(25*c); h.Pb(43)` — a textured quad whose
+    // corners are sheared about the pip's vertical centre (`x += oO*(y-yc)`).
+    auto draw_pip = [&](const char* frame, float x, bool done, float skew_tan) {
+        sf2::data::atlas_frame fr;
+        int tw = 0, th = 0;
+        unsigned int gl = 0;
+        const float yc = kPipY + pip_h * 0.5f;
+        float xy[8] = {x, kPipY, x + pip_e, kPipY, x, kPipY + pip_h,
+                       x + pip_e, kPipY + pip_h};
+        for (int c = 0; c < 4; ++c) xy[c * 2] += skew_tan * (xy[c * 2 + 1] - yc);
+        if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && tw > 0 && th > 0) {
+            const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
+            const float u1 = static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+            const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
+            const float v1 = static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
+            const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+            ren.draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+            return;
+        }
         // `HealthBar_Empty` (49,26,20)/255; `Round_Done` orange.
         const float r = done ? 1.0f : 0.19f;
         const float g = done ? 0.41f : 0.10f;
         const float b = done ? 0.07f : 0.08f;
+        const float dv[12] = {xy[0], xy[1], xy[2], xy[3], xy[4], xy[5],
+                              xy[2], xy[3], xy[6], xy[7], xy[4], xy[5]};
         ren.draw_triangles(dv, 6, r, g, b, 1.0f);
     };
-    draw_row2("HealthBar_Empty", 388.0f, kBaseW, false);  // player `Mx` base
-    draw_row2("HealthBar_Empty", 807.0f, kBaseW, false);  // enemy `Mx` base
+    draw_base("HealthBar_Empty", 388.0f, kBaseW);  // player `Mx` base
+    draw_base("HealthBar_Empty", 807.0f, kBaseW);  // enemy `Mx` base
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
         const bool e_done = i < fight_->enemy().rounds_won;
-        draw_row2(p_done ? "Round_Done" : "Round_Undone", 535.0f - static_cast<float>(i) * kPipStep,
-                  kPipW, p_done);
-        draw_row2(e_done ? "Round_Done" : "Round_Undone", 722.0f + static_cast<float>(i) * kPipStep,
-                  kPipW, e_done);
+        const float off = static_cast<float>(i) * pip_pitch;
+        // Player skew is `BL(25*(-1))` -> -25 deg; enemy `BL(25*(+1))`.
+        draw_pip(p_done ? "Round_Done" : "Round_Undone", 535.0f - off, p_done, -kPipTan25);
+        draw_pip(e_done ? "Round_Done" : "Round_Undone", 722.0f + off, e_done, +kPipTan25);
     }
 
     // --- Combo counter (JS `Gr` g="40E" / `Hx` g="40D" / `Ix` g="410"): the
