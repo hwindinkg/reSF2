@@ -11016,10 +11016,13 @@ void ResultsScreen::update_impl(float dt) {
             std::fflush(stdout);
         }
     }
-    // The quest modal is deliberately NOT consumed here: the
-    // `FirstGuardBeaten` chain (`quests.xml` L260-282) fires on `FightEnd`
-    // with `Place="Map"` (JS `Gib` L517394 `be.ifa(...)`), so its dialogs own
-    // the MAP after the OK press (`v.qxa` L1213) — never the Results overlay.
+    // The quest modal is deliberately NOT consumed here: JS `ha.RA`
+    // (L522515) fires a set on its listened-to event with NO screen gate, so
+    // `FirstGuardBeaten` (`quests.xml` L260-282: `<FightEnd>`,
+    // `<Actions Place="Map">`) queues its dialogs at the fight end. `Place`
+    // is only the auto-checkpoint scene (`be.Gib` L517407 `k7` -> `Ln.Faa`),
+    // never a gate. This Results overlay does not own `He` modals, so the
+    // queue is shown by the MAP after the OK press (`v.qxa` L1213).
     // The prize breakdown snapshot (JS `v.kD`/`bzb` factors, FLOW_STATIC
     // section 4.3) for render only. The GRANT itself already ran at the
     // fight end (`apply_fight_reward`, JS `v.kD` -> `dmb`/`emb`

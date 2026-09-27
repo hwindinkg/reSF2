@@ -2986,13 +2986,29 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             j.fight = "ZONE_1|BOSS_LYNX|1";
             j.fight_result = "Win";
             q.note_fight(j.fight, j.fight_result);
+            const int fire_screen = app.screens().current_id();
+            const std::size_t dlg_before = q.dialog_count();
             q.fire(app, "FightEnd", j);
-            // `Actions Place="Map"` (JS `be.Gib` L1007): the set is parked
-            // while the Fight screen is mounted and runs once the Map is
-            // (re)entered. Leave the fight/result screen the way the shipped
-            // flow does — the pop fires the ChangeTab/SceneLoaded edge the
-            // gate waits on.
-            for (int k = 0; k < 4 && !ok_story_advance; ++k) {
+            // JS-exact `Place` (JS `be.Gib` L517407): `k7` is ONLY the
+            // auto-checkpoint scene index (`Ln.Faa` -> `QuestParameters
+            // .ScreenIndex`, `Ln.iLa` L531194). The fire pump `ha.RA`
+            // (L522515) compares conditions, never the mounted screen, so a
+            // `Place="Map"` set fires ON THIS (non-Map) screen and applies its
+            // side effects at once. Assert the step advances with NO pop.
+            const bool fired_offmap_screen = fire_screen != kScreenMap;
+            bool immediate = false;
+            try {
+                immediate = app.save().load().story_step() == "LEARN_PERK";
+            } catch (const std::exception&) {
+            }
+            std::fprintf(stdout,
+                         "[qverify] Place=Map fired on screen=%d (non-Map=%d): step=%s "
+                         "dialogs+%zu\n",
+                         fire_screen, fired_offmap_screen ? 1 : 0,
+                         immediate ? "LEARN_PERK" : "?", q.dialog_count() - dlg_before);
+            // Leave the fight/result screen the way the shipped flow does
+            // (the pop drives the ChangeTab/SceneLoaded edge to the Map).
+            for (int k = 0; k < 4; ++k) {
                 const int c = app.screens().current_id();
                 if (c != kScreenFight && c != kScreenResults) break;
                 app.screens().pop();
@@ -3001,6 +3017,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 ok_story_advance = app.save().load().story_step() == "LEARN_PERK";
             } catch (const std::exception&) {
             }
+            // The JS-exact path must have fired on the non-Map screen with no
+            // deferral; if not, the story step assertion is invalid.
+            if (!immediate || !fired_offmap_screen) ok_story_advance = false;
             std::fprintf(stdout, "[qverify] FirstGuardBeaten win -> step=%s (%s)\n",
                          ok_story_advance ? "LEARN_PERK" : "?", ok_story_advance ? "PASS" : "FAIL");
             // The verifier must not advance the SHARED save past the step the
