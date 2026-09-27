@@ -2302,14 +2302,15 @@ struct ZaNavDef {
     const char* active;
     ScreenId nav;
     const char* label;
+    const char* scene;  // `NextScene`/`nav_flash_` name (the `Sb` lock id)
 };
 constexpr int kZaNavCount = 5;
 const ZaNavDef kZaNav[kZaNavCount] = {
-    {"Dojo_normal", "Dojo_pushed", "Dojo_active", kScreenDojo, "DOJO"},
-    {"Map_normal", "Map_pushed", "Map_active", kScreenMap, "MAP"},
-    {"Shop_normal", "Shop_pushed", "Shop_active", kScreenShop, "SHOP"},
-    {"Profile_normal", "Profile_pushed", "Profile_active", kScreenProfile, "PROFILE"},
-    {"Settings_normal", "Settings_active", nullptr, kScreenSettings, "SETTINGS"},
+    {"Dojo_normal", "Dojo_pushed", "Dojo_active", kScreenDojo, "DOJO", "Dojo"},
+    {"Map_normal", "Map_pushed", "Map_active", kScreenMap, "MAP", "Map"},
+    {"Shop_normal", "Shop_pushed", "Shop_active", kScreenShop, "SHOP", "Shop"},
+    {"Profile_normal", "Profile_pushed", "Profile_active", kScreenProfile, "PROFILE", "Profile"},
+    {"Settings_normal", "Settings_active", nullptr, kScreenSettings, "SETTINGS", "Settings"},
 };
 
 // The nav button source frame is 278x278 (menu atlas Dojo_normal
@@ -2465,22 +2466,34 @@ int za_nav_hit(double px, double py) {
 // GATING RULE (cited): the five `Le` buttons are created unconditionally
 // (`a.EL=!0`, L1978-1979) and every listener is `d1(a){rb.um();wa.F().mp(a)||
 // (this.xba.Nf=!0)}` (Ofb/Qfb/Wfb/Rfb, L1020xx) — `mp` navigates with NO
-// quest/step guard. There is NO hard lock on Dojo/Shop/Map/Profile; the story
-// only GUIDES via `MenuBtnFlashing BtnName` (JS `eo` L1117 -> the port's
-// `nav_flash`) plus `StoryTutorialOpenScene`/`StoryTutorialRetryGoToMap`
-// re-navigation. The port matches (free switching is correct); the log below
-// records the guidance target so the rule is observable.
+// quest/step guard in the LISTENER. The real lock is UPSTREAM: the listener
+// only fires via `db.g1()`, gated by `db.aa` (L1839) `if(Sb.F().Xva&&this.tk)
+// <fire> else if(this.Nf)<normal>`. While the quest holds `Sb.F().Xva` (the
+// `kk` overlay) only the armed `tk` nav button runs; Dojo/Shop/Map/Profile are
+// armed via `MenuBtnFlashing` (`eo` L1117) / `ClickButton` (`Nn` L1114), and
+// the port gates the tap below (`control_allowed`).
 // Button #5 is `Vfb` (L1981) — NOT a screen: it loads the per-language atlases
 // then `Xc.Shb()` opens the `un` dialog OVER the current screen (D13). The
 // other four push their `kZaNav` screen unless it is already showing.
-void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
-    if (hit < 0 || hit >= kZaNavCount) return;
+bool za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
+    if (hit < 0 || hit >= kZaNavCount) return false;
+    // `db.aa` L1839: the block discards every control but the armed `tk` one.
+    QuestEngine& q = app.quest_engine();
+    const std::string nav_id = kZaNav[hit].scene;
+    if (!q.control_allowed(nav_id)) {
+        std::fprintf(stdout, "[quest] nav %s REJECTED (Sb.Xva lock target=%s)\n",
+                     nav_id.c_str(), q.lock_target().c_str());
+        std::fflush(stdout);
+        return false;
+    }
+    // `Nn.Qg` (L1117) / `eo.XHa` (L1119): the guided button fired -> unblock.
+    q.complete_guided(nav_id);
     sf2::audio::AudioEngine::instance().play("snd_click_1");
     if (hit == 4) {  // Settings (JS `Vfb` L1981 -> `Xc.Shb()` L931)
         std::fprintf(stdout, "[za] nav %s -> settings dialog (no nav)\n", kZaNav[hit].label);
         std::fflush(stdout);
         open_settings_dialog(app);
-        return;
+        return true;
     }
     const ScreenId target = kZaNav[hit].nav;
     const std::string& guide = app.quest_engine().nav_flash();
@@ -2490,6 +2503,7 @@ void za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
     if (target != active) {
         self.push(target);
     }
+    return true;
 }
 
 // Handles the nav-column taps for a shell screen (JS listeners Ofb/Qfb/Wfb/
@@ -7766,6 +7780,15 @@ void MapScreen::update_impl(float dt) {
             // "InfoBattle.FightButton"`: while the quest armed this plate the
             // player's press dispatches the plate's OWN callback (`Nn.Qg`
             // completes the quest step) — the hit-test below IS that callback.
+            // `db.aa` L1839: while the quest holds `Sb.Xva`, the map FIGHT plate
+            // is the armed `InfoBattle.FightButton` (the tutorial's
+            // `ClickButton IgnoreCallback=1`, tutorial_quests.xml L156); a press
+            // completes the guided step (`Nn.Qg` -> unblock + `sa()`).
+            if (!app().quest_engine().control_allowed("InfoBattle.FightButton")) {
+                std::fprintf(stdout, "[quest] map FIGHT REJECTED (Sb.Xva)\n");
+                std::fflush(stdout);
+            } else {
+            app().quest_engine().complete_guided("InfoBattle.FightButton");
             if (app().quest_engine().click_armed("InfoBattle.FightButton")) {
                 std::fprintf(stdout,
                              "[quest] ClickButton dispatched: InfoBattle.FightButton\n");
@@ -7781,6 +7804,7 @@ void MapScreen::update_impl(float dt) {
                 // multi-`<Fight>` boss battle arms the `jk` opponent scroll
                 // (`lca` L2009) first; everything else launches directly.
                 start_battle(n);
+            }
             }
         }
     }
@@ -14403,6 +14427,15 @@ void EquipmentScreen::update_impl(float dt) {
     // latch keeps the last logical position -> byte-identical captures.
     if (p.pressed || p.down) tab_hover_ = profile_tab_hit(p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
+        // `db.aa` L1839: while the quest holds `Sb.Xva`, only the armed target
+        // activates; a profile sub-tab is addressed as `ProfileTab<i>`.
+        char tab_id[24];
+        std::snprintf(tab_id, sizeof(tab_id), "ProfileTab%d", tab_hover_);
+        if (!app().quest_engine().control_allowed(tab_id)) {
+            std::fprintf(stdout, "[quest] profile tab %d REJECTED (Sb.Xva)\n", tab_hover_);
+            std::fflush(stdout);
+        } else {
+        app().quest_engine().complete_guided(tab_id);
         sf2::audio::AudioEngine::instance().play("snd_click_2");
         std::fprintf(stdout, "[profile] tab %d (%s)\n", tab_hover_,
                      kProfileTabs[tab_hover_].label);
@@ -14436,6 +14469,7 @@ void EquipmentScreen::update_impl(float dt) {
             } catch (const std::exception& e) {
                 std::fprintf(stderr, "[profile] zha failed: %s\n", e.what());
             }
+        }
         }
     }
     // --- Tab 0 PERK TREE: `uk` cell selection (`vb.hqb` L2198) + the flat
@@ -15654,6 +15688,17 @@ void set_za_nav_open(bool open) {
         s.yI = open ? 1.0f : 0.0f;
         s.zI = open ? 1 : 2;
     }
+}
+
+// Test hook (`--tutorial-real-verify`): attempt a `za` nav tap by index through
+// the real dispatcher (`za_nav_activate`), so the probe exercises the SAME
+// `db.aa` (L1839) gate the player's tap does. Returns true when ACCEPTED (the
+// guided `tk` target or an unlocked overlay), false when the `Sb.Xva` block
+// discarded it. Requires the shell to be on a nav screen.
+bool za_nav_try_tap(App& app, int hit) {
+    Screen* top = app.screens().top();
+    if (top == nullptr) return false;
+    return za_nav_activate(app, *top, static_cast<ScreenId>(app.screens().current_id()), hit);
 }
 
 namespace {

@@ -3101,6 +3101,11 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             if (!attr_bool01(attr_or(a.attrs, "IgnoreCallback"))) {
                 fx.click_arm.push_back(target);
             }
+            // `Nn.S` (L1114): EVERY `ClickButton` runs `Sb.F().kk(!0)` and arms
+            // the target `tk` (`this.xk.tk=!0`) � with OR without
+            // `IgnoreCallback`. Arm the block so only this plate answers until
+            // the player presses it (`Qg` L1117 -> `Sb.F().kk(!1)`).
+            fx.lock_targets.push_back(target);
         } else if (t == "MenuBtnFlashing") {
             // Desktop navigation guidance (FLOW_STATIC L140-142): the web/
             // else branch of `StoryTutorialOpenScene` shows the notification
@@ -3109,6 +3114,11 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // the global `NextScene` (Shop/Map/Dojo/Profile).
             fx.menu_flashes.push_back(
                 quest_var(app, locals, attr_or(a.attrs, "BtnName")));
+            // `eo.N3a` (L1117): `Sb.F().kk(!0)` + `scroll.button.tk=!0` then
+            // `dia` (L1119) arms the named button; `XHa` unblocks on the press.
+            // Target = the resolved `_NextScene` scene name (the port's
+            // `nav_flash_` space): only that nav tab activates while locked.
+            fx.lock_targets.push_back(fx.menu_flashes.back());
             // `eo.parse`/`N3a` (L1117): `BtnName` + `za.instance.sxa()` ->
             // `scroll.collapse(0)` (L2001) — the flash first collapses the
             // `za` scroll so the collapsed header carries the pulse; the row
@@ -3121,6 +3131,14 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // base `S` (L485232), whose `S(a)` only applies `Lock`/`Sound`
             // and resumes the serialized tail — it renders NOTHING. The port
             // matches: silent no-op. (Neither tag occurs in any shipped XML.)
+        } else if (t == "BlockTouches") {
+            // `Cn.S` (L1115, factory `case "EBlockTouches"`; `Nz.hi` matches
+            // the bare name minimally): `Sb.F().kk(!0)` with NO armed target �
+            // a pure full block (every `db` is discarded until `UnblockTouches`).
+            fx.block_all = true;
+        } else if (t == "UnblockTouches") {
+            // `Jo.S` (L1127, `case "EUnblockTouches"`): `Sb.F().kk(!1)`.
+            fx.unblock = true;
         } else if (t == "ToggleItems") {
             // `Io` L1107 (`EToggleItems`): `Toggle` (default "on"), `Label`
             // (default ""); `p.iMa(ba.Pc(a,Label), ba.Pc(a,Toggle)=="on")`.
@@ -3342,6 +3360,13 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // in order — the tail still runs after this point, never before.
             const std::string raw = attr_or(a.attrs, "Frames", "0");
             const int frames = parse_int_or(quest_var(app, locals, raw), 0);
+            // `Ro.S` (L1114): `this.a8=ba.Zv(a,ControlsLock)`; when set it runs
+            // `Sb.F().kk(!0)` + `Za.Hb.enabled=!1` for the wait and restores in
+            // `stop()`. `tick` counts `wait_lock_frames_` down to that stop.
+            if (attr_bool01(attr_or(a.attrs, "ControlsLock")) && frames > 0) {
+                fx.wait_controls_lock = true;
+                wait_lock_frames_ = frames;
+            }
             if (!app.headless() && frames > 0) {
                 ActionRest suspended;
                 suspended.suspended = true;
@@ -4184,10 +4209,48 @@ void QuestEngine::enqueue_effects(App& app, const QuestSideEffects& fx,
         armed_clicks_.push_back(t);
         std::fprintf(stdout, "[quest] ClickButton armed: %s (callback live)\n", t.c_str());
     }
+    // `Sb`/`kk` (L2316) + the `db.aa` gate (L1839): arm the block overlay for
+    // every guided control (`Nn`/`eo`) or a targetless full block (`Cn`), and
+    // clear it on `Jo`.
+    for (const std::string& t : fx.lock_targets) lock_controls(t);
+    if (fx.block_all) lock_controls(std::string());
+    if (fx.wait_controls_lock) lock_controls(std::string());
+    if (fx.unblock) unlock_controls();
     if (fx.collapse_nav) collapse_nav_pending_ = true;
     // `Po` `UpdateShopItems` (L570290): `Oa.get().Imb()` on the live shop.
     if (fx.update_shop_items) shop_refresh_pending_ = true;
     std::fflush(stdout);
+}
+
+// `Sb` (L2316) `kk(a){this.Ry.R(a); this.Xva=a;}`: the global input-block
+// overlay. `target` = the armed `tk` control id (`""` = `Cn`'s full block).
+void QuestEngine::lock_controls(const std::string& target) {
+    controls_locked_ = true;
+    lock_target_ = target;
+    std::fprintf(stdout, "[quest] Sb.kk(1): input locked target=%s\n",
+                 target.empty() ? "-" : target.c_str());
+    std::fflush(stdout);
+}
+
+// `Jo.S`/`Nn.Qg`/`eo.XHa` (L1117/L1119/L1127): `Sb.F().kk(!1)`.
+void QuestEngine::unlock_controls() {
+    if (!controls_locked_ && lock_target_.empty()) return;
+    controls_locked_ = false;
+    lock_target_.clear();
+    wait_lock_frames_ = 0;
+    std::fprintf(stdout, "[quest] Sb.kk(0): input unlocked\n");
+    std::fflush(stdout);
+}
+
+// `db.g1()` -> `Nn.Qg` (L1117) / `eo.XHa` (L1119): the guided control fired
+// (`Sb.F().kk(!1)` + `sa()`). True only when `id` was the armed `tk` control.
+bool QuestEngine::complete_guided(const std::string& id) {
+    if (!controls_locked_ || lock_target_.empty() || lock_target_ != id) return false;
+    ++guided_actions_;
+    std::fprintf(stdout, "[quest] guided control used: %s\n", id.c_str());
+    std::fflush(stdout);
+    unlock_controls();
+    return true;
 }
 
 void QuestEngine::resume_run(App& app, PendingRun& run) {
@@ -4497,6 +4560,8 @@ void QuestEngine::tick(App& app) {
     // fires `TimerEnd`). Live path only (headless keeps the record-only
     // contract, like the rest of `tick`).
     tick_timers(app, quest_now());
+    // `Ro.stop` (L1114): a `ControlsLock` wait counts down to `Sb.F().kk(!1)`.
+    if (wait_lock_frames_ > 0 && --wait_lock_frames_ <= 0) unlock_controls();
     // `Ro` (L1119): resume every run whose frame delay elapsed.
     std::vector<PendingRun> due;
     for (std::size_t i = 0; i < pending_.size();) {
@@ -5116,6 +5181,9 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     if (event == "SceneLoaded") {
         flash_target_.clear();
         if (journal.scene_to == nav_flash_) nav_flash_.clear();
+        // A nav-guided `eo` step completes when the player reaches the flashed
+        // scene (`XHa` L1119 `Sb.F().kk(!1)`): clear the block for that target.
+        if (!lock_target_.empty() && journal.scene_to == lock_target_) unlock_controls();
     }
     if (!ensure_loaded(app)) return fired;
     QuestJournal j = journal;

@@ -1285,6 +1285,11 @@ std::string catalog_item_type(App& app, const std::string& item_name);
 // the shared `za` nav scroll flag (the collapsed header then carries the
 // `MenuBtnFlashing` pulse until the player expands it).
 void set_za_nav_open(bool open);
+// Test hook: attempt a `za` nav tap by index (0 Dojo/1 Map/2 Shop/3 Profile/
+// 4 Settings) through the real dispatcher, returning true when the `db.aa`
+// (L1839) gate ACCEPTED it (the guided `tk` target or an unlocked overlay) and
+// false when the quest's `Sb.Xva` block rejected it. `--tutorial-real-verify`.
+bool za_nav_try_tap(App& app, int hit);
 // The `za` column's expanded state for a shell screen (`gk.uJ`) — asserted by
 // the `--flow-verify` probe for the Map/Shop header tap.
 bool za_nav_expanded(ScreenId id);

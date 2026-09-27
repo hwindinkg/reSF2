@@ -2884,9 +2884,28 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             q2.press_dialog(app, 1);
             app.run_one_frame();
         }
-        // Follow the guidance: Profile -> Dojo (the flash target), through the
-        // same screen push the nav row tap performs.
-        if (Screen* top = app.screens().top()) top->push(kScreenDojo);
+        // `Sb`/`db.aa` input-lock gate (js L2316/L1839): while the guidance
+        // holds the block overlay with the `Dojo` nav button armed, an
+        // UNRELATED nav tab is REJECTED and the guided one ACCEPTED; the guided
+        // press clears the overlay (`eo.XHa`), so every tab is accepted again.
+        const bool lock_before = q2.controls_locked();
+        const std::string lock_target_before = q2.lock_target();
+        const bool unrelated_reject = !za_nav_try_tap(app, 2);  // Shop: REJECTED
+        const bool lock_held = q2.controls_locked();            // reject keeps it
+        const bool guided_accept = za_nav_try_tap(app, 0);      // Dojo: ACCEPTED
+        const bool unlocked_after = !q2.controls_locked();
+        const bool all_accept_after = q2.control_allowed("Shop");
+        std::fprintf(stdout,
+                     "[lock] BEFORE locked=%d target=%s | unrelated(Shop)=%s "
+                     "guided(Dojo)=%s | AFTER unlocked=%d accept(Shop)=%s\n",
+                     lock_before ? 1 : 0, lock_target_before.c_str(),
+                     unrelated_reject ? "REJECT" : "accept",
+                     guided_accept ? "ACCEPT" : "reject", unlocked_after ? 1 : 0,
+                     all_accept_after ? "ACCEPT" : "REJECT");
+        std::fflush(stdout);
+        const bool ok_lock =
+            lock_before && lock_target_before == "Dojo" && unrelated_reject &&
+            lock_held && guided_accept && unlocked_after && all_accept_after;
         const bool on_dojo = wait_screen(kScreenDojo, 300);
         // `StoryTutorialDoubleSweep` queues a Notification (ReadTime 5.0 s) and
         // the `SetStoryTutorialStep SHOW_BLOCK` sits in the parked tail the
@@ -2911,15 +2930,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              after_step == "SHOW_BLOCK" && after_nav.empty();
         std::fprintf(stdout,
                      "[tutreal2] RESULT profile=%s before_step=%s before_nav=%s "
-                     "dojo=%s after_step=%s after_nav_cleared=%d -> %s\n",
+                     "dojo=%s after_step=%s after_nav_cleared=%d lock=%s -> %s\n",
                      on_profile ? "PASS" : "FAIL",
                      before_step == "SHOW_DOUBLE_SWEEP" ? "PASS" : "FAIL",
                      before_nav == "Dojo" ? "PASS" : "FAIL", on_dojo ? "PASS" : "FAIL",
                      after_step == "SHOW_BLOCK" ? "PASS" : "FAIL",
-                     after_nav.empty() ? 1 : 0, ok_goto ? "PASS" : "FAIL");
+                     after_nav.empty() ? 1 : 0, ok_lock ? "PASS" : "FAIL",
+                     (ok_goto && ok_lock) ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();
-        return (ok && ok_goto) ? 0 : 1;
+        return (ok && ok_goto && ok_lock) ? 0 : 1;
     } else if (quest_verify || quest_verify_buy) {
         // --- interactive quest-action verification (internal injection) -----
         // A live app (headless_frames_ == 0, so the engine EXECUTES actions

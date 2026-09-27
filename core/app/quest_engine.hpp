@@ -432,7 +432,21 @@ struct QuestSideEffects {
     // target's callback. The engine only ARMS + logs it (the JS never
     // auto-presses: `Nn.S` hooks `xk.pa.addListener(Qg)` and waits).
     std::vector<std::string> click_arm;
-    // `eo` L1117 (`Nn`… `sxa()`): `MenuBtnFlashing` collapses the `za` scroll
+    // `Sb` L2316 `kk(a){this.Ry.R(a);this.Xva=a;}` � the global input-block
+    // overlay flag. `Nn.S`/`eo.N3a` (L1114/L1117) set it AND arm their guided
+    // `tk` control (its id here); the port's input routing discards every OTHER
+    // control while it holds (`db.aa` L1839:
+    // `if(Sb.F().Xva&&this.tk)<fire> else if(this.Nf)<normal>`).
+    std::vector<std::string> lock_targets;
+    // `Cn.S` (L1115 `EBlockTouches`): `Sb.F().kk(!0)` with NO target � a full
+    // block (every control discarded until `Jo` clears it).
+    bool block_all = false;
+    // `Jo.S` (L1127 `EUnblockTouches`): `Sb.F().kk(!1)`.
+    bool unblock = false;
+    // `Ro.S` (L1114 `Wait ControlsLock="1"`, quests.xml L1641/L1653): block for
+    // the wait's duration AND disable the back button (`Za.Hb.enabled=!1`).
+    bool wait_controls_lock = false;
+    // `eo` L1117 (`Nn`� `sxa()`): `MenuBtnFlashing` collapses the `za` scroll
     // (`za.instance.sxa()` -> `scroll.collapse(0)`, L2001) before it flashes.
     bool collapse_nav = false;
     // `Po` L570290 (`EUpdateShopItems`): `S` runs `a=Oa.get(); a!=null&&a.Imb()`
@@ -885,6 +899,26 @@ public:
     // `MenuBtnFlashing BtnName` — the `za` nav button (by scene name) to
     // highlight until the player navigates there.
     const std::string& nav_flash() const { return nav_flash_; }
+    // --- `Sb`/`kk` input-block overlay (L2316) + the `db.aa` gate (L1839) ---
+    // `kk(a)` stores the overlay flag in `Xva`; `db.aa` then runs the guided
+    // control when `Xva&&tk`, the normal press when `!Xva&&Nf`, and NOTHING
+    // otherwise � so a locked overlay enables ONLY the armed control.
+    bool controls_locked() const { return controls_locked_; }
+    const std::string& lock_target() const { return lock_target_; }
+    // `db.aa` predicate: unlocked -> every control may activate; locked -> only
+    // the armed target (`tk`) may.
+    bool control_allowed(const std::string& id) const {
+        return !controls_locked_ || (!lock_target_.empty() && lock_target_ == id);
+    }
+    // `Nn.S`/`eo.N3a`/`Cn.S`: `Sb.F().kk(!0)` + arm `target` (`""` = full block).
+    void lock_controls(const std::string& target);
+    // `Jo.S`/`Nn.Qg`/`eo.XHa`: `Sb.F().kk(!1)`.
+    void unlock_controls();
+    // The player used the guided control: JS `g1()` -> `Qg`/`XHa` (unblock +
+    // `sa()`). True when `id` was the armed target.
+    bool complete_guided(const std::string& id);
+    // Guided completions (`Qg`/`XHa`); test hook, not a record.
+    std::size_t guided_actions() const { return guided_actions_; }
     // Last `SetMapFocus Battle=` value applied (`qo` L1086 = `p.o.m5(battle)`
     // + the `Ya` focus refresh). The Map re-targets `Rr` on change, so a
     // focus landing after the map's construction still takes effect.
@@ -1232,6 +1266,12 @@ private:
     // `Po` `UpdateShopItems` (L570290) pending live-shop refresh.
     bool shop_refresh_pending_ = false;
     std::vector<std::string> armed_clicks_;  // `Nn` non-ignored targets
+    // `Sb.F().Xva` + the armed `tk` control id (the `db.aa` gate, L1839).
+    bool controls_locked_ = false;
+    std::string lock_target_;
+    std::size_t guided_actions_ = 0;  // `Qg`/`XHa` completions (test hook)
+    // `Ro` (L1114) `Wait ControlsLock`: frames left until `stop()` unblocks.
+    int wait_lock_frames_ = 0;
     std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
     std::size_t shop_refresh_actions_ = 0;   // executed `UpdateShopItems` count
