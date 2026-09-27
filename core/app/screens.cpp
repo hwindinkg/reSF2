@@ -3658,17 +3658,40 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     if (frame == nullptr || !load_callouts_atlas(app)) return;
     const float art = std::min(800.0f, std::min(kViewW, kViewH)) * 0.6f;
     if (!try_draw_atlas_button(app, frame, cx, cy, art, art, 1.0f)) return;
-    // The round NUMBER: `round = ea(E.get(1298))`, Ia(64), ua(fontSize*1.6)
-    // (JS `Cr` L2022/L2026) - the round digits above the ROUND art. The JS
-    // draws the number only; there is no "ROUND" text.
+    // (B) The round NUMBER: `round = ea(E.get(1298))`, Ia(64), ua(fs*1.6)
+    // (JS `Cr` ctor L2022). The banner init (`Cr.init`, L1043346) positions it
+    // from the ROUND art's bounds: `a = b.W-b.P` (art height),
+    // `round.C(b.N + a*.25)` (x = art RIGHT + 0.25*height) and `round.D(b.P)`
+    // (y = art top). The port centred it ABOVE the plate (cx, top-78) - the
+    // user's "the number is somewhere at the top"; JS puts it beside ROUND.
+    // `try_draw_atlas_button` aspect-fits the frame's natural size into
+    // (art,art) centred, so the art's real rect is nat*min(art/nat) - NOT the
+    // square `art` (the round frame is 513x109).
     if (kind == sf2::scene::banner_kind::round) {
         const sf2::data::font* rf = app.round_font();
         const unsigned int rtex = app.round_texture();
         if (rf != nullptr && rtex != 0) {
             const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
-            app.draw_text_centered(*rf, rtex, cx, cy - art * 0.5f - 78.0f,
-                                   std::to_string(fight.round().number + 1), rscale,
-                                   1.0f, 1.0f, 1.0f, 1.0f);
+            float art_w = art, art_h = art;  // fallback = the requested box
+            sf2::data::atlas_frame fr;
+            int tw = 0, th = 0;
+            unsigned int gl = 0;
+            if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl)) {
+                const float nat_w = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                                    : static_cast<float>(fr.w);
+                const float nat_h = fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                                    : static_cast<float>(fr.h);
+                if (nat_w > 0.0f && nat_h > 0.0f) {
+                    const float sc = std::min(art / nat_w, art / nat_h);
+                    art_w = nat_w * sc;
+                    art_h = nat_h * sc;
+                }
+            }
+            const float art_right = cx + art_w * 0.5f;  // `b.N` (image right)
+            const float art_top = cy - art_h * 0.5f;    // `b.P` (image top)
+            app.draw_text_with_font(*rf, rtex, art_right + art_h * 0.25f, art_top,
+                                    std::to_string(fight.round().number + 1),
+                                    rscale, 1.0f, 1.0f, 1.0f, 1.0f);
         }
     }
 }
@@ -4417,6 +4440,12 @@ struct BattleWarriorInfo {
     // `<Rules>/<Attributes>` rules, `ApplyTo` mapped to 1/2/3 and the
     // `<Level Min Max>` range stamped on each (`bb.Ajb`, L455854).
     std::vector<sf2::scene::RatingSideRule> side_rules;
+    // `pT`/`R4` (JS `IIa` L195: `a.pT=u.I(b.attributes.get("Rounds"),2)`,
+    // `a.R4=u.I(b.attributes.get("RoundTime"),60)`): the SELECTED `<Fight>`'s
+    // ROUNDS-to-win + round timer. The map launch hardcoded 2/99, so a boss
+    // ladder's final `Rounds="3"` fight still ran 2 rounds.
+    int rounds = 2;
+    int round_time = 60;
 };
 
 // `StageWarrior::Delta` -> `damage.hpp` `AlignDelta` (same fields, float).
@@ -4493,6 +4522,14 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             }
         }
         if (!fight) return out;
+        // JS `IIa` L195: the selected `<Fight>`'s Rounds (default 2) +
+        // RoundTime (default 60) - the JS-exact source of `Da.pT`/`Da.R4`.
+        {
+            const pugi::xml_attribute ra = fight.attribute("Rounds");
+            out.rounds = ra ? ra.as_int() : 2;
+            const pugi::xml_attribute rt = fight.attribute("RoundTime");
+            out.round_time = rt ? rt.as_int() : 60;
+        }
         // `dl.z8a()` (L1428): the fight's `<RatingEvaluation>` rule (`qn`
         // L881: `eVa`/`yUa`/`jVa`; `u.H` leaves an absent attr at 0).
         //
@@ -8697,8 +8734,10 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         std::fflush(stdout);
     }
     battle.location = location_;
-    battle.rounds = 2;
-    battle.round_time = 99;
+    // (A) `rounds`/`round_time` are sourced from the LAUNCHED `<Fight>` (the
+    // ladder index) below via the warrior resolver - JS `IIa` L195 `pT`/`R4`.
+    // (Previously hardcoded 2/99, so a boss ladder's final `Rounds="3"` fight
+    // still ran 2 rounds - "the Lynx boss had only two rounds".)
     battle.health_recovery = 1.0f;
     // [FIX Phase 4a — fighters on the floor] The spawn Y is the ModelsViewer
     // placement y (the PivotNode target — `Fighter::sample` anchors the model
@@ -8823,6 +8862,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     if (bw.attrs.empty() && bw.first_name.empty()) {
         bw = battle_warrior(battle_name_, app().pending_battle().zone, 0);
     }
+    // (A) JS `Da.pT`/`Da.R4` (`IIa` L195) from the resolved `<Fight>`: the
+    // ladder's CURRENT fight drives the ROUNDS-to-win + round timer. The boss
+    // ladder's final fight is `Rounds="3"` (stages.xml), the earlier ones 2.
+    battle.rounds = bw.rounds;
+    battle.round_time = bw.round_time;
     // `first_name` is a lang key (`NAME_SHIN`) resolved for display (JS `ur`).
     app().pending_battle().enemy_name =
         bw.first_name.empty() ? "Enemy" : loc(app(), bw.first_name, bw.first_name);
