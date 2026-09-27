@@ -12060,6 +12060,21 @@ void draw_shop_scroll(App& app, sf2::render::Renderer& ren, const ShopRect& v) {
         try_draw_atlas_button(app, "roll_center", v.J + capw + midw * 0.5f, by, midw, kRollH,
                               1.0f, true, false);
     }
+    // `Oe.Pn` (@1164670) VERBATIM: `this.uT.xc(this.scroll.Gv+5);
+    // this.uT.Pb(this.scroll.Xy)` — the `uT`=`roll_shadow` overlay (ctor
+    // @1163935, `y.hoa`), a child of `scroll.content` (at `(c, vk)`, `Fg.ba`
+    // @962809), so it starts at `(v.J+c, v.P+vk)` spanning `Gv+5 = w-2c+5` by
+    // `Xy = h-2*vk`.
+    try_draw_atlas_button(app, "roll_shadow", v.J + c, v.P + kRollH,
+                          (w - 2.0f * c) + 5.0f, h - 2.0f * kRollH, 1.0f, true,
+                          false, /*top_left=*/true);
+    // `Oe.Pn`: `a=(a.N-a.J)*.08; this.Lr.C(this.scroll.Gv-a*.15);
+    // this.Lr.D(0); this.Lr.ba(a,this.scroll.Xy)` — the `Lr`=`fk` slider
+    // ornament (ctor @1164154 `new fk`, frame `y.ORa`="slider" @966071). As a
+    // child of `scroll.content`, its screen x = `v.J + c + Gv - c*.15`.
+    try_draw_atlas_button(app, "slider", v.J + c + (w - 2.0f * c) - c * 0.15f,
+                          v.P + kRollH, c, h - 2.0f * kRollH, 1.0f, false, false,
+                          /*top_left=*/true);
 }
 
 // Slot fallback when unequipping (JS `p.vzb`, L214-215).
@@ -13465,6 +13480,65 @@ void ShopScreen::render_impl(App& app) {
             draw_ui_label(app, sx + 20.0f, sy - 16.0f, 60.0f, 32.0f, std::to_string(it.level),
                           0.8f, UiAlign::Left, 0.25f, 0.18f, 0.10f);
         }
+        // --- `ns` remaining frames (JS @1186046-1186300, VERBATIM) ----------
+        // The bottom `jw` strip is 40 design units tall (`jw.D(ce.y-40)`,
+        // @1186130); every frame in it is scaled by the list `ff.kf`
+        // (`list_w/uw_x`). `y.JRa`="lock" (@1268373), `y.GRa`="jackdaw_green"
+        // (@1268241), `y.SRa`="wear" (@1268581).
+        {
+            const ShopViewerParams cvp =
+                kShopViewer[std::clamp(tab_, 0, kShopTabCount - 1)];
+            const float cell_scale = cvp.uw_x > 0.0f ? cw / cvp.uw_x : 1.0f;
+            const float fr_h = 40.0f * cell_scale;       // `zf(40)` (@1186102)
+            const float jw_top = cell.W - fr_h;          // `jw.D(ce.y-40)` (@1186130)
+            auto frame_w = [&](const char* name) -> float {
+                sf2::data::atlas_frame fr;
+                int tw = 0, th = 0;
+                unsigned int gl = 0;
+                if (!app.get_atlas_frame(name, &fr, &tw, &th, &gl)) return 0.0f;
+                const float nw = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                                 : static_cast<float>(fr.w);
+                const float nh = fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                                 : static_cast<float>(fr.h);
+                return nh > 0.0f ? fr_h * (nw / nh) : fr_h;
+            };
+            // `TB` owned frame: `TB.zf(40); TB.C(ce.x-TB.za())` (@1186102),
+            // shown when `b!=null` (owned, `b=p.o.xa.te(a)` @1187015) and
+            // `a.type!=I.Bu/I.Vr/I.Ox/I.Hm` (Free/Seal/Consumable/
+            // RaidConsumable, @1272119-1272177) and `!a.Zz` (`Zz` = the
+            // `ConsumableProduct` attr, @164715).
+            const bool tb_show = owned && it.type != "Free" && it.type != "Seal" &&
+                                 it.type != "Consumable" &&
+                                 it.type != "RaidConsumable";
+            const float tb_w = frame_w("jackdaw_green");
+            if (tb_show && tb_w > 0.0f) {
+                try_draw_atlas_button(app, "jackdaw_green", cell.N - tb_w, jw_top,
+                                      tb_w, fr_h, 1.0f, false, false, /*top_left=*/true);
+            }
+            // `IV` wear frame: `IV.zf(40); IV.C(TB.ya-TB.za())` (@1186105) ->
+            // immediately LEFT of `TB`; shown when `b.G` = the owned entry's
+            // `Ru` equipped flag (`re.rga` @1175941) — the port's `equipped`.
+            const float iv_w = frame_w("wear");
+            if (equipped && iv_w > 0.0f) {
+                try_draw_atlas_button(app, "wear", cell.N - tb_w - iv_w, jw_top, iv_w,
+                                      fr_h, 1.0f, false, false, /*top_left=*/true);
+            }
+            // `aC` level-lock frame: `aC.kf(a*.2)` (@1186148) -> width = cell
+            // width*.2, `C(ce.x/2); D(ce.y/2)` centred (and `Ga()` centred
+            // anchor, @1185816); shown when `a.xf>p.o.bb()&&!re.sEa(a)`
+            // (@1187015) = required level above the player's AND not owned
+            // (`re.sEa` = owned-entry exists, @1176056).
+            if (it.level > seen_.level && !owned) {
+                try_draw_atlas_button(app, "lock", cx, cy, cw * 0.2f, cw * 0.2f, 1.0f,
+                                      false, false);
+            }
+        }
+        // NOTE (not ported, needs data the cell draw lacks): the `SE`=`gi`
+        // icon row (`SE.p5(p.BD(bc))`, @1187134), the `HG` user portrait for
+        // `type==I.Vr` (`new oe(Ye.qI(a.fileName))`, @1187118), and the `pv`
+        // amount label for `I.Ox`/`a7` (`this.pv.V(Y.na("shop_amount",
+        // p.o.uD(a.Kj)))`, @1187156) all require the upgraded `bc` variant /
+        // the player's currency lookup, not just the catalog row.
         // `ns.ba` (L2306) + `ns.j5` (L2308-2309): the sale/`badge` flag `Di`
         // (atlas 248 `pieces/*`) + its text `Im`. Resolved by `shop_cell_badge`
         // (the single rule shared with the `--settings-profile-shop-probe`).
@@ -15341,19 +15415,23 @@ void EquipmentScreen::render_impl(App& app) {
                                   v.height(), 1.0f, /*fill=*/true, /*flip_x=*/false,
                                   /*top_left=*/true);
         }
+        // `Fg.ba` (@962809) `this.vk = this.Dl==null ? 0 : c`; `Xd.Pn`
+        // (@1125116) calls `scroll.ba(a.N-a.J, a.W-a.P, (a.N-a.J)*.08)`, so the
+        // rail/roll thickness `vk = c = viewer_width*.08` (NOT a fixed 30).
+        const float roll_h = v.width() * kFgRailFrac;              // Zh(w, vk)
         // JS `Xd` ctor (L2186): `uT = R.$(E.get(254), y.hoa /* roll_shadow */,
         // this.scroll.content)`; `Xd.Pn` (L2185) sizes it `uT.xc(scroll.Gv+5)`,
         // `uT.Pb(scroll.Xy)`. `scroll.content` sits at `(c, vk)` in the node
         // (`Fg.ba` L1870 `content.C(c); content.D(vk)`), so the shadow starts at
-        // the paper rail (`edge`) one rail-height (`30`) down and spans the
+        // the paper rail (`edge`) one rail-height (`vk`) down and spans the
         // inner `Gv+5` x `Xy` — the vertical darkening the oracle shows over
         // the perk/achievement lists.
-        try_draw_atlas_button(app, "roll_shadow", v.J + edge, v.P + 30.0f,
-                              (v.width() - 2.0f * edge) + 5.0f, v.height() - 60.0f,
+        try_draw_atlas_button(app, "roll_shadow", v.J + edge, v.P + roll_h,
+                              (v.width() - 2.0f * edge) + 5.0f,
+                              v.height() - 2.0f * roll_h,
                               1.0f, /*fill=*/true, /*flip_x=*/false,
                               /*top_left=*/true);
         constexpr float kRollSrcH = 114.0f, kRollCapSrcW = 101.0f;
-        const float roll_h = 30.0f;                                 // Zh(w,30)
         const float capw = kRollCapSrcW * (roll_h / kRollSrcH);
         const float bodyw = v.width() - 2.0f * capw;
         auto roll_bar = [&](float cy) {
