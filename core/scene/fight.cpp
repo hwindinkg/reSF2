@@ -2950,6 +2950,20 @@ void FightController::apply_round_result(round_result result, const FightFighter
     player_.kh = true;
     enemy_.kh = true;
 
+    // JS `E3a` (L413) tail: `this.uN=!1; this.Zw(!1); ... this.mV=this.xX=null`
+    // — the round end clears the finishing-blow slow-mo + freeze latch.
+    finish_blow_pending_ = false;
+    if (finish_frozen_ != nullptr) {
+        finish_frozen_->fighter.set_disabled(false);
+        finish_frozen_ = nullptr;
+    }
+    if (slowmo_on_) set_slowmo(false);
+    else {
+        game_speed_ = 1.0f;
+        player_.fighter.set_anim_rate(1.0f);
+        enemy_.fighter.set_anim_rate(1.0f);
+    }
+
     // Battle end: the winner reached `round.eL` (Rounds) — JS `Onb` (L411)
     // `a = wo.nB.ng >= round.eL`. Computed here (before the visibility gate)
     // because `Onb` chooses the `XF(!1)` branch by `a`.
@@ -3087,10 +3101,82 @@ void FightController::between_rounds_recover() {
     }
 }
 
-// JS `vfa` (L413): the round winner by HP.
+// JS `vfa` (L413): `vfa(a){if(this.ey!=5&&this.Pu!=null)switch(this.Pu.wfa()){
+//   case 1:return this.kc;case 2:return this.Zb}
+//   return this.kc.gd<=this.Zb.gd?a?this.Zb:this.kc:a?this.kc:this.Zb}`
+// The round winner by HP for the double-KO (`ey==6`) / timeout tie: the
+// `<=` sends the TIE to the enemy (`Zb`); the player (`kc`) wins only on a
+// strict `>`. (The old port's `>=` gave the tie to the player.)
 const FightFighter& FightController::round_winner_by_hp() const {
-    if (player_.hp >= enemy_.hp) return player_;
+    if (player_.hp > enemy_.hp) return player_;
     return enemy_;
+}
+
+// JS `ca.Zw`/`v.YT` (L211118/L616082): the global timescale `v.on()` set to
+// `v.kNa` while the finishing-blow slow-mo runs and `v.dB` (=1) at rest.
+// `de.ia` (L248219) feeds `1/v.on()` to every animator, so BOTH fighters'
+// clip advance divides by `on()`.
+void FightController::set_slowmo(bool on) {
+    if (slowmo_on_ == on) return;
+    slowmo_on_ = on;
+    game_speed_ =
+        on ? static_cast<float>(fight_params().slow_mode_value) : 1.0f;
+    const float rate = 1.0f / game_speed_;
+    player_.fighter.set_anim_rate(rate);
+    enemy_.fighter.set_anim_rate(rate);
+    std::fprintf(stdout, "[fx] slow-mo %s on()=%.0f\n", on ? "on" : "off",
+                 static_cast<double>(game_speed_));
+    std::fflush(stdout);
+}
+
+// JS `ca.q_a` (L211492) + `ca.xX.Qh` (`cu`, L220111): the per-frame
+// finishing-blow tick. `q_a(){this.pW&&this.Zw(!0)}` turns slow-mo on while
+// `pW` (the `Zw` tail clears `pW` once `yt` is set). `cu.Qh` counts `Sc` in
+// `L.K.sk.Bm` = 1/60 s steps toward `v.iNa`/`v.jNa` ONLY while the fight is
+// live (`a.wn` false) and slow-mo OFF (`a.yt` false), then restores the
+// attacker's `y5(!0)` (act-allowed) and latches `state=-1`.
+void FightController::tick_finish_slowmo() {
+    if (finish_blow_pending_) {
+        set_slowmo(true);
+        finish_blow_pending_ = false;
+    }
+    if (finish_frozen_ != nullptr) {
+        if (finish_freeze_frames_ < finish_freeze_total_) {
+            if (!slowmo_on_) ++finish_freeze_frames_;
+        } else {
+            finish_frozen_->fighter.set_disabled(false);
+            std::fprintf(stdout, "[fx] finishing-blow stun released (F%d %s)\n",
+                         frame_, finish_frozen_->name.c_str());
+            std::fflush(stdout);
+            finish_frozen_ = nullptr;
+        }
+    }
+}
+
+// JS `ca.uhb`'s prediction `b = a.Pd.bCa(b,!1,!1,null,null)` (L211214): the
+// damage the attacker's type-4 interval would deal to `def` with no block,
+// no crit, and NO hit capsule (`wd.LAa(...,d=null)` -> the `v.lNa`
+// fallback defense = `SlowMotion Defense`). The `side_bp` factor is filled
+// exactly as `apply_hit` does (`damage_bp_[iv].bp` for the attacker's side).
+float FightController::predict_interval_damage(const FightFighter& atk,
+                                               const FightFighter& def,
+                                               const sf2::scene::Interval& iv,
+                                               const sf2::scene::MoveDef& mv) const {
+    sf2::scene::IntervalDamage idmg;
+    idmg.base_damage = iv.damage;
+    idmg.no_critical = iv.no_critical;
+    idmg.hit_body_part = iv.hit_name_at(atk.fighter.move_frame());
+    idmg.attack_attrs = iv.attack_attrs;
+    idmg.defense_names = iv.defense_names;
+    idmg.qx = mv.qx;
+    const auto it = damage_bp_.find(&iv);
+    if (it != damage_bp_.end()) {
+        idmg.side_bp = it->second[atk.is_player ? 0 : 1].bp;
+    }
+    const std::string defense_attr =
+        sf2::scene::select_defense(idmg, false, nullptr);
+    return sf2::scene::compute_damage(idmg, atk.params, def.params, defense_attr,
+                                      false, false, nullptr);
 }
 
 void FightController::sample_idle(FightFighter& f) {
@@ -3818,6 +3904,52 @@ void FightController::tick_bus_side(int side) {
             bus_.drain(0, p3);
             bus_.drain(1, p3);
             for (const auto& pr : p3) exec_action(pr.first, pr.second, side);
+            // JS `ca.wA` (L196103): `this.tb.Gj(a.model,12,!0); this.uhb(a)`
+            // — the FINISHING-BLOW arm on a type-4 (Attack) interval start.
+            // Gate `uhb(a)`: `this.round.Vt` (round live) && `Da.type !=
+            // "FightNone"` && `!this.yt && !this.pW && a.model.Dfa()`.
+            if (me.fighter.interval_type(n) == 4 &&
+                phase_ == fight_phase::fight && !fight_none_ &&
+                !finish_blow_pending_ && !slowmo_on_ &&
+                !me.fighter.disabled() &&
+                me.fighter.current_move() != nullptr) {
+                const sf2::scene::MoveDef* mv = me.fighter.current_move();
+                const sf2::scene::Interval* iv = nullptr;
+                for (const sf2::scene::Interval& cand : mv->intervals) {
+                    // Match the `active_intervals_` key: an unnamed interval
+                    // uses `"type" + G0` (JS `fe` name fallback; see
+                    // `Fighter::interval_type`), so a bare name compare misses
+                    // every shipped `Type="Attack"` interval.
+                    const std::string key =
+                        cand.name.empty()
+                            ? "type" + std::to_string(cand.type)
+                            : cand.name;
+                    if (key == n) { iv = &cand; break; }
+                }
+                if (iv != nullptr) {
+                    // `b = a.Pd.bCa(b,!1,!1,null,null)`; the finishing blow is
+                    // `a.Pd.parameters.gd <= b` (the opponent's HP <= predicted).
+                    const float b = predict_interval_damage(me, foe, *iv, *mv);
+                    if (foe.hp <= b) {
+                        me.fighter.set_disabled(true);  // `a.model.y5(!1)`
+                        finish_blow_pending_ = true;    // `this.pW=!0`
+                        finish_frozen_ = &me;           // `this.xX=new cu(a)`
+                        finish_freeze_frames_ = 0;
+                        finish_freeze_total_ = static_cast<int>(
+                            fight_params().slow_mode_restore_non_weapon *
+                            60.0f);
+                        ++finish_blows_;
+                        std::fprintf(
+                            stdout,
+                            "[fx] finishing blow armed (F%d %s tgt_hp=%.1f "
+                            "pred=%.1f stun=%d frames)\n",
+                            frame_, me.name.c_str(),
+                            static_cast<double>(foe.hp), static_cast<double>(b),
+                            finish_freeze_total_);
+                        std::fflush(stdout);
+                    }
+                }
+            }
         }
     }
     for (const std::string& n : me.prev_intervals) {
@@ -3830,6 +3962,18 @@ void FightController::tick_bus_side(int side) {
             bus_.drain(0, p3);
             bus_.drain(1, p3);
             for (const auto& pr : p3) exec_action(pr.first, pr.second, side);
+            // JS `ca.Pf` (L196236): `this.tb.Gj(a.model,13,!0); this.rgb(a)`
+            // — `rgb(a){this.yt&&a.data.type==4&&this.Zw(!1)}`: a type-4
+            // interval END turns the finishing-blow slow-mo OFF. The ended
+            // interval's type is resolved from the still-latched
+            // `ended_intervals()` when the move already dropped (`KNa`).
+            int ivt = me.fighter.interval_type(n);
+            if (ivt == 0) {
+                for (const auto& p : me.fighter.ended_intervals()) {
+                    if (p.first == n) { ivt = p.second; break; }
+                }
+            }
+            if (ivt == 4) set_slowmo(false);
         }
     }
     me.prev_intervals = std::move(cur);
@@ -4814,6 +4958,16 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // `Vx.wyb` tick below.
         atk.combo_active = true;
         atk.combo_frames = 0;
+        // JS `iu.wgb` (L248921): `this.tf>=v.aw()&&(this.j2=this.Ui=this.tf,
+        // this.Jt.Z(this.Ui))` — the combo MINHITS signal (`v.aw()` =
+        // `v.nV` = `<Combo MinHits>`, the consumer the parsed value lacked).
+        if (atk.combo_run >= fight_params().combo_min_hits) {
+            atk.combo_j2 = atk.combo_announced = atk.combo_run;
+            ++atk.combos_announced;
+            std::fprintf(stdout, "[fx] combo signal %d (F%d %s)\n",
+                         atk.combo_announced, frame_, atk.name.c_str());
+            std::fflush(stdout);
+        }
     }
     if (rec.shock) ++atk.shocks_dealt;
     if (!battle_first_hit_) {
@@ -5500,7 +5654,7 @@ void FightController::update(float dt) {
         {enemy_.fighter.world_x(), enemy_.fighter.world_y(),
          enemy_.fighter.facing()},
     };
-    magic_fx_.update(1.0f, fx_anchors, 2);
+    magic_fx_.update(1.0f / game_speed_, fx_anchors, 2);
     // Child models (JS `wd.vd` — the `<CreatePlayer>` spawns): advance their
     // clips + fire their own `AnimationEnd` actions. Presentation only.
     update_children();
@@ -5510,7 +5664,7 @@ void FightController::update(float dt) {
     camera_.tick_zoom_effect();
     // JS `wd.MOa()` (L532): `ca.Ka()` (the player) advances its ability
     // cooldowns when `ca.Ka().eu == 2`. `v.on()` = 1 here.
-    player_.fighter.tick_ability_cooldowns(1.0f);
+    player_.fighter.tick_ability_cooldowns(game_speed_);
     if (battle_over_) return;
 
     // The K.O. slow-mo beat (JS: the KO freeze): the first 30 frames of
@@ -5632,12 +5786,26 @@ void FightController::update(float dt) {
             // `this.Ax()`. This is the combo time decay the port lacked.
             {
                 const int combo_window = fight_params().combo_time;
+                const int combo_min_hits = fight_params().combo_min_hits;
                 for (FightFighter* fr : {&player_, &enemy_}) {
                     if (!fr->combo_active) continue;
                     if (++fr->combo_frames > combo_window) {
+                        // JS `iu.wyb`: `this.j2=this.Ui, this.reset(),
+                        // this.j2>=v.aw()&&this.Jt.Z(this.Ui)`. `reset()`
+                        // zeroes `Ui`/`tf`/`OV`, so the end signal fires with
+                        // the saved `j2` gating the fire (`Jt.Z(0)`).
+                        fr->combo_j2 = fr->combo_announced;
                         fr->combo_active = false;
                         fr->combo_frames = 0;
                         fr->combo_run = 0;
+                        fr->combo_announced = 0;
+                        if (fr->combo_j2 >= combo_min_hits) {
+                            std::fprintf(
+                                stdout,
+                                "[fx] combo signal 0 end (F%d %s run=%d)\n",
+                                frame_, fr->name.c_str(), fr->combo_j2);
+                            std::fflush(stdout);
+                        }
                     }
                 }
             }
@@ -5673,6 +5841,11 @@ void FightController::update(float dt) {
             break;
         }
     }
+
+    // JS `ca.ia` tail `this.q_a()` + the outer driver `a=this.xX;
+    // a!=null&&a.Qh(this)` (L196...): the finishing-blow slow-mo `q_a` +
+    // the `cu` freeze-timer tick. Runs after the fighters' clip advance.
+    tick_finish_slowmo();
 
     // The global `<Triggers>` EveryFrame publish (JS `kz.create` `Mm`,
     // L771): the trigger bus fires type 14 once per frame while the model's

@@ -1050,6 +1050,13 @@ struct FightFighter {
     // port previously lacked — it only reset the run on a taken hit.
     int combo_frames = 0;        // `iu.OV`
     bool combo_active = false;   // `iu.v1`
+    // `iu.Ui` (the announced combo count fired to `Jt`) and `iu.j2` (the
+    // count saved at the window expiry so the end signal can fire). The
+    // signal `Jt.Z(v)` fires with `v=tf` on `wgb` (`tf>=v.aw()`, MinHits) and
+    // with `v=0` on the `wyb` reset when the saved `j2>=MinHits`.
+    int combo_announced = 0;     // `iu.Ui`
+    int combo_j2 = 0;            // `iu.j2`
+    int combos_announced = 0;    // [probe] signal-fire count
     int shocks_dealt = 0;     // shock hits landed (prize Shock factor)
     // JS `wd.Era` (init 0 L490; `++` only at L510 `e.JCa()||this.Era++`):
     // the hits-TAKEN counter, incremented on an unblocked hit when the
@@ -1766,6 +1773,20 @@ private:
     fight_phase phase_ = fight_phase::idle;  // JS `eu`
     int frame_ = 0;                // JS `ca.frame`
     bool battle_over_ = false;     // JS `xJ` (battle finished)
+    // --- finishing-blow hit-stun + slow-mo (JS `ca.uhb`/`q_a`/`rgb`) -------
+    // `game_speed_` is the global timescale `v.on()` (`v.YT` sets it, `v.dB`
+    // = 1 is the rest value). `finish_blow_pending_` is `ca.pW` (armed by
+    // `uhb`, consumed by `q_a`); `slowmo_on_` is `ca.yt`. `finish_frozen_` is
+    // the `ca.xX` (`new cu(a)`) owner (the attacker whose `xd.y5(!1)` disable
+    // holds), `finish_freeze_frames_` counts `cu.Sc` in 1/60 s ticks up to
+    // `finish_freeze_total_` (`v.iNa`=2 s / `v.jNa`=4 s).
+    float game_speed_ = 1.0f;              // `v.on()`
+    bool finish_blow_pending_ = false;     // `ca.pW`
+    bool slowmo_on_ = false;               // `ca.yt`
+    FightFighter* finish_frozen_ = nullptr; // `ca.xX`
+    int finish_freeze_frames_ = 0;         // `cu.Sc` (frames)
+    int finish_freeze_total_ = 0;          // `v.iNa`/`v.jNa` * 60
+    int finish_blows_ = 0;                 // [probe] `uhb` arm count
     // JS `bea`/`kD` (L413/L415): true while the result plate holds the
     // fight-end sequence. `battle_over_` is set only when the plate expires
     // (`banner_expire` case `end_battle`), so the Results appear after the
@@ -1948,8 +1969,25 @@ private:
     void end_battle(const FightFighter& winner);
     // JS `NA` (L414): the between-round recovery (heal qDa, clear flags).
     void between_rounds_recover();
-    // JS `vfa` (L413): the round winner by HP.
+    // JS `vfa` (L413): the round winner by HP. `vfa(!0)` =
+    // `this.kc.gd<=this.Zb.gd ? this.Zb : this.kc` — the tie (`<=`) goes to
+    // the ENEMY (`Zb`), the player (`kc`) wins only on a strict `>`.
     const FightFighter& round_winner_by_hp() const;
+    // JS `ca.Zw`/`v.YT` (L211...) — turn the finishing-blow slow-mo on/off:
+    // `v.YT(a ? v.kNa : v.dB)` and (via `de.ia`) `1/v.on()` for both
+    // fighters' clip advance.
+    void set_slowmo(bool on);
+    // JS `ca.q_a` + `ca.xX.Qh` (the per-frame finishing-blow tick): `q_a`
+    // turns slow-mo on while `pW`; `cu.Qh` counts the freeze and resumes the
+    // attacker (`y5(!0)`) once `Sc >= v.iNa`/`v.jNa`.
+    void tick_finish_slowmo();
+    // JS `ca.uhb`'s damage prediction `b = a.Pd.bCa(b,!1,!1,null,null)` — the
+    // damage the ATTACKER's type-4 interval would deal to `def` with no
+    // block, no crit and no hit capsule (the `LAa(...,null)` fallback
+    // defense). Used to decide `a.Pd.parameters.gd <= b` (the finishing blow).
+    float predict_interval_damage(const FightFighter& atk, const FightFighter& def,
+                                  const sf2::scene::Interval& iv,
+                                  const sf2::scene::MoveDef& mv) const;
     // The per-fighter update (AI / input + move execution + physics).
     void update_fighter(FightFighter& me, FightFighter& foe, float dt);
     // Stamps the condition context's geometry: the two fighter roots, the

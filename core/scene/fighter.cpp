@@ -1535,10 +1535,16 @@ void Fighter::advance(float dt) {
     // path is `Bl.strike` (L587-588) -> `strike_node` (endpoint node `ma`).
     // Timescale steps (SlowModel KT): scale>=1 verbatim (Speed<1 no-ops
     // at apply); fractional remainder carries to the next tick.
-    scale_acc_ += time_scale_;
+    // [FIX finishing-blow slow-mo — JS `de.ia` L248219] The GLOBAL timescale
+    // `v.on()` divides the animator rate (`a=1/v.on()`), and the per-fighter
+    // KT channel multiplies it. The old clamp `[1,4]` made a sub-1 rate
+    // STRUCTURALLY impossible, so `v.YT(v.kNa)` (on()=kNa=7) could never
+    // slow the clip. Now the effective rate is `time_scale_ * anim_rate_`:
+    // at 1/7 the animator advances one clip sub-step every 7 fight frames.
+    scale_acc_ += time_scale_ * anim_rate_;
     int steps = static_cast<int>(scale_acc_);
-    if (steps < 1) steps = 1;
-    if (steps > 4) steps = 4;
+    if (steps < 0) steps = 0;
+    if (steps > 64) steps = 64;
     scale_acc_ -= static_cast<float>(steps);
     for (int i = 0; i < steps; ++i) advance_step();
 }

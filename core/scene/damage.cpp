@@ -334,8 +334,24 @@ void load_fight_params_from_settings(const std::string& xml_text) {
         v.combo_min_hits = cb.attribute("MinHits").as_int(3);
         v.combo_time = cb.attribute("Time").as_int(90);
     }
+    // `v.kNa`/`v.mGa`/`v.jNa`/`v.iNa` (L1156) = `<SlowMode .../>` — the
+    // finishing-blow slow-mo (`u.I`/`u.H` fallbacks 10/100/4/2).
+    if (const pugi::xml_node sm = root.child("SlowMode")) {
+        v.slow_mode_value = sm.attribute("Value").as_int(10);
+        v.slow_mode_max_time = sm.attribute("MaxTime").as_float(100.0f);
+        v.slow_mode_restore_weapon =
+            sm.attribute("RestoreWeapon").as_float(4.0f);
+        v.slow_mode_restore_non_weapon =
+            sm.attribute("RestoreNonWeapon").as_float(2.0f);
+    }
     std::fprintf(stdout, "[fx] Combo MinHits=%d Time=%d (shipped XML)\n",
                  v.combo_min_hits, v.combo_time);
+    std::fprintf(stdout,
+                 "[fx] SlowMode Value=%d MaxTime=%.0f RestoreWeapon=%.0f "
+                 "RestoreNonWeapon=%.0f (shipped XML)\n",
+                 v.slow_mode_value, static_cast<double>(v.slow_mode_max_time),
+                 static_cast<double>(v.slow_mode_restore_weapon),
+                 static_cast<double>(v.slow_mode_restore_non_weapon));
     std::fflush(stdout);
     // Diagnostic (boot, once): the shipped value vs the JS `u.I(...,2)` fallback.
     std::fprintf(stdout, "[fx] CounterPunches=%d (shipped XML; fallback=2)\n",

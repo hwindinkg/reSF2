@@ -223,6 +223,19 @@ struct FightParams {
     // `v.Lpa` (L1157) = `u.I(a.A("Combo").attributes.get("Time"),90)` — the
     // `pCa()` frame budget `iu.wyb` counts `OV` against (the combo window).
     int combo_time = 90;
+    // `v.kNa`/`v.mGa`/`v.jNa`/`v.iNa` (L1156) = internal_settings.xml
+    // `<SlowMode Value="7" MaxTime="3" RestoreWeapon="4"
+    // RestoreNonWeapon="2"/>` — the FINISHING-BLOW hit-stun + slow-mo.
+    // `ca.uhb` arms `ca.pW`; `ca.q_a` calls `v.YT(v.kNa)` so the global
+    // timescale `v.on()` becomes `kNa` (the JS default is 10, the shipped
+    // XML is 7) and `rgb`/`Zw(false)` restores `v.dB` (=1). The `cu` freeze
+    // timer (`cu.Qh`) counts `Sc` up in `L.K.sk.Bm` = 1/60 steps to
+    // `RestoreNonWeapon` s (a main fighter) or `RestoreWeapon` s (a
+    // sub-fighter model, `instanceof ih`).
+    int slow_mode_value = 10;                    // `v.kNa` (`u.I`, default 10)
+    float slow_mode_max_time = 100.0f;           // `v.mGa` (`u.H`, default 100)
+    float slow_mode_restore_weapon = 4.0f;       // `v.jNa` (`u.H`, default 4)
+    float slow_mode_restore_non_weapon = 2.0f;   // `v.iNa` (`u.H`, default 2)
     // AlignTargetAttributes (JS `v.wv`): attribute name -> Align value.
     std::map<std::string, float> align_target_attributes;
     // `p.o.Yh` — the eclipse flag `v.eNa` (L1204) tests. The dojo has no

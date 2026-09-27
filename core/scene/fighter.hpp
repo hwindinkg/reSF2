@@ -305,6 +305,18 @@ public:
     // Speed<1 is a verbatim no-op), revert restores 1.0 (`v.dB` assumed).
     void set_time_scale(float s) { time_scale_ = s; scale_acc_ = 0.0f; }
     float time_scale() const { return time_scale_; }
+    // JS `wd.y5(a)`/`Dfa()` (L251005/L251095): `wd.xpa` — the ACT-ALLOWED
+    // flag. `ca.uhb` calls `a.model.y5(!1)` on the finishing blow (Dfa() then
+    // false, so `uhb` cannot re-arm), and the `cu` timer restores it after
+    // `v.iNa`/`v.jNa` seconds. It is NOT an animation freeze: the clip keeps
+    // advancing (which is how the type-4 interval end — `rgb` — still fires).
+    void set_disabled(bool d) { action_disabled_ = d; }
+    bool disabled() const { return action_disabled_; }
+    // JS `de.ia` (L248219): `let a=1/v.on(); ... P7[b].ia(a)` — the GLOBAL
+    // timescale `v.on()` divides the clip advance rate. 1.0 when no slow-mo;
+    // `set_slowmo` sets it to `1/v.kNa` (the finishing-blow slow-mo).
+    void set_anim_rate(float r) { anim_rate_ = r; }
+    float anim_rate() const { return anim_rate_; }
     // Advances the current clip one frame (60 Hz). Updates active intervals
     // (Start/End), transitions to idle when the clip ends (JS `Te.ia`
     // L547-548: `Xh+2 >= len` -> stop). Samples the pose at move_frame.
@@ -889,6 +901,10 @@ private:
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
+    // JS `wd.xpa` (`y5`): false while the finishing-blow disable holds.
+    bool action_disabled_ = false;
+    // JS `1/v.on()` (the global timescale divisor `de.ia` feeds the animator).
+    float anim_rate_ = 1.0f;
     // --- JS `Al` solver latch (see `ragdoll_start`) -----------------------
     bool nk_ = false;                         // JS `Al.nk` (ragdoll active)
     int ragdoll_frame_count_ = 0;             // JS `Al.frameCount`
