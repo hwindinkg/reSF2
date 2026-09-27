@@ -7429,13 +7429,16 @@ const UrBlinkCfg& ur_blink_cfg() {
     return cfg;
 }
 
-// A zone renders a dot iff it has a map backdrop and at least one visible
-// battle (`Vr.$v()` returns only zones with `!Cga`, i.e. an active battle);
-// the same gate `zone_dot_center` uses, so draw and hit-test cannot drift.
+// A zone renders a slot iff it has a map backdrop and at least one ACTIVE
+// battle. JS `Vr.HXa` (L2123-2124) adds the zone widget when any battle
+// `isActive` (`b=b&&!e.isActive` over `a.Dg`, i.e. `WDa(zone|battle)`, L256)
+// — it does NOT consult the button's hidden state (`Qr.lla` L2094). A zone
+// whose only active battle is Hidden still renders; the same gate
+// `zone_dot_center` uses, so draw and hit-test cannot drift.
 bool ur_zone_renders(const MapScreen::ZoneTab& z) {
     if (z.part < 0) return false;
     for (const MapScreen::Node& n : z.nodes) {
-        if (n.visible) return true;
+        if (n.active) return true;
     }
     return false;
 }
@@ -7549,7 +7552,7 @@ bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {   
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         bool any = false;
         for (const Node& n : zones_[i].nodes) {
-            if (n.visible) {
+            if (n.active) {  // `Vr.HXa` L2123-2124 (`WDa`), not the button gate
                 any = true;
                 break;
             }
@@ -7748,23 +7751,33 @@ void MapScreen::update_impl(float dt) {
     // A node tap only RE-TARGETS the `Rr` panel (selects); it never starts a
     // fight (JS `qe` -> `Ya.Uw`, L2129 — the fight is the FIGHT button below).
     bool node_tap = false;
+    // JS `qe.X0a` (L2144) appends one `Qr` button per battle IN `Dg` order, so
+    // the LAST node is the topmost child and is the one a tap lands on. The
+    // port used to `break` on the FIRST hit, so coincident nodes resolved to
+    // the BOTTOM one — ZONE_1 (BOSS_LYNX / *_INTERMISSION / BOSS_HARDMODE) and
+    // zones 2-6 (`BOSS_X_LOCKED` + the real `BOSS_X` at the same X/Y, e.g.
+    // BOSS_HERMIT_LOCKED L2595 immediately before BOSS_HERMIT L2596) always
+    // fired the locked placeholder ("complete the previous act") instead of
+    // the real boss. Scan on and keep the LAST hit to match the JS z-order.
+    int node_hit = -1;
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
         const float node_half = map_node_size(kViewW) * 0.5f;
         if (p.x >= n.x - node_half && p.x <= n.x + node_half &&
             p.y >= n.y - node_half && p.y <= n.y + node_half) {
-            hover_ = static_cast<int>(i);
-            // One node per tap (JS buttons are exclusive — the topmost node
-            // fires). ZONE_1 has coincident nodes (BOSS_LYNX / *_INTERMISSION
-            // / BOSS_HARDMODE at the same X/Y).
-            if (p.pressed) {
-                node_tap = true;
-                std::fprintf(stdout, "[map] node focus -> %s [%s] (%s)\n", n.name.c_str(),
-                             n.zone.c_str(), n.active ? "active" : "locked");
-                std::fflush(stdout);
-                break;
-            }
+            node_hit = static_cast<int>(i);
+        }
+    }
+    if (node_hit >= 0) {
+        hover_ = node_hit;
+        const Node& n = zones_[zone_sel_].nodes[static_cast<std::size_t>(node_hit)];
+        // One node per tap (JS buttons are exclusive — the topmost node fires).
+        if (p.pressed) {
+            node_tap = true;
+            std::fprintf(stdout, "[map] node focus -> %s [%s] (%s)\n", n.name.c_str(),
+                         n.zone.c_str(), n.active ? "active" : "locked");
+            std::fflush(stdout);
         }
     }
     // The `Rr` FIGHT button (`tj`, L2099/L2102): the ONLY fight trigger.
