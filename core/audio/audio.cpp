@@ -23,6 +23,7 @@
 #include "audio/sfx_table.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -47,11 +48,13 @@ struct EventDef {
     int voices = 1;                  // overlapping copies per event
 };
 
-// The bus levels `$f.cMa` (music) / `$f.uF` (sfx) fade between — JS `ta.WT`
-// and `ta.VT` (L1264) write 0 (muted) or the normal level; the port's music
-// bus level is its fixed 0.7 and the engine (sfx) bus the miniaudio default.
-constexpr float kMusicVolume = 0.7f;
-constexpr float kSfxVolume = 1.0f;
+// The bus levels JS `ta.WT` (SOUND/`cMa`) and `ta.VT` (MUSIC/`uF`) fade
+// between — L1264: `$f.cMa(a?0:1)` / `$f.uF(a?0:1)`, i.e. 0 or the UNITY bus
+// gain. The port used a fixed 0.7 music level; set it to the JS unity so
+// unmute restores the same loudness the JS bus does.
+constexpr float kMusicVolume = 1.0f;
+// The beep fallback's own gain (a native stand-in; see init).
+constexpr float kBeepVolume = 0.4f;
 
 // The table-driven event list (Phase 7.1): built once from sfx_table.hpp so
 // the JS mapping stays in exactly one place. Stable after construction.
@@ -106,6 +109,38 @@ std::string resolve_sfx_dir(const std::string& res_root) {
         if (std::filesystem::is_directory(c)) return c;
     }
     return "";
+}
+
+// The music file for a JS `ta.u0` track name (L653150). The port ships the
+// derived `assets/music/<track>.mp3` set; `fight38_sakura_forest` (JS id 1326)
+// was MISSING from that set, so fall back to the canonical extracted bank
+// `reference/www/res/audio/<lower(track)>_music.<hash>.ogg` (JS asset naming:
+// `fight37_titan_epic_fight_music` for the JS `fight37_Titan_Epic_Fight`).
+// miniaudio decodes mp3 + ogg natively; m4a (AAC) is not wired.
+std::string resolve_music_path(const std::string& track) {
+    std::error_code ec;
+    const std::string mp3 = "assets/music/" + track + ".mp3";
+    if (std::filesystem::exists(mp3, ec)) return mp3;
+    const std::string ogg = "assets/music/" + track + ".ogg";
+    if (std::filesystem::exists(ogg, ec)) return ogg;
+    std::string lower;
+    lower.reserve(track.size());
+    for (const char c : track) {
+        lower.push_back(static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c))));
+    }
+    const std::filesystem::path dir = "reference/www/res/audio";
+    const std::string prefix = lower + "_music.";
+    if (std::filesystem::is_directory(dir, ec)) {
+        for (const std::filesystem::directory_entry& e :
+             std::filesystem::directory_iterator(dir, ec)) {
+            const std::string name = e.path().filename().string();
+            if (name.rfind(prefix, 0) == 0 && e.path().extension() == ".ogg") {
+                return e.path().string();
+            }
+        }
+    }
+    return mp3;  // no candidate: let the loader report the failure
 }
 
 }  // namespace
@@ -181,7 +216,8 @@ bool AudioEngine::init(const std::string& res_root) {
                     MA_SOUND_FLAG_NO_SPATIALIZATION,
                 NULL, NULL, &sound);
             if (r == MA_SUCCESS) {
-                ma_sound_set_volume(&sound, ev.volume);
+                ma_sound_set_volume(&sound,
+                                    ev.volume * (sfx_muted_ ? 0.0f : 1.0f));
                 ++loaded;
             } else {
                 std::fprintf(stderr, "[audio] load failed: %s (%d)\n", path.c_str(),
@@ -213,7 +249,8 @@ bool AudioEngine::init(const std::string& res_root) {
                     MA_SOUND_FLAG_NO_PITCH | MA_SOUND_FLAG_NO_SPATIALIZATION, NULL,
                     &impl_->beep_sound) == MA_SUCCESS) {
                 impl_->beep_sound_ok = true;
-                ma_sound_set_volume(&impl_->beep_sound, 0.4f);
+                ma_sound_set_volume(&impl_->beep_sound,
+                                    kBeepVolume * (sfx_muted_ ? 0.0f : 1.0f));
             }
         }
         std::fprintf(stdout, "[audio] NO wav samples in '%s' — beep fallback %s\n",
@@ -392,6 +429,15 @@ void AudioEngine::play(const std::string& event) {
     }
     if (sound == nullptr) return;
 
+    // Apply the SFX bus gain per sound (JS `cMa`/`ta.$D`, L1264) so a SOUND
+    // mute never touches the engine master (which would also silence music).
+    const float sfx_gain = sfx_muted_ ? 0.0f : 1.0f;
+    if (sound == &impl_->beep_sound) {
+        ma_sound_set_volume(sound, kBeepVolume * sfx_gain);
+    } else {
+        ma_sound_set_volume(sound, ev.volume * sfx_gain);
+    }
+
     // Restart the clip (miniaudio: stop + rewind + start; thread-safe —
     // the engine thread picks the commands up asynchronously).
     ma_sound_stop(sound);
@@ -457,7 +503,7 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
         ma_sound_uninit(&impl_->music);
         impl_->music_ok = false;
     }
-    const std::string path = std::string("assets/music/") + track + ".mp3";
+    const std::string path = resolve_music_path(track);
     const ma_result r = ma_sound_init_from_file(
         &impl_->engine, path.c_str(),
         MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_ASYNC | MA_SOUND_FLAG_NO_PITCH |
@@ -485,9 +531,10 @@ void AudioEngine::play_music_once(const std::string& track, bool loop) {
     play_music(track, loop);
 }
 
-// JS `ta.WT(a)` (L1264): `L.K.$f.cMa(a?0:1); ta.$D=a`. `cMa` is the music
-// BUS volume, so the streamed track keeps playing (silently) and unmuting
-// resumes it — `lb.Mz()` (L1276) reads the same `ta.$D`.
+// JS `ta.VT(a)` (L1264): `L.K.$f.uF(a?0:1); ta.ZD=a` — the MUSIC bus. `uF` is
+// the bus a `tR` voice routes to (`cy.play` L1240813, `tR` = music per L29718).
+// `lb.Lz()` (L1276) reads `ta.ZD`. It is a BUS volume, not a stop: unmuting
+// resumes the still-playing track.
 void AudioEngine::set_music_muted(bool muted) {
     music_muted_ = muted;
     if (impl_ != nullptr && impl_->music_ok) {
@@ -497,15 +544,32 @@ void AudioEngine::set_music_muted(bool muted) {
     std::fflush(stdout);
 }
 
-// JS `ta.VT(a)` (L1264): `L.K.$f.uF(a?0:1); ta.ZD=a` — the master SFX bus.
-// `lb.Lz()` (L1276) reads `ta.ZD`; `Rd.end` (L2096) gates on it too.
+// JS `ta.WT(a)` (L1264): `L.K.$f.cMa(a?0:1); ta.$D=a` — the SOUND/SFX bus.
+// `lb.Mz()` (L1276) reads `ta.$D`; `Rd.end` (L2096) gates on it too. The bus
+// gain is applied PER SOUND (never `ma_engine_set_volume`, which is the shared
+// master and would mute the music bus as well — JS keeps `cMa`/`uF` separate,
+// L1240811).
 void AudioEngine::set_sfx_muted(bool muted) {
     sfx_muted_ = muted;
     if (impl_ != nullptr && impl_->engine_ok) {
-        ma_engine_set_volume(&impl_->engine, muted ? 0.0f : kSfxVolume);
+        const float gain = muted ? 0.0f : 1.0f;
+        for (std::size_t e = 0; e < impl_->sounds.size(); ++e) {
+            const float v = events()[e].volume * gain;
+            for (ma_sound& s : impl_->sounds[e]) ma_sound_set_volume(&s, v);
+        }
+        if (impl_->beep_sound_ok) {
+            ma_sound_set_volume(&impl_->beep_sound, kBeepVolume * gain);
+        }
     }
-    std::fprintf(stdout, "[audio] sfx mute %s\n", muted ? "ON" : "OFF");
+    std::fprintf(stdout, "[audio] sfx mute %s (bus gain %.0f)\n",
+                 muted ? "ON" : "OFF", muted ? 0.0f : 1.0f);
     std::fflush(stdout);
+}
+
+// The engine MASTER volume; JS `s0` (L1240812). -1 when no device runs.
+float AudioEngine::master_gain() const {
+    if (impl_ == nullptr || !impl_->engine_ok) return -1.0f;
+    return ma_engine_get_volume(&impl_->engine);
 }
 
 void AudioEngine::stop_music() {

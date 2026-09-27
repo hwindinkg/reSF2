@@ -4777,8 +4777,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             settings_bus_row_center(false, cx, cy, w, h);
             app.inject_click(cx, cy);  // Sound row
             tick(10);
-            check(au.sfx_muted() != s1 && au.music_muted() == m1,
-                  "settings Sound row -> SFX bus only");
+            check(au.sfx_muted() != s1 && au.music_muted() == m1 &&
+                      (au.master_gain() < 0.0f || au.master_gain() == 1.0f),
+                  "settings Sound row -> SFX bus only (master untouched)");
             sf2::app::WarriorSave pw = app.save().load();
             check(pw.music_muted == au.music_muted() && pw.sound_muted == au.sfx_muted(),
                   "settings bus mutes persist to the save <Sounds>");
@@ -4841,8 +4842,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                       "pause Music row -> MUSIC bus only");
                 app.inject_click(718.75, 396.0);  // Sound row (`Sla`)
                 tick(8);
-                check(au.sfx_muted() != s0 && au.music_muted() != m0,
-                      "pause Sound row -> SFX bus only");
+                check(au.sfx_muted() != s0 && au.music_muted() != m0 &&
+                          (au.master_gain() < 0.0f || au.master_gain() == 1.0f),
+                      "pause Sound row -> SFX bus only (master untouched)");
                 sf2::app::WarriorSave fw = app.save().load();
                 check(fw.music_muted == au.music_muted() &&
                           fw.sound_muted == au.sfx_muted(),

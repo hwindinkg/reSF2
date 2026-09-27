@@ -83,18 +83,29 @@ public:
     // L2096-2098): clear the guard so the next `play_music_once` replays.
     void reset_music_guard() { music_guard_ = false; }
     bool music_guard() const { return music_guard_; }
-    // JS `ta.WT(a)` (L1264): `L.K.$f.cMa(a?0:1); ta.$D=a` — the MUSIC BUS
-    // volume mute, NOT a stop: the track keeps its position and unmute
-    // resumes it. Read back by `lb.Mz()` (L1276) -> `ta.$D`. The port modelled
-    // this as a stop/restart, which lost the track (`music_track()` reads ""
-    // after a stop), so the ON path was a silent no-op.
+    // JS `ta.VT(a)` (L1264): `L.K.$f.uF(a?0:1); ta.ZD=a`. `uF` is the bus the
+    // voice `cy.play` (L1240813) routes to when `audio.tR` is true, and `tR` is
+    // set exactly for the music assets (`f.tR=(new Ua("music","")).match(...)`
+    // L29718) — so `uF`/`ta.ZD` is the MUSIC bus, NOT the SFX bus. Read back by
+    // `lb.Lz()` (L1276) -> `ta.ZD`. This is a BUS volume mute, NOT a stop: the
+    // track keeps its position and unmute resumes it.
     void set_music_muted(bool muted);
     bool music_muted() const { return music_muted_; }
-    // JS `ta.VT(a)` (L1264): `L.K.$f.uF(a?0:1); ta.ZD=a` — the master SFX
-    // bus volume mute. Read back by `lb.Lz()` (L1276) -> `ta.ZD`. `lb.WT`/
-    // `lb.VT` (L1276) persist it via `p.TJ.save()`.
+    // JS `ta.WT(a)` (L1264): `L.K.$f.cMa(a?0:1); ta.$D=a`. `cMa` is the bus a
+    // non-`tR` voice routes to (`oBa`, L1240811) — the SOUND/SFX bus. Read back
+    // by `lb.Mz()` (L1276) -> `ta.$D`; persisted as `<Sounds>/<Sound>@Mute`
+    // (`ta.WT`'s saver). `lb.WT`/`lb.VT` (L1276) persist via `p.TJ.save()`.
     void set_sfx_muted(bool muted);
     bool sfx_muted() const { return sfx_muted_; }
+    // The bus gains JS `ta.VT`/`ta.WT` write (1 or 0). Exposed so the headless
+    // gates prove the two source buses are INDEPENDENT: muting SFX must not
+    // touch the music bus (JS routes them to separate `uF`/`cMa` gains, L1240811).
+    float sfx_bus_gain() const { return sfx_muted_ ? 0.0f : 1.0f; }
+    float music_bus_gain() const { return music_muted_ ? 0.0f : 1.0f; }
+    // The miniaudio engine MASTER volume (1.0 = untouched), or -1 while no
+    // device runs. JS keeps a master bus (`s0`, type 5, L1240812) that neither
+    // `ta.VT` nor `ta.WT` touches; a source-bus mute must leave the master at 1.
+    float master_gain() const;
     void stop_music();
     // [latency probe] Per-frame audio-feed measurement (no-op unless
     // `SF2_AUDIO_LATENCY=1`). The port also self-polls it on every play/music
