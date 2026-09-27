@@ -928,6 +928,18 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
         std::fflush(stdout);
         return;
     }
+    // `b.G.Gp==null&&(... b.G.Gp=f)` (char 546690): the base offer (`Gp`) is
+    // created ONLY when it is null — an EXISTING offer is never overwritten
+    // (JS short-circuits the whole creation+assignment). `offers_` is the
+    // port's `Gp`, so a present entry means keep it untouched.
+    if (offers_.find(item) != offers_.end()) {
+        std::fprintf(stdout,
+                     "[quest] Discount %s percent=%d period=%lld sale=%d -> keep "
+                     "existing offer (Gp != null, no clobber)\n",
+                     item.c_str(), percent, period, sale ? 1 : 0);
+        std::fflush(stdout);
+        return;
+    }
     // `KA` is set ONLY when `e.G>0`; a `Percent="0"` offer keeps the base.
     o.price = percent > 0
                   ? static_cast<std::int64_t>(std::trunc(

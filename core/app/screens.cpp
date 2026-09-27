@@ -10093,6 +10093,14 @@ void FightScreen::update_impl(float dt) {
         }
         results_pushed_ = true;
         PendingBattle& pb = app().pending_battle();
+        // JS `v.kD` (L622187) commits the reward PER FIGHT: this is the one
+        // site that creates a fresh result (`has_result=true`), so it RE-ARMS
+        // the idempotency guard for THIS fight. Without it `reward_applied`
+        // stayed true from the previous fight and every fight after the first
+        // returned early in `apply_fight_reward` (no money/exp, no counter
+        // flush/achievements). JS grants once per `v.kD` call; one result ==
+        // one grant.
+        pb.reward_applied = false;
         pb.has_result = true;
         pb.player_won = player_won;
         // The terminal mode win grants the final row's reward (JS `D0(Rk)`).
