@@ -13475,6 +13475,106 @@ float profile_list_top(const ShopRect& v, float cell_w, float cell_h) {
     return v.P + kFgRailFrac * v.width() + uz;
 }
 
+// One `Gg.aa` step (JS L1886-1890) for a profile `Xd` list. `s` carries the
+// `ei`/`gj`/`ub`/`state` machine; the geometry is the `Gg` list rect (`left`/
+// `right`/`top`/`list_h`) and the clamp targets (`uz`/`lo`/`hi`, L1885/1890).
+// `pitch` = `cell.qa() + spacing`, `cell_h` = `cell.qa()`.
+void gg_scroll_step(EquipmentScreen::ListScroll& s, const App::PointerState& p,
+                    float left, float right, float top, float list_h, float uz,
+                    float lo, float hi, float pitch, float cell_h, int nrows) {
+    // `Gg.VK`/`ba` (L1891/L1885): a rebuilt list recentres (`gj = uz`).
+    if (s.count != nrows) {
+        s.count = nrows;
+        s.y = uz;
+        s.vel = 0.0f;
+        s.target = uz;
+        s.state = 0;
+    }
+    s.y = std::clamp(s.y, lo, hi);
+    const bool in_list =
+        p.x >= left && p.x <= right && p.y >= top && p.y <= top + list_h;
+    const float local = static_cast<float>(p.y) - top;
+    if (s.state == 0) {
+        s.y = std::clamp(s.y + s.vel, lo, hi);          // L1887 `ub*=.9`
+        s.vel *= 0.9f;
+        if (std::fabs(s.vel) < 0.5f) s.vel = 0.0f;
+        if (s.vel == 0.0f && nrows > 0) {
+            // `Lvb` (L1892): once the fling stops, snap the nearest cell to the
+            // viewer centre (state 3/2 spring).
+            int best = 0;
+            float best_d = 1.0e9f;
+            for (int i = 0; i < nrows; ++i) {
+                const float qk = list_h * 0.5f -
+                                 (s.y + static_cast<float>(i) * pitch + cell_h * 0.5f);
+                if (std::fabs(qk) < best_d) {
+                    best_d = std::fabs(qk);
+                    best = i;
+                }
+            }
+            const float tgt = std::clamp(uz - static_cast<float>(best) * pitch, lo, hi);
+            if (std::fabs(tgt - s.y) > 1.0f) {
+                s.target = tgt;
+                s.state = 2;
+            }
+        }
+        if (s.state == 0 && in_list && p.down) {        // L1887 `b&&d`
+            s.state = 1;
+            s.drag_start = local;                       // `Fq`
+            s.drag_base = s.y;                          // `gj`
+            s.drag_delta = 0.0f;
+            s.drag_prev = local;
+            s.drag_vel = 0.0f;
+            s.vel = 0.0f;
+        }
+    }
+    if (s.state == 1) {
+        if (p.down) {
+            s.drag_delta = local - s.drag_start;        // L1888 `p_`
+            s.drag_vel = local - s.drag_prev;           // `jM[0].y`
+            s.drag_prev = local;
+            s.y = std::clamp(s.drag_base + s.drag_delta, lo, hi);
+        } else {
+            s.state = 0;
+            // `abs(p_)<10` = tap (the row select already ran on press); else
+            // fling with the last pointer velocity (`ub`).
+            s.vel = std::fabs(s.drag_delta) >= 10.0f ? s.drag_vel : 0.0f;
+            s.drag_delta = 0.0f;
+            s.drag_vel = 0.0f;
+        }
+    }
+    if (s.state == 2) {                                 // L1889 `*.3`
+        s.y += (s.target - s.y) * 0.3f;
+        if (std::fabs(s.target - s.y) < 1.0f) {
+            s.y = s.target;
+            s.state = 0;
+        }
+    }
+    s.y = std::clamp(s.y, lo, hi);
+}
+
+// `ds.NC` (L2230) packs up to two `tk` cells per tier, one `tk` row per tier
+// (or per two cells); the `Gg` list height uses the packed ROW count.
+int perk_packed_rows(const std::vector<EquipmentScreen::PerkRow>& rows) {
+    int row = 0;
+    int col = 0;
+    int last_tier = -1;
+    for (const EquipmentScreen::PerkRow& r : rows) {
+        if (r.tier != last_tier) {
+            if (last_tier != -1) {
+                ++row;
+                col = 0;
+            }
+            last_tier = r.tier;
+        }
+        if (col >= 2) {
+            ++row;
+            col = 0;
+        }
+        ++col;
+    }
+    return rows.empty() ? 0 : row + 1;
+}
+
 // The four `cs` tab badge values (JS `cs.getCounterValue` L2189):
 //   0 = `p.o.co.uCa()` (L305) = `id.ht().n5a() - co.KS.Oa.length`
 //       = `<PerkTree>` tiers whose `<Level Value>` <= player level, minus the
@@ -13522,20 +13622,21 @@ ShopRect profile_improve_rect() {
 // (L2214) sets `Pa.spacing = 10`; the cell box is the `Gg` list rect (one rail
 // inset left/top, `Gv - 8` wide) and the row pitch is `130*A/400 + 10`
 // (`profile_cell_pitch`). Shared by render + hit-test.
-ShopRect profile_achiev_row_rect(const ShopRect& v, int i) {
+ShopRect profile_achiev_row_rect(const ShopRect& v, int i, float scroll_y) {
     const float row_h = profile_cell_h(v, 400.0f, 130.0f);
     ShopRect r;
     r.J = profile_list_left(v);
     r.N = r.J + profile_list_w(v);
-    r.P = profile_list_top(v, 400.0f, 130.0f) + static_cast<float>(i) * (row_h + 10.0f);
+    r.P = v.P + kFgRailFrac * v.width() + scroll_y +
+          static_cast<float>(i) * (row_h + 10.0f);
     r.W = r.P + row_h;
     return r;
 }
 
 // `as` (L2210) reward button: `nv.xc(a*.4)` at `C(a/2)`, `D(b - nv.qa())`
 // (bottom-centre of the cell). Native anchor: the row's right edge.
-ShopRect profile_achiev_reward_rect(const ShopRect& v, int i) {
-    const ShopRect row = profile_achiev_row_rect(v, i);
+ShopRect profile_achiev_reward_rect(const ShopRect& v, int i, float scroll_y) {
+    const ShopRect row = profile_achiev_row_rect(v, i, scroll_y);
     ShopRect b;
     b.N = row.N - 8.0f;
     b.J = b.N - 92.0f;
@@ -14315,6 +14416,71 @@ bool EquipmentScreen::arm_block_preview(App& app) {
     return true;
 }
 
+// The `Gg` list geometry for one `Xd` sub-view: the `Fg` scroll rect, the
+// `Gg.ba` (L1885) centre offset `uz` and the `Gg.aa` (L1887-1890) clamps.
+EquipmentScreen::ListGeom profile_list_geom(const ShopRect& v, float cell_w,
+                                            float cell_h, float spacing, int nrows) {
+    EquipmentScreen::ListGeom g;
+    g.left = profile_list_left(v);
+    g.right = g.left + profile_list_w(v);
+    g.top = v.P + kFgRailFrac * v.width();
+    g.list_h = profile_scroll_h(v);
+    g.cell_h = profile_cell_h(v, cell_w, cell_h);
+    g.pitch = g.cell_h + spacing;
+    g.nrows = nrows;
+    g.uz = std::max(0.0f, (g.list_h - g.cell_h) * 0.5f);   // `Gg.ba` L1885
+    g.hi = g.uz;                                           // state 4 target
+    g.lo = nrows > 0 ? std::min(g.hi, g.uz - static_cast<float>(nrows - 1) * g.pitch)
+                     : g.uz;                               // state 5 target
+    return g;
+}
+
+// `Gg.aa` (L1886-1890) driven by the live pointer (`app().pointer()`).
+void EquipmentScreen::advance_list_scroll(int tab, const ListGeom& g) {
+    if (tab < 0 || tab >= 4) return;
+    gg_scroll_step(list_scroll_[tab], app().pointer(), g.left, g.right, g.top, g.list_h,
+                   g.uz, g.lo, g.hi, g.pitch, g.cell_h, g.nrows);
+}
+
+// [probe] Feed a synthetic down -> move -> release through the SAME
+// `gg_scroll_step` the live path uses, so the headless probe exercises the
+// exact `Gg.aa` machine without OS input.
+void EquipmentScreen::probe_list_scroll(int tab, double y0, double y1) {
+    if (tab < 0 || tab >= 4) return;
+    const ProfileLayout pl = profile_layout();
+    const ShopRect& v = pl.viewer;
+    ListGeom g;
+    if (tab == kProfileTabMoves) {
+        g = profile_list_geom(v, 400.0f, 150.0f, 10.0f,
+                              static_cast<int>(move_rows_.size()));
+    } else if (tab == kProfileTabAchiev) {
+        g = profile_list_geom(v, 400.0f, 130.0f, 10.0f,
+                              static_cast<int>(achiev_rows_.size()));
+    } else if (tab == kProfileTabSeals) {
+        g = profile_list_geom(v, 400.0f, 300.0f, 0.0f,
+                              static_cast<int>(seal_rows_.size()));
+    } else {
+        g = profile_list_geom(v, 400.0f, 150.0f, 0.0f, perk_packed_rows(perk_rows_));
+    }
+    list_scroll_[tab].count = -1;   // `Gg.VK`: rebuild -> recentre (`gj = uz`)
+    App::PointerState pd;
+    pd.x = g.left + 1.0;
+    pd.y = y0;
+    pd.down = true;
+    pd.pressed = true;
+    gg_scroll_step(list_scroll_[tab], pd, g.left, g.right, g.top, g.list_h, g.uz, g.lo,
+                   g.hi, g.pitch, g.cell_h, g.nrows);
+    App::PointerState pm = pd;
+    pm.pressed = false;
+    pm.y = y1;
+    gg_scroll_step(list_scroll_[tab], pm, g.left, g.right, g.top, g.list_h, g.uz, g.lo,
+                   g.hi, g.pitch, g.cell_h, g.nrows);
+    App::PointerState pr = pm;
+    pr.down = false;
+    gg_scroll_step(list_scroll_[tab], pr, g.left, g.right, g.top, g.list_h, g.uz, g.lo,
+                   g.hi, g.pitch, g.cell_h, g.nrows);
+}
+
 void EquipmentScreen::update_impl(float dt) {
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
@@ -14454,6 +14620,10 @@ void EquipmentScreen::update_impl(float dt) {
                      kProfileTabs[tab_hover_].label);
         std::fflush(stdout);
         tab_ = tab_hover_;
+        // `vb.hla` (L2190-2193) calls the new sub-view's `rka()`/`v2()`, which
+        // rebuilds the `Gg` list and recentres it (`Gg.VK`/`ba` L1891/L1885) —
+        // so the port's per-tab scroll resets to the top on entry.
+        if (tab_ >= 0 && tab_ < 4) list_scroll_[tab_].count = -1;
         // JS `vb.hla` (L2191): `this.jq != null && (this.jq.zha(),
         // this.jq.X(!0)); this.zh.GU();` - the newly active sub-view's `zha()`
         // runs on every tab switch (tabs 0/2 are the `Xd.zha(){}` no-op,
@@ -14491,6 +14661,13 @@ void EquipmentScreen::update_impl(float dt) {
     // render_impl so update hit-tests the exact wrapping layout.
     perk_hover_ = -1;
     if (tab_ == kProfileTabLeveling) {
+        // `Gg.aa` scroll for the `ds` list (drag/momentum/snap). The hit rects
+        // below come from the renderer's current offset, so update + render
+        // agree.
+        const ShopRect pv = profile_layout().viewer;
+        advance_list_scroll(kProfileTabLeveling,
+                            profile_list_geom(pv, 400.0f, 150.0f, 0.0f,
+                                              perk_packed_rows(perk_rows_)));
         for (const PerkCellHit& h : perk_cell_hits_) {
             if (h.index < 0) continue;
             if (p.x >= h.cx - h.half && p.x <= h.cx + h.half &&
@@ -14518,6 +14695,14 @@ void EquipmentScreen::update_impl(float dt) {
     // render_impl so update hit-tests the exact list layout.
     move_hover_ = -1;
     if (tab_ == kProfileTabMoves) {
+        // `Gg.aa` scroll for the `es` list (`es.init` L2239 `spacing=10`).
+        {
+            const ShopRect mv = profile_layout().viewer;
+            advance_list_scroll(
+                kProfileTabMoves,
+                profile_list_geom(mv, 400.0f, 150.0f, 10.0f,
+                                  static_cast<int>(move_rows_.size())));
+        }
         for (const MoveCellHit& h : move_cell_hits_) {
             if (h.index < 0) continue;
             if (p.x >= h.cx - h.half_w && p.x <= h.cx + h.half_w &&
@@ -14554,12 +14739,22 @@ void EquipmentScreen::update_impl(float dt) {
     // `vb.exb` L2199 -> `yt.sca` L296 + money/bonus payout).
     achiev_hover_ = -1;
     if (tab_ == kProfileTabAchiev) {
+        // `Gg.aa` scroll for the `fs` list (`fs.init` L2214 `spacing=10`).
+        {
+            const ShopRect av = profile_layout().viewer;
+            advance_list_scroll(
+                kProfileTabAchiev,
+                profile_list_geom(av, 400.0f, 130.0f, 10.0f,
+                                  static_cast<int>(achiev_rows_.size())));
+        }
         const ProfileLayout pl = profile_layout();
         for (int i = 0; i < static_cast<int>(achiev_rows_.size()); ++i) {
-            const ShopRect row = profile_achiev_row_rect(pl.viewer, i);
+            const ShopRect row = profile_achiev_row_rect(
+                pl.viewer, i, list_scroll_[kProfileTabAchiev].y);
             if (row.W > pl.viewer.W) break;
             if (!achiev_claimable(i)) continue;
-            const ShopRect rb = profile_achiev_reward_rect(pl.viewer, i);
+            const ShopRect rb = profile_achiev_reward_rect(
+                pl.viewer, i, list_scroll_[kProfileTabAchiev].y);
             if (p.x >= rb.J && p.x <= rb.N && p.y >= rb.P && p.y <= rb.W) {
                 achiev_hover_ = i;
                 if (p.pressed) {
@@ -14569,6 +14764,16 @@ void EquipmentScreen::update_impl(float dt) {
                 return;
             }
         }
+    }
+    // --- Tab 3 SEALS: the `gs` list scroll (`Gg.aa`; `gs` is an `Xd` slider).
+    // No per-cell input exists (`js` L2232 is a pure image cell), so only the
+    // scroller runs here.
+    if (tab_ == kProfileTabSeals) {
+        const ShopRect sv = profile_layout().viewer;
+        advance_list_scroll(
+            kProfileTabSeals,
+            profile_list_geom(sv, 400.0f, 300.0f, 0.0f,
+                              static_cast<int>(seal_rows_.size())));
     }
     // Shared `za` nav column (JS `ma.D1`): Dojo/Map/Shop/Settings hops. The
     // oracle `profile_tab*` captures show the nav COLLAPSED (the `МЕНО`
@@ -14758,7 +14963,11 @@ void EquipmentScreen::render_impl(App& app) {
         // this.ei.D(this.gj = this.uz)`. `size.y` is the scroll's inner height
         // (`Fg.ba` L1870 case 0: `Xy = b - 2*vk`, `vk = .08*w`), so the cell
         // list is centred on the viewer as a whole.
-        float row_top = profile_list_top(v, 400.0f, 150.0f);
+        const float list_base = v.P + kFgRailFrac * v.width();
+        const float sy = list_scroll_[kProfileTabLeveling].count >= 0
+                             ? list_scroll_[kProfileTabLeveling].y
+                             : profile_list_top(v, 400.0f, 150.0f) - list_base;
+        float row_top = list_base + sy;
         int last_tier = -1;
         int tier_idx = -1;   // `tk.$i(a==0, a+1==len)` L2228 first/last gate
         int col = 0;
@@ -14783,6 +14992,10 @@ void EquipmentScreen::render_impl(App& app) {
                 col = 0;
             }
             if (row_top + row_h > v.W - 34.0f) break;
+            if (row_top + row_h <= list_base) {   // scrolled above the viewer
+                ++col;
+                continue;
+            }
             const float cy = row_top + row_h * 0.5f;
             const bool pair_left = (col == 0) && (i + 1 < perk_rows_.size()) &&
                                    (perk_rows_[i + 1].tier == r.tier);
@@ -14913,7 +15126,14 @@ void EquipmentScreen::render_impl(App& app) {
         // (`Fg.ba` case 0, L1871).
         const float cell_l = profile_list_left(v);
         const float cell_w = profile_list_w(v);
-        const float row_top = profile_list_top(v, 400.0f, 150.0f);
+        // `Gg` list origin = `scroll.content` (`Fg.ba` case 0 `content.D(vk)`,
+        // L1871) + the scroller offset `ei.node.ra` (`Gg.ba` L1885 sets it to
+        // `uz`); the port keeps the centred offset when no drag has run yet.
+        const float list_base = v.P + kFgRailFrac * v.width();
+        const float sy = list_scroll_[kProfileTabMoves].count >= 0
+                             ? list_scroll_[kProfileTabMoves].y
+                             : profile_list_top(v, 400.0f, 150.0f) - list_base;
+        const float row_top = list_base + sy;
         // NO weapon-name header: the JS `es` (L2238-2240) is a bare `Xd`
         // slider — `es.init` (L2239) sets only `spacing`/`v2`, `es.NC` (L2240)
         // returns a `ks`/`ls` cell whose `ymb` (L2238) label is the move's own
@@ -14926,6 +15146,7 @@ void EquipmentScreen::render_impl(App& app) {
         for (std::size_t i = 0; i < move_rows_.size(); ++i) {
             const MoveRow& r = move_rows_[i];
             const float ry = row_top + static_cast<float>(i) * row_h;
+            if (ry + cell_h <= list_base) continue;   // scrolled above the viewer
             if (ry + cell_h > v.W) break;
             // `es`/`ks` cell hit rect (captured for the `vb.hqb` L2198
             // selection that refreshes the `$r` right panel).
@@ -14998,10 +15219,15 @@ void EquipmentScreen::render_impl(App& app) {
             const float cell_w = profile_list_w(v);
             const float img_h = chh * 1.25f;
             const float cxc = cell_l + cell_w * 0.5f;
-            const float top = profile_list_top(v, 400.0f, 300.0f);
+            const float list_base = v.P + kFgRailFrac * v.width();
+            const float sy = list_scroll_[kProfileTabSeals].count >= 0
+                                 ? list_scroll_[kProfileTabSeals].y
+                                 : profile_list_top(v, 400.0f, 300.0f) - list_base;
+            const float top = list_base + sy;
             for (std::size_t i = 0; i < seal_rows_.size(); ++i) {
                 const SealRow& s = seal_rows_[i];
                 const float cy = top + chh * 0.5f + static_cast<float>(i) * chh;
+                if (cy + chh * 0.5f <= list_base) continue;  // above the viewer
                 if (cy - chh * 0.5f > v.W) break;
                 if (!draw_user_image(app, s.image, cxc, cy, img_h, img_h, 1.0f)) {
                     // Genuine art miss -> OPEN: JS `js` (L2232) draws only the
@@ -15035,10 +15261,16 @@ void EquipmentScreen::render_impl(App& app) {
             const float row_h = cell_h + 10.0f;                      // `fs.init` spacing
             const float x0 = profile_list_left(v);
             const float x1 = x0 + profile_list_w(v);
-            // `Gg.ba` (L1885) centres the cell list: `uz = (size.y - qa)/2`.
-            float yy = profile_list_top(v, 400.0f, 130.0f);
+            // `Gg.ba` (L1885) centres the cell list: `uz = (size.y - qa)/2`;
+            // the scroller offset (`ei.node.ra`) shifts it once dragged.
+            const float list_base = v.P + kFgRailFrac * v.width();
+            const float sy = list_scroll_[kProfileTabAchiev].count >= 0
+                                 ? list_scroll_[kProfileTabAchiev].y
+                                 : profile_list_top(v, 400.0f, 130.0f) - list_base;
+            float yy = list_base + sy;
             for (std::size_t ri = 0; ri < achiev_rows_.size(); ++ri) {
                 const AchievRow& r = achiev_rows_[ri];
+                if (yy + cell_h <= list_base) { yy += row_h; continue; }
                 if (yy + cell_h > v.W) break;
                 const float cy = yy + cell_h * 0.5f;
                 sf2::render::Renderer& rr = app.renderer();
@@ -15104,7 +15336,8 @@ void EquipmentScreen::render_impl(App& app) {
                 // `as.nv` reward button (L2210, `Y.na("achievement_BtnReward")`)
                 // visible while `sq.dg() && Wpa >= counter` (L2211).
                 if (achiev_claimable(static_cast<int>(ri))) {
-                    const ShopRect rb = profile_achiev_reward_rect(v, static_cast<int>(ri));
+                    const ShopRect rb = profile_achiev_reward_rect(
+                        v, static_cast<int>(ri), sy);
                     const float bx = (rb.J + rb.N) * 0.5f;
                     const float by = (rb.P + rb.W) * 0.5f;
                     const bool hov = achiev_hover_ == static_cast<int>(ri);
@@ -15833,6 +16066,7 @@ bool EquipmentScreen::select_tab(int slot, const std::string& focus) {
     tab_ = slot;      // `this.vV=a`
     tab_hover_ = -1;
     hover_ = -1;
+    if (tab_ >= 0 && tab_ < 4) list_scroll_[tab_].count = -1;  // `hla` recentres
     std::fprintf(stdout, "[profile] rF slot=%d focus=%s -> tab %d\n", slot,
                  focus.c_str(), tab_);
     std::fflush(stdout);
@@ -16719,6 +16953,41 @@ int run_shell_probe(App& app) {
         check(ok && st.has_next && tier_after == st.next.tc &&
                   money0 - money_after == st.next.price,
               "(vi) FUa Pa.DYa charges Qi.mi and sets the owned UpgradeLevel");
+    }
+    // (vii) PROFILE LIST SCROLL (this fix): the `Xd`/`Gg` slider (JS `Xd` ctor
+    // L2184; `Gg.aa` L1886-1890) must move its list offset on a drag. Before
+    // the fix the offset was pinned to `uz` and no row beyond the fold could
+    // be revealed. `probe_list_scroll` feeds the SAME `gg_scroll_step` the live
+    // pointer path runs (no OS input).
+    {
+        EquipmentScreen eq(app.screens());
+        eq.select_tab(kProfileTabAchiev, "");
+        const ProfileLayout pl = profile_layout();
+        const ShopRect& v = pl.viewer;
+        const float cell_h = profile_cell_h(v, 400.0f, 130.0f);
+        const float pitch = cell_h + 10.0f;
+        const float list_h = profile_scroll_h(v);
+        const float list_top = v.P + kFgRailFrac * v.width();
+        const float uz = std::max(0.0f, (list_h - cell_h) * 0.5f);  // `Gg.ba` L1885
+        const auto first_visible = [&](float y) {
+            const float i = (-y - cell_h) / pitch;
+            return i <= 0.0f ? 0 : static_cast<int>(std::ceil(i));
+        };
+        const float y_before = uz;             // at rest `ei.node.ra == uz`
+        const int row_before = first_visible(y_before);
+        const float drag = cell_h + pitch + list_h;   // > one full viewer
+        eq.probe_list_scroll(kProfileTabAchiev, list_top + list_h * 0.9,
+                             list_top + list_h * 0.9 - drag);
+        const float y_after = eq.list_scroll_y(kProfileTabAchiev);
+        const int row_after = first_visible(y_after);
+        std::fprintf(stdout,
+                     "[sps] list scroll achiev n=%d cell=%.1f pitch=%.1f "
+                     "y %.1f->%.1f firstRow %d->%d\n",
+                     eq.achiev_row_count(), cell_h, pitch, y_before, y_after,
+                     row_before, row_after);
+        std::fflush(stdout);
+        check(std::fabs(y_after - y_before) > 1.0f && row_after > row_before,
+              "(vii) Profile ACHIEV list scrolls (Gg.aa drag moves firstRow)");
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);

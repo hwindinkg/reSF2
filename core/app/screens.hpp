@@ -977,6 +977,7 @@ public:
     void select_move(int index);
     std::string shown_move() const;
     int move_row_count() const { return static_cast<int>(move_rows_.size()); }
+    int achiev_row_count() const { return static_cast<int>(achiev_rows_.size()); }
 
     // --- [probe] `--tutorial-showblock-probe` --------------------------------
     // Did the ShowBlock avatar move-preview actually RUN and publish its
@@ -1077,6 +1078,48 @@ public:
         int bonus_prize = 0;      // BonusPrize (`xw.dP`)
         bool reward_available = false;  // `xw.yj` (`Ir` L1248)
     };
+
+    // The `Xd` slider's `Gg` vertical scroll state (JS `Xd` ctor L2184:
+    // `this.scroll = new Fg(500,800,0,30)` + `this.Pa = new Gg`; the scroller
+    // is `Gg.aa` L1886-1890, the cell list `Gg.ba` L1884-1885). Each sub-view
+    // (`ds`/`es`/`fs`/`gs`) owns its own `Fg`+`Gg`, so the port keeps one
+    // instance per tab. `y` = `ei.node.ra` (offset from the `Gg` list top);
+    // at rest `y == uz` (`Gg.ba` L1885) centres the first cell. The drag
+    // fields mirror `Gg.aa` case 1 (`Fq`/`gj`/`p_`/`ub`).
+    struct ListScroll {
+        float y = 0.0f;           // `ei.node.ra`
+        float vel = 0.0f;         // `ub` (momentum, px/step)
+        float target = 0.0f;      // `targetY` (state 2)
+        int state = 0;            // `state` (0 idle / 1 drag / 2 snap)
+        float drag_start = 0.0f;  // `Fq`
+        float drag_base = 0.0f;   // `gj`
+        float drag_delta = 0.0f;  // `p_`
+        float drag_prev = 0.0f;
+        float drag_vel = 0.0f;
+        int count = -1;           // cell count the current `y` was built for
+    };
+    ListScroll list_scroll_[4];
+    // The `Gg` list geometry (native px) for one tab: `left/right/top/list_h`
+    // bound the drag capture + the `Gg` rect, `uz`/`[lo,hi]` are the
+    // `Gg.ba` (L1885) centre offset and the `Gg.aa` clamps (L1887-1890),
+    // `pitch`/`cell_h` the row step/height, `nrows` the cell count.
+    struct ListGeom {
+        float left = 0.0f, right = 0.0f, top = 0.0f, list_h = 0.0f;
+        float uz = 0.0f, lo = 0.0f, hi = 0.0f;
+        float pitch = 0.0f, cell_h = 0.0f;
+        int nrows = 0;
+    };
+    // Advances the active tab's `Gg` scroller from `app().pointer()` (`Gg.aa`
+    // L1886-1890 drag/momentum/snap), then `Gg.ba`'s clamp.
+    void advance_list_scroll(int tab, const ListGeom& g);
+    // --- [probe] `--settings-profile-shop-probe` (vii) ---------------------
+    // The live list offset (`ei.node.ra`) for a tab, and a synthetic drag fed
+    // through the SAME `Gg.aa` path `update_impl` runs (down -> move ->
+    // release), for the headless scroll assertion.
+    float list_scroll_y(int tab) const {
+        return list_scroll_[tab >= 0 && tab < 4 ? tab : 0].y;
+    }
+    void probe_list_scroll(int tab, double y0, double y1);
 
 private:
     int tab_ = 0;        // `cs` tab index (0 = `ds` leveling .. 3)
