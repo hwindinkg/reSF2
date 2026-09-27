@@ -344,6 +344,10 @@ private:
     // Draws the Preloader/Loader boot overlay (JS `Rg` L1967 / `ad` L1969).
     void draw_boot_splash();
 
+    // The JS boot progress value (`Rg.gMa` @1014188 + `Ev.x$a` @596102):
+    // 0->95 asset ramp, then the `Ev` module ramp 95,96,97,98,99,100.
+    int boot_progress_pct() const;
+
     // Called by ScreenManager boot; builds the initial MainMenu screen.
     void boot();
 

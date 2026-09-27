@@ -758,12 +758,23 @@ bool App::init(const std::string& res_root, const std::string& save_path,
     return true;
 }
 
-// Boot overlay length: JS `Rg` (Preloader, L1967) runs 0-95%, then `ad`
-// (Loader, L1969) holds "Loading 100%" until `aHa>30` frames. The native
-// shell shows the same art for a fixed number of 1/60 steps (asset loading
-// itself is synchronous in `init`).
-constexpr int kBootSplashFrames = 75;
-constexpr int kBootLoaderFrames = 30;
+// Boot progress model: JS `Rg` (Preloader, sf2.502f0946.js @1014033, g="3F3")
+// then `ad` (Loader, @1014648, g="3F4"), ported literally.
+//
+//   Rg.Ea (state==3):
+//     kd==0: gMa(oi.V0(), 0, 95); when oi.kp() -> Ja.Vxb(); the `Ev` module
+//            pass (ap,cp,$o,bp,dp); kd=1
+//     kd==1: oE.update(); gMa(oE.x$a(), 95, 100)
+//   Rg.gMa(a,b,c) @1014188: a = round(b + a/100*(c-b)); if changed -> n5(a)
+//   Ev.update @596073: ONE module per frame, PZ++ on Kg
+//   Ev.x$a()  @596102: WR.length==0 ? 100 : round(PZ/WR.length*100)
+//
+// The native asset load is synchronous in `init`, so phase 0 is the visual
+// oi.V0() ramp and phase 1 is the real 5-module ramp (one Ev step per frame).
+constexpr int kPreloadRampFrames = 45;  // phase 0: oi.V0() mapped 0 -> 95
+constexpr int kEvModules = 5;           // `ap cp $o bp dp` (Rg.init @1014187)
+constexpr int kBootLoaderFrames = 30;   // `ad.kp` @1014756: aHa > 30
+constexpr int kBootSplashFrames = kPreloadRampFrames + kEvModules + kBootLoaderFrames;
 
 void App::boot() {
     // Boot to the Dojo home screen (screen 3) — the ORIGINAL starts in the
@@ -787,22 +798,58 @@ void App::boot() {
     // session events after — the tutorial then only ever ran when a harness
     // re-fired the Loader->Dojo edge (`set_fresh_tutorial`). This restores
     // the JS-exact order: session start, then the scene edge.
+    // JS `Ev` module pass (@596053) in `Rg.init` add-order (@1014187):
+    //   ap (@595487 g=241) / cp (@596860 g=244) / $o (@595462 g=240):
+    //     data + world init (JS `td.Wdb`/`ra.load`/`P.zdb`/`p.F().Edb`/
+    //     `id.ht().bya`/`Cc.F`) — already performed synchronously by `init`.
+    //   bp (@596328 g=243): `Sf("QUEST_EVENT_START_APPLICATION")` @596356,
+    //     then the login poll (`Zob`).
+    //   dp (@596700 g=245): `v.owb(); v.uwb()` -> `Sf("QUEST_EVENT_SESSION")`.
+    // The two events fire in THIS order BEFORE the Loader->Dojo edge
+    // (`ad.load` @1014478 -> the Dojo `ChangeTab`), matching `Rg.Ea` kd=1.
     try {
         QuestJournal j;
         try {
             j.player_level = save_->load().level;
         } catch (const std::exception&) {
         }
+        // ap / cp / $o
+        // bp
         quest_engine().fire(*this, "ApplicationStart", j);
+        // dp
         quest_engine().fire(*this, "SessionStart", j);
     } catch (const std::exception&) {
     }
 
+    std::fprintf(stdout,
+                 "[boot] Rg(@1014033) preload %d frames 0->95%%; Ev(@596053) %d modules "
+                 "ap(241),cp(244),$o(240),bp(243),dp(245) -> 95,96,97,98,99,100%%; "
+                 "ad(@1014648) aHa>30 hold %d frames; total %d frames\n",
+                 kPreloadRampFrames, kEvModules, kBootLoaderFrames, kBootSplashFrames);
+    std::fflush(stdout);
     std::fprintf(stdout, "[screen] boot: Preloader(0) -> Loader(2) -> Dojo(3)\n");
     std::fflush(stdout);
     // The Loader->Dojo edge (`ad.load` by `TGa`): the logical source scene is
     // Loader(2), never the empty boot stack's "" (None).
     screens_->push(make_screen(*screens_, kScreenDojo), "Loader");
+}
+
+// JS `Rg.Ea`/`Rg.gMa` (@1014081/@1014188) + `Ev.x$a` (@596102), ported as one
+// integer function: phase 0 = `round(0 + oi.V0()/100*(95-0))` over
+// `kPreloadRampFrames`; phase 1 = `round(95 + Ev.x$a()/100*(100-95))` where
+// `Ev.x$a() = round(PZ/5*100)` advances one module per frame (PZ = 0..5 ->
+// 95,96,97,98,99,100). 100 once the Ev pass ends (the `ad` Loader takes over).
+int App::boot_progress_pct() const {
+    const int elapsed = boot_splash_total_ - boot_splash_frames_;
+    if (elapsed <= 0) return 0;
+    if (elapsed < kPreloadRampFrames) {
+        const int load = (elapsed * 100) / kPreloadRampFrames;  // oi.V0()
+        return (load * 95 + 50) / 100;                          // gMa(load, 0, 95)
+    }
+    const int pz = elapsed - kPreloadRampFrames;  // Ev.PZ, one per frame
+    if (pz >= kEvModules) return 100;
+    const int x = (pz * 100) / kEvModules;  // Ev.x$a()
+    return 95 + (x * 5 + 50) / 100;         // gMa(x, 95, 100)
 }
 
 void App::set_fresh_tutorial(bool on) {
@@ -950,13 +997,14 @@ void App::draw_boot_splash() {
     // JS `Rg`/`Tk` (L1967, L87-90) Preloader -> `ad` (L1969) Loader.
     // `Tk` layout (cast id 278, scroll id 274) + the localized
     // `splash/loading{lang}` BMF (ids 276/277, `ea` L87-88) with the UTF-8
-    // glyph path are implemented below. Still OPEN (PORT_AUDIT_UI §4.12):
-    //   - `Rg.Ea` state-3 module passes (L1967: `Ev` + `ap`/`cp`/`$o`/`bp`/
-    //     `dp`, defs L1160-1164). They are async app-startup side effects
-    //     (version, quest login dialogs, reload) whose `Ev.x$a()` progress
-    //     (L1163 = round(PZ/N*100)) feeds `gMa(x,95,100)`. Native init is
-    //     synchronous, so there is no per-module frame boundary to derive the
-    //     95->100 ramp from — the passes are performed inside `init`/`boot`.
+    // glyph path are implemented below. The `Rg.Ea` state-3 progress is the
+    // `boot_progress_pct()` model: phase 0 = `gMa(oi.V0(),0,95)`, then the
+    // `Ev` (@596053) pass `ap(241),cp(244),$o(240),bp(243),dp(245)` feeding
+    // `gMa(Ev.x$a(),95,100)` = 95,96,97,98,99,100 (one module per frame);
+    // `ad.kp` (@1014756) then holds "Loading 100%" for `aHa>30` frames.
+    // Still OPEN (PORT_AUDIT_UI §4.12): the Ev module side effects are
+    // synchronous in native `init`/`boot` (no async load completion drives
+    // `oi.kp()`), so phase 0 is a timed ramp rather than real byte progress.
     //   - the `ad` view `tr` art (id 816/817, L1867-1868) IS drawn below
     //     (loader branch); the Preloader `Tk` branch is the `!loader` path.
     const bool loader = boot_splash_frames_ <= kBootLoaderFrames;
@@ -1140,10 +1188,9 @@ void App::draw_boot_splash() {
     }
     char buf[64];
     {
-        // JS `Tk.n5` (L88): "<word> <n>%" mapped 0..95.
-        const int pre_span = boot_splash_total_ - kBootLoaderFrames;
-        const int elapsed = pre_span - boot_splash_frames_;
-        const int pct = pre_span > 0 ? (elapsed * 95) / pre_span : 95;
+        // JS `Tk.n5` (L88): "<word> <n>%". `n` is `Rg.gMa`'s value: the 0->95
+        // asset ramp then the `Ev` module ramp 95,96,97,98,99,100.
+        const int pct = boot_progress_pct();
         std::snprintf(buf, sizeof(buf), "%s %d%%", loading_word(lang_), pct);
     }
     // `Jo` (L90): `ua(qe.qa()*.4)` centred on the scroll node.
