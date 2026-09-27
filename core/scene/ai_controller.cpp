@@ -38,12 +38,17 @@
 //     `mwb` call context).
 //   - `xaa` applies the Ju-frame horizon `b=Fl+Aea` and the Hu frame pick
 //     `Ju.$_(Fl)`; the outcome window pick now follows `Gu.acb`/`Gu.n0`
-//     (L610-612) exactly (`NDa[i-1]`, lower edge gated). `yaa`/`gea` still
-//     pass `hu_pick=-1` (all Hu frames) — cited divergence, see `yaa`.
+//     (L610-612) exactly (`NDa[i-1]`, lower edge gated). `yaa` now uses the
+//     JS `Q6a` frame source `g=this.Fl`, the Hu pick `L6a(f)`, and the
+//     `f!=g -> wait(f-g)` tail (L609-611). `gea` (throw, `Z0()[2]`) still
+//     passes `hu_pick=-1` and skips the `gcb`/`Uea` structure — cited
+//     divergence (throws only).
 //   - the table target: JS `Wea` (L600) returns the FIGHTER BONE named
-//     `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`) and the enemy body
-//     contributes `dw()`/`hd()`; `AiFightState` carries no bone world-x, so
-//     the port keeps `my_facing * enemy_x` (the one value not JS-exact).
+//     `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`, resolved on MY
+//     fighter). The weight is `enemy_hd*(t - enemy_dw) + Mu` using the
+//     enemy's `hd()`/`dw()`; `AiFightState` exposes the bone world-x and
+//     the enemy clip mirror but NOT the enemy's spatial `dw()` (`Pta`), so
+//     the port keeps `my_facing * t + Mu` (the one value not JS-exact).
 // Exact since this wave (no oracle needed — pure JS math):
 //   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
 //     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
@@ -598,9 +603,16 @@ int AiController::yaa(const AiFightState& st) {
     const TacticRecord* rec = find_record(st.enemy_anim);
     if (rec == nullptr) return 0;
 
+    // JS `Q6a` (L609-611) is called as
+    //   `this.Q6a(a, this.cs, this.ds, this.Ji.dw(), a.da.dw(),
+    //             this.q7, this.Fl, this.Mu)`
+    // so its `g` parameter is `this.Fl` (the ENEMY's offset frame), NOT the
+    // enemy's `Tba`/`M2`. The port previously fed `enemy_max_part_frames`
+    // (JS `pZ` = `Tba`) here, so both the `f-g` wait and the Hu frame pick
+    // were computed from the wrong quantity.
+    const int g = Fl_;
     // Round the enemy frame up to a P.sp multiple (JS L610: `f = g%P.sp!=0
     // ? g+P.sp-g%P.sp : g`).
-    const int g = st.enemy_max_part_frames;
     const int f = (g % 5) != 0 ? g + 5 - g % 5 : g;
 
     // For each condition row, the target distance (JS `Wea` L600 + L610:
@@ -610,30 +622,27 @@ int AiController::yaa(const AiFightState& st) {
     // facing, d = my facing, e = the enemy's dw, h = the DistanceError draw.
     // The port keeps the `l*t + h` shell; the `xea` and `-e` terms are still
     // dropped (no move `xea` table / enemy `dw` on this path).
-    // REMAINING (cited, not guessed): JS also picks the Hu frame
-    // `k = row.$_(f)` at the ROUNDED frame and then, when `f!=g` and any
-    // outcome matched, REPLACES the candidates by a single wait `f-g`
-    // (L611). The port leaves `hu_pick=-1` (all Hu frames) and the raw
-    // frame — this is a known divergence, deliberately not changed without
-    // the `Fl`/`g` owner pinned.
+    // The Hu frame pick is JS `PBa`'s `L6a(c)` (L617 + L628):
+    // `a=this.$_(c); return -1<a ? frames[a] : null` — the single Hu frame
+    // at the ROUNDED frame `f`, or NO outcomes when `-1`. Previously the
+    // port passed `hu_pick=-1` (every Hu frame), over-approximating.
     for (const TacticRow& row : rec->rows) {
+        const int k = ju_frame_index(f, row.rda, row.hu_frames);
+        if (k < 0) continue;  // JS `L6a` -> null -> row contributes nothing
         const float target =
             st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
         dbg_.target = target;
         dbg_.mu = static_cast<float>(Mu_);
         dbg_.label = row.label;
-        pba_append(row, target, wb_);
+        pba_append(row, target, wb_, k);
     }
-    if (f == g || wb_.empty()) {
-        return static_cast<int>(wb_.size());
-    }
-    // JS: if no outcomes matched, push a wait-only candidate (null anim +
-    // the frames until the rounded frame).
-    if (wb_.empty()) {
-        wb_.push_back({std::string(), f - g});
-        return 1;
-    }
-    return static_cast<int>(wb_.size());
+    const int c = static_cast<int>(wb_.size());
+    // JS L611: `if(f==g||0==c) return c; this.wb.length=0;
+    //          this.wb.push(new kd(null,f-g)); return 1`.
+    if (f == g || c == 0) return c;
+    wb_.clear();
+    wb_.push_back({std::string(), f - g});
+    return 1;
 }
 
 // JS `XAa` (L611-612): the attack-table selection (Z0()[0]).
