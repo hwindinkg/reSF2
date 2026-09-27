@@ -4534,21 +4534,36 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // perturbs the shared fight/AI stream.
         const std::string reaction = def.fighter.try_react(rctx, rec.shock);
         if (!reaction.empty()) {
-            // JS `Gc.DK` (L673-674) -> `jJa`/`Qnb` -> `wd.Lwb` -> `ca.Lgb`
-            // (L387) -> `PC(7,side)`: the knockdown reaction start is the
-            // LoseFall cp==7 event. A *Fall*-named reaction is the native
-            // proxy for the JS `Qnb`/`qs.animation` knockdown.
-            if (reaction.find("Fall") != std::string::npos) {
-                def.reaction_fall = true;
+            // JS `Gc.DK` tail (L674) — the reaction branches on the picked
+            // animation's `MS` (the `Physics` attr, L362442):
+            //   `e.animation.MS ? a.jJa(e.animation,e.R1)
+            //                   : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)`
+            // `jJa` sets the `qs` latch -> next-frame `Qnb` -> `wd.Lwb`
+            // (`Te.Sca`, `Nd.start`=`Al.start`, L582) STARTS THE RAGDOLL;
+            // `Nsb` starts the move as an ORDINARY playing clip (`Nd.nk`
+            // stays false). The OLD port always took the `jJa` branch, so
+            // every hit reaction froze into the ragdoll — e.g. the boss
+            // `RootHit` (`Recoil|NotTitan|Hit`, Priority 700, NO `Physics`)
+            // was reported as "one hit -> ragdoll; opponent stuck". `Nd.start`
+            // re-seeds from the current pose; `Te.Skb`
+            // (`Fighter::start_move_impl`) calls `Al.stop` when the next clip
+            // starts.
+            const bool knockdown = def.fighter.last_react_physics();  // MS
+            if (knockdown) {
+                def.fighter.ragdoll_start(reaction, wall_min_, wall_max_,
+                                          floor_y_);
+                std::fprintf(stdout, "[ragdoll] F%d %s START '%s' (nk=1)\n",
+                             frame, def.name.c_str(), reaction.c_str());
+            } else {
+                // `Nsb` (L674): no `Nd.start`, `Nd.nk` stays false; the
+                // reaction is a normal clip (the `st.playing`/`Pe` gate).
+                std::fprintf(stdout, "[ragdoll] F%d %s SKIP '%s' (nk=0 Nsb)\n",
+                             frame, def.name.c_str(), reaction.c_str());
             }
-            // JS `Gc.DK` (L673) -> `jJa`/`Qnb` (L507) -> `wd.Mwb`/`Lwb`
-            // (L507/L511) -> `ca.Lwb` (L387) -> `Nd.start(a)` (L582): the
-            // landed reaction STARTS the ragdoll (`nk=true; frameCount=0;
-            // names={reaction}`). `Te.Skb` (`Fighter::start_move_impl`)
-            // calls `Al.stop` when the next clip starts.
-            def.fighter.ragdoll_start(reaction, wall_min_, wall_max_, floor_y_);
-            std::fprintf(stdout, "[ragdoll] F%d %s START '%s' (nk=1)\n", frame,
-                         def.name.c_str(), reaction.c_str());
+            // cp==7 (`ca.Lgb` L387: `a.model.lb==null -> PC(7,side)`) fires
+            // from `wd.Lwb`/`Qnb` (the `jJa`/MS/ragdoll path), not from the
+            // `Nsb` branch — arm the LoseFall pulse only for a knockdown.
+            if (knockdown) def.reaction_fall = true;
             std::fprintf(stdout, "[react] F%d %s -> %s\n", frame,
                          def.name.c_str(), reaction.c_str());
             std::fflush(stdout);

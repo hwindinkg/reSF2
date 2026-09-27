@@ -6084,14 +6084,30 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 }
             }
             app.run_one_frame();
-            if (react_at < 0 && fs->enemy_ragdoll_active()) {
+            // [FIX ragdoll gate] Detect the hit reaction on EITHER branch of
+            // `Gc.DK`'s tail (L674): the `jJa` ragdoll branch (`Nd.nk`,
+            // `enemy_ragdoll_active()`) OR the `Nsb` branch — an ORDINARY hit
+            // reaction clip. The boss's `RootHit` (`Recoil|NotTitan|Hit`, NO
+            // `Physics`) used to take the `jJa` branch and froze `nk=1`; with
+            // the `MS`/`Physics` gate it is the `Nsb` branch (`nk` stays 0), so
+            // the ragdoll latch alone no longer detects it.
+            const std::string em = fs->enemy_current_move();
+            const bool react_now =
+                fs->enemy_ragdoll_active() ||
+                (!em.empty() && (em.find("Hit") != std::string::npos ||
+                                 em.find("Fall") != std::string::npos ||
+                                 em.find("Physical") != std::string::npos ||
+                                 em.find("Recoil") != std::string::npos));
+            if (react_at < 0 && react_now) {
                 react_at = f;
                 react_started = fs->enemy_moves_started();
-                react_move = fs->enemy_ragdoll_name();
+                react_move = fs->enemy_ragdoll_active() ? fs->enemy_ragdoll_name()
+                                                        : em;
                 std::fprintf(stdout,
-                             "[bossprobe] HIT at f=%d reaction='%s' nk=1 "
+                             "[bossprobe] HIT at f=%d reaction='%s' nk=%d "
                              "started=%d\n",
-                             f, react_move.c_str(), react_started);
+                             f, react_move.c_str(),
+                             fs->enemy_ragdoll_active() ? 1 : 0, react_started);
                 std::fflush(stdout);
             }
             if (react_at >= 0) {

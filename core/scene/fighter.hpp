@@ -263,8 +263,10 @@ public:
     // first priority-ordered `hb` move carrying a `Hit` event whose tactics
     // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
     // PhysicalFall/...). `prefer_fall` (shock knockdown, `Ub`) tries
-    // *Fall*-named reactions first — a proxy for the MS/jJa branch (the
-    // exact MS mapping is OPEN). The JS `DK` picks the top-`priority` group
+    // *Fall*-named reactions first. The JS `DK` tail branches on the picked
+    // animation's `MS` (the `Physics` attr, L362442): `MS ? jJa : Nsb`
+    // (L674) — `last_react_physics()` reports which branch this pick ran.
+    // The JS `DK` picks the top-`priority` group
     // and then `f[uf.sja(len)]` (uniform, `Math.random`); `rng` is the
     // injected `Math.random` analog (never `Da.pg`). The `Pkb` weighted
     // roulette at reaction time stays OPEN (no tactic weights available).
@@ -446,6 +448,11 @@ public:
         std::string picked;  // the move the decision actually started
     };
     const MoveDecision& last_decision() const { return decision_; }
+    // Whether the move `try_react` most recently STARTED carries `MS` (the
+    // `Physics` knockdown attr, L362442). `Gc.DK`'s tail (L674) branches
+    // `e.animation.MS ? jJa(-> ragdoll) : Nsb(ordinary clip)`; `apply_hit`
+    // reads this to start the ragdoll ONLY on the `jJa` branch.
+    bool last_react_physics() const { return react_physics_; }
     // Test/trace accessors (no behavior change): live input-buffer counts.
     int buffered_tap_count() const;
     int buffered_hold_count() const;
@@ -715,6 +722,8 @@ private:
     // Live perk names for the `<Perk Name=..>` lock test (JS `Bm.he` L753).
     std::vector<std::string> perks_;
     MoveDecision decision_;                 // last player decision (probe/trace)
+    // `MS` of the move `try_react` last started (see `last_react_physics`).
+    bool react_physics_ = false;
     // `uf.sja`'s `Math.random` mirror (`set_math_random`); unset -> no draw is
     // needed because the `Aua` group is a singleton (value-free).
     std::function<float()> math_random_;

@@ -541,6 +541,15 @@ struct MoveDef {
     // ABSENT from the shipped moves.xml (0 occurrences) -> always false; the
     // `g` branch of `DK` is dead with shipped data.
     bool no_animation = false;
+    // JS `l.MS` (L362442: `l.MS=u.ka(k.attributes.get("Physics"))`) — the
+    // move is a KNOCKDOWN animation. `Gc.DK`'s tail branches on it (L674):
+    //   `e.animation.MS ? a.jJa(e.animation,e.R1)
+    //                   : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)`
+    // `jJa` sets the `qs` latch whose next-frame `Qnb` -> `wd.Lwb`
+    // (`Al.start`, L582) starts the RAGDOLL; `Nsb` starts the move as an
+    // ordinary playing clip (`Nd.nk` stays false). 14 shipped moves carry
+    // `Physics="1"` (PhysicalFall/PhysicalGroundHit/RootHit is NOT one).
+    bool physics = false;
     int end_frame = 0;   // EndFrame attr, else 0 (JS `jc.Lj`)
     int priority = 0;
     float style_factor = 1.0f;  // `RNa` (StyleFactor attr, default 1.0)

@@ -1022,6 +1022,7 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         def.first_frame = data::xml_attr_int(move, "FirstFrame", 0);
         def.no_interp = data::xml_attr_bool(move, "NoInterpolationFrames", false);
         def.no_animation = data::xml_attr_bool(move, "NoAnimation", false);  // `Rha`
+        def.physics = data::xml_attr_bool(move, "Physics", false);  // `MS` (L362442)
         def.end_frame = data::xml_attr_int(move, "EndFrame", 0);
         def.priority = data::xml_attr_int(move, "Priority", 0);
         def.style_factor = data::xml_attr_float(move, "StyleFactor", 1.0f);  // `RNa`

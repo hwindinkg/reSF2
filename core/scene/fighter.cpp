@@ -1443,6 +1443,9 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
 // `Math.random` analog (`FightController::math_random01`), never `Da.pg`.
 std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
                                const std::function<float()>& rng) {
+    // JS `Gc.DK` tail (L674): record which branch the pick ran (`MS ? jJa :
+    // Nsb`) so `apply_hit` starts the ragdoll only for `MS` (Physics).
+    react_physics_ = false;
     // Build the candidate list: moves with a Hit event (JS `b` = the
     // candidate reactions), split by the Fall preference (`Ub`/MS proxy).
     std::vector<const MoveDef*> cands;
@@ -1492,7 +1495,10 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
     // (the first candidate whose conditions pass, in the same order).
     for (std::size_t k = 0; k < top.size(); ++k) {
         const MoveDef* m = top[(idx + k) % top.size()];
-        if (ai_start_move(*m, ctx)) return m->name;
+        if (ai_start_move(*m, ctx)) {
+            react_physics_ = m->physics;  // JS `e.animation.MS` (L674)
+            return m->name;
+        }
     }
     return "";
 }
