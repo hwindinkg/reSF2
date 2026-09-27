@@ -3327,10 +3327,48 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 fx.unknown.push_back("Foreach:" + ftype + "/" + fname +
                                      " (no such sub-quest)");
             } else {
+                // `zj.getType` (L1072) VERBATIM: ActiveOffers 10, Battles 5,
+                // DeliveryEnchantments 6, DeliveryItems 2, DeliveryUpgrades 3,
+                // EndedOffers 13, Items 1, JustStartedOffers 9,
+                // LastChanceOffers 12, NotStartedOffers 8, Offers 7, Packs 14,
+                // PaidItems 4, PurchasedOffers 11, default 0.
+                // The port models `Battles` (`Tob`) and `Items` (`$ob`). The
+                // delivery/offer/pack collections read JS lists the port has no
+                // source for (`p.o.xa.e_`/`f_`/`Vca`, `p.items.Dp`,
+                // `parameters.tm`) — left unmodelled (logged, never silently
+                // wrong) rather than invented.
+                const bool only_active =
+                    attr_bool01(attr_or(a.attrs, "OnlyActiveBattles", "0"));
+                const bool non_raid =
+                    attr_bool01(attr_or(a.attrs, "NonRaidBattles", "0"));
                 std::vector<std::string> items;
                 if (ftype == "Battles") {
-                    // `Tob` L1072: `p.F().Jm` battle list (`battle_zone_`).
-                    for (const auto& kv : battle_zone_) items.push_back(kv.first);
+                    // `Tob` (L1072) VERBATIM:
+                    //   `let a=0,b=p.F().Jm;for(;a<b.length;){let c=b[a];++a;
+                    //    this.mIa&&!c.isActive||this.nIa&&c.type=="FightRaid"||
+                    //    this.Pg.push(c.TQ())}`
+                    // `d.isActive=p.o.WDa(e)` (L103442), `e` = the
+                    // `Zone|Battle|` triple, and `WDa(a)=this.iF.get(a)!=null`
+                    // (L129828) — the save carries the record, exactly the bit
+                    // `?Battle.Available` reads (L2203). `c.type` is
+                    // `p.F().b0(<Battle Type>)`; the port reverses it through
+                    // `fight_type_label(battle_type_[name])`.
+                    EvalCtx bw_ctx;
+                    const WarriorSave& bw = bw_ctx.live(app);
+                    for (const auto& kv : battle_zone_) {
+                        if (only_active && !bw.has_battle(kv.first)) {
+                            continue;  // `mIa && !c.isActive` -> skip
+                        }
+                        if (non_raid) {
+                            const auto bt = battle_type_.find(kv.first);
+                            if (bt != battle_type_.end() &&
+                                std::string(fight_type_label(bt->second)) ==
+                                    "FightRaid") {
+                                continue;  // `nIa && c.type=="FightRaid"` -> skip
+                            }
+                        }
+                        items.push_back(kv.first);
+                    }
                 } else if (ftype == "Items") {
                     // `$ob` L1072: `p.o.xa.items` slot names (`ab()`).
                     static const char* const kSlots[] = {
@@ -4838,7 +4876,11 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
     std::vector<std::string> attaches;  // AttachQuestFile, applied post-pass
     // JS `ha.RA` (L1018) captures the event list length before iterating:
     // quests registered by an attach during this pass run on FUTURE events.
+    // It FIRST matches every listener (`e.compare(this.ta)`) into the queue
+    // `Dh`, then `Rla` (L184) sorts it and `eLa` pumps one at a time. The port
+    // collects the matches, sorts, then runs — see the comparator note below.
     const std::size_t quest_total = quests_.size();
+    std::vector<std::size_t> order;
     for (std::size_t i = 0; i < quest_total; ++i) {
         const QuestDef& q = quests_[i];
         bool listens = false;
@@ -4868,6 +4910,30 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
             if (seen) continue;
         }
         if (!conditions_hold(app, q.root, ctx)) continue;
+        order.push_back(i);
+    }
+    // JS `Rla` (L184) sorts the matched queue `Dh` with `Pd.sort(this.Dh,
+    // function(c,d){return c.Wy(d)})`; `Wy` (L184) is VERBATIM:
+    //   `Wy(a){return this.SC==1&&a.SC!=1?1:this.SC!=1&&a.SC==1?-1:
+    //           pb(a.priority,this.priority)}`
+    // and `pb(a,b)=a<b?-1:a>b?1:0` (L2, `function pb` @2747). `be.lF` (L184)
+    // sets `SC=1` when the quest runs, so `SC==1` == present in the port's
+    // active queue (`quest_active`). Result: non-active first (`c.SC!=1`
+    // sorts before `d.SC==1`), then priority DESCENDING (`pb(d.priority,
+    // c.priority)`); `Array.prototype.sort` is stable, so ties keep load
+    // order — `std::stable_sort` matches.
+    std::stable_sort(order.begin(), order.end(),
+                     [&](std::size_t x, std::size_t y) {
+                         const QuestDef& c = quests_[x];
+                         const QuestDef& d = quests_[y];
+                         const bool c_active = quest_active(c.name);
+                         const bool d_active = quest_active(d.name);
+                         if (c_active && !d_active) return false;  // Wy -> 1
+                         if (!c_active && d_active) return true;   // Wy -> -1
+                         return c.priority > d.priority;  // pb(d.priority,c.priority)
+                     });
+    for (std::size_t i : order) {
+        const QuestDef& q = quests_[i];
         // NOT a fire gate. JS `be.Gib` (L517407) makes `Place` ONLY the
         // auto-checkpoint scene index (`this.k7 = be.ifa(Place||"Map")` ->
         // each action's `Faa` -> `Ln.iLa` L531194 `setParameters(a, Faa,
