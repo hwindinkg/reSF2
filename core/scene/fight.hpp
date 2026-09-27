@@ -910,6 +910,7 @@ enum class banner_action : int {
                   // round's plate, the FIGHT! plate, victory/defeat)
     begin_round,  // JS type 2 -> `vhb` case 2 -> `FNa` (L409): phase 1
     next_round,   // the round-end hold -> `NA()` + `Z2()` (L411/L414/L408)
+    end_battle,   // the result-plate hold -> `battle_over_` (the Results)
 };
 
 // How a round ended (JS `ey` 0-6; the demo fight uses KO=0 and
@@ -1650,6 +1651,10 @@ public:
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
+    // JS `bea`/`kD` (L413/L415): the result plate's `fu(1.166)` hold is the
+    // fight-end sequence; `battle_over_` flips only on its expiry, so the
+    // caller's Results push (and reward) happen AFTER the K.O./end stance.
+    bool battle_end_pending() const { return battle_end_pending_; }
     // JS: the between-round gate — true from a round's end until the
     // round-break banner (`Cr.tca` L2023) expires into `FNa` (phase 1).
     // The round auto-advances (`Onb` L411 `ZK(); NA(); Z2()`); there is NO
@@ -1761,6 +1766,11 @@ private:
     fight_phase phase_ = fight_phase::idle;  // JS `eu`
     int frame_ = 0;                // JS `ca.frame`
     bool battle_over_ = false;     // JS `xJ` (battle finished)
+    // JS `bea`/`kD` (L413/L415): true while the result plate holds the
+    // fight-end sequence. `battle_over_` is set only when the plate expires
+    // (`banner_expire` case `end_battle`), so the Results appear after the
+    // K.O./end-stance hold instead of on the winning frame.
+    bool battle_end_pending_ = false;
     const FightFighter* winner_ = nullptr;
     bool auto_attack_ = false;     // the demo's simple auto-attack driver
     bool round_live_ = false;      // JS `h9` — a round is in progress

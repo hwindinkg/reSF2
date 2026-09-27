@@ -103,6 +103,12 @@ struct PendingBattle {
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;
     bool player_won = false;
+    // JS `v.kD` (L622187) -> `v.F().dmb(f)` -> `emb` (L93552): the reward
+    // (money/exp + battle record + level-up) is committed AT THE FIGHT END,
+    // before the results dialog, so dismissing/skipping the dialog never
+    // forfeits it. Set once by `apply_fight_reward`; that function is
+    // idempotent on this flag.
+    bool reward_applied = false;
     // The owned items the player's move list was built from. Carries the
     // item NAME too (JS `Hm.he` L758 compares Type / SubType / Name): the
     // direct-boot and the Map/Dojo launch must build the SAME list from the

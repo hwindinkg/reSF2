@@ -2973,7 +2973,10 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // when the end-stance animation finishes (`kg` L387 `h4a` -> `Ewb`
     // L404 -> `h9` -> `Onb` L411 `ZK(); NA(); Z2()`), and the port has no
     // end-stance clip, so the plate's `fu(1.166)` hold stands in for it.
-    if (result == round_result::ko) {
+    // A BATTLE-ENDING round does not raise this plate: `end_battle` raises
+    // the result plate with the same hold, so the fight-end sequence plays
+    // before the Results (JS `bea` L413 -> `kD` L415).
+    if (result == round_result::ko && !battle_end) {
         banner_show(banner_kind::ko, kJsBannerHoldSeconds,
                     banner_action::next_round, false);
         std::fprintf(stdout, "[fight] banner: K.O. (F%d)\n", frame_);
@@ -2984,6 +2987,8 @@ void FightController::apply_round_result(round_result result, const FightFighter
     history_.push_back(oc);
 
     if (battle_end) {
+        // JS `bea` (L413): the battle end. `end_battle` raises the result
+        // plate (fu(1.166)) and `battle_over_` flips only on its expiry.
         end_battle(w);
     } else if (cur_banner_ == banner_kind::ko) {
         // The K.O. plate holds the break (see above); its expiry runs
@@ -3010,6 +3015,7 @@ void FightController::begin_next_mode_fight(const ModeSetup& setup) {
     player_.hp = std::min(player_.max_hp, player_.hp + heal);
     enemy_.hp = std::min(enemy_.max_hp, enemy_.hp + heal);
     battle_over_ = false;
+    battle_end_pending_ = false;
     winner_ = nullptr;
     player_.rounds_won = 0;
     enemy_.rounds_won = 0;
@@ -3029,18 +3035,22 @@ void FightController::begin_next_mode_fight(const ModeSetup& setup) {
 
 // JS `bea` (L413): the battle end — the winner is fixed, the fight stops.
 void FightController::end_battle(const FightFighter& winner) {
-    battle_over_ = true;
+    // JS `bea` (L413) -> `kD` (L415). `battle_over_` is NOT set here: the
+    // result plate (`Cr`, the port's `victory`/`defeat`) takes over with the
+    // JS `fu(1.166)` hold, and only its expiry (`banner_expire` case
+    // `end_battle`) finalizes the battle � so the fight-end (K.O./end-stance)
+    // sequence plays BEFORE the Results. Hiding the winner frame behind the
+    // dialog made the battle stats appear "momentally" (instantly).
+    battle_end_pending_ = true;
     winner_ = &winner;
     round_.running = false;
     round_live_ = false;
     round_wait_ = false;
-    // The final banner: VICTORY for the player's win, DEFEAT for the loss
-    // (presentation only; no `fu` timer — the results screen takes over).
-    banner_show(winner.is_player ? banner_kind::victory : banner_kind::defeat,
-                0.0f, banner_action::none, false);
     // JS `tl.fB` (L844) / `ca.kD`: the effect containers drain at the battle
     // end (`fB()` -> `Gq.fB()`/`Hq.fB()`).
     magic_fx_.clear();
+    banner_show(winner.is_player ? banner_kind::victory : banner_kind::defeat,
+                kJsBannerHoldSeconds, banner_action::end_battle, false);
     std::fprintf(stdout, "[fight] banner: %s (F%d)\n",
                  winner.is_player ? "VICTORY" : "DEFEAT", frame_);
     std::fflush(stdout);
@@ -5437,9 +5447,17 @@ void FightController::banner_expire() {
         case banner_action::next_round:
             // The port's stand-in for the JS end-stance gate
             // (`kg` L387 -> `h4a` L413 -> `Ewb` L404 -> `h9` -> `Onb`
-            // L411): `ZK(); NA(); Z2()` — the round AUTO-advances.
+            // L411): `ZK(); NA(); Z2()` � the round AUTO-advances.
             between_rounds_recover();
             round_start();
+            break;
+        case banner_action::end_battle:
+            // JS `bea`/`kD` (L413/L415): the result plate's `fu(1.166)` hold
+            // IS the fight-end sequence; only its expiry finalizes the battle,
+            // so the FightScreen pushes the Results (and grants the reward)
+            // AFTER the sequence.
+            battle_end_pending_ = false;
+            battle_over_ = true;
             break;
         case banner_action::none:
         default:

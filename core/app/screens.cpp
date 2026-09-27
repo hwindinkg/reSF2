@@ -9748,6 +9748,14 @@ constexpr float kPauseDlgMusicX = 561.25f;
 constexpr float kPauseDlgSoundX = 718.75f;
 constexpr float kPauseDlgPlayX = 876.25f;
 
+// JS `v.kD` (L622187) -> `v.F().dmb(f)` -> `emb` (L93552): the fight reward
+// (money/exp + battle record + level-up) is committed with `p.o.save()` at
+// the FIGHT END, BEFORE the results dialog exists � so a skipped/closed
+// dialog can never forfeit it. Idempotent on `PendingBattle::reward_applied`.
+// Declared here for the battle-end handoff; defined after the ResultsScreen
+// (it needs `ResultsScreen::exp_for_level`).
+void apply_fight_reward(App& app);
+
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
     // Sensei dialog modal gate (quest engine `He` records): a dialog queued
@@ -10011,6 +10019,10 @@ void FightScreen::update_impl(float dt) {
             pb.prize_shock_coins = prize.coins_shock;
             if (player_won) pb.reward_money = prize.coins_total;
         }
+        // JS `v.kD` (L622187) -> `dmb`/`emb` (L93552): the reward is granted
+        // AT THE FIGHT END (with `p.o.save()`), before the results dialog is
+        // created � so skipping/closing the dialog can never forfeit it.
+        apply_fight_reward(app());
         std::fflush(stdout);
         push(kScreenResults);
     }
@@ -10819,6 +10831,87 @@ int ResultsScreen::exp_for_level(int level) {
     return it != thresholds.end() ? it->second : 100;
 }
 
+// JS `v.kD` (L622187) -> `v.F().dmb(f)` -> `emb` (L93552): commit the
+// fight reward at the FIGHT END (money -> `Pa.Fwa`, exp -> `Pa.Iab`), the
+// battle record (`Dxa`), the level-up (`OLa`/`Oz` thresholds) and
+// `p.o.save()` -- all BEFORE the results dialog is shown, so the dialog's
+// skip/close (`kk.rxa` -> `v.qxa` L1213) never forfeits the reward.
+// Idempotent on `PendingBattle::reward_applied`.
+void apply_fight_reward(App& app) {
+    PendingBattle& pb = app.pending_battle();
+    if (pb.reward_applied) return;
+    pb.reward_applied = true;
+    const bool player_won = pb.player_won;
+    const int money_reward = pb.reward_money;
+    const int exp_reward = pb.reward_exp;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[result] save load failed: %s\n", e.what());
+        return;
+    }
+    if (player_won) {
+        // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money),
+        // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
+        const std::int64_t before = w.money;
+        w.money += money_reward;
+        w.experience += exp_reward;
+        // JS `hj.Uo` gems (FLOW_STATIC section 4.4 `emb`): applied to Bonus.
+        w.bonus += pb.prize_gems;
+        std::fprintf(stdout,
+                     "[result] WIN reward money=%d exp=%d (money %lld -> %lld)\n",
+                     money_reward, exp_reward, static_cast<long long>(before),
+                     static_cast<long long>(w.money));
+        // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2).
+        {
+            w.battle_unlock(pb.zone, pb.battle_name);
+            const std::string ids = pb.fight_triple.empty()
+                                        ? pb.battle_name
+                                        : pb.fight_triple;
+            WarriorSave::FightWins& fr = w.fight_record_or_create(ids);
+            ++fr.wins;
+            fr.level = w.level;
+            std::fprintf(stdout,
+                         "[result] fight record: %s wins=%d level=%d\n",
+                         ids.c_str(), fr.wins, fr.level);
+        }
+        // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds.
+        while (w.level < 50) {
+            const int need = ResultsScreen::exp_for_level(w.level);
+            if (w.experience < need) break;
+            w.experience -= need;
+            w.level++;
+            w.power += 2;
+            std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n",
+                         w.level, w.power);
+        }
+    } else {
+        // JS `Dxa` L111216 (loss): a loss with NO record creates none.
+        const std::string ids = pb.fight_triple.empty()
+                                    ? pb.battle_name
+                                    : pb.fight_triple;
+        WarriorSave::FightWins* fr = w.fight_record(ids);
+        if (fr != nullptr) {
+            ++fr->losses;
+            fr->level = w.level;
+            std::fprintf(stdout,
+                         "[result] fight record: %s losses=%d level=%d\n",
+                         ids.c_str(), fr->losses, fr->level);
+        }
+        std::fprintf(stdout, "[result] LOSS (no reward)\n");
+    }
+    try {
+        app.save().save(w);
+        std::fprintf(stdout, "[result] save: money=%lld exp=%d level=%d weapon=%s\n",
+                     static_cast<long long>(w.money), w.experience, w.level,
+                     w.weapon.c_str());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[result] save failed: %s\n", e.what());
+    }
+}
+
 // JS `Lr`/`Or`/`Pr` reveal timeline (L2057-2081). `ed(a)` is a DURATION in
 // seconds, not an ease curve: `ed(a){return a==0?1:Math.min(1,this.time/a)}`
 // (JS @13398), so `ed(.5)` = a 500 ms phase and `ed(1)` = a 1 s phase.
@@ -10853,111 +10946,31 @@ void ResultsScreen::update_impl(float dt) {
     // `FirstGuardBeaten` chain (`quests.xml` L260-282) fires on `FightEnd`
     // with `Place="Map"` (JS `Gib` L517394 `be.ifa(...)`), so its dialogs own
     // the MAP after the OK press (`v.qxa` L1213) — never the Results overlay.
+    // The prize breakdown snapshot (JS `v.kD`/`bzb` factors, FLOW_STATIC
+    // section 4.3) for render only. The GRANT itself already ran at the
+    // fight end (`apply_fight_reward`, JS `v.kD` -> `dmb`/`emb`
+    // L622187/L93552): this screen just DISPLAYS, so skipping or closing it
+    // can never forfeit the reward.
     if (!applied_) {
         applied_ = true;
-        WarriorSave w;
-        try {
-            w = app().save().load();
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "[result] save load failed: %s\n", e.what());
-            return;
-        }
-        if (player_won_) {
-            // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money),
-            // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
-            const std::int64_t before = w.money;
-            w.money += money_reward_;
-            w.experience += exp_reward_;
-            // JS `hj.Uo` gems (FLOW_STATIC section 4.4 `emb`): applied to
-            // Bonus. No fight source evidenced (always 0 today) — the field
-            // flows end-to-end for when gem sources land.
-            w.bonus += app().pending_battle().prize_gems;
-            std::fprintf(stdout,
-                         "[result] WIN reward money=%d exp=%d (money %lld -> %lld)\n",
-                         money_reward_, exp_reward_, static_cast<long long>(before),
-                         static_cast<long long>(w.money));
-            // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2):
-            // a win records the battle for the `WDa` unlock rule; the fight
-            // win count (`yc`/`no`) bumps too.
-            {
-                const PendingBattle& pb = app().pending_battle();
-                // JS `J1a` L259 / `u4a` L260: the unlock write is the
-                // zone-qualified `hb` key (`Me+"|"+Re+"|"`, L1416), never a
-                // bare name (the legacy `record_battle_win` is superseded).
-                w.battle_unlock(pb.zone, pb.battle_name);
-                // JS `Dxa` L111216 (win): `B0a(a.Nb)` -> `il.Fab` (`no++`),
-                // then `b.xL(p.o.bb())` sets the record `Level` to the player
-                // level. The record `IDS` is the `hb` triple (`il.Atb`); the
-                // direct-boot path has no triple -> the battle name.
-                const std::string ids = pb.fight_triple.empty()
-                                            ? pb.battle_name
-                                            : pb.fight_triple;
-                WarriorSave::FightWins& fr = w.fight_record_or_create(ids);
-                ++fr.wins;
-                fr.level = w.level;
-                std::fprintf(stdout,
-                             "[result] fight record: %s wins=%d level=%d\n",
-                             ids.c_str(), fr.wins, fr.level);
-            }
-            // Prize breakdown snapshot for render (JS `v.kD` factor lines;
-            // base + bonus were captured by the FightScreen handoff).
-            {
-                const PendingBattle& pb = app().pending_battle();
-                prize_base_ = pb.prize_base_coins;
-                prize_bonus_ = pb.prize_bonus;
-                prize_combo_ = pb.prize_combo;
-                prize_shocks_ = pb.prize_shocks;
-                prize_perfect_ = pb.prize_perfect;
-                prize_first_ = pb.prize_first;
-                prize_perfect_coins_ = pb.prize_perfect_coins;
-                prize_first_coins_ = pb.prize_first_coins;
-                prize_combo_coins_ = pb.prize_combo_coins;
-                prize_style_coins_ = pb.prize_style_coins;
-                prize_style_level_ = pb.prize_style_level;
-                prize_shock_coins_ = pb.prize_shock_coins;
-                // `oc.OY` ruby (`Fh.lXa` arg `c` L2054-2055 -> `oc.mOa`): the
-                // goldPrize row's `Or.x_` (`Lr.ZMa` L2078).
-                prize_ruby_ = pb.prize_gems;
-            }
-            // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds
-            // (`v.FR` = character_progress.xml `<Threshold Level Exp>`).
-            while (w.level < 50) {
-                const int need = ResultsScreen::exp_for_level(w.level);
-                if (w.experience < need) break;
-                w.experience -= need;
-                w.level++;
-                w.power += 2;
-                std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n", w.level, w.power);
-            }
-        } else {
-            // JS `Dxa` L111216 (loss): `eeb(a.Nb)` -> `il.Sq` (find ONLY) then
-            // `il.Lab` (`FW++`) and, when found, `b.xL(p.o.bb())` (record Level
-            // = player level). A loss with NO record creates none (`eeb`
-            // returns null when `Sq` misses) — unlike a win (`Yea`/`eya`).
-            const PendingBattle& pb = app().pending_battle();
-            const std::string ids = pb.fight_triple.empty()
-                                        ? pb.battle_name
-                                        : pb.fight_triple;
-            WarriorSave::FightWins* fr = w.fight_record(ids);
-            if (fr != nullptr) {
-                ++fr->losses;
-                fr->level = w.level;
-                std::fprintf(stdout,
-                             "[result] fight record: %s losses=%d level=%d\n",
-                             ids.c_str(), fr->losses, fr->level);
-            }
-            std::fprintf(stdout, "[result] LOSS (no reward)\n");
-        }
-        try {
-            app().save().save(w);
-            std::fprintf(stdout, "[result] save: money=%lld exp=%d level=%d weapon=%s\n",
-                         static_cast<long long>(w.money), w.experience, w.level,
-                         w.weapon.c_str());
-            std::fflush(stdout);
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "[result] save failed: %s\n", e.what());
-        }
+        const PendingBattle& pb = app().pending_battle();
+        prize_base_ = pb.prize_base_coins;
+        prize_bonus_ = pb.prize_bonus;
+        prize_combo_ = pb.prize_combo;
+        prize_shocks_ = pb.prize_shocks;
+        prize_perfect_ = pb.prize_perfect;
+        prize_first_ = pb.prize_first;
+        prize_perfect_coins_ = pb.prize_perfect_coins;
+        prize_first_coins_ = pb.prize_first_coins;
+        prize_combo_coins_ = pb.prize_combo_coins;
+        prize_style_coins_ = pb.prize_style_coins;
+        prize_style_level_ = pb.prize_style_level;
+        prize_shock_coins_ = pb.prize_shock_coins;
+        prize_ruby_ = pb.prize_gems;
     }
+    // Idempotent fallback: a Results screen reached without the fight-end
+    // handoff still grants (JS `v.kD` runs once per fight).
+    apply_fight_reward(app());
     const App::PointerState& p = app().pointer();
     if (p.pressed) {
         std::fprintf(stdout, "[result] click -> back to Map\n");
