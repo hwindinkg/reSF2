@@ -1397,6 +1397,19 @@ struct ChildModel {
     int facing = 1;          // spawner's `da.hd()` sign
 };
 
+// One HUD callout signal (`Gr`/`Hx`, g="40E"/"40D", L2048-2052). JS producers:
+//   `Sf.strike` (L2038) -> `Gr.h1a`(2 critical)/`P1a`(5 shock)/`p1a`(0
+//     first_strike)/`r1a`(1 head_hit), all on the DEFENDER's `Gr`;
+//   `du.o_a` `ERuleHotGround` (L902) -> `Gr.Gma(time)` -> `t1a` (4 hot_ground).
+// `type` is the `Hx` sprite index (`i8a`: 0 first_strike, 1 head_hit,
+// 2 critical, 3 combo, 4 hot_ground, 5 shock); `value` is the label text
+// (`Hx.w6`), shown only for types 3/4 (the others never call `w6`).
+struct CalloutSignal {
+    int side = 0;   // HUD owner: 0 = player (`Sf.Id`), 1 = enemy (`Sf.je`)
+    int type = 0;   // `Hx.wZ` (the sprite index)
+    int value = 0;  // `Hx` label text (3 = combo count, 4 = hot-ground time)
+};
+
 class FightController {
 public:
     ~FightController();  // closes the pose dump file if the dump is cut short
@@ -1570,6 +1583,14 @@ public:
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
+    // Drains the pending HUD callout signals recorded by the `Gr` producers
+    // (`apply_hit`'s `Sf.strike` flags + the hot-ground rule tick). The
+    // fight screen appends one `Gr.Gu` element per signal (JS `addElement`).
+    std::vector<CalloutSignal> take_callouts() {
+        std::vector<CalloutSignal> out;
+        out.swap(callouts_);
+        return out;
+    }
     // [probe, authorised] `--tactic <Name>`: force the ENEMY's tactic by
     // name (the tactic_settings.xml `<Tactic Name=..>`) on the live fight,
     // overriding the battle's shipped tactic. Returns false when the name
@@ -1753,6 +1774,10 @@ private:
         std::string defense;     // `JP`
     };
     std::vector<DamageLogEntry> i_;
+
+    // Pending HUD callout signals (`Gr` producers); drained by the fight
+    // screen each frame (`take_callouts`). JS pushes into `Gr.Gu` directly.
+    std::vector<CalloutSignal> callouts_;
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)

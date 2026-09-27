@@ -334,6 +334,16 @@ void load_fight_params_from_settings(const std::string& xml_text) {
         v.combo_min_hits = cb.attribute("MinHits").as_int(3);
         v.combo_time = cb.attribute("Time").as_int(90);
     }
+    // `v.apa` (L1157) = `u.I(a.A("Announcements").attributes.get("Time"),60)`
+    // — `Gr.Qq`'s default element life (`u9a()`) for the first_strike /
+    // head_hit / critical / shock announcements; `v.Yqa` (`Gtb`) =
+    // `u.I(a.A("HotGroundTimer").attributes.get("Time"),90)` — the type-4
+    // hot_ground life (`R9a()`). Values verified against
+    // reference/extracted/xml/res/internal_settings.xml (`<Announcements
+    // Time="60"/>`, `<HotGroundTimer Time="200"/>`).
+    v.announce_time = root.child("Announcements").attribute("Time").as_int(60);
+    v.hot_ground_time =
+        root.child("HotGroundTimer").attribute("Time").as_int(90);
     // `v.kNa`/`v.mGa`/`v.jNa`/`v.iNa` (L1156) = `<SlowMode .../>` — the
     // finishing-blow slow-mo (`u.I`/`u.H` fallbacks 10/100/4/2).
     if (const pugi::xml_node sm = root.child("SlowMode")) {
@@ -346,6 +356,9 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     }
     std::fprintf(stdout, "[fx] Combo MinHits=%d Time=%d (shipped XML)\n",
                  v.combo_min_hits, v.combo_time);
+    std::fprintf(stdout,
+                 "[fx] Announcements Time=%d HotGroundTimer Time=%d (shipped XML)\n",
+                 v.announce_time, v.hot_ground_time);
     std::fprintf(stdout,
                  "[fx] SlowMode Value=%d MaxTime=%.0f RestoreWeapon=%.0f "
                  "RestoreNonWeapon=%.0f (shipped XML)\n",

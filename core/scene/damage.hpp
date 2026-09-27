@@ -223,6 +223,15 @@ struct FightParams {
     // `v.Lpa` (L1157) = `u.I(a.A("Combo").attributes.get("Time"),90)` — the
     // `pCa()` frame budget `iu.wyb` counts `OV` against (the combo window).
     int combo_time = 90;
+    // `v.apa` (L1157) = `u.I(a.A("Announcements").attributes.get("Time"),60)`
+    // — the `u9a()` life (`Gr.Qq` default) of every non-combo announcement
+    // element (`Gr.h1a/P1a/p1a/r1a`: critical/shock/first_strike/head_hit).
+    // Shipped `<Announcements Time="60"/>`.
+    int announce_time = 60;
+    // `v.Yqa` (L1157) = `u.I(a.A("HotGroundTimer").attributes.get("Time"),90)`
+    // — the `R9a()` life (`Gr.Qq(4)`) of the type-4 hot_ground callout.
+    // Shipped `<HotGroundTimer Time="200"/>`.
+    int hot_ground_time = 90;
     // `v.kNa`/`v.mGa`/`v.jNa`/`v.iNa` (L1156) = internal_settings.xml
     // `<SlowMode Value="7" MaxTime="3" RestoreWeapon="4"
     // RestoreNonWeapon="2"/>` — the FINISHING-BLOW hit-stun + slow-mo.

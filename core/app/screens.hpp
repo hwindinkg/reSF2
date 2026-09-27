@@ -763,13 +763,22 @@ private:
         int count = 0;      // `Ix.count` remaining life frames
         float time = 0.0f;  // `Ix.time` slide clock (seconds)
         bool fp = false;    // `Ix.fp` fade latch
-        int value = 0;      // `Hx` label text (the announced combo count)
+        int value = 0;      // `Hx` label text (shown for types 3/4 only)
+        // `Hx.wZ` sprite index (`Hx.i8a`, L2048): 0 first_strike, 1 head_hit,
+        // 2 critical, 3 combo, 4 hot_ground, 5 shock. All six share the same
+        // `Gr.addElement`/`Gr.azb` machinery; only the sprite frame, the
+        // label colour (combo/hot_ground) and the label life (`Gr.Qq`)
+        // differ.
+        int type = 3;
     };
     struct ComboTracker {
         int last_signal = 0;                  // `combos_announced` high-water
         std::vector<ComboElement> elements;   // `Gr.Gu`
     };
     ComboTracker combo_callout_[2];           // [0]=player, [1]=enemy
+    // Appends one `Gr.Gu` element for a drained `CalloutSignal` (JS
+    // `Gr.addElement` + `Hx.init`). Defined in screens.cpp.
+    void push_callout_element(int side, int type, int value);
 };
 
 // The battle results — native results flow (JS `v.kD` L622187 -> the

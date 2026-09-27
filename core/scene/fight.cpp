@@ -2055,6 +2055,15 @@ void FightController::rules_frame() {
                     }
                 }
                 fire = r.hot_time <= 0;
+                // `du.o_a` (L902) `ERuleHotGround`: `c.cK&&
+                // (this.Oe.ha.Hzb(c.getTime(),c.mc()),c.cK=!1)` — every
+                // `cK` (port `hot_changed`, set on the reset + each second
+                // tick) pushes a type-4 callout showing the remaining
+                // seconds on the rule's side (`mc()` 1/2 -> HUD side 0/1).
+                if (r.hot_changed) {
+                    callouts_.push_back({r.apply_to == 2 ? 1 : 0, 4, r.hot_time});
+                    r.hot_changed = false;
+                }
                 break;
             }
             case FightRuleKind::regeneration:
@@ -4973,6 +4982,32 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!battle_first_hit_) {
         battle_first_hit_ = true;
         battle_first_by_player_ = atk.is_player;
+    }
+    // HUD callouts (JS `ca` L200998 `this.ha.Gzb(b.aI,b.Zi,b.target,b.ep,
+    // b.Uq,b.se,b.block,b.Ub)` -> `Sf.strike` L2038). The callouts land on
+    // the DEFENDER's `Gr`: `h&&b.yvb()` = shock (`Ub`), `f&&b.Uub()` =
+    // critical (`se`), then the `g?b.UYa():` else branch fires `d&&b.cvb()`
+    // (first_strike, `ep`) and `e&&b.fvb()` (head_hit, `Uq`). Note shock and
+    // critical are evaluated BEFORE the block test; first_strike/head_hit
+    // only on the unblocked branch.
+    {
+        const int dside = def.is_player ? 0 : 1;  // `c==0?Sf.je:Sf.Id`
+        if (rec.shock) callouts_.push_back({dside, 5, 0});        // `yvb`
+        if (hit_critical) callouts_.push_back({dside, 2, 0});     // `Uub`
+        if (!hit_blocked) {
+            if (rec.first_hit) callouts_.push_back({dside, 0, 0});  // `cvb`
+            if (rec.head_hit) callouts_.push_back({dside, 1, 0});   // `fvb`
+        }
+        if (!callouts_.empty()) {
+            std::fprintf(stdout,
+                         "[callout] F%d %s announc side=%d shock=%d crit=%d "
+                         "first=%d head=%d\n",
+                         frame_, def.name.c_str(), dside, rec.shock ? 1 : 0,
+                         hit_critical ? 1 : 0,
+                         (rec.first_hit && !hit_blocked) ? 1 : 0,
+                         (rec.head_hit && !hit_blocked) ? 1 : 0);
+            std::fflush(stdout);
+        }
     }
     // JS `ca.Cgb` (L396) `PC(5/6,...)` + `ca.Ihb` (L423): the landed-hit
     // rule pass (LifeSteal heal, Regeneration reset, Points, WinCombo/

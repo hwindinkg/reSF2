@@ -9840,6 +9840,42 @@ constexpr float kPauseDlgPlayX = 876.25f;
 // (it needs `ResultsScreen::exp_for_level`).
 void apply_fight_reward(App& app);
 
+// JS `Gr.addElement` + `Hx.init` (L2051/L2048). Creates the `Gr.Gu` element
+// for an incoming `CalloutSignal`: `count = Gr.Qq(type)` (type 4 =
+// `v.Yqa` hot_ground_time, type 3 = `v.Lpa` combo_time, else `v.apa`
+// announce_time), label text = `value` (`Hx.w6`; drawn for types 3/4 only).
+// Type 4 follows `Gr.Gma`: it REUSES the first existing type-4 element
+// (updating the countdown label); the type 0/1/2/5 announcements always
+// append a fresh element (`Gr.h1a/P1a/p1a/r1a`).
+void FightScreen::push_callout_element(int side, int type, int value) {
+    if (side < 0 || side > 1) return;
+    const sf2::scene::FightParams& fp = sf2::scene::fight_params();
+    ComboTracker& tr = combo_callout_[side];
+    int life = fp.announce_time;  // `u9a()`
+    if (type == 3) life = fp.combo_time;              // `pCa()`
+    else if (type == 4) life = fp.hot_ground_time;    // `R9a()`
+    ComboElement* el = nullptr;
+    if (type == 4) {  // `Gr.Gma`: reuse the existing type-4 element
+        for (ComboElement& e : tr.elements) {
+            if (e.type == 4) { el = &e; break; }
+        }
+    }
+    if (el == nullptr) {
+        tr.elements.push_back(ComboElement{});
+        el = &tr.elements.back();
+        el->type = type;
+    }
+    el->count = life;
+    el->value = value;
+    static bool logged[6] = {};
+    if (type >= 0 && type < 6 && !logged[type]) {
+        logged[type] = true;
+        std::fprintf(stdout, "[callout] HUD side=%d type=%d value=%d life=%d\n",
+                     side, type, value, life);
+        std::fflush(stdout);
+    }
+}
+
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
     // Sensei dialog modal gate (quest engine `He` records): a dialog queued
@@ -9960,6 +9996,13 @@ void FightScreen::update_impl(float dt) {
     // the buffered keys land this frame (the same ordering as on_key).
     update_gamepad_input();
     fight_->update(dt);
+    // Drain the `Gr` HUD callout signals the sim recorded (`Sf.strike` flags
+    // + the hot-ground rule tick) into the per-side `Gr.Gu` lists (JS
+    // `Gr.addElement`, L2051). JS pushes synchronously from the producers;
+    // the native queues them and appends here, once per tick.
+    for (const sf2::scene::CalloutSignal& s : fight_->take_callouts()) {
+        push_callout_element(s.side, s.type, s.value);
+    }
     // [child-model probe] The shipped fights reach 0 `<CreatePlayer>` rows
     // (the action-kind census), so `SF2_CHILD_PROBE=1` drives one synthetic
     // create -> render -> delete cycle through the EXACT dispatch path and
@@ -10808,15 +10851,12 @@ void FightScreen::render_impl(App& app) {
             combo_callout_[1].elements.clear();
         } else {
             load_callouts_atlas(app);
-            sf2::data::atlas_frame combo_fr;
-            int combo_tw = 0, combo_th = 0;
-            unsigned int combo_gl = 0;
-            const bool have_combo =
-                app.get_atlas_frame("combo", &combo_fr, &combo_tw, &combo_th, &combo_gl);
-            const float nat_w = (combo_fr.source_w > 0 ? static_cast<float>(combo_fr.source_w)
-                                                       : static_cast<float>(combo_fr.w)) * hud_c;
-            const float nat_h = (combo_fr.source_h > 0 ? static_cast<float>(combo_fr.source_h)
-                                                       : static_cast<float>(combo_fr.h)) * hud_c;
+            // `Hx.i8a` (L2048): the callouts sprite frame per `Hx.wZ`
+            // (0 first_strike, 1 head_hit, 2 critical, 3 combo,
+            // 4 hot_ground, 5 shock). Frames live in res/fight/callouts.
+            static const char* const kCalloutFrame[6] = {
+                "first_strike", "head_hit", "critical",
+                "combo", "hot_ground", "shock"};
             const sf2::data::font* cfnt = app.digits_font();
             const unsigned int ctex = app.digits_texture();
             const int combo_time = sf2::scene::fight_params().combo_time;    // `v.pCa()`
@@ -10838,11 +10878,16 @@ void FightScreen::render_impl(App& app) {
                         // port's `Interval::combo_time` mirrors the field.
                         const int s_p = 0;
                         const int life = std::max(0, combo_time + s_p);  // `Qq(3,sP)`
-                        ComboElement* el =
-                            tr.elements.empty() ? nullptr : &tr.elements.front();
+                        // `Gr.Ax`: reuse the first type-3 element, else make
+                        // one (`m.find(this.Gu, d.type==3)`).
+                        ComboElement* el = nullptr;
+                        for (ComboElement& e : tr.elements) {
+                            if (e.type == 3) { el = &e; break; }
+                        }
                         if (el == nullptr) {
                             tr.elements.push_back(ComboElement{});
                             el = &tr.elements.back();
+                            el->type = 3;
                         }
                         el->count = life;
                         el->value = hq;
@@ -10873,17 +10918,43 @@ void FightScreen::render_impl(App& app) {
                     const float ex = start_x + (end_x - start_x) * b;
                     const float ey =
                         panel_y + (200.0f + 100.0f * static_cast<float>(stack)) * hud_c;
-                    if (have_combo) {
-                        try_draw_atlas_button(app, "combo", ex, ey, nat_w, nat_h, 1.0f);
+                    const int ct = (e.type >= 0 && e.type < 6) ? e.type : 3;
+                    sf2::data::atlas_frame fr;
+                    int ftw = 0, fth = 0;
+                    unsigned int fgl = 0;
+                    const bool have_frame = app.get_atlas_frame(
+                        kCalloutFrame[ct], &fr, &ftw, &fth, &fgl);
+                    const float nat_w =
+                        (fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                         : static_cast<float>(fr.w)) * hud_c;
+                    const float nat_h =
+                        (fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                         : static_cast<float>(fr.h)) * hud_c;
+                    if (have_frame) {
+                        try_draw_atlas_button(app, kCalloutFrame[ct], ex, ey, nat_w,
+                                              nat_h, 1.0f);
                     }
-                    if (cfnt != nullptr && ctex != 0) {
-                        // `Hx.init` label: box height = image height
-                        // (`Fa(100, image.qa())`); digits design size 90 ->
-                        // scale = h/90.
-                        const float nscale = nat_h / 90.0f;
-                        const std::string v = std::to_string(e.value);
-                        app.draw_text_centered(*cfnt, ctex, ex, ey - nat_h * 0.5f, v, nscale,
-                                               1.0f, 1.0f, 127.0f / 255.0f, 1.0f);
+                    // `Hx.init`: the label node exists for every type, but
+                    // only the combo (`f1a`) and hot_ground (`t1a`) paths call
+                    // `Hx.w6` (text + visible) — types 0/1/2/5 render the
+                    // sprite alone. Combo colour `Na.cd(16777087)` =
+                    // (255,255,127); hot_ground `Na.cd(16758585)` =
+                    // (255,183,57) with the ×1.2 box (`Fa(100, c)`, c =
+                    // `image.qa()*1.2`) and the extra `D(-((c-b)/2))` lift.
+                    if ((ct == 3 || ct == 4) && cfnt != nullptr && ctex != 0) {
+                        const float nscale = (ct == 4 ? nat_h * 1.2f : nat_h) / 90.0f;
+                        float lr = 1.0f, lg = 1.0f, lb = 1.0f;
+                        if (ct == 3) {
+                            lb = 127.0f / 255.0f;
+                        } else if (ct == 4) {
+                            lg = 183.0f / 255.0f;
+                            lb = 57.0f / 255.0f;
+                        }
+                        float ly = ey - nat_h * 0.5f;
+                        if (ct == 4) ly -= 0.1f * nat_h;
+                        app.draw_text_centered(*cfnt, ctex, ex, ly,
+                                               std::to_string(e.value), nscale, lr, lg,
+                                               lb, 1.0f);
                     }
                     // `Gr.azb`: while sliding (`a<1`) `count` is untouched;
                     // once landed `count--`; at 0 -> `fp=true, time=0`.
