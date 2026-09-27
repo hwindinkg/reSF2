@@ -783,8 +783,15 @@ void FightController::dispatch_move_actions(
                 // `ee.nt` L786: `c.x += this.ix*a.Wl; c.y -= this.jx`.
                 ax += act->effect_shift_x * static_cast<float>(facing);
                 ay -= act->effect_shift_y;
-                const bool ok = magic_fx_.spawn(
-                    act->name, ax, ay, owner.fighter.facing(), side,
+                // JS-STRICT per-action descriptor: `Yl.Uh(a){a.gwb(this)}`
+                // (L728) hands the ACTUAL `<Effect>` row to `cv.lwb` (L838),
+                // whose descriptor (`fileName`/`scale`/`NL`/`wcb`/`lYa`/`Gfb`/
+                // `Vla`) is that row's own. Rows sharing a `Name` but with
+                // different `Sequence` (e.g. `FireballEnd` ->
+                // mgc_magic_fireball_end vs mgc_magic_ice_ball_end) MUST NOT
+                // collapse to the first-authored variant.
+                const bool ok = magic_fx_.spawn_action(
+                    act, ax, ay, owner.fighter.facing(), side,
                     act->effect_follow, ax - owner.fighter.world_x(),
                     ay - owner.fighter.world_y());
                 std::fprintf(stdout,
@@ -4902,12 +4909,16 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 
     // [fx] Hit sparks `ql.Rub`/`Ut.ryb` (JS L369/L824): the burst is spawned
     // ONLY on a critical strike -- JS L395 `b.se && this.Ta.Rub(b.bk,b.fg)`.
-    // The burst origin is the contact point (`strike.n$` = `ch.point`). The
-    // presentation RNG is EffectSystem's private LCG (never roll01). JS fans
-    // by the impulse direction `b.fg`; the native keeps the facing x
-    // reduction (`spawn_hit_sparks`) - the impulse-vector fan is OPEN.
+    // The burst origin is the contact point (`b.bk` = `strike.n$` = `ch.point`).
+    // The fan direction is the hit event's `b.fg` (JS L510:
+    // `h=this.Bb.fg; h.x=f.x; h.y=f.y; ...` where `f` = the impulse vector
+    // built in `Kwb` L509 as `new H(b.kw,b.gR,b.hR,1)` mirrored by `da.hd()`
+    // and scaled by `JG.x/y/z`) -- exactly the `impulse` local above (L4728-
+    // 4739 already applied the mirror+JG). The old port passed the attacker
+    // FACING, dropping `b.fg.y` entirely (an uppercut/launcher fan was flat).
+    // The presentation RNG is EffectSystem's private LCG (never roll01).
     if (hit_critical) {
-        fx_.spawn_hit_sparks(ch.point.x, ch.point.y, atk.fighter.facing());
+        fx_.spawn_hit_sparks(ch.point.x, ch.point.y, impulse.x, impulse.y);
     }
 
     // [fx] The hit flash `Hyb` (JS L825) is now driven by the parsed

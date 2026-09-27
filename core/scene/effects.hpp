@@ -107,10 +107,15 @@ struct offscreen_markers {
 class EffectSystem {
 public:
     // Spawns the JS `ryb` burst: clears any previous burst, then emits
-    // `kSparkCount` (=4, JS L369 default) sparks from the hit point (x, y)
-    // travelling along `facing` (±1 -> the hit direction x). `color` is the
-    // location root colour (JS `Na.cd(Lb.N2)`); the caller may pass it.
-    void spawn_hit_sparks(float x, float y, int facing,
+    // `kSparkCount` (=4, JS L369 default) sparks from the hit point (x, y).
+    // `dir_x/dir_y` is the JS hit-event direction `b.fg` — the CONTACT-POINT
+    // strike-impulse vector, mirrored by the clip and scaled by `JG`
+    // (`sto.strike` L509-510: `d.x*=this.da.hd(); d.x*=this.JG.x; ...`,
+    // `this.Bb.fg=d`; consumed by `this.Ta.Rub(b.bk,b.fg)` L395 and fed to
+    // `av` at L833: `fg.x = a.x/200 + ...`, `fg.y = a.y/200 + ...`). NOT the
+    // attacker facing. `color` is the location root colour
+    // (JS `Na.cd(Lb.N2)`); the caller may pass it.
+    void spawn_hit_sparks(float x, float y, float dir_x, float dir_y,
                           std::uint32_t color = 0xFFFFFFFFu);
 
     // Advances every particle one 60 Hz frame (JS `av.ia` + `Ut.Cnb`):

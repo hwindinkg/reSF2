@@ -64,10 +64,14 @@ void parse_offset_vector(const std::string& s, float& x, float& y) {
 std::vector<MagicEffectDesc> build_magic_descs(
     const std::map<std::string, std::vector<std::string>>& atlas_frames,
     const std::map<std::string, MoveDef>& moves,
-    const std::vector<GlobalTrigger>* global_triggers) {
+    const std::vector<GlobalTrigger>* global_triggers,
+    std::map<const MoveAction*, std::size_t>* action_map) {
     std::vector<MagicEffectDesc> descs;
-    std::map<std::string, std::size_t> by_name;  // identity -> desc index
-    std::size_t rows = 0, resolved = 0, dupes = 0, unresolved = 0;
+    std::size_t rows = 0, resolved = 0, shared_names = 0, split_names = 0,
+                unresolved = 0;
+    std::map<std::string, std::size_t> name_rows;  // Name -> resolved row count
+    std::map<std::string, std::string> name_first_seq;  // Name -> first Sequence
+    std::string split_example;  // first (Name: seqA != seqB) evidence
 
     const auto add_row = [&](const MoveAction& a) {
         if (a.kind != "Effect") return;
@@ -79,14 +83,20 @@ std::vector<MagicEffectDesc> build_magic_descs(
             return;
         }
         ++resolved;
-        // The JS descriptor lives on the ACTION instance (one `Yl` per
-        // authored `<Effect>`); the native registry is keyed by the spawn
-        // identity (`<Effect Name>`, the `cv.LNa`/`Gwb` match key). The first
-        // authored row for a name wins; later duplicates are counted, never
-        // silently merged.
-        if (!by_name.emplace(a.name, descs.size()).second) {
-            ++dupes;
-            return;
+        // JS-STRICT: ONE descriptor per authored `<Effect>` row (`Yl` is a
+        // per-row instance, L728-730). The JS `cv.lwb` (L838) reads the
+        // row's own `fileName`/`scale`/`NL`/`wcb`/`lYa`/`Gfb`/`Vla`, so two
+        // rows sharing a `Name` but carrying different attributes must each
+        // keep their own descriptor. Track how many resolved rows share a
+        // name (the JS-visible collision count) instead of dropping them.
+        if (name_rows[a.name]++ > 0) ++shared_names;
+        const auto fs = name_first_seq.emplace(a.name, a.sequence);
+        if (!fs.second && fs.first->second != a.sequence) {
+            ++split_names;
+            if (split_example.empty()) {
+                split_example = a.name + ": " + fs.first->second + " != " +
+                                a.sequence;
+            }
         }
         MagicEffectDesc d;
         d.name = a.name;
@@ -115,6 +125,9 @@ std::vector<MagicEffectDesc> build_magic_descs(
             d.shift_x = a.effect_shift_x;
             d.shift_y = a.effect_shift_y;
         }
+        if (action_map != nullptr) {
+            (*action_map)[&a] = descs.size();
+        }
         descs.push_back(std::move(d));
     };
 
@@ -128,9 +141,13 @@ std::vector<MagicEffectDesc> build_magic_descs(
     }
     std::fprintf(stdout,
                  "[fx] magic descriptors: %zu loaded (rows=%zu resolved=%zu "
-                 "unresolved=%zu duplicate-names=%zu atlas-sets=%zu)\n",
-                 descs.size(), rows, resolved, unresolved, dupes,
-                 atlas_frames.size());
+                 "unresolved=%zu shared-names=%zu split-names=%zu atlas-sets=%zu",
+                 descs.size(), rows, resolved, unresolved, shared_names,
+                 split_names, atlas_frames.size());
+    if (!split_example.empty()) {
+        std::fprintf(stdout, "; first split=%s", split_example.c_str());
+    }
+    std::fprintf(stdout, ")\n");
     std::fflush(stdout);
     return descs;
 }
@@ -139,10 +156,14 @@ std::size_t MagicEffects::load_descriptors(
     const std::map<std::string, std::vector<std::string>>& atlas_frames,
     const std::map<std::string, MoveDef>& moves,
     const std::vector<GlobalTrigger>* global_triggers) {
+    std::map<const MoveAction*, std::size_t> action_map;
     std::vector<MagicEffectDesc> descs =
-        build_magic_descs(atlas_frames, moves, global_triggers);
+        build_magic_descs(atlas_frames, moves, global_triggers, &action_map);
     const std::size_t n = descs.size();
-    if (n > 0) load(descs);
+    if (n > 0) {
+        load(descs);
+        action_desc_ = std::move(action_map);
+    }
     return n;
 }
 
@@ -150,7 +171,9 @@ bool MagicEffects::load(const std::vector<MagicEffectDesc>& descs) {
     if (descs.empty()) return false;
     descs_ = descs;
     // Live instances hold desc INDICES — a reload invalidates them (same as
-    // JS re-entering a fight: `fB()` drains every effect first).
+    // JS re-entering a fight: `fB()` drains every effect first). The
+    // per-action map indices are invalidated with them.
+    action_desc_.clear();
     background_.clear();
     foreground_.clear();
     return true;
@@ -194,6 +217,29 @@ bool MagicEffects::spawn(const std::string& name, float x, float y, int facing,
     const MagicEffectDesc* d = find(name);
     if (d == nullptr) return false;
     const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
+    return spawn_index(idx, x, y, facing, owner, follow, anchor_dx, anchor_dy);
+}
+
+bool MagicEffects::spawn_action(const MoveAction* act, float x, float y,
+                                int facing, int owner, bool follow,
+                                float anchor_dx, float anchor_dy) {
+    if (act == nullptr) return false;
+    const auto it = action_desc_.find(act);
+    if (it == action_desc_.end()) {
+        // Not part of the loaded build (e.g. the `--fx-probe` default set) —
+        // fall back to the name lookup so legacy callers keep working.
+        return spawn(act->name, x, y, facing, owner, follow, anchor_dx,
+                     anchor_dy);
+    }
+    return spawn_index(it->second, x, y, facing, owner, follow, anchor_dx,
+                       anchor_dy);
+}
+
+bool MagicEffects::spawn_index(std::size_t idx, float x, float y, int facing,
+                               int owner, bool follow, float anchor_dx,
+                               float anchor_dy) {
+    if (idx >= descs_.size()) return false;
+    const MagicEffectDesc* d = &descs_[idx];
     MagicInstance in;
     in.desc = idx;
     in.x = x;
@@ -240,23 +286,22 @@ std::vector<MagicInstance> MagicEffects::live() const {
 }
 
 void MagicEffects::stop(const std::string& name, int owner) {
-    const MagicEffectDesc* d = find(name);
-    if (d == nullptr) return;
-    const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
     // JS `tl.Ot` (L843) calls `Gq.Ot(a)` then `Hq.Ot(a)`; each `cv.Dwb` ->
-    // `LNa` (L838) removes the FIRST entry matching `(model, name)` and
-    // `break`s. `owner < 0` keeps the legacy remove-all-by-name.
-    const auto purge = [idx, owner](std::vector<MagicInstance>& v) {
+    // `LNa` (L838) removes the FIRST entry matching `(model, NAME)` and
+    // `break`s. The match key is the descriptor NAME, not the desc index —
+    // with one descriptor per authored row, rows sharing a `Name` must all
+    // be findable by it. `owner < 0` keeps the legacy remove-all-by-name.
+    const auto purge = [this, &name, owner](std::vector<MagicInstance>& v) {
         if (owner < 0) {
             v.erase(std::remove_if(v.begin(), v.end(),
-                                   [idx](const MagicInstance& in) {
-                                       return in.desc == idx;
+                                   [this, &name](const MagicInstance& in) {
+                                       return descs_[in.desc].name == name;
                                    }),
                     v.end());
             return;
         }
         for (std::size_t i = 0; i < v.size(); ++i) {
-            if (v[i].desc == idx && v[i].owner == owner) {
+            if (descs_[v[i].desc].name == name && v[i].owner == owner) {
                 v.erase(v.begin() + static_cast<std::ptrdiff_t>(i));
                 return;  // JS `break` — first match only
             }
@@ -267,14 +312,11 @@ void MagicEffects::stop(const std::string& name, int owner) {
 }
 
 void MagicEffects::stop_follow(const std::string& name, int owner) {
-    const MagicEffectDesc* d = find(name);
-    if (d == nullptr) return;
-    const std::size_t idx = static_cast<std::size_t>(d - descs_.data());
-    // JS `cv.Hwb` -> `Gwb` (L838): latch `Yla` on the first `(model, name)`
+    // JS `cv.Hwb` -> `Gwb` (L838): latch `Yla` on the first `(model, NAME)`
     // match, `break`ing. `tl.Pt` (L843) runs it for both `Gq` and `Hq`.
-    const auto latch = [idx, owner](std::vector<MagicInstance>& v) {
+    const auto latch = [this, &name, owner](std::vector<MagicInstance>& v) {
         for (MagicInstance& in : v) {
-            if (in.desc == idx && in.owner == owner) {
+            if (descs_[in.desc].name == name && in.owner == owner) {
                 in.detached = true;  // JS `e.Yla = !0`
                 return;
             }

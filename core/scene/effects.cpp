@@ -54,17 +54,13 @@ float EffectSystem::next01() {
     return static_cast<float>(lcg_ >> 8) * (1.0f / 16777216.0f);
 }
 
-void EffectSystem::spawn_hit_sparks(float x, float y, int facing,
+void EffectSystem::spawn_hit_sparks(float x, float y, float dir_x,
+                                    float dir_y,
                                     std::uint32_t color) {
     // JS `Ut.ryb` (L824) clears the previous burst before spawning the new
     // one (`this.dKa()`), then resets the pool clock (`this.uba=0`).
     live_.clear();
     pool_age_ = 0.0f;
-
-    // The native hit is directed along ±x by the attacker's facing — the JS
-    // `IDa` direction vector reduced to its x component.
-    const float dir_x = facing >= 0 ? 1.0f : -1.0f;
-    const float dir_y = 0.0f;
 
     live_.reserve(static_cast<std::size_t>(kSparkCount));
     for (int i = 0; i < kSparkCount; ++i) {

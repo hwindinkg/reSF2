@@ -95,10 +95,19 @@ struct MagicEffectDesc {
 // A row whose Sequence has no loaded atlas is skipped (the JS spawn on a
 // missing asset produces an empty frame run). Rows with an empty Sequence
 // (a Name-only row) are skipped too.
+//
+// ONE DESCRIPTOR PER AUTHORED ACTION (JS-STRICT): the JS descriptor IS the
+// `Yl` action instance (`Yl.parse` L728-730 runs per XML row; `cv.lwb` L838
+// reads `a.fileName`/`a.scale`/`a.NL`/`a.wcb`/`a.lYa`/`a.Gfb`/`a.Vla` off
+// that instance). Two `<Effect>` rows may share a `Name` yet carry a
+// DIFFERENT `Sequence`/`Scale`/`StartRotation`; the JS spawns each row's own
+// descriptor. `action_map`, when non-null, receives `MoveAction*` -> desc
+// index so the dispatch can spawn by the exact authored row.
 std::vector<MagicEffectDesc> build_magic_descs(
     const std::map<std::string, std::vector<std::string>>& atlas_frames,
     const std::map<std::string, MoveDef>& moves,
-    const std::vector<GlobalTrigger>* global_triggers = nullptr);
+    const std::vector<GlobalTrigger>* global_triggers = nullptr,
+    std::map<const MoveAction*, std::size_t>* action_map = nullptr);
 
 // One live effect (a `bv`-wrapped `dd` in JS terms).
 struct MagicInstance {
@@ -183,6 +192,16 @@ public:
                int owner = -1, bool follow = false, float anchor_dx = 0.0f,
                float anchor_dy = 0.0f);
 
+    // JS-STRICT per-action spawn (JS `Yl.Uh(a){a.gwb(this)}` L728 -> `cv.lwb`
+    // reads THAT action instance): spawns the descriptor of the exact authored
+    // `<Effect>` row. Falls back to the name lookup when `act` was not part of
+    // the loaded build (e.g. the `--fx-probe` default set). Needed because two
+    // rows can share a `Name` with different `Sequence`/`Scale` (e.g.
+    // `FireballEnd` -> mgc_magic_fireball_end / mgc_magic_ice_ball_end / ...).
+    bool spawn_action(const MoveAction* act, float x, float y, int facing,
+                      int owner = -1, bool follow = false,
+                      float anchor_dx = 0.0f, float anchor_dy = 0.0f);
+
     // JS `cv.Dwb`/`LNa` (L838): StopEffect. Destroys the FIRST live instance
     // whose `(effect.name == name && model == owner)` matches (the loop
     // `break`s on the first hit). `owner < 0` keeps the legacy remove-all of
@@ -249,8 +268,15 @@ public:
 
 private:
     const MagicEffectDesc* find(const std::string& name) const;
+    // Shared body of `spawn`/`spawn_action` (index already resolved).
+    bool spawn_index(std::size_t idx, float x, float y, int facing, int owner,
+                     bool follow, float anchor_dx, float anchor_dy);
 
     std::vector<MagicEffectDesc> descs_;
+    // JS-STRICT: `MoveAction*` (the authored `<Effect>` row) -> its descriptor
+    // index. Built by `load_descriptors`; each row keeps its OWN descriptor so
+    // a `Name` shared across rows with different `Sequence` resolves exactly.
+    std::map<const MoveAction*, std::size_t> action_desc_;
     std::vector<MagicInstance> background_;  // JS `Gq` — before the fighters
     std::vector<MagicInstance> foreground_;  // JS `Hq` — after the fighters
 };
