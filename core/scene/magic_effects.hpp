@@ -118,6 +118,13 @@ struct MagicInstance {
     float vy = 0.0f;
     int facing = 1;           // JS `Fc.Wl = da.hd()` (+1 / -1 mirror)
     int frame = 0;            // JS `ni.hc` — current frame cursor
+    // JS `ni.MT`/`JXa` (L585-588, @585454+401): `JXa(){ this.MT(this.hc);
+    // this.hc += this.K9; ... }` — the sprite texture is set to `frames[hc]`
+    // and ONLY THEN is `hc` stepped. So the DISPLAYED frame lags the cursor by
+    // one step, and the reset frame (`RLa`/`wrb` + `yXa`) is shown twice: once
+    // at spawn and again on the first `JXa`. `show` is the last `MT` argument
+    // (the live sprite texture); `frame` is the cursor (`hc`).
+    int show = 0;             // JS `ni.MT` texture — displayed frame index
     int frame_step = 1;       // JS `ni.K9` (+1 forward / -1 backward)
     int iterations_left = 1;  // JS `ni.iterations` (>0 finite; -1 = loop)
     bool playing = true;      // JS `ni.LJ`
@@ -144,11 +151,22 @@ struct MagicInstance {
 };
 
 // One owner transform for the follow update (JS `bv.update` reads
-// `model.Fc` + `model.da.hd()`): world anchor + facing sign.
+// `model.Fc` + `model.da.hd()`): world anchor + facing sign. For a `<Position
+// Follow="true">` effect the JS re-derives the anchor EVERY tick from the
+// owner's POSED bone: `a=this.effect.position.nt(b)` where `b=model.Fc`
+// (@424997 `bv.update`), i.e. the named Part's live world position plus the
+// facing-scaled `<Position>` ShiftX/ShiftY (`ee.nt`, @371340 `Yl`/`ee`). The
+// CoM `(x,y)` below is only the fallback when no part resolves.
 struct EffectAnchor {
     float x = 0.0f;
     float y = 0.0f;
     int facing = 1;
+    // Owner handle handed back to `part_world` (opaque to this header).
+    const void* ctx = nullptr;
+    // Resolves a named skeleton part to its live world (x,y) on the owner
+    // (`positions()[bone_by_name(part)*2..]`). Returns false on a miss.
+    bool (*part_world)(const void* ctx, const char* part, float& x, float& y) =
+        nullptr;
 };
 
 // The two render containers (JS `Xm` + `cv`, L836-839): descriptors + live

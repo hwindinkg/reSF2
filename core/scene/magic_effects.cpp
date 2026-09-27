@@ -251,6 +251,10 @@ bool MagicEffects::spawn_index(std::size_t idx, float x, float y, int facing,
     // JS `cv.lwb` (L839): `a.lYa ? f.wrb() : f.RLa()` — backward starts at the
     // last frame (`Qu`), forward at the first (`mv` = 0).
     in.frame = (d->reverse && n > 0) ? n - 1 : 0;
+    // JS `RLa`/`wrb` (L586-587 @586350): the reset sets the cursor to `mv`
+    // (forward) / `Qu` (reverse) and calls `MT(...)`, so the SAME frame is the
+    // initial displayed texture (as `ni.yXa` created the sprite on frames[0]).
+    in.show = in.frame;
     in.frame_step = d->reverse ? -1 : 1;
     in.iterations_left = d->loop ? -1 : 1;  // JS `wcb ? -1 : 1`
     in.playing = true;
@@ -344,19 +348,42 @@ void MagicEffects::update(float timescale, const EffectAnchor* owners,
         for (std::size_t i = 0; i < live.size(); ++i) {
             MagicInstance& in = live[i];
             const MagicEffectDesc& d = descs_[in.desc];
+            // JS `cv.WL` (@426779): the per-effect removal test runs at the
+            // TOP of the tick — `!d.animate.LJ ? this.LNa(...) : (...
+            // animate.ia(...))`. `ni.JXa` clears `LJ` ON the wrap tick and the
+            // frame `MT`'d on that same `JXa` is still drawn, so the instance
+            // must survive one more tick before `LNa` removes it.
+            if (!in.playing) continue;  // JS `LNa` — removed NEXT tick
             // JS `bv.update` (L834, reached from `cv.WL` L839 only while
             // `effect.P1 && !Yla`): reposition a live follow/attach effect
             // onto its model before the frame advance. StopFollowEffect
             // latches `Yla` (`detached`) and suppresses this.
             if (in.follow && !in.detached && owners != nullptr &&
                 in.owner >= 0 && in.owner < owner_count) {
-                // JS `bv.update` (L834): re-anchor on the model. The native
-                // anchor keeps the spawn-time `<Position>` offset from the
-                // owner CoM (`cv.lwb` L838), so a named-Part effect stays on
-                // that part instead of snapping to the CoM.
-                in.x = owners[in.owner].x + in.anchor_dx;
-                in.y = owners[in.owner].y + in.anchor_dy;
-                in.facing = owners[in.owner].facing >= 0 ? 1 : -1;
+                // JS `bv.update` (@424997): the `else` branch runs
+                // `a=this.effect.position.nt(b)` with `b=model.Fc` and writes
+                // `b.translate.x=a.x; b.translate.y=a.y` — the named Part's
+                // LIVE posed world position + facing-scaled ShiftX/Y (`ee.nt`,
+                // L784-786), recomputed EVERY tick. Re-resolve the part on the
+                // owner's current pose instead of holding the spawn offset
+                // (which is only the fallback when no part resolves).
+                const MagicEffectDesc& fd = descs_[in.desc];
+                const EffectAnchor& an = owners[in.owner];
+                const int fsign = an.facing >= 0 ? 1 : -1;
+                float px = 0.0f, py = 0.0f;
+                bool resolved = false;
+                if (!fd.pos_part.empty() && an.part_world != nullptr) {
+                    resolved = an.part_world(an.ctx, fd.pos_part.c_str(), px, py);
+                }
+                if (resolved) {
+                    // `ee.nt` L786: `c.x += this.ix*a.Wl; c.y -= this.jx`.
+                    in.x = px + fd.shift_x * static_cast<float>(fsign);
+                    in.y = py - fd.shift_y;
+                } else {
+                    in.x = an.x + in.anchor_dx;
+                    in.y = an.y + in.anchor_dy;
+                }
+                in.facing = fsign;
             }
             in.age += 1.0f;
             in.x += in.vx / ts;
@@ -364,8 +391,6 @@ void MagicEffects::update(float timescale, const EffectAnchor* owners,
             if (d.frames.empty()) {
                 // Timeless tint pulse without frames: lives off the end-fade.
                 if (in.age >= kEndFadeTicks * 2.0f) continue;  // dead — dropped
-            } else if (!in.playing) {
-                continue;  // JS `cv.WL`: `!d.animate.LJ` -> remove
             } else {
                 const int n = static_cast<int>(d.frames.size());
                 const float tpf = d.ticks_per_frame > 0.0f ? d.ticks_per_frame : 1.0f;
@@ -374,6 +399,10 @@ void MagicEffects::update(float timescale, const EffectAnchor* owners,
                 in.accum += dt;
                 while (in.playing && in.accum >= mp) {
                     in.accum -= mp;
+                    // JS `ni.JXa` (@585454+401): `this.MT(this.hc)` FIRST
+                    // (display the cursor), THEN `this.hc += this.K9`. So the
+                    // displayed texture is the PRE-step cursor.
+                    in.show = in.frame;
                     in.frame += in.frame_step;
                     if (in.frame >= n || in.frame < 0) {
                         in.frame = 0;  // JS `JXa`: `this.hc = this.mv`
@@ -383,7 +412,6 @@ void MagicEffects::update(float timescale, const EffectAnchor* owners,
                         }
                     }
                 }
-                if (!in.playing) continue;  // JS `LNa` — destroy finished
             }
             live[w++] = in;
         }
@@ -444,7 +472,9 @@ float MagicEffects::alpha_for(const MagicInstance& in) const {
 std::string MagicEffects::frame_for(const MagicInstance& in) const {
     const MagicEffectDesc& d = descs_[in.desc];
     if (d.frames.empty()) return "";
-    int f = in.frame;
+    // `show` is the last `ni.MT` texture (`JXa` sets it from the pre-step
+    // cursor); `frame` is the cursor `hc`. See magic_effects.hpp.
+    int f = in.show;
     if (f < 0) f = 0;
     if (f >= static_cast<int>(d.frames.size())) {
         f = static_cast<int>(d.frames.size()) - 1;

@@ -1826,9 +1826,84 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          real_frame.empty() ? "<none>" : real_frame.c_str(),
                          real_ok ? "PASS" : "FAIL");
             std::fflush(stdout);
+            // --- ni display phase (JS `ni.JXa` @585454+401) ----------------
+            // `JXa(){ this.MT(this.hc); this.hc += this.K9; ... }`: the sprite
+            // texture is set BEFORE the cursor steps, so the reset frame is
+            // shown twice. A 3-frame one-shot (NL=1) must read
+            // p_1,p_1,p_2,p_3 over the first 4 ticks.
+            sf2::scene::MagicEffects phase_fx;
+            {
+                sf2::scene::MagicEffectDesc pd;
+                pd.name = "__ni_phase";
+                pd.frames = {"p/p_1", "p/p_2", "p/p_3"};
+                pd.draw_source_size = false;
+                phase_fx.load({pd});
+                phase_fx.spawn("__ni_phase", 0.0f, 0.0f, 1, 0, false);
+            }
+            std::string phase_seq =
+                phase_fx.live().empty()
+                    ? std::string("<none>")
+                    : phase_fx.frame_for(phase_fx.live().front());
+            for (int t = 0; t < 3; ++t) {
+                phase_fx.update(1.0f);
+                phase_seq += ",";
+                phase_seq += phase_fx.live().empty()
+                                 ? std::string("<removed>")
+                                 : phase_fx.frame_for(phase_fx.live().front());
+            }
+            const bool phase_ok = phase_seq == "p/p_1,p/p_1,p/p_2,p/p_3";
+            // --- dynamic bone attach (JS `bv.update` @424997) --------------
+            // A follow effect with a named part re-anchors from the owner's
+            // LIVE pose every tick (`effect.position.nt(model.Fc)`); the fake
+            // resolver moves 100,50 -> 200,70 with ShiftX/ShiftY 5/2, so the
+            // world anchor must read (105,48) then (205,68).
+            static float s_partx = 100.0f, s_party = 50.0f;
+            const auto part_res = [](const void*, const char*, float& x,
+                                     float& y) -> bool {
+                x = s_partx;
+                y = s_party;
+                return true;
+            };
+            sf2::scene::MagicEffects attach_fx;
+            {
+                sf2::scene::MagicEffectDesc ad;
+                ad.name = "__ni_attach";
+                ad.frames = {"a/a_1", "a/a_2"};
+                ad.loop = true;
+                ad.pos_part = "Hand";
+                ad.shift_x = 5.0f;
+                ad.shift_y = 2.0f;
+                ad.draw_source_size = false;
+                attach_fx.load({ad});
+                attach_fx.spawn("__ni_attach", 0.0f, 0.0f, 1, 0, true, 0.0f,
+                                0.0f);
+            }
+            sf2::scene::EffectAnchor at_an[1] = {{0.0f, 0.0f, 1, nullptr, part_res}};
+            attach_fx.update(1.0f, at_an, 1);
+            auto at_live = attach_fx.live();
+            const float at_x1 = at_live.empty() ? -1.0f : at_live.front().x;
+            const float at_y1 = at_live.empty() ? -1.0f : at_live.front().y;
+            s_partx = 200.0f;
+            s_party = 70.0f;
+            attach_fx.update(1.0f, at_an, 1);
+            at_live = attach_fx.live();
+            const float at_x2 = at_live.empty() ? -1.0f : at_live.front().x;
+            const float at_y2 = at_live.empty() ? -1.0f : at_live.front().y;
+            const bool attach_ok = std::fabs(at_x1 - 105.0f) < 0.01f &&
+                                   std::fabs(at_y1 - 48.0f) < 0.01f &&
+                                   std::fabs(at_x2 - 205.0f) < 0.01f &&
+                                   std::fabs(at_y2 - 68.0f) < 0.01f;
+            std::fprintf(stdout,
+                         "[fxprobe] ni_phase=%s phase_ok=%d attach=(%.0f,%.0f)->"
+                         "(%.0f,%.0f) attach_ok=%d\n",
+                         phase_seq.c_str(), phase_ok ? 1 : 0,
+                         static_cast<double>(at_x1), static_cast<double>(at_y1),
+                         static_cast<double>(at_x2), static_cast<double>(at_y2),
+                         attach_ok ? 1 : 0);
+            std::fflush(stdout);
             const bool pass = s0 && s1 && spawned == 2 && follow_ok && draw_ok &&
                               destroyed && latch_alive && latch_detached && emptied &&
-                              real_ok;
+                              real_ok && phase_ok && attach_ok;
             std::fprintf(stdout,
                          "[fxprobe] spawn=%zu/%d follow=%d draw=%d "
                          "stopeffect_destroyed=%d stopfollow_alive=%d "

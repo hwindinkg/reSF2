@@ -5694,11 +5694,28 @@ void FightController::update(float dt) {
     // Magic/effect containers (JS `tl.WL` L837 -> `Gq.WL`/`Hq.WL`; the
     // timescale `1/v.on()` = 1.0 here). Presentation only. The two owner
     // anchors feed the follow update (`bv.update` L834) for `follow` effects.
-    const sf2::scene::EffectAnchor fx_anchors[2] = {
+    // JS `bv.update` (@424997): a follow effect re-derives its anchor from the
+    // owner's POSED bone (`effect.position.nt(model.Fc)`), so the resolver
+    // reads the fighter's live `positions()` for the descriptor's `pos_part`
+    // (the same query the spawn uses at `spawn_action`). Empty part -> the CoM.
+    const auto part_world = [](const void* ctx, const char* part, float& x,
+                               float& y) -> bool {
+        const auto* f = static_cast<const sf2::scene::Fighter*>(ctx);
+        if (f == nullptr || part == nullptr) return false;
+        const int bi = f->model().bone_by_name(part);
+        const std::vector<float>& pos = f->positions();
+        if (bi < 0 || static_cast<std::size_t>(bi) * 2 + 1 >= pos.size()) {
+            return false;
+        }
+        x = pos[static_cast<std::size_t>(bi) * 2];
+        y = pos[static_cast<std::size_t>(bi) * 2 + 1];
+        return true;
+    };
+    sf2::scene::EffectAnchor fx_anchors[2] = {
         {player_.fighter.world_x(), player_.fighter.world_y(),
-         player_.fighter.facing()},
+         player_.fighter.facing(), &player_.fighter, part_world},
         {enemy_.fighter.world_x(), enemy_.fighter.world_y(),
-         enemy_.fighter.facing()},
+         enemy_.fighter.facing(), &enemy_.fighter, part_world},
     };
     magic_fx_.update(1.0f / game_speed_, fx_anchors, 2);
     // Child models (JS `wd.vd` — the `<CreatePlayer>` spawns): advance their
