@@ -540,9 +540,10 @@ inline R8aOut r8a_decide(bool ecb, bool target_vc, float zi_over_so,
 // (`xc.Wk` items' `x4`, perks.xml `<Rating Player=..>`) and the `xc.gX`
 // PerkAspect branch (`Be.eea` + `v.CY` `<Aspect>` config + `oma`/`gy`).
 // NOT PORTED (unported subsystems — see damage.cpp OPEN): `v.cw()`/`v.EQ()`/
-// `v.Wka`/`Fm`/`Bua` (the warrior-from-save model) and the perk-EQUIP mapping
-// (`AK` from the save's `<Perks>` against perks.xml) — so `FighterParams::perks`
-// is empty unless a caller fills it. The shipped fresh save has NO `<Rating>`
+// `v.Wka`/`Fm`/`Bua` (the warrior-from-save model). The perk-EQUIP mapping
+// (`AK` from the save's `<Perks>` against perks.xml) IS wired: the callers
+// (`screens.cpp equipped_rating_perks`/`enemy_rating_perks`) fill
+// `FighterParams::perks` per side. The shipped fresh save has NO `<Rating>`
 // perk equipped, so the loops are EMPTY there and the sum is exact.
 
 // One `Ba` (name, value) pair (JS `Ba` L112): the merged attribute list

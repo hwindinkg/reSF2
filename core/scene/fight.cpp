@@ -2565,6 +2565,13 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
         ref.set_str = pr.set;
         perk_setup_.enemy_refs.push_back(std::move(ref));
     }
+    // JS `Wk()` (L811-812): then EACH equipped item's `Oa` (its catalog
+    // `<Perks>`/`<Enchantments><Perk>` with overrides) — the mode enemy's
+    // gear perks. The app resolved them into `setup.enemy.item_refs`.
+    for (const sf2::scene::ItemPerkRef& ir : setup.enemy.item_refs) {
+        if (ir.name.empty()) continue;
+        perk_setup_.enemy_refs.push_back(ir);
+    }
     sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
@@ -3238,8 +3245,9 @@ void FightController::rebuild_body(FightFighter& f, const FightFighter& foe) {
 
 // --- perk trigger bus (`tb`) -------------------------------------------
 // `ZOa` (L398-399): rebuild live trigger sets from the PerkSetup and
-// register both sides (`Gf`). Enemy refs are usually empty (enemy gear
-// is not modeled — OPEN).
+// register both sides (`Gf`). Enemy refs carry the warrior `<Perks>` (`AK`)
+// plus each equipped item's catalog `Oa` (JS `Wk` L811), so enemy gear perks
+// drive the same trigger bus as the player's.
 void FightController::setup_bus(const PerkSetup& perks) {
     // Full reset first (JS `reset()`+`pP(true)`+`JNa` path + `Yka` re-gf):
     // live state reverts (JG/Ly/Qz/collision/timescale/color/dots), then

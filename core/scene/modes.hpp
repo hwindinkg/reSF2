@@ -30,6 +30,8 @@
 
 #include <pugixml.hpp>
 
+#include "trigger.hpp"  // sf2::scene::ItemPerkRef (the per-item `Oa`)
+
 namespace sf2::scene {
 
 // One `<Perk Name="X"><Set k="v"/></Perk>` row of a Warrior/Template
@@ -745,6 +747,13 @@ struct ModeEnemy {
     // the FIRST input of `Wk()` (L811) — before the equipped items' catalog
     // perks — so a mode enemy's `<Set>` overrides must ride along.
     std::vector<StagePerkRef> perks;
+    // JS `Wk` L811-812: after `AK` (the warrior `<Perks>` above), EVERY
+    // equipped item's `Oa` (its list.xml `<Perks>`/`<Enchantments><Perk>`)
+    // with each `<Set>` override. The app resolves `owned` names against the
+    // item catalog into these refs (the same shape the stage path's
+    // `equipped_perks` builds); `apply_mode_setup` appends them AFTER the
+    // warrior perks (AK-before-Oa). Before this the mode path dropped them.
+    std::vector<sf2::scene::ItemPerkRef> item_refs;
 };
 
 // Whole-fight setup applied post-init (`FightController::apply_mode_setup`).

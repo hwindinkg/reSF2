@@ -4973,7 +4973,9 @@ void resolve_enemy_loadout(App& app, const BattleWarriorInfo& bw,
 
 // Perk setup for the fight trigger bus (`ZOa` analog, PERKS §5.4/§5.7):
 // equipped items' `<Perks>`/`<Enchantments>` rows + names from the save,
-// resolved against the perk catalog. Enemy gear is not modeled (empty).
+// resolved against the perk catalog. The ENEMY side is the mirror of the
+// player's (JS `Wk` L811: warrior `<Perks>` first, then each equipped item's
+// catalog `Oa`), fed from the resolved stage Warrior.
 sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
                                      const BattleWarriorInfo& enemy) {
     sf2::scene::PerkSetup ps;
@@ -8028,9 +8030,11 @@ std::vector<sf2::scene::PerkModel> enemy_rating_perks(
 //
 // The fight's `<Attributes>` rules (the `k5a`/`j5a` side lists) ARE parsed now
 // (`parse_rating_side_rules` + `rating_side_attrs`), so the `2^((q-r)*l)`
-// DamageFactor term is live. REMAINDER (unported): the enemy gear perks are
-// not modeled (its `PerkSetup` is empty), so only the PLAYER's
-// `<Enchantments>`/learned `<Perks>` feed `p.perks` here. For the shipped
+// DamageFactor term is live. The enemy gear perks ARE modeled now
+// (`enemy_rating_perks` below: the stage `<Warrior>/<Perks>` + each equipped
+// item's catalog `<Perks>`/`<Enchantments>`), and the player's from its save
+// (via `equipped_rating_perks`), so BOTH sides' `p.perks`/`e.perks` feed the
+// `xc.JBa` perk `<Rating>`/PerkAspect loops. For the shipped
 // fights the rule has no negative rating, so `c = b.W3` / `d = b.C_` (the
 // Warrior-XML overrides) and `JBa` is not reached — exact there; the perk
 // `<Rating>`/PerkAspect branch runs whenever the rating is left negative.
@@ -9282,10 +9286,12 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 fight_->apply_mode_setup(setup);
                 std::fprintf(stdout,
                              "[mode] %s setup: rounds=%d time=%d recovery=%.3f "
-                             "enemy_perks=%zu enemy_items=%zu dmgP=%.0f dmgE=%.0f "
+                             "enemy_perks=%zu enemy_item_refs=%zu enemy_items=%zu "
+                             "dmgP=%.0f dmgE=%.0f "
                              "noBullets=%d reward m=%d e=%d\n",
                              battle.type.c_str(), setup.rounds, setup.round_time,
                              setup.health_recovery, setup.enemy.perks.size(),
+                             setup.enemy.item_refs.size(),
                              setup.enemy.owned.size(), setup.player_damage_factor,
                              setup.enemy_damage_factor, setup.no_bullets ? 1 : 0,
                              setup.reward.money, setup.reward.exp);
@@ -9337,6 +9343,31 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
     sf2::scene::BattleParams mrow;
     resolve_enemy_loadout(app(), mw, mrow);
     out = sf2::scene::mode_setup_from_fight(mf, mrow.enemy_owned);
+    // JS `Wk` L811-812: after the warrior's own `<Perks>` (`AK`), merge EACH
+    // equipped item's `Oa` (its catalog `<Perks>`/`<Enchantments><Perk>` with
+    // the `<Set>` overrides) — the mode enemy's GEAR perks. Resolved here (the
+    // app layer owns the item catalog) into the same `sf2::scene::ItemPerkRef`
+    // shape `equipped_perks` builds for the stage path; `apply_mode_setup`
+    // appends them after the warrior perks.
+    {
+        const std::vector<CatalogItem> catalog = load_full_catalog(app());
+        for (const sf2::scene::OwnedItem& ow : mrow.enemy_owned) {
+            if (ow.name.empty()) continue;
+            for (const CatalogItem& ci : catalog) {
+                if (ci.name != ow.name) continue;
+                for (const ItemPerkRef& pr : ci.perks) {
+                    if (pr.name.empty()) continue;
+                    sf2::scene::ItemPerkRef ref;
+                    ref.name = pr.name;
+                    ref.set_num = pr.set_num;
+                    ref.set_str = pr.set_str;
+                    ref.enchant = pr.enchant;
+                    out.enemy.item_refs.push_back(std::move(ref));
+                }
+                break;
+            }
+        }
+    }
     return true;
 }
 
