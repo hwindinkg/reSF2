@@ -1224,9 +1224,9 @@ struct FightCamera {
     // Recomputes center/zoom from the two fighters' world COM positions
     // (JS `Eu.ma` — the native fighter world_x/world_y anchors) and the
     // view size. An exact port of the JS camera chain (see the struct
-    // comment); the `ay`/`by` are the CoM y's (the oracle's CoM-mid
-    // vertical target — the native maps it to the floor anchor so the
-    // dojo's verified composition holds).
+    // comment); `ay`/`by` are the CoM y's, and `ql.tyb` (L363) makes the
+    // vertical target their midpoint (`Du.ma = wd.mea(Rw, pF)`). The render
+    // camera y is always 0 (`N.Ta.K4` L85 + `Sya`), so it stays chase state.
     void framing(float ax, float ay, float bx, float by, float view_w, float view_h);
 };
 

@@ -29,11 +29,9 @@ namespace sf2::scene {
 // view_w/h = viewport px.
 inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, float by,
                              float view_w, float view_h) {
-    // The CoM y's (ay/by) are the JS `Eu.ma` vertical target — the native
-    // keeps the verified floor@0.78 composition instead of the oracle's
-    // dummy-CoM (see the struct comment); the horizontal target uses ax/bx.
-    (void)ay;
-    (void)by;
+    // JS `ql.tyb` (L363) feeds BOTH axes: `Du.ma = wd.mea(Rw, pF)` is the
+    // midpoint of the two fighters' WORLD positions, so `ay`/`by` (the CoM
+    // y's) are the JS vertical target — there is no invented vertical anchor.
     // --- the Sya zoom (exact JS L1833) ----------------------------------
     const float aspect = view_w / view_h;
     const float span = std::fabs(bx - ax);             // d = qh.ECa() = |x1-x2|
@@ -104,12 +102,12 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
         return;
     }
     cam.du_x_ = (ax + bx) * 0.5f;                      // By = mid of the CoM's x
-    // The vertical target: the arena FLOOR line at 0.78 of the view height
-    // (F9*(1-zoom) keeps the line anchored at any zoom — JS Ut.init
-    // F9 = (Lb.height/2 - ct)/2).
-    const float floor_screen_y = view_h * 0.78f;
-    const float vshift = ((cam.arena_h / 2.0f - cam.floor) / 2.0f) * (1.0f - cam.zoom);
-    cam.du_y_ = cam.floor + vshift - (floor_screen_y - view_h / 2.0f) / cam.zoom;
+    // JS `ql.tyb` (L363): `Du.ma = wd.mea(Rw, pF)` — the midpoint of the two
+    // fighters' world positions on ALL axes, so the vertical target is the
+    // midpoint CoM y (`start_y_` uses the same formula, fight.cpp:457). The
+    // earlier native kept an invented floor-anchored y here (D1); `Sya`/`K4`
+    // never feed the render camera y, so it was dead chase state anyway.
+    cam.du_y_ = (ay + by) * 0.5f;
 
     // --- the smoothing (ql.dZa, exact) ----------------------------------
     const float d_x = cam.du_x_ - cam.du_prev_x_;      // $X = By - DO
