@@ -15310,13 +15310,38 @@ void EquipmentScreen::render_impl(App& app) {
     // the `info_panel_v` frame stretched into their slots. Flat fallback only
     // on a genuine atlas miss (never a silent blank).
     if (load_scroll_atlas(app)) {
-        const float midx = v.J + v.width() * 0.5f;
-        const float midy = v.P + v.height() * 0.5f;
-        if (!try_draw_atlas_button(app, "bg", midx, midy, v.width(), v.height(), 1.0f,
-                                   /*fill=*/true, /*flip_x=*/false)) {
-            draw_flat_button(app, "", midx, midy, v.width(), v.height(), 0.62f, 0.5f,
-                             0.34f, false);
+        // JS `Fg.wc` (L1869-1870): the `Xd` viewer body is `paper_edge_left` +
+        // stretched `paper` + `paper_edge_right`, NOT the `bg`/`bg_edge` panel
+        // (that pair belongs to the `od` dialog, L1863). `Xd.Pn` (L2185) calls
+        // `scroll.ba(a.N-a.J, a.W-a.P, (a.N-a.J)*.08)`, so `Fg.ba` (L1870)
+        // makes each edge `k = c/fa.x` wide (display width `c = .08*viewer_w`)
+        // and stretches every part to the full viewer height (`f.Pb(e)`/
+        // `g.Pb(e)`, e = `a.W-a.P`); the centre `paper` is `d - 2*edge` wide.
+        const float edge = v.width() * kFgRailFrac;
+        if (!try_draw_atlas_button(app, "paper_edge_left", v.J, v.P, edge, v.height(),
+                                   1.0f, /*fill=*/true, /*flip_x=*/false,
+                                   /*top_left=*/true)) {
+            draw_flat_button(app, "", v.J + v.width() * 0.5f, v.P + v.height() * 0.5f,
+                             v.width(), v.height(), 0.62f, 0.5f, 0.34f, false);
+        } else {
+            try_draw_atlas_button(app, "paper", v.J + edge, v.P, v.width() - 2.0f * edge,
+                                  v.height(), 1.0f, /*fill=*/true, /*flip_x=*/false,
+                                  /*top_left=*/true);
+            try_draw_atlas_button(app, "paper_edge_right", v.N - edge, v.P, edge,
+                                  v.height(), 1.0f, /*fill=*/true, /*flip_x=*/false,
+                                  /*top_left=*/true);
         }
+        // JS `Xd` ctor (L2186): `uT = R.$(E.get(254), y.hoa /* roll_shadow */,
+        // this.scroll.content)`; `Xd.Pn` (L2185) sizes it `uT.xc(scroll.Gv+5)`,
+        // `uT.Pb(scroll.Xy)`. `scroll.content` sits at `(c, vk)` in the node
+        // (`Fg.ba` L1870 `content.C(c); content.D(vk)`), so the shadow starts at
+        // the paper rail (`edge`) one rail-height (`30`) down and spans the
+        // inner `Gv+5` x `Xy` — the vertical darkening the oracle shows over
+        // the perk/achievement lists.
+        try_draw_atlas_button(app, "roll_shadow", v.J + edge, v.P + 30.0f,
+                              (v.width() - 2.0f * edge) + 5.0f, v.height() - 60.0f,
+                              1.0f, /*fill=*/true, /*flip_x=*/false,
+                              /*top_left=*/true);
         constexpr float kRollSrcH = 114.0f, kRollCapSrcW = 101.0f;
         const float roll_h = 30.0f;                                 // Zh(w,30)
         const float capw = kRollCapSrcW * (roll_h / kRollSrcH);
