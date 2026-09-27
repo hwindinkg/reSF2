@@ -494,6 +494,39 @@ struct BattleRecord {
     };
     std::vector<AchievementCounter> counters;
 
+    // JS `yt.rD(a)` (L297): the saved `<Counter Name=a>` row (null when absent).
+    AchievementCounter* counter(const std::string& name) {
+        for (AchievementCounter& c : counters) {
+            if (c.name == name) return &c;
+        }
+        return nullptr;
+    }
+    const AchievementCounter* counter(const std::string& name) const {
+        for (const AchievementCounter& c : counters) {
+            if (c.name == name) return &c;
+        }
+        return nullptr;
+    }
+
+    // JS `yt.ika()` L297 (`f = this.rD(e.name)` branch):
+    //   `a = f.AB + e.tP; e.type=="WinBattle" && a>1 && (a=1); f.vMa(a)`
+    // plus the create-on-miss `yt.I1a(e.name,a)` (`new kl` + `vMa`). The
+    // `WinBattle` cap uses the COUNTER DEF`type` (internal_settings.xml
+    // `<AchievementCounter>`, JS `v.iY.Yy`), passed in by the caller as
+    // `cap_at_one`. Returns the saved counter's new value.
+    int counter_add(const std::string& name, int delta, bool cap_at_one) {
+        if (name.empty() || delta <= 0) return counter(name) != nullptr ? counter(name)->value : 0;
+        AchievementCounter* c = counter(name);
+        int value = (c != nullptr ? c->value : 0) + delta;  // `f.AB + e.tP`
+        if (cap_at_one && value > 1) value = 1;             // `WinBattle` cap
+        if (c != nullptr) {
+            c->value = value;                               // `kl.vMa(a)`
+        } else {
+            counters.push_back({name, value});              // `yt.I1a`
+        }
+        return value;
+    }
+
     // Achievement unlock records (JS `ll`, `yi.jO`: `<Achievements>
     // <Achievement Name=".." ObtainedReward="true"/>`; `ll` ctor L1247,
     // `yt.parse` L294). `yt.Yua` L297 sets the def's `completed` + reward

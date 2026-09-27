@@ -869,6 +869,14 @@ public:
     // The live `Oa.Hg` shop tab index (probe/verify read).
     int tab() const { return tab_; }
 
+    // [probe] `--settings-profile-shop-probe` (vi): drive the REAL `M8` price
+    // plate (`Ne.ZYa` L2251 -> `Pa.iwa` L1228) for `it`, so the JS level/
+    // availability gate (`shop_detail_buy_available`) is observable end-to-end
+    // (not just as a predicate).
+    bool probe_purchase_price(App& app, const CatalogItem& it) {
+        return purchase_price_plate(app, it);
+    }
+
 private:
     std::vector<CatalogItem> items_;
     int hover_ = -1;      // grid cell hover (row index within the tab)

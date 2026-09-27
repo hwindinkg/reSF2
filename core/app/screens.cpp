@@ -11111,6 +11111,164 @@ int ResultsScreen::exp_for_level(int level) {
     return it != thresholds.end() ? it->second : 100;
 }
 
+// JS `v.iY.parse` (L594055, the `<AchievementCounter>` node of
+// internal_settings.xml) + `yt.ika` (L297) + `v.Cpb` (L616881): the missing
+// counter WRITE path. The JS session tracker (`Vt`) accumulates each fight's
+// value into `e.tP`; `COa` copies it (`e.tP = this.Ob.Hv.get(name).value`,
+// L191266) and `ika()` flushes `f.AB + e.tP` into `<Counters>`, capping
+// `WinBattle` (`e.type=="WinBattle" && a>1 -> a=1`). `Cpb` then auto-unlocks
+// every `<Achievement CounterValue<=value>` of a flushed counter (`yt.sca` ->
+// `<Achievements><Achievement ObtainedReward="false">`).
+static bool load_res_doc(const char* path, sf2::data::xml_doc& doc) {
+    try {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return false;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+    } catch (const std::exception&) {
+        return false;
+    }
+    return true;
+}
+struct AchievementCounterDef {
+    std::string name;                       // `Counter Name`
+    std::string type;                       // `Counter Type` (the `e.type`)
+    std::string fight;                      // `Fight` attr ("zone|battle|index")
+    std::string fight2;                     // `Fight2` attr
+    std::string eclipse;                    // `EclipseMode` attr ("0"/"1")
+    std::vector<std::string> win_battles;   // `<WinBattle Name>` children
+};
+
+// Parse internal_settings.xml `<AchievementCounter><Counter>` (JS `iY.parse`).
+static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
+    std::vector<AchievementCounterDef> out;
+    sf2::data::xml_doc doc;
+    if (!load_res_doc("reference/extracted/xml/res/internal_settings.xml", doc)) return out;
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) return out;
+    const pugi::xml_node ac = root.child("AchievementCounter");
+    if (!ac) return out;
+    for (pugi::xml_node c : ac.children("Counter")) {
+        AchievementCounterDef d;
+        d.name = c.attribute("Name").value();
+        if (d.name.empty()) continue;
+        d.type = c.attribute("Type").value();
+        d.fight = c.attribute("Fight").value();
+        d.fight2 = c.attribute("Fight2").value();
+        d.eclipse = c.attribute("EclipseMode").value();
+        for (pugi::xml_node wb : c.children("WinBattle")) {
+            const std::string n = wb.attribute("Name").value();
+            if (!n.empty()) d.win_battles.push_back(n);
+        }
+        out.push_back(std::move(d));
+    }
+    return out;
+}
+
+// Build the per-fight counter deltas the native hooks can source. Each mapped
+// delta is the JS `tP=1` flag value the session tracker yields for that TYPE
+// (`Bq`/`Nk` set `Ob.Hv` 0/1; `COa` copies it into `tP`):
+//   WinBattle    -> `Xsb(record)` when the win's `hb` name matches a
+//                   `<WinBattle Name>` (`IZa` -> `uga`, L189588).
+//   FightBeaten  -> `Ysb(record)` when `RI(counter.T3a/U3a)` matches
+//                   `Fight`/`Fight2` (L189533).
+//   Losses       -> `zrb()` on a lost fight (`Bq("Losses")`, L188930).
+//   MaximumLevel -> `Psb()` when the player reaches a new maximum level.
+// The other shipped TYPES (PerfectRound, ComboCount, Style, FirstHits, Disarm,
+// HeadHitRound, SurvivalRounds, HealthRemained, RoundQuicker/Longer,
+// RestrictedAnimation, ShockWin, BodyguardsWin, BossWin, TournamentsBeaten,
+// ChallangesBeaten, DailyBeaten, BossNoLose, Enchantments, Quest) have NO
+// shipped trigger hook in the native FightController (it tracks round/HP/
+// combo state but not per-round perfect/disarm/style/first-hit session flags;
+// no quest-completion counter hook either), so they are SKIPPED (no invention).
+static std::map<std::string, int> fight_result_counter_deltas(
+    const std::string& ids, bool player_won, bool leveled_up) {
+    std::map<std::string, int> deltas;
+    for (const AchievementCounterDef& d : load_achievement_counter_defs()) {
+        // `EclipseMode="1"` counters need the fight's eclipse state, which the
+        // native `PendingBattle` does not carry -> SKIP (no invention). The
+        // `EclipseMode="0"` / absent rows are the normal-mode hooks.
+        if (d.eclipse == "1") continue;
+        if (player_won) {
+            if (d.type == "WinBattle") {
+                for (const std::string& wb : d.win_battles) {
+                    if (wb == ids) {
+                        deltas[d.name] += 1;  // `Xsb` -> capped at 1 by `ika`
+                        break;
+                    }
+                }
+            } else if (d.type == "FightBeaten") {
+                if ((!d.fight.empty() && d.fight == ids) ||
+                    (!d.fight2.empty() && d.fight2 == ids)) {
+                    deltas[d.name] += 1;
+                }
+            }
+        } else if (d.type == "Losses") {
+            deltas[d.name] += 1;  // `zrb`
+        }
+        if (leveled_up && d.type == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
+    }
+    return deltas;
+}
+
+// JS `yt.ika()` L297 + `v.Cpb` L616881: apply each delta to the saved counter
+// (the `WinBattle` cap uses the counter DEF's `type`) and auto-unlock the
+// matching achievements. Returns the number of achievements unlocked.
+static int flush_achievement_counters(App& app, WarriorSave& w,
+                                      const std::map<std::string, int>& deltas) {
+    (void)app;
+    if (deltas.empty()) return 0;
+    std::map<std::string, std::string> type_of;
+    for (const AchievementCounterDef& d : load_achievement_counter_defs())
+        type_of[d.name] = d.type;
+    std::vector<std::string> changed;  // JS `ika`'s `b` (the flushed names)
+    for (const auto& kv : deltas) {
+        if (kv.second <= 0) continue;  // `if(e.tP>0)`
+        const std::string type = type_of.count(kv.first) ? type_of[kv.first] : "";
+        const int after = w.counter_add(kv.first, kv.second, type == "WinBattle");
+        changed.push_back(kv.first);
+        std::fprintf(stdout, "[counter] %s +%d -> %d (type=%s)\n", kv.first.c_str(),
+                     kv.second, after, type.c_str());
+        std::fflush(stdout);
+    }
+    // `v.Cpb(v.uv.BZa(changed))`: for each flushed counter, unlock every
+    // achievement whose `CounterValue` <= the new value (skip already-unlocked).
+    int unlocked = 0;
+    sf2::data::xml_doc doc;
+    if (load_res_doc("reference/extracted/xml/res/achievements.xml", doc)) {
+        const pugi::xml_node root = doc.root().first_child();
+        if (root) {
+            for (pugi::xml_node c : root.children("Counter")) {
+                const std::string cname = c.attribute("Name").value();
+                if (std::find(changed.begin(), changed.end(), cname) == changed.end()) continue;
+                const WarriorSave::AchievementCounter* sc = w.counter(cname);
+                const int value = sc != nullptr ? sc->value : 0;
+                for (pugi::xml_node a : c.children("Achievement")) {
+                    const std::string an = a.attribute("Name").value();
+                    if (an.empty()) continue;
+                    const int target = sf2::data::xml_attr_int(a, "CounterValue", 0);
+                    if (value < target) continue;  // `BZa` break
+                    bool already = false;
+                    for (const WarriorSave::AchievementUnlock& u : w.achievement_unlocks) {
+                        if (u.name == an) {
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (already) continue;
+                    w.achievement_unlocks.push_back({an, false});  // `yt.sca(g,!1)`
+                    std::fprintf(stdout, "[achievement] UNLOCK %s (%s=%d >= %d)\n",
+                                 an.c_str(), cname.c_str(), value, target);
+                    std::fflush(stdout);
+                    ++unlocked;
+                }
+            }
+        }
+    }
+    return unlocked;
+}
+
 // JS `v.kD` (L622187) -> `v.F().dmb(f)` -> `emb` (L93552): commit the
 // fight reward at the FIGHT END (money -> `Pa.Fwa`, exp -> `Pa.Iab`), the
 // battle record (`Dxa`), the level-up (`OLa`/`Oz` thresholds) and
@@ -11131,6 +11289,7 @@ void apply_fight_reward(App& app) {
         std::fprintf(stderr, "[result] save load failed: %s\n", e.what());
         return;
     }
+    bool leveled_up = false;
     if (player_won) {
         // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money),
         // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
@@ -11163,6 +11322,7 @@ void apply_fight_reward(App& app) {
             w.experience -= need;
             w.level++;
             w.power += 2;
+            leveled_up = true;  // `Psb` -> MaximumLevel counter delta
             std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n",
                          w.level, w.power);
         }
@@ -11180,6 +11340,19 @@ void apply_fight_reward(App& app) {
                          ids.c_str(), fr->losses, fr->level);
         }
         std::fprintf(stdout, "[result] LOSS (no reward)\n");
+    }
+    // JS `fe.COa(...)` -> `p.o.yi.ika()` (L216008/L217754/L620909) + `v.Cpb`:
+    // flush the session counter deltas into `<Counters>` and auto-unlock the
+    // achievements they cross. Runs BEFORE the save so the counters persist.
+    {
+        const std::string cids = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
+        const std::map<std::string, int> deltas =
+            fight_result_counter_deltas(cids, player_won, leveled_up);
+        const int unlocked = flush_achievement_counters(app, w, deltas);
+        std::fprintf(stdout,
+                     "[result] ika flush: %zu counter delta(s), %d achievement(s) unlocked\n",
+                     deltas.size(), unlocked);
+        std::fflush(stdout);
     }
     try {
         app.save().save(w);
@@ -12022,6 +12195,18 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     } catch (const std::exception&) {
         return false;
     }
+    // JS `Oa` detail update (L1156807): `this.Aa.xf<=p.o.bb() && (type!=I.wk ||
+    // ICa()) ? Sxb() : Zdb()` — `Pa.iwa` is wired ONLY from the enabled `M8`
+    // plate, so an above-level / unavailable item can never charge. Guarded at
+    // the ROOT (the shared predicate), independent of the click dispatch.
+    if (!shop_detail_buy_available(bit, bw.level)) {
+        std::fprintf(stdout,
+                     "[shop] Zdb %s: level %d > player %d (or RealMoneyItem w/o "
+                     "price) -> purchase DISABLED (no charge)\n",
+                     bit.name.c_str(), bit.has_level ? bit.level : 0, bw.level);
+        std::fflush(stdout);
+        return false;
+    }
     // `Pa.iwa` L1228 money gate `p.o.Tb >= a.jp()`: the charged price is the
     // offer-aware one (`p.o.xa.vu()` -> `yf.KA`), not the raw list.xml `Price`.
     const std::int64_t price = shop_effective_price(app, bit);
@@ -12107,6 +12292,17 @@ bool ShopScreen::purchase_gem_price_plate(App& app, const CatalogItem& bit) {
     }
     const int price = shop_effective_bonus(app, bit);
     if (price <= 0) return false;  // `kL` L2254 never activates a 0-price plate
+    // JS `Oa` detail update (L1156807): the `pVa` RubyButton is one of the
+    // `Cd` plates gated by `Sxb()`/`Zdb()`; apply the SAME level/availability
+    // gate before charging rubies.
+    if (!shop_detail_buy_available(bit, bw.level)) {
+        std::fprintf(stdout,
+                     "[shop] Zdb %s: level %d > player %d (or RealMoneyItem w/o "
+                     "price) -> RUBY purchase DISABLED (no charge)\n",
+                     bit.name.c_str(), bit.has_level ? bit.level : 0, bw.level);
+        std::fflush(stdout);
+        return false;
+    }
     if (bw.bonus < price) {
         // `Pa.EYa` L1228 else: `v.Bv(a,3)` -> reason 3 (`p.o.$Pa` = "Ruby").
         std::fprintf(stdout,
@@ -13004,7 +13200,11 @@ void ShopScreen::update_impl(float dt) {
                               p.x <= gold_rect.N && p.y >= gold_rect.P && p.y <= gold_rect.W;
         const bool hit_gem = p_gems > 0 && p.pressed && p.x >= gem_rect.J &&
                              p.x <= gem_rect.N && p.y >= gem_rect.P && p.y <= gem_rect.W;
-        if (hit_gold || hit_gem) {
+        // JS `Oa` detail update (L1156807) `Sxb()`/`Zdb()`: the `Cd` price
+        // plates are ENABLED (`Nf=!0`) only when the item passes the level/
+        // availability gate. An unavailable plate never dispatches `Pa.iwa`.
+        const bool pavail = shop_detail_buy_available(pit, seen_.level);
+        if ((hit_gold || hit_gem) && pavail) {
             if (powned) {
                 // `Ne.Ehb` cases 8/9 L2250 -> `Pa.DYa`/`Pa.FYa` L1228-1229.
                 if (up_ok) {
@@ -13427,17 +13627,22 @@ void ShopScreen::render_impl(App& app) {
             gold = shop_effective_price(app, *sel_it);
             gems = shop_effective_bonus(app, *sel_it);
         }
+        // JS `Zdb()` L1159395 dims each `Cd` plate (`c.node.wa(.7)`) when the
+        // item fails the L1156807 gate `xf<=bb() && (type!=wk||ICa())`;
+        // `Sxb()` L1159486 restores `wa(1)` and `c.Nf=!0`.
+        const float avail_a = shop_detail_buy_available(*sel_it, seen_.level) ? 1.0f : 0.7f;
         auto draw_price_plate = [&](int slot, const char* icon, std::int64_t value) {
             const float py = byy0 - static_cast<float>(slot) * (bh + bpad);
             if (!(load_sliced_atlas(app) &&
-                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, 1.0f))) {
-                draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f, 0.62f,
-                                 0.30f, false);
+                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, avail_a))) {
+                draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f * avail_a,
+                                 0.62f * avail_a, 0.30f * avail_a, false);
             }
-            try_draw_atlas_button(app, icon, cx0 + 30.0f, py, 40.0f, 40.0f, 1.0f, false,
+            try_draw_atlas_button(app, icon, cx0 + 30.0f, py, 40.0f, 40.0f, avail_a, false,
                                   false);
             draw_ui_label(app, cx0 + 56.0f, py - 15.0f, cw0 - 56.0f, 30.0f,
-                          std::to_string(value), 0.9f, UiAlign::Left, 0.15f, 0.10f, 0.05f);
+                          std::to_string(value), 0.9f, UiAlign::Left, 0.15f * avail_a,
+                          0.10f * avail_a, 0.05f * avail_a);
         };
         int slot = 0;
         if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
@@ -17201,6 +17406,83 @@ int run_shell_probe(App& app) {
         std::fflush(stdout);
         check(std::fabs(y_after - y_before) > 1.0f && row_after > row_before,
               "(vii) Profile ACHIEV list scrolls (Gg.aa drag moves firstRow)");
+    }
+    // (viii) SHOP DETAIL LEVEL GATE (JS L1156807): `this.Aa.xf<=p.o.bb() &&
+    // (this.Aa.type!=I.wk||this.Aa.ICa()) ? this.Sxb() : this.Zdb()`. The
+    // unowned `M8` plate purchase is REFUSED for an above-level item (no
+    // charge) and ACCEPTED at/above its `Level`, driven through the real
+    // `purchase_price_plate` (`Pa.iwa` L1228).
+    {
+        ShopScreen shop(app.screens());
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const CatalogItem* hi = nullptr;
+        for (const CatalogItem& it : full) {
+            if (it.has_level && it.level > 1 && it.price > 0 && !it.paid &&
+                it.type != "RealMoneyItem" && !it.shop_hide) {
+                hi = &it;
+                break;
+            }
+        }
+        if (hi != nullptr) {
+            WarriorSave w = app.save().load();
+            const int saved_level = w.level;
+            w.level = 1;  // `p.o.bb()` below the item's `xf`
+            w.money = 1000000000;
+            w.bonus = 1000000;
+            app.save().save(w);
+            const bool gate_low = shop_detail_buy_available(*hi, 1);
+            const std::int64_t m0 = app.save().load().money;
+            const bool bought_low = shop.probe_purchase_price(app, *hi);
+            const std::int64_t m1 = app.save().load().money;
+            w = app.save().load();
+            w.level = hi->level;  // `p.o.bb() >= xf`
+            app.save().save(w);
+            const bool gate_high = shop_detail_buy_available(*hi, hi->level);
+            const bool bought_high = shop.probe_purchase_price(app, *hi);
+            const std::int64_t m2 = app.save().load().money;
+            std::fprintf(stdout,
+                         "[sps] shopgate item=%s lvl=%d @L1 gate=%d bought=%d money "
+                         "%lld->%lld; @L%d gate=%d bought=%d money->%lld\n",
+                         hi->name.c_str(), hi->level, gate_low ? 1 : 0, bought_low ? 1 : 0,
+                         static_cast<long long>(m0), static_cast<long long>(m1), hi->level,
+                         gate_high ? 1 : 0, bought_high ? 1 : 0, static_cast<long long>(m2));
+            std::fflush(stdout);
+            check(gate_low == false && bought_low == false && m1 == m0 && gate_high == true &&
+                      bought_high == true && m2 < m1,
+                  "(viii) shop detail level gate: BLOCKED at L1, ALLOWED at item level");
+            w = app.save().load();
+            w.level = saved_level;
+            app.save().save(w);
+        } else {
+            check(false, "(viii) shop detail level gate: no Level>1 priced item");
+        }
+    }
+    // (ix) ACHIEVEMENT COUNTER WRITE PATH (JS `yt.ika` L297 + `v.Cpb`
+    // L616881): a won fight whose `hb` triple matches the `Survival1`
+    // FightBeaten counter's `Fight` must raise the saved counter and unlock the
+    // counter's first achievement (uses the REAL delta builder + flush).
+    {
+        WarriorSave w = app.save().load();
+        const WarriorSave::AchievementCounter* cb = w.counter("Survival1");
+        const int before = cb != nullptr ? cb->value : 0;
+        const std::size_t ul_before = w.achievement_unlocks.size();
+        const std::map<std::string, int> deltas =
+            fight_result_counter_deltas("ZONE_1|Survival|1", /*player_won=*/true,
+                                        /*leveled_up=*/false);
+        const int unlocked = flush_achievement_counters(app, w, deltas);
+        app.save().save(w);
+        const WarriorSave chk = app.save().load();
+        const WarriorSave::AchievementCounter* ca = chk.counter("Survival1");
+        const int after = ca != nullptr ? ca->value : 0;
+        std::fprintf(stdout,
+                     "[sps] ach Survival1 %d->%d deltas=%zu unlocks=%d (total unlocks "
+                     "%zu->%zu)\n",
+                     before, after, deltas.size(), unlocked, ul_before,
+                     chk.achievement_unlocks.size());
+        std::fflush(stdout);
+        check(after == before + 1 && unlocked >= 1 &&
+                  chk.achievement_unlocks.size() > ul_before,
+              "(ix) achievement counter write path: Survival1 rises + achievement unlocks");
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);

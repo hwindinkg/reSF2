@@ -191,6 +191,21 @@ struct CatalogItem {
     std::vector<OfferCondition> offer_conditions;  // `CE` <- <OfferConditions>
 };
 
+// JS shop-detail availability gate (L1156807):
+//   `this.Aa.xf <= p.o.bb() && (this.Aa.type != I.wk || this.Aa.ICa())`.
+// `this.Aa` = the selected `CatalogItem`; `xf` = the item's `Level` attr
+// (`u.I(a.attributes.get("Level"))`, absent -> 0, NOT the port's default 1);
+// `p.o.bb()` = the player level (`ZB`); `I.wk` = "RealMoneyItem" (L1272053);
+// `ICa()` L169073 = `kc(this.Hp) > 1E-10` = `has_real_price` (item_catalog.cpp
+// L468-486). When false the JS runs `Zdb()` (dim `wa(.7)` + disable `Nf=!1`,
+// L1159395) instead of `Sxb()` (enable, L1159486). This is the SAME predicate
+// the price-plate purchase path and the click dispatch use.
+inline bool shop_detail_buy_available(const CatalogItem& it, int player_level) {
+    const int req = it.has_level ? it.level : 0;  // `xf` (null -> 0)
+    return req <= player_level &&
+           (it.type != "RealMoneyItem" || it.has_real_price);  // `I.wk` / `ICa()`
+}
+
 // Parses list.xml into the item list (JS `it.parse`). `xml_text` is the
 // extracted list.xml document. Throws std::runtime_error on malformed XML.
 std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text);
