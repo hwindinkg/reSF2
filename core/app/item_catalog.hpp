@@ -154,6 +154,12 @@ struct CatalogItem {
     // RealMoneyItem rows (35 `AddPercent` / 46 `ConsumableProduct` shipped).
     int add_percent = 0;             // AddPercent
     bool consumable_product = false; // ConsumableProduct="1"
+    // JS item ctor L164: `this.Hp` is `RealPrice` (leading currency char
+    // stripped, first space token) or `RealPriceConst`. `ICa()` L169073 =
+    // `kc(this.Hp) > 1E-10` gates the Ruby/IAP tab (`Oa.f5` case 5 filter,
+    // L1177372) and the shop detail buy button (`Aa.xf<=bb() && (type!=wk ||
+    // ICa())`, L1156807). True when the row carries a positive real price.
+    bool has_real_price = false;
     std::vector<ItemPerkRef> perks;  // `<Perks>` + `<Enchantments>` rows
     // The item's combat stats (JS `this.attributes`, a `ud` map; item ctor
     // `for(e of v.eo.attributes) node.attributes.get(e.name)!=null &&

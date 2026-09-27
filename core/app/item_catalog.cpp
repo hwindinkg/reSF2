@@ -33,7 +33,7 @@ const std::vector<ShopAttributeDef>& shop_attribute_defs() {
         {"RangedDamage", "ranged_attack", "RangedDamage", false},
         {"MagicDamage", "magic_attack", "MagicDamage", false},
         {"CriticalChance", "critical_chance", "Chance", true},
-        {"CriticalRating", "critical_chance", "Enchantment", false},  // ShopHidden, not Hidden
+        {"CriticalRating", "critical_chance", "Enchantment", true},  // Hidden="1"
         {"BlockDamageFactor", "", "", true},
         {"DamageFactor", "", "", true},
         {"RangedQuantity", "ranged_quantity", "RangedQuantity", true},
@@ -465,6 +465,29 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.add_percent = sf2::data::xml_attr_int(item, "AddPercent", 0);
         ci.consumable_product =
             attr_bool_str(item.attribute("ConsumableProduct").value());
+        // JS item ctor L164: `Hp` = `RealPrice` with its leading currency char
+        // stripped (`J.substr(this.xr,1,null)`, first space token), else
+        // `RealPriceConst`. `ICa()` (L169073) = `kc(this.Hp) > 1E-10` gates the
+        // Ruby/IAP tab (`f5` case 5, L1177372) and the shop detail buy button
+        // (L1156807). Only rows with a positive real price are listed/sold.
+        {
+            std::string rp;
+            if (item.attribute("RealPrice")) {
+                const std::string raw = item.attribute("RealPrice").value();
+                rp = raw.empty() ? std::string() : raw.substr(1);
+                const std::size_t sp = rp.find(' ');
+                if (sp != std::string::npos) rp = rp.substr(0, sp);
+            } else if (item.attribute("RealPriceConst")) {
+                rp = item.attribute("RealPriceConst").value();
+            }
+            if (!rp.empty()) {
+                try {
+                    std::size_t pos = 0;
+                    ci.has_real_price = std::stod(rp, &pos) > 1e-10;
+                } catch (...) {
+                }
+            }
+        }
         // JS item ctor L326-327: `this.Tg = UpgradeLevel` and
         // `this.D6 = <Upgrades Template>`; `dkb` L342 then walks the inline
         // `<Upgrades><Upgrade>` rows into `eB` (each via `wf.Qd`).

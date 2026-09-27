@@ -12396,8 +12396,17 @@ std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, in
     const bool tab5 = tab == 5;
     for (std::size_t i = 0; i < items.size(); ++i) {
         const std::string& ty = items[i].type;
-        const bool keep = tab5 ? (ty == "RealMoneyItem" || ty == "Consumable")
-                               : (ty == kShopTabs[tab].type);
+        bool keep;
+        if (tab5) {
+            // `Oa.f5` case 5 (L1177372): `m.oD(this.gC, c -> c.type == I.wk ?
+            // c.ICa() : true)` — RealMoneyItem rows only when `ICa()` (a
+            // positive `RealPrice`/`RealPriceConst`, L169073), Consumable
+            // always. Without the gate the port listed e.g. `TapjoyRubyTab`.
+            keep = ty == "Consumable" ||
+                   (ty == "RealMoneyItem" && items[i].has_real_price);
+        } else {
+            keep = ty == kShopTabs[tab].type;
+        }
         if (keep) out.push_back(i);
     }
     return out;
