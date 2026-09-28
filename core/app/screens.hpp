@@ -820,6 +820,18 @@ private:
         // label colour (combo/hot_ground) and the label life (`Gr.Qq`)
         // differ.
         int type = 3;
+        // `Gr.addElement` STORES the slide endpoints at spawn (L2051):
+        //   `c = a.node.Xn(new H(pe==0?0:N.width,0,0,1)).x`  -> `Ix.Pp`
+        //   `d = b + this.Gu.length*100` (b = `jUa.y` = 200) -> the node Y
+        //   `b.y_ = pe==0?400:-400`                        -> `Ix.y_`
+        // `Ix.move` then slides x = `Pp + (y_ - Pp)*b`; the Y never moves.
+        // Every callout type (0/1/2/3/4/5) goes through `addElement`, so all
+        // six carry their OWN edge spawn + stack slot + target. `spawn_x` is
+        // screen-space (port HUD 0 / kViewW); `target_x` and `stack_y` are
+        // the JS-local values (local x * hud_c + panel origin in render).
+        float spawn_x = 0.0f;  // `Ix.Pp`
+        float target_x = 0.0f; // `Ix.y_` (JS-local ±400)
+        float stack_y = 200.0f;// `d` at spawn (JS-local 200 + Gu.length*100)
     };
     struct ComboTracker {
         int last_signal = 0;                  // `combos_announced` high-water

@@ -10218,9 +10218,19 @@ void FightScreen::push_callout_element(int side, int type, int value) {
         }
     }
     if (el == nullptr) {
+        // `Gr.addElement` computes the node's position and the `Ix` slide
+        // endpoints HERE, once, from the CURRENT `Gu.length`:
+        //   `d = jUa.y(200) + Gu.length*100`, `c = pe==0?0:N.width` (edge),
+        //   `y_ = pe==0?400:-400`. Every type shares this (h1a/P1a/p1a/r1a/
+        //   f1a/t1a all funnel through `addElement`). The port stores them on
+        //   the element so the render is a pure `Ix.move` replay.
+        const float local_y = 200.0f + 100.0f * static_cast<float>(tr.elements.size());
         tr.elements.push_back(ComboElement{});
         el = &tr.elements.back();
         el->type = type;
+        el->spawn_x = (side == 0) ? 0.0f : kViewW;         // `Ix.Pp`
+        el->target_x = (side == 0) ? 400.0f : -400.0f;     // `Ix.y_`
+        el->stack_y = local_y;                             // `d`
     }
     el->count = life;
     el->value = value;
@@ -11305,9 +11315,17 @@ void FightScreen::render_impl(App& app) {
                             if (e.type == 3) { el = &e; break; }
                         }
                         if (el == nullptr) {
+                            // Same `Gr.addElement` spawn bookkeeping as the
+                            // drained-signal path: store `Pp`/`y_`/`d` at
+                            // creation so `Ix.move` slides from the edge.
+                            const float local_y =
+                                200.0f + 100.0f * static_cast<float>(tr.elements.size());
                             tr.elements.push_back(ComboElement{});
                             el = &tr.elements.back();
                             el->type = 3;
+                            el->spawn_x = (side == 0) ? 0.0f : kViewW;
+                            el->target_x = (side == 0) ? 400.0f : -400.0f;
+                            el->stack_y = local_y;
                         }
                         el->count = life;
                         el->value = hq;
@@ -11323,10 +11341,7 @@ void FightScreen::render_impl(App& app) {
                         }
                     }
                 }
-                const float start_x = (side == 0) ? 0.0f : kViewW;
-                const float end_x = (side == 0) ? (panel_player_x + 400.0f * hud_c)
-                                                : (panel_enemy_x - 400.0f * hud_c);
-                int stack = 0;
+                const float panel_x = (side == 0) ? panel_player_x : panel_enemy_x;
                 for (std::size_t i = 0; i < tr.elements.size();) {
                     ComboElement& e = tr.elements[i];
                     // `Ix.move`: time += frame; a=min(1,time/.5);
@@ -11335,9 +11350,31 @@ void FightScreen::render_impl(App& app) {
                     const float a = std::min(1.0f, e.time / kSlide);
                     const float b = e.fp ? (1.0f - a) * (1.0f - a)
                                          : 1.0f - (1.0f - a) * (1.0f - a);
-                    const float ex = start_x + (end_x - start_x) * b;
-                    const float ey =
-                        panel_y + (200.0f + 100.0f * static_cast<float>(stack)) * hud_c;
+                    // `Ix.move`: `target.node.C(Pp + (y_ - Pp)*b)`. `Pp`
+                    // (edge spawn), `y_` (target, JS-local ±400) and `d`
+                    // (`stack_y`) were STORED at spawn by `Gr.addElement`, so
+                    // the slide is identical for all six types and the stack
+                    // slot does not shift when an earlier element is removed.
+                    const float land_x = panel_x + e.target_x * hud_c;
+                    const float ex = e.spawn_x + (land_x - e.spawn_x) * b;
+                    const float ey = panel_y + e.stack_y * hud_c;
+                    {
+                        // One-shot per type: the JS-exact geometry (`Pp`, the
+                        // land `y_` mapped to screen, `d`).
+                        static bool hud_dbg[6] = {};
+                        if (e.type >= 0 && e.type < 6 && !hud_dbg[e.type]) {
+                            hud_dbg[e.type] = true;
+                            std::fprintf(stdout,
+                                         "[callout-hud] side=%d type=%d spawn_x=%.1f "
+                                         "land_x=%.1f ey=%.1f stack_y=%.1f\n",
+                                         side, e.type,
+                                         static_cast<double>(e.spawn_x),
+                                         static_cast<double>(land_x),
+                                         static_cast<double>(ey),
+                                         static_cast<double>(e.stack_y));
+                            std::fflush(stdout);
+                        }
+                    }
                     const int ct = (e.type >= 0 && e.type < 6) ? e.type : 3;
                     sf2::data::atlas_frame fr;
                     int ftw = 0, fth = 0;
@@ -11388,7 +11425,6 @@ void FightScreen::render_impl(App& app) {
                                           static_cast<std::ptrdiff_t>(i));
                         continue;
                     }
-                    ++stack;
                     ++i;
                 }
             }
