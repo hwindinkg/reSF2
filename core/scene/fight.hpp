@@ -942,6 +942,8 @@ enum class banner_kind : int {
     round,      // `Cr.tca` round plate (atlas frame `round` + the round number)
     fight,      // `Cr.Zy` fight plate (atlas frame `fight`)
     ko,         // `Cr.GZ` round-end plate (atlas frame `perfect`/`great`)
+    timesup,    // `Cr.uca` round-end plate `y.DQa` (js `Iq==3`)
+    ringout,    // `Cr.rca` round-end plate `y.AQa` (js `Iq==4`)
     victory,    // the battle-end win plate
     defeat,     // the battle-end lose plate
 };
@@ -951,8 +953,10 @@ enum class banner_kind : int {
 // gate (`h4a` -> `Ewb` -> `h9`, L387/L404).
 enum class banner_action : int {
     none = 0,     // display only (`vhb` has no case for the type; the first
-                  // round's plate, the FIGHT! plate, victory/defeat)
+                  // round's plate, the FightNone `xF(2)` plate, victory/defeat)
     begin_round,  // JS type 2 -> `vhb` case 2 -> `FNa` (L409): phase 1
+    begin_fight,  // JS type 5 (`Cr.Zy` FIGHT plate) -> `vhb` case 5 -> `Rkb`
+                  // (L410): phase 2. The plate holds phase 1 for `fu(1.166)`.
     next_round,   // the round-end hold -> `NA()` + `Z2()` (L411/L414/L408)
     end_battle,   // the result-plate hold -> `battle_over_` (the Results)
 };

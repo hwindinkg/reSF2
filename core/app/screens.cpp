@@ -3686,6 +3686,13 @@ const char* banner_atlas_frame(sf2::scene::banner_kind kind) {
     switch (kind) {
         case sf2::scene::banner_kind::round: return "round";
         case sf2::scene::banner_kind::fight: return "fight";
+        // JS `Cr.GZ` (L2024): type 6 -> `y.zQa` ("perfect"), type 7 ->
+        // `y.wQa` ("great"); the port's `ko` plate uses the winner frame.
+        case sf2::scene::banner_kind::ko: return "perfect";
+        // JS `Cr.uca` (L2024) `y.DQa` / `Cr.rca` `y.AQa` (the round-end
+        // timesup / ringout plates, `ca.Pf` L196360 `Iq` 3/4).
+        case sf2::scene::banner_kind::timesup: return "timesup";
+        case sf2::scene::banner_kind::ringout: return "ringout";
         case sf2::scene::banner_kind::victory: return "perfect";
         case sf2::scene::banner_kind::defeat: return "great";
         default: return nullptr;

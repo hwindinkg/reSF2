@@ -607,8 +607,11 @@ static const UiTourStep kFidelitySteps[] = {
     // phase 1 at f=131) and its phase 2 at frame 133 (the oracle's at f=334),
     // so each state's port frame = oracle phase-local frame mapped onto the
     // port's phase-local frame:
-    //   stance 251-131=120 ; block 347-334+133=146 ; pause 588-334+133=387 ;
-    //   attack 591-334+133=390 ; hit 835-334+133=634.
+    //   stance 251-131=120 ; block 347-334+202=215 ; pause 588-334+202=456 ;
+    //   attack 591-334+202=459 ; hit 835-334+202=703.  (Phase 2 now starts at
+    //   port frame 202: phase 1 is 133 stance frames + the JS FIGHT plate
+    //   `fu(1.166)` = 69 frames, so the oracle's phase-2 local frame maps onto
+    //   202, not the old 133 — the FIGHT plate was previously missing.)
     // The port's BOSS_LYNX round 0 now survives the full 99 s timer (the
     // 8cb8a65e JS-exact fight), so the earlier ~F181 K.O. clamp is gone and
     // every mapped phase-2 frame is reachable. The oracle's ONLY fight input
@@ -630,22 +633,22 @@ static const UiTourStep kFidelitySteps[] = {
     {0.0f, 0.0f, "fight stance", 6, 0, -1, 0, "fight_stance.png", 0, true, 0.0f, 0.0f, -1, false,
      120, false, 3, 0},
     {0.0f, 0.0f, "fight block", 6, 0, -1, 0, "fight_block.png", 0, true, 0.0f, 0.0f, -1, false,
-     146, false, 3, 0},
+     215, false, 3, 0},
     // The oracle's single fight input: punch (control 9 = K/Space) pressed at
     // phase-2 local 227 (oracle f=561 -> port frame 360).
     {0.0f, 0.0f, "fight punch (oracle control 9)", 6, 0, -1, 0, nullptr, 32, true, 0.0f, 0.0f,
-     -1, false, 360},
+     -1, false, 429},
     // Pause at the oracle pause shot's frame f=588 (phase-2 local 254 -> port
     // frame 387), so the frozen backdrop matches the oracle `pause.png`
     // backdrop (opened by the HUD pause disc 627,125; native Esc alias). The
     // pause/resume freeze does not skip the move clock, so the attack capture
     // below still lands at move-frame 30 as in the oracle.
-    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 2, "pause.png", 256, true, 0.0f, 0.0f, -1, false, 387},
+    {0.0f, 0.0f, "pause (Esc)", 6, 0, -1, 2, "pause.png", 256, true, 0.0f, 0.0f, -1, false, 456},
     {0.0f, 0.0f, "resume (Esc)", 6, 0, -1, 2, nullptr, 256, false},
     {0.0f, 0.0f, "fight attack", 6, 0, -1, 0, "fight_attack.png", 0, true, 0.0f, 0.0f, -1, false,
-     390},
+     459},
     {0.0f, 0.0f, "fight hit", 6, 0, -1, 0, "fight_hit.png", 0, true, 0.0f, 0.0f, -1, false,
-     634},
+     703},
     {0.0f, 0.0f, "fight->results", 6, 0, 10, 0, "results_win.png", 0, true},
     // results_lose: no deterministic headless loss path (the enemy AI is
     // passive in the tested direct fight; the auto fight wins) — closest

@@ -99,6 +99,17 @@ void snapshot_capsule_ends(FightFighter& f) {
         f.prev_cap_ends[c.name] = std::make_pair(c.r1, c.r2);
     }
 }
+
+// [probe, authorised] `SF2_ROUND_PROBE=1`: the round/fight timeline dump
+// switch. A free env toggle so the CLI probe needs no app-layer plumbing.
+bool round_probe_on() {
+    static int s = -1;
+    if (s < 0) {
+        const char* e = std::getenv("SF2_ROUND_PROBE");
+        s = (e != nullptr && e[0] != '\0' && e[0] != '0') ? 1 : 0;
+    }
+    return s == 1;
+}
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -3180,19 +3191,33 @@ void FightController::apply_round_result(round_result result, const FightFighter
         set_scene_visible(false);
     }
 
-    // The K.O. finish plate (JS `Cr.GZ` L2024, type 6/7, `fu(1.166)`).
-    // `GZ` has no `ca.vhb` (L410) case, so its expiry does NOT dispatch —
-    // but the port uses it as the end-stance hold: JS advances the round
-    // when the end-stance animation finishes (`kg` L387 `h4a` -> `Ewb`
-    // L404 -> `h9` -> `Onb` L411 `ZK(); NA(); Z2()`), and the port has no
-    // end-stance clip, so the plate's `fu(1.166)` hold stands in for it.
-    // A BATTLE-ENDING round does not raise this plate: `end_battle` raises
-    // the result plate with the same hold, so the fight-end sequence plays
-    // before the Results (JS `bea` L413 -> `kD` L415).
-    if (result == round_result::ko && !battle_end) {
-        banner_show(banner_kind::ko, kJsBannerHoldSeconds,
+    // JS `ca.Pf` (L196360): the round-END result plate, `fu(1.166)`. The
+    // winner's round-end reason `Iq` picks the art:
+    //   case 2 -> `yca`/`xca` (label_win / label_lose);
+    //   case 3 -> `uca` (timesup); case 4 -> `rca` (ringout);
+    //   default -> `GZ` (perfect / great).
+    // The port's `round_result` maps ko (default / `Onb` KO) -> `ko`,
+    // timeout_win (`Onb` L412 `ey=3`) -> `timesup`, ringout (`BT` L392
+    // `ey=4`) -> `ringout`. `GZ`/`uca`/`rca` have no `ca.vhb` (L410) case,
+    // so their expiry does NOT dispatch in the JS; the port uses the plate as
+    // the end-stance hold (the JS advances the round only when the end-stance
+    // animation finishes: `kg` L387 `h4a` -> `Ewb` L404 `h9` -> `Onb` L411
+    // `ZK(); NA(); Z2()`), so `banner_action::next_round` runs `NA` + `Z2` on
+    // the plate's expiry. A BATTLE-ENDING round raises no plate here:
+    // `end_battle` raises the result plate with the same `fu(1.166)` hold.
+    if (!battle_end) {
+        banner_kind result_plate = banner_kind::ko;
+        const char* plate_name = "K.O.";
+        if (result == round_result::timeout_win) {
+            result_plate = banner_kind::timesup;
+            plate_name = "TIMESUP";
+        } else if (result == round_result::ringout) {
+            result_plate = banner_kind::ringout;
+            plate_name = "RINGOUT";
+        }
+        banner_show(result_plate, kJsBannerHoldSeconds,
                     banner_action::next_round, false);
-        std::fprintf(stdout, "[fight] banner: K.O. (F%d)\n", frame_);
+        std::fprintf(stdout, "[fight] banner: %s (F%d)\n", plate_name, frame_);
         std::fflush(stdout);
     }
 
@@ -3203,18 +3228,12 @@ void FightController::apply_round_result(round_result result, const FightFighter
         // JS `bea` (L413): the battle end. `end_battle` raises the result
         // plate (fu(1.166)) and `battle_over_` flips only on its expiry.
         end_battle(w);
-    } else if (cur_banner_ == banner_kind::ko) {
-        // The K.O. plate holds the break (see above); its expiry runs
-        // `NA()` + `Z2()` through `banner_expire`.
-        round_wait_ = true;
     } else {
-        // JS `Onb` (L411) else branch: `this.Ta.XF(!1), this.ZK(),
-        // this.NA(), this.Z2()` — the next round starts AUTOMATICALLY.
-        // There is no host "Next" button in the JS; the round-break plate
-        // raised by `Z2` (`Cr.tca` L2023) holds the round until `FNa`.
+        // The result plate holds the break; its expiry runs `NA()` + `Z2()`
+        // through `banner_expire` (`banner_action::next_round`). There is no
+        // host "Next" button in the JS: the round-break plate raised by `Z2`
+        // (`Cr.tca` L2023) then holds the next round until `FNa`.
         round_wait_ = true;
-        between_rounds_recover();   // JS `NA` (L414)
-        round_start();              // JS `Z2` (L408) via `tx`/`wca`/`vhb`
     }
 }
 
@@ -3240,10 +3259,17 @@ void FightController::begin_next_mode_fight(const ModeSetup& setup) {
     player_.is_winner = false;
     enemy_.is_winner = false;
     phase_ = fight_phase::idle;
+    // JS `Onb` (L411) hides the 3-D view (`this.Ta.XF(!1)`) before the series
+    // advance, and `mfb` (L205745) runs the enemy swap + `this.xF(0); this.tx()`
+    // UNDER it. `tx` re-arms the round and `ha.wca` (`Cr.wca` L2023 ->
+    // `vhb` case 1 -> `Z2`) raises the ROUND break plate, so the next fight
+    // does NOT start instantly and the reposition is invisible (bugs #7/#8).
+    // The old code called `enter_start_stance()` directly with the scene
+    // SHOWN: it teleported the fighters on screen and skipped the ROUND plate.
+    set_scene_visible(false);
     apply_mode_setup(setup);
     round_.number = 0;
-    round_init();
-    enter_start_stance();
+    round_start();  // JS `mfb` -> `this.tx()` -> `ha.wca` -> the ROUND plate
     std::fprintf(stdout,
                  "[mode] next fight armed: enemy='%s' rounds=%d reward m=%d e=%d\n",
                  enemy_.name.c_str(), battle_.rounds, setup.reward.money,
@@ -5885,6 +5911,12 @@ void FightController::banner_expire() {
             // JS `vhb` (L410) case 2/3 -> `FNa` (L409): phase 1.
             enter_start_stance();
             break;
+        case banner_action::begin_fight:
+            // JS `vhb` (L410) case 5 -> `Rkb` (L410): phase 2 (`xF(2)`),
+            // the FIGHT plate's `fu(1.166)` hold now elapsed. This is where a
+            // non-`FightNone` round actually goes live (bug #6).
+            enter_fight();
+            break;
         case banner_action::next_round:
             // The port's stand-in for the JS end-stance gate
             // (`kg` L387 -> `h4a` L413 -> `Ewb` L404 -> `h9` -> `Onb`
@@ -6004,20 +6036,33 @@ void FightController::update(float dt) {
             ++start_stance_frames_;
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
-            if (start_stance_frames_ >= kStartStanceFrames) {
-                // JS `kg` (L387): `this.eu==1 && a` (the stance clip
-                // finished) -> `this.Da.type!="FightNone" ? this.Am() :
-                // this.xF(2)`. `Am()` raises the FIGHT! plate (`Cr.Zy`
-                // L2024, `fu(1.166)`) and only its expiry (`vhb` L410 case
-                // 5) calls `Rkb`. The traced configuration takes the
-                // `xF(2)` branch — `oracle_pose.jsonl` shows `phase` 1 -> 2
-                // at f=134 — so the port enters phase 2 here and shows the
-                // plate for the same JS `fu(1.166)` hold (display only).
-                banner_show(banner_kind::fight, kJsBannerHoldSeconds,
-                            banner_action::none, false);
-                std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
-                std::fflush(stdout);
-                enter_fight();
+            if (start_stance_frames_ >= kStartStanceFrames && !start_stance_done_) {
+                // JS `kg` (L387): `this.eu==1 && a` (the stance clip finished)
+                // -> `this.Da.type!="FightNone" ? this.Am() : this.xF(2)`.
+                // `FightNone` takes `xF(2)` straight to phase 2 (the plate below
+                // is display-only for it, matching the oracle dummy trace).
+                if (battle_.type == "FightNone") {
+                    banner_show(banner_kind::fight, kJsBannerHoldSeconds,
+                                banner_action::none, false);
+                    std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
+                    std::fflush(stdout);
+                    enter_fight();
+                } else {
+                    // JS `Am()` (L409) -> `Ar.Zy` (L2020) -> `Cr.Zy` (L2024):
+                    // the FIGHT plate (type 5, `fu(1.166)`, `wU=!0` so it is
+                    // armed immediately). It does NOT enter phase 2: the plate
+                    // expiry (`vhb` L410 case 5) calls `Rkb` -> `xF(2)`, so the
+                    // round-start delay holds BOTH fighters out of the fight
+                    // (no AI attack, no input) for the full 1.166 s the plate
+                    // is on screen. The old port called `enter_fight()` on the
+                    // same frame it raised the plate, so the enemy attacked
+                    // during/right after the FIGHT banner (bug #6).
+                    start_stance_done_ = true;  // raise the plate ONCE
+                    banner_show(banner_kind::fight, kJsBannerHoldSeconds,
+                                banner_action::begin_fight, false);
+                    std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
+                    std::fflush(stdout);
+                }
             }
             break;
         }
@@ -6154,6 +6199,40 @@ void FightController::update(float dt) {
     // phase machine, so a dispatch (`FNa`/`Rkb`/`Z2`) is applied from the
     // next frame on — the JS ordering.
     banner_tick(dt);
+
+    // [probe, authorised] `SF2_ROUND_PROBE=1`: dump the round/fight timeline on
+    // every state change (phase, banner, scene visibility, round_wait, round
+    // number, either fighter's move) with the fighters' live anchors. Proves
+    // the FIGHT-plate end / first attack / round-end / next-round-start frames
+    // and the positions across the reset. No behaviour change when unset.
+    if (round_probe_on()) {
+        static int pp = -9999, pb = -9999, pr = -9999, pv = -9999, pw = -9999;
+        static std::string pemv = "<>", ppmv = "<>";
+        const int ph = static_cast<int>(phase_);
+        const int bn = static_cast<int>(cur_banner_);
+        const int vv = camera_.visible ? 1 : 0;
+        const int rw = round_wait_ ? 1 : 0;
+        const std::string& emv = enemy_.last_move;
+        const std::string& pmv = player_.last_move;
+        if (ph != pp || bn != pb || round_.number != pr || vv != pv || rw != pw ||
+            emv != pemv || pmv != ppmv) {
+            std::fprintf(stdout,
+                         "[rprobe] F%d phase=%d banner=%d vis=%d round=%d rw=%d "
+                         "px=%.1f py=%.1f ex=%.1f ey=%.1f hpP=%.1f hpE=%.1f P=%s E=%s\n",
+                         frame_, ph, bn, vv, round_.number, rw,
+                         static_cast<double>(player_.fighter.world_x()),
+                         static_cast<double>(player_.fighter.world_y()),
+                         static_cast<double>(enemy_.fighter.world_x()),
+                         static_cast<double>(enemy_.fighter.world_y()),
+                         static_cast<double>(player_.hp),
+                         static_cast<double>(enemy_.hp),
+                         pmv.empty() ? "idle" : pmv.c_str(),
+                         emv.empty() ? "idle" : emv.c_str());
+            std::fflush(stdout);
+            pp = ph; pb = bn; pr = round_.number; pv = vv; pw = rw;
+            pemv = emv; ppmv = pmv;
+        }
+    }
 
     // The camera follows the fight (JS ql.Ea -> tyb/dZa/c3a + ma.Sya).
     // JS `ql.tyb` (L363 + the L535/L581 `Dl.mea(a.Eu,b.Eu)`) targets the
