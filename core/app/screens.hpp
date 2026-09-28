@@ -961,10 +961,45 @@ public:
         return purchase_price_plate(app, it);
     }
 
+    // [probe] the shop `Pi` preview (`Oa.Fhb` L2300 -> `Ex(a,7)`): arm it for
+    // `it` (the SAME `arm_preview` the TRY press runs) and report the merged
+    // body bones + the live `Te.M0()` clip frame. Used to prove the preview
+    // advances at the `Te.ia` subframe rate, not one frame per tick.
+    bool probe_arm_preview(App& app, const CatalogItem& it) {
+        arm_preview(app, it);
+        return preview_active_;
+    }
+    int preview_bones() const { return static_cast<int>(preview_model_.bones.size()); }
+    int preview_frame() const { return preview_frame_; }
+    int preview_sub() const { return preview_fighter_ ? preview_fighter_->sub() : 0; }
+    bool preview_active() const { return preview_active_; }
+    // [probe] arm the preview for `it` and advance it `steps` fixed ticks
+    // (plus the arm's own `Pi.Ex` tick); returns the `Te.M0()` clip frame.
+    int probe_preview_frame_after(App& app, const CatalogItem& it, int steps);
+    // [probe] scroll the list so `row` is centred and run the `Gg.aa` (L1886)
+    // centre-band auto-selection (two passes: arm + apply, the JS `Oha`
+    // deferral); returns the resulting `sel_`.
+    int probe_scroll_select(App& app, int tab, int row);
+
+    // [probe] the player body the shop/dojo `Pi` backdrop draws — JS `p.o.Ca`
+    // after `setItem` -> `Ca.hk` + `Ca.cM` (L134620). `probe_sync_model`
+    // re-merges it from the save (the same path a buy/equip runs).
+    void probe_sync_model(App& app);
+    int player_model_bones(App& app) const;
+    int player_model_tris(App& app) const;
+
 private:
     std::vector<CatalogItem> items_;
     int hover_ = -1;      // grid cell hover (row index within the tab)
     int sel_ = 0;         // selected grid row (JS `Oa.xA`/`Za.Ac` L2296)
+    // `Gg.aa` (L1886) AUTO-selection: every frame the scroller picks the cell
+    // within 30 px of the list centre (`Math.abs(c.Qk)<30 && this.Ac!=c`) and
+    // sets `this.Oha=!0`; the NEXT frame fires `vK.Z(Ac)` -> `Oe.Cp` ->
+    // `this.xA.Z(item)` -> `Oa.xA` (L2296) which refreshes the detail panel
+    // (`Jyb`/`Qma`/`z6`/`DU`). So scrolling updates the name/price WITHOUT a
+    // click. `auto_sel_row_` = JS `Ac`; `auto_sel_pending_` = JS `Oha`.
+    int auto_sel_row_ = -1;
+    bool auto_sel_pending_ = false;
     int side_hover_ = 0;  // 0 = none, 1 = detail action button (JS `Up`)
     std::int64_t money_logged_ = 0;
     // --- `Gg` list scroll (JS L1883-1893): drag + momentum + snap --------
@@ -1308,6 +1343,7 @@ private:
     // branch resumes immediately (`Cxa()`).
     std::unique_ptr<sf2::scene::Fighter> block_preview_fighter_;
     sf2::scene::Model block_preview_model_;
+    const sf2::scene::MoveDef* block_preview_move_ = nullptr;   // owned by FightAssets
     const sf2::data::anim_clip* block_preview_clip_ = nullptr;  // owned by FightAssets
     int block_preview_frame_ = 0;
     bool block_preview_active_ = false;
@@ -1324,6 +1360,7 @@ private:
     // y -93).
     std::unique_ptr<sf2::scene::Fighter> avatar_fighter_;
     sf2::scene::Model avatar_model_;
+    const sf2::scene::MoveDef* avatar_move_ = nullptr;   // owned by FightAssets
     const sf2::data::anim_clip* avatar_clip_ = nullptr;  // owned by FightAssets
     std::string avatar_clip_name_;
     int avatar_frame_ = 0;

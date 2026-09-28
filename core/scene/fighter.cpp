@@ -1819,6 +1819,25 @@ void Fighter::clear_move() {
     clip_mirror_ = 1;
 }
 
+// JS `Pi.Ex` L2301 -> `wd.ia` -> `Te.ia` (see fighter.hpp): seat a DISPLAY-ONLY
+// clip for the shop `TryOn` / profile move preview. `Te.Skb` L550-551 resets
+// the playback counters and `Gka` seats the subframe rate; the caller then
+// `advance()`s exactly like the fight so the clip lasts
+// `(clipLen-FirstFrame)*(MidFrames+1)+1` 60 Hz frames — NOT one clip frame per
+// tick (the old raw `++frame` was 3x too fast for MidFrames=2).
+void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip) {
+    clear_move();  // `Te.reset`/`Bnb`: drop any previous move + ragdoll
+    current_move_ = &move;
+    current_clip_ = &clip;
+    move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
+    playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
+    sub_ = std::max(1, (move.mid_frames + 1) * 1);  // JS `Gka`: (XJ+1)*HD
+    subframe_ = 0;
+    last_action_frame_ = -1;  // the `cX` sentinel (first `vp` sees a change)
+    ended_move_ = nullptr;
+    sample_current();  // the first `Te.eda` pose
+}
+
 // JS `Dl.NQ` (L575): `for(d in this.Wf.b3){if(a==d.first)return d.second;
 // if(a==d.second)return d.first} return -1` — the mirror partner of bone `i`.
 int Fighter::mirror_partner(int i) const {

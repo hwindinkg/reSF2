@@ -333,6 +333,21 @@ public:
     void advance(float dt);
     void advance_step();  // one fixed sub-step (timescale loop calls this)
 
+    // --- display preview playback (`Pi.Ex` L2301 -> `wd.ia` -> `Te.ia`) -----
+    // Seats a DISPLAY-ONLY clip so the caller drives it through the SAME
+    // `advance()` (the `Te.ia` subframe pacing) the fight uses. The shop
+    // `TryOn` (`Oa.Fhb` L2300 -> `Ex(a,7)`) and the profile move preview
+    // (`vb.DK` -> `Pi.kg` -> `wd.fJa`) both play on a `Pi` model whose
+    // animation is `Pi.ia` -> `wd.ia` -> `Te.ia`; a raw `++frame` per 60 Hz
+    // tick was `(MidFrames+1)` = 3x TOO FAST (same bug the fight's Phase 4a
+    // fixed). Seats the `Te.Skb` counters (`playhead_=0`, `subframe_=0`,
+    // `sub_=(MidFrames+1)`) and samples the first pose; the caller then calls
+    // `advance()` once per fixed step and reads `move_frame()` (JS `Te.M0()`).
+    // `preview_active()` goes false when the clip ends (`Te.KNa` clears the
+    // move), the `Ad.kg` animation-end.
+    void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip);
+    bool preview_active() const { return current_clip_ != nullptr; }
+
     // --- move-frame action dispatch (JS `Te.Lwa` L563-564) -----------------
     // JS `xc.voice` (the fighter XML `<Voice>` attr; `Vo` ctor default ""
     // L807, filled by `ur` L186 from the Warrior's Voice). The

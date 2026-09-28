@@ -12641,6 +12641,13 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     preview_fighter_->set_model(preview_model_);
     preview_fighter_->set_color(assets.dojo.root_color());
     preview_clip_ = &cit->second;
+    // `Pi.Ex` (L2301) seats the clip and runs `this.ia()` ONCE; `Oa.Fhb` then
+    // calls `this.Ad.aa(L.K.sk.Bm)` (one more `ia()`). Drive the SAME `Te.ia`
+    // subframe pacing the fight uses (the old raw `++preview_frame_` per tick
+    // was `(MidFrames+1)` = 3x too fast).
+    preview_fighter_->start_preview_clip(*tm, *preview_clip_);
+    preview_fighter_->advance(0.0f);  // `Pi.Ex`'s internal `this.ia()`
+    preview_frame_ = preview_fighter_->move_frame();
     preview_active_ = true;
     // Preview-owned storage: the shared body (`assets.merged`, used by the
     // dojo/fight and the idle backdrop) is NEVER rebuilt here, so returning
@@ -12720,6 +12727,87 @@ static void log_purchase_fired(const char* kind,
     for (const std::string& n : fired) std::fprintf(stdout, " %s", n.c_str());
     std::fprintf(stdout, "\n");
     std::fflush(stdout);
+}
+
+// `p.o.setItem(c,!0)` (JS L134620) -> `this.Ca.hk(type,item); this.Ca.cM()`:
+// every shop BUY/EQUIP rebuilds the player's `xc` body from the save's typed
+// slots (`xc.cM` L809-810 -> `Yc.load` L568). The port's shared
+// `FightAssets::merged` is the player body the shop/dojo/profile `Pi`
+// backdrops draw (`Pi.Lb`, L439), so re-merge it here — the pre-fix port wrote
+// only the save slot and the `Pi` body kept the pre-purchase gear (the user
+// report: "при покупке предмета модель персонажа не обновляется").
+void shop_rebuild_player_model(App& app) {
+    if (!app.has_fight_assets()) return;
+    FightAssets& assets = app.fight_assets();
+    std::vector<std::string> names;
+    try {
+        const WarriorSave w = app.save().load();
+        names = {w.skeleton, w.weapon, w.armor, w.helm};
+    } catch (const std::exception&) {
+        return;
+    }
+    const std::vector<std::string> model_names = fighter_model_names(app, names);
+    if (model_names.empty() || model_names[0].empty()) return;
+    assets.merged = assets.merge_names(model_names);
+    std::fprintf(stdout, "[shop] Ca.cM re-merge: %zu bones / %zu tris\n",
+                 assets.merged.bones.size(), assets.merged.resolved_tris.size());
+    std::fflush(stdout);
+}
+
+void ShopScreen::probe_sync_model(App& app) { shop_rebuild_player_model(app); }
+int ShopScreen::player_model_bones(App& app) const {
+    return app.has_fight_assets()
+               ? static_cast<int>(app.fight_assets().merged.bones.size())
+               : 0;
+}
+int ShopScreen::player_model_tris(App& app) const {
+    return app.has_fight_assets()
+               ? static_cast<int>(app.fight_assets().merged.resolved_tris.size())
+               : 0;
+}
+int ShopScreen::probe_preview_frame_after(App& app, const CatalogItem& it, int steps) {
+    arm_preview(app, it);
+    if (!preview_active_ || preview_fighter_ == nullptr) return -1;
+    for (int i = 0; i < steps; ++i) {
+        preview_fighter_->advance(0.0f);
+        preview_frame_ = preview_fighter_->move_frame();
+    }
+    return preview_frame_;
+}
+std::vector<std::size_t> shop_tab_rows(const std::vector<CatalogItem>& items, int tab);
+int ShopScreen::probe_scroll_select(App& app, int tab, int row) {
+    (void)app;
+    const ShopLayout sl = shop_layout(tab);
+    const int nrows = static_cast<int>(shop_tab_rows(items_, tab).size());
+    if (row < 0 || row >= nrows) return sel_;
+    const float uz = (sl.list_h - sl.cell_h) * 0.5f;  // `Gg.ba` L1885
+    scroll_y_ = -(static_cast<float>(row) * sl.cell_step) + uz;
+    auto_sel_row_ = -1;
+    auto_sel_pending_ = false;
+    // Two passes: pass 1 arms (`this.Oha=!0`), pass 2 applies (the next `aa`).
+    for (int pass = 0; pass < 2; ++pass) {
+        if (auto_sel_pending_) {
+            auto_sel_pending_ = false;
+            sel_ = auto_sel_row_;
+        } else {
+            int band = -1;
+            float band_d = 30.0f;  // `Math.abs(c.Qk)<30`
+            for (int i = 0; i < nrows; ++i) {
+                const float qk = sl.list_h * 0.5f -
+                                 (scroll_y_ + static_cast<float>(i) * sl.cell_step +
+                                  sl.cell_h * 0.5f);
+                if (std::fabs(qk) < band_d) {
+                    band_d = std::fabs(qk);
+                    band = i;
+                }
+            }
+            if (band >= 0 && band != auto_sel_row_) {
+                auto_sel_row_ = band;
+                auto_sel_pending_ = true;
+            }
+        }
+    }
+    return sel_;
 }
 
 // `Ne.ZYa` L2251 (`Pa.iwa(this.Ch) && p.o.xa.$o(this.Ch,!0), this.Sr()`) =
@@ -12804,6 +12892,12 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     bw.items.push_back(oi);
     app.save().save(bw);
     seen_ = bw;
+    // `$o` -> `p.o.setItem(c,!0)` -> `Ca.cM` (L134620): the player `Pi` body
+    // is rebuilt from the new equipment; drop the cached backdrop so the shop
+    // draws it.
+    shop_rebuild_player_model(app);
+    backdrop_fig_tried_ = false;
+    backdrop_fig_ok_ = false;
     std::fprintf(stdout,
                  "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%lld -> money %lld"
                  " + EQUIPPED ($o)%s\n",
@@ -12866,6 +12960,10 @@ bool ShopScreen::purchase_gem_price_plate(App& app, const CatalogItem& bit) {
     bw.items.push_back(oi);
     app.save().save(bw);
     seen_ = bw;
+    // `Pa.gI` -> `$o` -> `Ca.cM` (L134620): rebuild the player `Pi` body.
+    shop_rebuild_player_model(app);
+    backdrop_fig_tried_ = false;
+    backdrop_fig_ok_ = false;
     std::fprintf(stdout,
                  "[shop] Pi confirm Pa.EYa -> BOUGHT %s price=%dR -> bonus %d"
                  " + EQUIPPED\n",
@@ -13381,7 +13479,6 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
 }
 
 void ShopScreen::update_impl(float dt) {
-    (void)dt;
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // Sensei dialog modal gate (quest engine `He` records). The tutorial
     // lands here: `StoryTutorialBuyItem` fires on SceneTo==Shop
@@ -13417,6 +13514,8 @@ void ShopScreen::update_impl(float dt) {
                 if (p.pressed && t != tab_) {
                     tab_ = t;
                     sel_ = 0;  // Oa.f5 -> usb() auto-selects the first cell
+                    auto_sel_row_ = -1;  // `Za.Kmb()` clears `Ac`
+                    auto_sel_pending_ = false;
                     sf2::audio::AudioEngine::instance().play("snd_click_2");
                     std::fprintf(stdout, "[shop] tab %s (E0=%d)\n", kShopTabs[tab_].label,
                                  kShopTabs[tab_].e0);
@@ -13627,6 +13726,33 @@ void ShopScreen::update_impl(float dt) {
             scroll_state_ = 0;
         }
     }
+    // `Gg.aa` (L1886) AUTO-select: the cell within 30 px of the list centre
+    // (`Math.abs(c.Qk)<30 && this.Ac!=c`) arms `this.Oha=!0`; the NEXT frame
+    // fires `vK.Z(Ac)` -> `Oe.Cp` (L1165060) -> `this.xA.Z(item)` -> `Oa.xA`
+    // (L2296), which refreshes the detail panel (`Jyb`/`Qma`/`z6`/`DU`). So
+    // scrolling updates the name/price WITHOUT a click — the pre-fix port only
+    // set `sel_` on `p.pressed` (the user report: "при пролистывании списка
+    // нужно нажать по предмету").
+    if (auto_sel_pending_) {
+        auto_sel_pending_ = false;
+        sel_ = auto_sel_row_;
+    } else if (nrows > 0) {
+        int band = -1;
+        float band_d = 30.0f;  // `Math.abs(c.Qk)<30`
+        for (int i = 0; i < nrows; ++i) {
+            const float qk = list_h * 0.5f -
+                             (scroll_y_ + static_cast<float>(i) * sl.cell_step +
+                              sl.cell_h * 0.5f);
+            if (std::fabs(qk) < band_d) {
+                band_d = std::fabs(qk);
+                band = i;
+            }
+        }
+        if (band >= 0 && band != auto_sel_row_) {
+            auto_sel_row_ = band;
+            auto_sel_pending_ = true;
+        }
+    }
     for (int i = 0; i < nrows; ++i) {
         // `Gg.aa` (L1886) hides cells outside `|Qk| <= size.y/2 + cell.qa()/2`.
         // The renderer has no scissor/mask (core/scene out of scope), so a
@@ -13678,6 +13804,11 @@ void ShopScreen::update_impl(float dt) {
                     shop_apply_slot(w, it.type, new_slot);
                     app().save().save(w);
                     seen_ = w;
+                    // `$o`/`Qxb` -> `p.o.Ca.hk` + `p.o.setItem` -> `Ca.cM`
+                    // (L134620): rebuild the player `Pi` body on equip/unequip.
+                    shop_rebuild_player_model(app());
+                    backdrop_fig_tried_ = false;
+                    backdrop_fig_ok_ = false;
                     std::fprintf(stdout, "[shop] %s %s -> %s slot %s\n",
                                  was_equipped ? "Qxb UNEQUIP" : "$o EQUIP", it.name.c_str(),
                                  it.type.c_str(), new_slot.c_str());
@@ -13780,10 +13911,14 @@ void ShopScreen::update_impl(float dt) {
     // (`iz.XBa("PeacefulRestore")=6`). So the preview RETURNS TO THE IDLE after
     // the last frame — it must NOT freeze on the TryOn end pose (the helm
     // clip ends lowered, which read as "dropped + stuck").
-    if (preview_active_ && preview_clip_ != nullptr && !preview_clip_->frames.empty()) {
-        if (preview_frame_ + 1 < static_cast<int>(preview_clip_->frames.size())) {
-            ++preview_frame_;
-        } else {
+    // `Pi.ia` -> `wd.ia` -> `Te.ia`: advance the `TryOn` clip through the SAME
+    // `(MidFrames+1)` subframe pacing the fight uses. `move_frame()` is the
+    // `Te.M0()` clip frame; `preview_active()` goes false on the `Te.KNa` end
+    // (the `Ad.kg` animation-end -> `Oa.yS` -> `Ex(null,6)`).
+    if (preview_active_ && preview_fighter_ != nullptr) {
+        preview_fighter_->advance(dt);
+        preview_frame_ = preview_fighter_->move_frame();
+        if (!preview_fighter_->preview_active()) {
             preview_active_ = false;
             preview_fighter_.reset();
             preview_clip_ = nullptr;
@@ -15348,12 +15483,22 @@ bool EquipmentScreen::ensure_avatar(App& app) {
         const auto it = idle.empty() ? assets.clips.end() : assets.clips.find(idle);
         if (!avatar_model_.bones.empty() && it != assets.clips.end() &&
             !it->second.frames.empty()) {
+            // The idle MoveDef (for the `Te.ia` MidFrames/FirstFrame pacing).
+            for (const auto& kv : assets.moves) {
+                if (shop_clip_key(kv.second) == it->first) {
+                    avatar_move_ = &kv.second;
+                    break;
+                }
+            }
+            if (avatar_move_ == nullptr) return false;
             avatar_fighter_ = std::make_unique<sf2::scene::Fighter>();
             avatar_fighter_->set_model(avatar_model_);
             avatar_fighter_->set_color(assets.dojo.root_color());  // `p.o_.XCa()`
             avatar_clip_ = &it->second;
             avatar_clip_name_ = it->first;
-            avatar_frame_ = 0;
+            // `Pi.ia` -> `wd.ia` -> `Te.ia` subframe pacing (not 1/tick).
+            avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_);
+            avatar_frame_ = avatar_fighter_->move_frame();
             avatar_ok_ = true;
             std::fprintf(stdout,
                          "[profile] Pi avatar: model %zu bones, idle clip %s (%zu frames)\n",
@@ -15429,11 +15574,28 @@ bool EquipmentScreen::arm_block_preview(App& app) {
         if (!idle.empty()) cit = assets.clips.find(idle);
     }
     if (cit == assets.clips.end() || cit->second.frames.empty()) return false;
+    // Resolve the MoveDef driving the clip (the selected move, else the idle
+    // move the fallback clip belongs to): `start_preview_clip` reads its
+    // `MidFrames`/`FirstFrame` for the `Te.ia` subframe pacing.
+    if (md == nullptr) {
+        for (const auto& kv : assets.moves) {
+            if (shop_clip_key(kv.second) == cit->first) {
+                md = &kv.second;
+                break;
+            }
+        }
+    }
+    if (md == nullptr) return false;
+    block_preview_move_ = md;
     block_preview_fighter_ = std::make_unique<sf2::scene::Fighter>();
     block_preview_fighter_->set_model(block_preview_model_);
     block_preview_fighter_->set_color(assets.dojo.root_color());
     block_preview_clip_ = &cit->second;
-    block_preview_frame_ = 0;
+    // `Pi.kg` -> `vb.lS` -> `wd.fJa` seats the clip; `Pi.ia` -> `wd.ia` ->
+    // `Te.ia` then advances it at the (MidFrames+1) subframe rate (the old
+    // raw `++block_preview_frame_` per tick was 3x too fast).
+    block_preview_fighter_->start_preview_clip(*md, *block_preview_clip_);
+    block_preview_frame_ = block_preview_fighter_->move_frame();
     block_preview_active_ = true;
     std::fprintf(stdout, "[profile] ShowBlock preview: move %s clip %s (%zu frames)\n",
                  mv.empty() ? "(idle)" : mv.c_str(), cit->first.c_str(),
@@ -15515,9 +15677,17 @@ void EquipmentScreen::update_impl(float dt) {
     // The `Pi` avatar (`vb.Ad`, L2196) idle animation (`Pi.ia` -> `Jc.ia()`):
     // advance the idle clip each frame UNLESS the Show preview owns the model.
     ensure_avatar(app());
-    if (avatar_ok_ && avatar_clip_ != nullptr && !avatar_clip_->frames.empty() &&
+    if (avatar_ok_ && avatar_fighter_ != nullptr && avatar_move_ != nullptr &&
+        avatar_clip_ != nullptr && !avatar_clip_->frames.empty() &&
         !block_preview_active_) {
-        avatar_frame_ = (avatar_frame_ + 1) % static_cast<int>(avatar_clip_->frames.size());
+        // The idle loops: when `Te.KNa` ends the clip, restart it (the JS `Aua`
+        // idle auto-play re-picks the stance). Advance through the `Te.ia`
+        // subframe pacing, not one frame per tick.
+        if (!avatar_fighter_->preview_active()) {
+            avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_);
+        }
+        avatar_fighter_->advance(dt);
+        avatar_frame_ = avatar_fighter_->move_frame();
     }
     // [Show chain] `$r.Op.pa` -> `Ad.kg` (JS `$r.mhb` L1150052 -> `vb.Zkb`
     // L1131024 -> `vb.DK` L1131507 -> `Pi.kg` -> `vb.lS` L1131503): the VIEW
@@ -15581,12 +15751,13 @@ void EquipmentScreen::update_impl(float dt) {
                 q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
             }
         }
-        if (block_preview_active_ && block_preview_clip_ != nullptr &&
-            !block_preview_clip_->frames.empty()) {
-            if (block_preview_frame_ + 1 <
-                static_cast<int>(block_preview_clip_->frames.size())) {
-                ++block_preview_frame_;
-            } else {
+        if (block_preview_active_ && block_preview_fighter_ != nullptr) {
+            // `Pi.ia` -> `wd.ia` -> `Te.ia`: the SAME (MidFrames+1) subframe
+            // pacing the fight uses. `move_frame()` = the `Te.M0()` clip frame;
+            // `preview_active()` goes false on the `Te.KNa` end (`Ad.kg`).
+            block_preview_fighter_->advance(dt);
+            block_preview_frame_ = block_preview_fighter_->move_frame();
+            if (!block_preview_fighter_->preview_active()) {
                 // The `Pi` model's animation END (`Ad.kg`).
                 block_preview_completed_ = true;
                 block_preview_active_ = false;
@@ -17133,6 +17304,8 @@ void ShopScreen::refresh_items() {
     buy_armed_ = -1;    // the list changed under the open panel
     scroll_tab_ = -1;   // force the `Gg` scroller to re-init (L1891)
     scroll_count_ = -1;
+    auto_sel_row_ = -1;  // `Oa.Imb` -> `Za.Kmb()` clears `Ac`
+    auto_sel_pending_ = false;
     std::fprintf(stdout, "[shop] Imb refresh: %zu items, tab %d, sel %d\n",
                  items_.size(), tab_, sel_);
     std::fflush(stdout);
@@ -18212,6 +18385,92 @@ int run_shell_probe(App& app) {
         check(persisted == shown && boot_lang == shown,
               "(x) Language persists to the save + the boot reader restores it");
         close_settings_dialog();
+    }
+    // (xi) SHOP BUY -> `Ca.cM` RE-MERGE (this fix, report #9a): the shop buy/
+    // equip runs `$o` -> `p.o.setItem(c,!0)` (L134620) -> `this.Ca.hk(type,
+    // item); this.Ca.cM()` (L809-810 -> `Yc.load` L568), so the player `Pi`
+    // body is rebuilt from the NEW equipment. The pre-fix port wrote only the
+    // save slot: the shop backdrop kept the pre-purchase gear.
+    {
+        ShopScreen shop(app.screens());
+        FightAssets& assets = app.fight_assets();
+        WarriorSave w = app.save().load();
+        w.level = 60;
+        w.money = 1000000000;
+        w.bonus = 1000000;
+        w.weapon.clear();  // baseline: Fists (no weapon model)
+        app.save().save(w);
+        shop.probe_sync_model(app);
+        const int bones0 = shop.player_model_bones(app);
+        const int tris0 = shop.player_model_tris(app);
+        // A Weapon catalog row carrying a model (list.xml `Model`). Named
+        // local so `wp` points into a live vector, not the returned temporary.
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const CatalogItem* wp = nullptr;
+        for (const CatalogItem& it : full) {
+            if (it.type == "Weapon" && !it.model.empty() && it.price > 0 && !it.paid &&
+                !it.shop_hide) {
+                wp = &it;
+                break;
+            }
+        }
+        const bool bought = wp != nullptr && shop.probe_purchase_price(app, *wp);
+        const int bones1 = shop.player_model_bones(app);
+        const int tris1 = shop.player_model_tris(app);
+        const WarriorSave nw = app.save().load();
+        const std::vector<std::string> exp_names =
+            fighter_model_names(app, {nw.skeleton, nw.weapon, nw.armor, nw.helm});
+        const sf2::scene::Model exp = assets.merge_names(exp_names);
+        const bool changed = bones1 > bones0 || tris1 > tris0;
+        const bool matches = static_cast<std::size_t>(bones1) == exp.bones.size() &&
+                             static_cast<std::size_t>(tris1) == exp.resolved_tris.size();
+        std::fprintf(stdout,
+                     "[sps] shop Ca.cM item=%s bones %d->%d tris %d->%d expected=%zu/%zu\n",
+                     wp != nullptr ? wp->name.c_str() : "-", bones0, bones1, tris0, tris1,
+                     exp.bones.size(), exp.resolved_tris.size());
+        std::fflush(stdout);
+        check(wp != nullptr && bought && changed && matches,
+              "(xi) shop buy -> Ca.cM re-merge (player body rebuilt from new gear)");
+    }
+    // (xii) SHOP PREVIEW PACING (this fix, report #10): the `Pi` `TryOn`
+    // preview is `Pi.ia` -> `wd.ia` -> `Te.ia`, which advances one clip frame
+    // every `(MidFrames+1)` = 3 fixed ticks (JS time base). The pre-fix port
+    // did `++preview_frame_` every tick -> 3x too fast.
+    {
+        ShopScreen shop(app.screens());
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const CatalogItem* wp = nullptr;
+        for (const CatalogItem& it : full) {
+            if (it.name == "WEAPON_KNIVES") wp = &it;
+        }
+        const bool armed = wp != nullptr && shop.probe_arm_preview(app, *wp);
+        const int ff = shop.preview_frame();  // after the arm tick = JS `Te.Mq`
+        const int sub = shop.preview_sub();
+        const int f_after_sub = shop.probe_preview_frame_after(app, *wp, sub);
+        const int f_after_3sub = shop.probe_preview_frame_after(app, *wp, 3 * sub);
+        const bool paced = armed && sub >= 1 && f_after_sub == ff && f_after_3sub == ff + 1;
+        std::fprintf(stdout,
+                     "[sps] preview pacing item=%s sub=%d frame ff=%d after %dt=%d after "
+                     "%dt=%d (JS 1 clip frame per %d ticks)\n",
+                     wp != nullptr ? wp->name.c_str() : "-", sub, ff, sub, f_after_sub,
+                     3 * sub, f_after_3sub, sub);
+        std::fflush(stdout);
+        check(paced, "(xii) shop TryOn preview advances at the Te.ia subframe rate (not 3x)");
+    }
+    // (xiii) SHOP SCROLL AUTO-SELECT (this fix, report #9b): `Gg.aa` (L1886)
+    // auto-selects the centre-band cell every frame; `Oe.Cp` -> `Oa.xA` then
+    // refreshes the detail name/price WITHOUT a click. The pre-fix port only
+    // set `sel_` on `p.pressed`.
+    {
+        ShopScreen shop(app.screens());
+        shop.open_at("Weapon", "");
+        const int before = shop.probe_scroll_select(app, 0, 0);
+        const int after = shop.probe_scroll_select(app, 0, 2);
+        std::fprintf(stdout, "[sps] shop scroll select row %d->%d (no click)\n", before,
+                     after);
+        std::fflush(stdout);
+        check(after == 2 && after != before,
+              "(xiii) shop scroll auto-selects the centre cell (name/price refresh)");
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);
