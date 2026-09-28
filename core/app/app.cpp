@@ -26,6 +26,7 @@
 #include "atlas.hpp"
 #include "audio/audio.hpp"
 #include "font.hpp"
+#include "lang_table.hpp"
 #include "render/gl.hpp"
 #include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
@@ -298,6 +299,138 @@ App::App() = default;
 
 App::~App() { shutdown(); }
 
+// Menu font (BMFont binary + png page): JS asset ids 264/265
+// (`ui/font{lang}.{png,fnt}`, `G.rq` L1281033). Factored out of `init` so
+// `reload_language` (the `L.K.reload()` analogue) can re-run it after
+// `G.Ska`. Never throws; `menu_font_` stays null on failure.
+void App::load_menu_font_() {
+    menu_font_.reset();
+    font_tex_ = 0;
+    try {
+        const std::string ui = res_root_ + "/ui";
+        menu_font_ = std::make_unique<sf2::data::font>();
+        const std::string fnt_path = find_localized_file(ui, "font", lang_, ".fnt");
+        if (fnt_path.empty()) {
+            throw std::runtime_error("no ui/font-*.fnt");
+        }
+        {
+            const std::vector<std::uint8_t> fnt_bytes = read_file_bytes(fnt_path);
+            *menu_font_ = sf2::data::font_parse(fnt_bytes.data(), fnt_bytes.size());
+        }
+        sf2::data::Texture font_tex;
+        std::string page_lang;
+        if (decode_atlas_any(ui + "/font-" + lang_, font_tex)) {
+            page_lang = lang_;
+        } else if (lang_ != "en" && decode_atlas_any(ui + "/font-en", font_tex)) {
+            page_lang = "en";
+            std::fprintf(stdout, "[app] font page fallback -> en\n");
+        } else {
+            std::fprintf(stderr, "app: font page png unavailable\n");
+        }
+        if (!page_lang.empty()) {
+            // Upload under a lang-unique key (so a language change gets a
+            // FRESH page — `texture_for` caches by name), then alias the
+            // stable "font-en" key the sprite layer resolves.
+            const GLuint gl = renderer_->texture_for("font-page:" + page_lang, font_tex);
+            if (gl != 0) {
+                font_tex_ = gl;
+                renderer_->texture_alias("font-en", gl);
+            }
+        }
+        std::fprintf(stdout, "[app] menu font[%s]: %zu chars %dx%d tex %u (%s)\n",
+                     lang_.c_str(), menu_font_->chars.size(), menu_font_->scale_w,
+                     menu_font_->scale_h, font_tex_, fnt_path.c_str());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: font load failed: %s\n", e.what());
+        menu_font_.reset();
+    }
+}
+
+// The per-language SETTINGS-dialog font (`un.C8`, JS L1917 at offset
+// 993155): `ui/settings_font.dat` (asset 253) is a zstd container holding
+// one BMFont per `iv` entry ("en de it fr pt ru es tr ja ko", L1274223);
+// `ui/settings_font.png` (asset 252) is their shared page. Never throws.
+void App::load_settings_fonts_() {
+    settings_fonts_loaded_ = true;
+    try {
+        const std::string ui = res_root_ + "/ui";
+        std::string dat;
+        for (const auto& entry : std::filesystem::directory_iterator(ui)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("settings_font.", 0) == 0 &&
+                entry.path().extension().string() == ".dat") {
+                dat = entry.path().string();
+                break;
+            }
+        }
+        if (dat.empty()) {
+            std::fprintf(stderr, "app: settings_font.dat unavailable\n");
+            return;
+        }
+        const std::vector<std::uint8_t> comp = read_file_bytes(dat);
+        const std::vector<std::uint8_t> raw = sf2::data::zstd_decompress(comp);
+        // JS `un` ctor: `var d=G.Oq(253); ... for(var e=0,f=iv;e<f.length;)
+        // { let q=f[e++]; var g=d.ie(),h=new kb(new ArrayBuffer(g));
+        // d.ek(h,0,g); ... }` — read a u16 length then that many BMFont bytes,
+        // one per `iv` entry, in `iv` order.
+        static const char* const kIv[] = {"en", "de", "it", "fr", "pt",
+                                          "ru", "es", "tr", "ja", "ko"};
+        std::size_t off = 0;
+        std::size_t parsed = 0;
+        for (const char* lang : kIv) {
+            if (off + 2 > raw.size()) break;
+            const std::size_t n = static_cast<std::size_t>(raw[off]) |
+                                  (static_cast<std::size_t>(raw[off + 1]) << 8);
+            off += 2;
+            if (n == 0 || off + n > raw.size()) break;
+            settings_fonts_[lang] = sf2::data::font_parse(raw.data() + off, n);
+            const sf2::data::font& f = settings_fonts_[lang];
+            std::fprintf(stdout,
+                         "[settings] settings_font[%s]: %zu chars %dx%d lh=%d base=%d "
+                         "size=%d page='%s'\n",
+                         lang, f.chars.size(), f.scale_w, f.scale_h, f.line_height, f.base,
+                         f.size, f.page.c_str());
+            off += n;
+            ++parsed;
+        }
+        sf2::data::Texture tex;
+        if (decode_atlas_any(ui + "/settings_font", tex)) {
+            settings_font_tex_ = renderer_->texture_for("settings_font", tex);
+        } else {
+            std::fprintf(stderr, "app: settings_font.png unavailable\n");
+        }
+        std::fprintf(stdout, "[settings] settings font atlas: %zu langs tex %u (%s)\n",
+                     parsed, settings_font_tex_, dat.c_str());
+        std::fflush(stdout);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: settings font load failed: %s\n", e.what());
+    }
+}
+
+// JS `L.K.reload()` (offset 27162: `a?window.location=window.location.pathname
+// :window.location.reload(!0)`) — a full browser page reload, which has NO
+// exact desktop analogue. The closest JS-exact state reset: `G.Ska(lang)`
+// (L1230347) then re-run the language-dependent asset loads and land back on
+// the boot hub. `settings_run_row` kRestart calls this.
+bool App::reload_language(const std::string& lang) {
+    lang_ = resolve_language(lang);
+    ++reload_count_;
+    std::fprintf(stdout, "[app] L.K.reload(): G.Ska('%s') -> reload #%d\n", lang_.c_str(),
+                 reload_count_);
+    std::fflush(stdout);
+    load_menu_font_();
+    settings_fonts_.clear();
+    settings_font_tex_ = 0;
+    settings_fonts_loaded_ = false;
+    load_settings_fonts_();  // string table reloads via `ensure_lang`'s lang key
+    if (screens_) {
+        while (screens_->top() != nullptr) screens_->pop();
+        screens_->push(make_screen(*screens_, kScreenDojo));
+    }
+    return !settings_fonts_.empty();
+}
+
 bool App::init(const std::string& res_root, const std::string& save_path,
                const std::string& lang, bool hidden) {
     res_root_ = res_root;
@@ -393,37 +526,14 @@ bool App::init(const std::string& res_root, const std::string& save_path,
 
     // Menu font (BMFont binary + png page): JS asset ids 264/265,
     // `ui/font{lang}.{png,fnt}` (PORT_AUDIT_UI §0.3 — the RU BMF ships).
-    // The .fnt page name is "-" (a relative ref); the real page is
-    // ui/font-<lang>.<hash>.png. Missing localized files fall back to EN
-    // (JS `G.bg` L2394). The texture cache key stays "font-en" because the
-    // sprite layer aliases the menu font under that name.
-    try {
-        const std::string ui = res_root + "/ui";
-        menu_font_ = std::make_unique<sf2::data::font>();
-        const std::string fnt_path = find_localized_file(ui, "font", lang_, ".fnt");
-        if (fnt_path.empty()) {
-            throw std::runtime_error("no ui/font-*.fnt");
-        }
-        {
-            const std::vector<std::uint8_t> fnt_bytes = read_file_bytes(fnt_path);
-            *menu_font_ = sf2::data::font_parse(fnt_bytes.data(), fnt_bytes.size());
-        }
-        sf2::data::Texture font_tex;
-        if (decode_atlas_any(ui + "/font-" + lang_, font_tex)) {
-            font_tex_ = renderer_->texture_for("font-en", font_tex);
-        } else if (lang_ != "en" && decode_atlas_any(ui + "/font-en", font_tex)) {
-            font_tex_ = renderer_->texture_for("font-en", font_tex);
-            std::fprintf(stdout, "[app] font page fallback -> en\n");
-        } else {
-            std::fprintf(stderr, "app: font page png unavailable\n");
-        }
-        std::fprintf(stdout, "[app] menu font[%s]: %zu chars %dx%d tex %u (%s)\n",
-                     lang_.c_str(), menu_font_->chars.size(), menu_font_->scale_w,
-                     menu_font_->scale_h, font_tex_, fnt_path.c_str());
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "app: font load failed: %s\n", e.what());
-        menu_font_.reset();
-    }
+    // Missing localized files fall back to EN (JS `G.bg` L2394).
+    load_menu_font_();
+
+    // The per-language SETTINGS-dialog font map (`un.C8`): built lazily when
+    // the settings dialog opens, matching the JS `B()`/constructor pair
+    // (`E.eD(252); G.Qr(253)` + `new un`). Preloaded here only when the shell
+    // is not headless-lite; the dialog itself calls `load_settings_fonts_()`.
+    // (Left to the dialog to avoid decoding zstd for every boot.)
 
     // Splash/Loader art (JS `Rg` L1967 / `ad` L1969; asset ids 274-279):
     // `splash/loading{lang}.{png,fnt}` (276/277), `splash/logo.png` (275),
@@ -1488,6 +1598,7 @@ bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, flo
     // by texture_name alias. Register the page alias on demand.
     std::string tex_name;
     if (tex == font_tex_) tex_name = "font-en";
+    else if (tex == settings_font_tex_) tex_name = "settings_font";
     else if (tex == digits_tex_) tex_name = "digits_font";
     else if (tex == round_tex_) tex_name = "round_font";
     else if (tex == splash_loading_tex_) tex_name = "splash_loading";

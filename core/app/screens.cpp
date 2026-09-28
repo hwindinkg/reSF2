@@ -346,6 +346,14 @@ enum class UiAlign { Left = 0, Center = 1, Right = 2 };
 // L1931 set `ea.a1=.8` for ru). `ea.ua(a)` -> `effect.ua(a*ea.a1)` (L1711).
 float ea_a1(const App& app) { return app.ui_text_scale(); }
 
+// JS `Z.sc` (L1274716): the settings-dialog TEXT color (dark brown). The
+// `un` ctor sets it on every row (`t.La(Z.sc)` L1917) and the `Bb` button
+// `V(a)` sets it on the label (`this.label.La(Z.sc)`, L949170); the title
+// uses `Z.W6` (already). White was wrong.
+constexpr float kSettingsTextR = 0.1843137254901961f;
+constexpr float kSettingsTextG = 0.1450980392156863f;
+constexpr float kSettingsTextB = 0.10588235294117647f;
+
 // JS `{br}` inline markup (the `Xc`/`ea` rich-text splitter): a hard line
 // break. Resolve it to '\n' before a multiline draw. A no-op for plain text.
 std::string expand_br(const std::string& text) {
@@ -399,6 +407,43 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
     // NOTE: menu draw_text has no alpha channel (opaque labels).
     (void)a;
     (void)app.draw_text(dx, y, text, scale, r, g, b);
+}
+
+// Draws a label through an EXPLICIT font page — the JS `ea`/`Ea` node's
+// `charset` (set by `qg(font)`). The settings dialog's title/rows/labels are
+// `un.C8[$u]` (`ui/settings_font`, JS L1917 at offset 993155), NOT the menu
+// font, so they route here; `draw_ui_label` stays the menu-font default.
+bool draw_ui_label_font(App& app, const sf2::data::font* font, unsigned int tex,
+                        float x, float y, float w, float h, const std::string& text,
+                        float ua_scale, UiAlign align, float r, float g, float b,
+                        bool fit = true) {
+    if (text.empty() || w <= 0.0f || h <= 0.0f || font == nullptr || tex == 0) return false;
+    // The call sites express `ua` in the MENU font's units (`ua_scale = px/100`,
+    // `ui_ua_scale`). The JS divides by the ACTIVE charset's `eF`: the settings
+    // BMF's `size` is per language (ru=80, ja=49, ko=60, others=100 — see
+    // `settings_font[...] lh=.. size=..`), so rescale `px/100` -> `px/eF`.
+    // NOTE (OPEN divergence): the JS divides by the ACTIVE charset `eF`
+    // (`Qh.print`, L1631), and the settings BMF `size` is per language
+    // (ru=80, ja=49, ko=60 — see `settings_font[...] size=..`). `ua_scale`
+    // stays in the port's menu-font px/100 convention: the raw eF rescale
+    // measured FURTHER from the oracle capture (26.89 vs 26.41 %pix>12), so
+    // the per-language `size` split remains the recorded divergence.
+    float scale = ua_scale * ea_a1(app);
+    if (scale <= 0.0f) return false;
+    if (fit) {
+        const float tw = app.measure_text(*font, text, 1.0f);
+        const float th = sf2::data::measure_text_height_utf8(*font, text, 1.0f);
+        if (tw > 0.0f && tw * scale > w) scale = w / tw;
+        if (th > 0.0f && th * scale > h) scale = h / th;
+    }
+    const float draw_w = app.measure_text(*font, text, scale);
+    float dx = x;
+    if (align == UiAlign::Center) {
+        dx = x + (w - draw_w) * 0.5f;
+    } else if (align == UiAlign::Right) {
+        dx = x + w - draw_w;
+    }
+    return app.draw_text_with_font(*font, tex, dx, y, text, scale, r, g, b, 1.0f);
 }
 
 // JS `ea.ua(px)` -> glyph scale for a font size in PIXELS: `Qh.print` (L1631)
@@ -5215,9 +5260,14 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
 // controller-atlas prefix-scan pattern). Silent when absent — callers fall
 // back to embedded EN (headless-safe).
 void ensure_lang(App& app) {
-    static bool done = false;
-    if (done) return;
-    done = true;
+    const std::string active = app.language().empty() ? "en" : app.language();
+    // Keyed on the active language so the `L.K.reload()` language switch
+    // re-reads the new string table. `lang_cache_clear` drops the old keys —
+    // `lang_table_load` never overwrites a key already present.
+    static std::string loaded_lang;
+    if (loaded_lang == active) return;
+    loaded_lang = active;
+    lang_cache_clear(app.res_root());
     try {
         const std::string dir = app.res_root() + "/lang";
         std::string path;
@@ -5227,7 +5277,6 @@ void ensure_lang(App& app) {
         // active file falls back to EN (`G.bg` L2394). This was EN-only, which
         // is why every UI label rendered the EN fallback regardless of the
         // resolved language.
-        const std::string active = app.language().empty() ? "en" : app.language();
         for (const std::string& lang : {active, std::string("en")}) {
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 const std::string name = entry.path().filename().string();
@@ -16362,6 +16411,8 @@ void SettingsScreen::on_key(int glfw_key, bool down) {
 // saved one (`t9 = G.Rq()!=this.$u` is false at open, so RESTART stays hidden).
 void open_settings_dialog(App& app) {
     g_settings_dialog_open = true;
+    // `un.B()` (`E.eD(252); G.Qr(253)`, offset 994738) + the ctor `C8` build.
+    app.load_settings_fonts();
     g_settings_lang = app.language().empty() ? "en" : app.language();
     g_settings_restart_visible = false;
     g_settings_age = 0;
@@ -16431,6 +16482,12 @@ void settings_dialog_cycle_language(App& app) {
     g_settings_lang = kSettingsLangs[idx];
     const std::string saved = app.language().empty() ? "en" : app.language();
     g_settings_restart_visible = g_settings_lang != saved;  // `t9`
+    const sf2::data::font* f = app.settings_font(g_settings_lang);
+    if (f != nullptr) {
+        std::fprintf(stdout, "[settings] atlas[%s]: %zu chars %dx%d lh=%d base=%d tex %u\n",
+                     g_settings_lang.c_str(), f->chars.size(), f->scale_w, f->scale_h,
+                     f->line_height, f->base, app.settings_font_texture());
+    }
     std::fprintf(stdout, "[settings] language -> %s (RESTART %s)\n", g_settings_lang.c_str(),
                  g_settings_restart_visible ? "shown" : "hidden");
     std::fflush(stdout);
@@ -16612,11 +16669,23 @@ bool settings_run_row(App& app, SettingsRow row) {
             return false;
         case SettingsRow::kRestart:
             sf2::audio::AudioEngine::instance().play("snd_click_1");
-            // `un.rHa` case 5 (L1932): `G.Ska(this.$u); p.TJ.save(!0)` then
-            // `L.K.reload()`. The port exposes no runtime language setter nor a
-            // reload path, so the press is reported, never faked.
-            std::fprintf(stdout, "[settings] RESTART (needs L.K.reload; not modelled)\n");
-            std::fflush(stdout);
+            // `un.rHa` case 5 (offset 995553): `this.t9&&(G.Ska(this.$u),
+            // p.TJ.save(!0)),L.K.reload()`. `t9` = the displayed language
+            // differs from the saved one; only then is the language committed
+            // and reloaded.
+            if (g_settings_restart_visible) {
+                const bool ok = app.reload_language(g_settings_lang);
+                std::fprintf(stdout,
+                             "[settings] RESTART -> G.Ska('%s') + L.K.reload() "
+                             "(reload #%d, %s)\n",
+                             g_settings_lang.c_str(), app.reload_count(),
+                             ok ? "settings fonts rebuilt"
+                                : "settings fonts unavailable");
+                std::fflush(stdout);
+            } else {
+                std::fprintf(stdout, "[settings] RESTART ignored (t9=false)\n");
+                std::fflush(stdout);
+            }
             return true;
         case SettingsRow::kCredits:
             // `un.rHa` case 2 (L1931): `xh.show()`. Unlike BACK/`Ge(0)` the
@@ -16663,17 +16732,28 @@ bool settings_dialog_consume(App& app) {
 void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     if (!g_settings_dialog_open) return;
     ensure_lang(app);
+    // `un.B()` loads the settings-font bundle when the dialog opens
+    // (`E.eD(252); G.Qr(253)`, offset 994738); the constructor builds `C8`.
+    app.load_settings_fonts();
+    const std::string lang = g_settings_lang.empty() ? "en" : g_settings_lang;
+    // `un.Oyb` (offset 995552): every text node is `qg(this.C8.v[this.$u])` —
+    // the DISPLAYED language's settings font (`ui/settings_font`, 252/253).
+    const sf2::data::font* sfont = app.settings_font(lang);
+    unsigned int stex = app.settings_font_texture();
+    if (sfont == nullptr) {  // bundle unavailable -> menu font fallback
+        sfont = app.menu_font();
+        stex = app.font_texture();
+    }
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
     const SettingsLayout s = settings_layout();
     draw_od_base(app, ren, s.panel);
     // Title `Vc`: `IVa.Settings_Title` (L1917); `ua(152)` + `La(Z.W6)` (L1900).
-    draw_ui_label(app, s.title_x, s.title_y, s.title_w, s.title_h,
-                  loc(app, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
-                  0.243f, 0.141f);
+    draw_ui_label_font(app, sfont, stex, s.title_x, s.title_y, s.title_w, s.title_h,
+                       loc(app, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
+                       0.243f, 0.141f);
     // JS `y.loa/koa` (L1928): the Sound row icon reflects the SFX mute (`lb.Mz()`).
     const bool sfx_on = !sf2::audio::AudioEngine::instance().sfx_muted();
-    const std::string lang = g_settings_lang.empty() ? "en" : g_settings_lang;
     if (load_settings_icons_atlas(app)) {
         try_draw_atlas_button(app, sfx_on ? "sound" : "sound_off", s.sound_cx, s.sound_cy,
                               s.icon, s.icon, 1.0f);
@@ -16694,9 +16774,9 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         {s.lang_cx, s.lang_cy, loc(app, "Settings_Language", "English")},
     };
     for (const RowLabel& row : labels) {
-        draw_ui_label(app, row.cx + s.icon * 0.7f, row.cy - s.icon * 0.25f,
-                      596.0f * s.panel.c, s.icon, row.text, 0.6f, UiAlign::Left, 1.0f, 1.0f,
-                      1.0f);
+        draw_ui_label_font(app, sfont, stex, row.cx + s.icon * 0.7f,
+                           row.cy - s.icon * 0.25f, 596.0f * s.panel.c, s.icon, row.text,
+                           0.6f, UiAlign::Left, kSettingsTextR, kSettingsTextG, kSettingsTextB);
     }
     // `Nm` (L1929): `ea` at `Fa(1500,50)`, `C(-750)`, `D(250)`, `ua(75)`,
     // `Kc(.6)`, `V(Y.na("dlgSettingsRestart"))`, `R(!1)`; `R(t9)` (L1933) on a
@@ -16704,8 +16784,8 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     if (g_settings_restart_visible) {
         draw_ui_label(app, s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
                       s.notice_y - 25.0f * s.panel.c, 1500.0f * s.panel.c, 50.0f * s.panel.c,
-                      loc(app, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center, 1.0f,
-                      1.0f, 1.0f);
+                      loc(app, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
+                      kSettingsTextR, kSettingsTextG, kSettingsTextB);
     }
     // BACK (`Bb("EButtonDark")` L1930 -> `btnDark`), `Ge(0)` closes.
     if (!(load_sliced_atlas(app) &&
@@ -16713,8 +16793,9 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
                          g_settings_hover == 0);
     }
-    draw_ui_label(app, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f, s.btn_w, 28.0f,
-                  loc(app, "Settings_Back", "BACK"), 0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    draw_ui_label_font(app, sfont, stex, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f,
+                       s.btn_w, 28.0f, loc(app, "Settings_Back", "BACK"), 0.9f, UiAlign::Center,
+                       kSettingsTextR, kSettingsTextG, kSettingsTextB);
     // RESTART (`Bb("EButtonBeige")` L1930 -> `btnBeige`), revealed by L1931.
     if (g_settings_restart_visible) {
         if (!(load_sliced_atlas(app) &&
@@ -16723,9 +16804,10 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
             draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f,
                              0.3f, g_settings_hover == 2);
         }
-        draw_ui_label(app, s.restart_cx - s.btn_w * 0.5f, s.restart_cy - 14.0f, s.btn_w,
-                      28.0f, loc(app, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
-                      1.0f, 1.0f, 1.0f);
+        draw_ui_label_font(app, sfont, stex, s.restart_cx - s.btn_w * 0.5f,
+                           s.restart_cy - 14.0f, s.btn_w, 28.0f,
+                           loc(app, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
+                           kSettingsTextR, kSettingsTextG, kSettingsTextB);
     }
     // `xh` credits overlay (L1854-1857): drawn over the settings surface,
     // exactly as `xh.show` appends to the root above the `Wb` dialog.
@@ -17972,6 +18054,35 @@ int run_shell_probe(App& app) {
         check(after == before + 1 && unlocked >= 1 &&
                   chk.achievement_unlocks.size() > ul_before,
               "(ix) achievement counter write path: Survival1 rises + achievement unlocks");
+    }
+    // (x) Settings language cycle -> RESTART (JS `un.rHa` case 4/5, offsets
+    // 995437/995553): cycling `$u` reveals RESTART (`t9`) and selects the
+    // DISPLAYED language's settings font (`C8[$u]`); RESTART then commits
+    // `G.Ska($u)` and runs the `L.K.reload()` reset (`App::reload_language`).
+    {
+        const std::string before_lang = app.language();
+        const int reloads0 = app.reload_count();
+        open_settings_dialog(app);
+        settings_dialog_cycle_language(app);  // `rHa` case 4
+        const bool restart_vis = settings_dialog_restart_visible();
+        const std::string shown = g_settings_lang;
+        const sf2::data::font* sf = app.settings_font(shown);
+        const std::size_t sf_chars = sf != nullptr ? sf->chars.size() : 0;
+        const unsigned int sf_tex = app.settings_font_texture();
+        const bool font_ok = sf != nullptr && sf_tex != 0;
+        const bool reloaded = settings_run_row(app, SettingsRow::kRestart);  // case 5
+        const std::string after_lang = app.language();
+        std::fprintf(stdout,
+                     "[sps] restart: cycle %s->%s shown=%d atlas=%s(%zu chars) tex=%u "
+                     "reload=%d lang=%s\n",
+                     before_lang.c_str(), shown.c_str(), restart_vis ? 1 : 0,
+                     font_ok ? shown.c_str() : "none", sf_chars, sf_tex,
+                     app.reload_count(), after_lang.c_str());
+        std::fflush(stdout);
+        check(restart_vis && font_ok && reloaded && after_lang == shown &&
+                  app.reload_count() == reloads0 + 1,
+              "(x) Settings language cycle -> C8[$u] font + RESTART commits G.Ska + reload");
+        close_settings_dialog();
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);

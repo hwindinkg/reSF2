@@ -1341,9 +1341,13 @@ private:
 // L1894/L1930) + title + Sound/Music/Credits/Language rows (gated by
 // `Ca.hasFeature`) + BACK (`EButtonDark`) / RESTART (`EButtonBeige`). Music
 // toggles via play/stop_music; BACK returns to the caller; Sound is state
-// display (no runtime SFX mute API). OPEN: the per-language BMF atlas build
-// (`G.Oq(253)`/`un.C8`, L1927) and the exact per-row offsets (need the
-// `E.get(250)` frame sizes, L1917) are not modelled.
+// display (no runtime SFX mute API). PORTED: the per-language BMF settings
+// atlas (`un.C8`; `ui/settings_font.dat` asset 253 zstd container + asset 252
+// page, JS L1917 offset 993155) is loaded by `App::load_settings_fonts_` and
+// selected per displayed language; the RESTART action commits `G.Ska($u)` and
+// runs the `L.K.reload()` analogue (`App::reload_language`). STILL OPEN: the
+// exact per-row offsets (the `E.get(250)` frame sizes, L1917) stay
+// approximated in `settings_layout`.
 class SettingsScreen : public Screen {
 public:
     explicit SettingsScreen(ScreenManager& mgr);

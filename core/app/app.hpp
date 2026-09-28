@@ -25,6 +25,7 @@
 // except through those.
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -32,6 +33,7 @@
 #include <vector>
 
 #include "atlas.hpp"
+#include "font.hpp"            // `sf2::data::font` (settings_fonts_ map value)
 #include "scene/move_def.hpp"  // `scene::OwnedItem` (the PendingBattle.owned row)
 
 struct GLFWwindow;
@@ -202,6 +204,32 @@ public:
     // Null when unavailable.
     const sf2::data::font* menu_font() const { return menu_font_.get(); }
     unsigned int font_texture() const { return font_tex_; }
+
+    // The per-language SETTINGS-dialog font (`un.C8`, JS L1917 at offset
+    // 993155): `ui/settings_font.dat` (asset 253, L1281033 `G.rq[253]`) is a
+    // zstd container holding one BMFont per `iv` entry ("en de it fr pt ru es
+    // tr ja ko", L1274223); `ui/settings_font.png` (asset 252) is their shared
+    // page. `lang` outside the container -> nullptr. Null/0 until loaded.
+    const sf2::data::font* settings_font(const std::string& lang) const {
+        const auto it = settings_fonts_.find(lang);
+        return it != settings_fonts_.end() ? &it->second : nullptr;
+    }
+    unsigned int settings_font_texture() const { return settings_font_tex_; }
+    bool settings_fonts_loaded() const { return settings_fonts_loaded_; }
+    // Build the settings-font map on first use (JS `un.B()` loads 252/253 when
+    // the dialog opens). Idempotent.
+    void load_settings_fonts() {
+        if (!settings_fonts_loaded_) load_settings_fonts_();
+    }
+
+    // JS `L.K.reload()` (offset 27162: `window.location.reload(!0)`) has no
+    // exact desktop analogue (there is no browser page to reload). The
+    // closest JS-exact state reset: `G.Ska(lang)` (L1230347) + reload every
+    // language-dependent UI asset + reset the shell to the boot hub. Returns
+    // false only when no settings font could be built. `reload_count()` is
+    // the probe observable.
+    bool reload_language(const std::string& lang);
+    int reload_count() const { return reload_count_; }
     // The resolved UI language (JS `G.lang`, default "en").
     const std::string& language() const { return lang_; }
     // Per-language UI text scale (JS `ea.a1`): the boot bootstrap switches on
@@ -353,6 +381,15 @@ private:
     // Draws the Preloader/Loader boot overlay (JS `Rg` L1967 / `ad` L1969).
     void draw_boot_splash();
 
+    // Loads `menu_font_`/`font_tex_` for the resolved `lang_` (JS asset ids
+    // 264/265, `ui/font{lang}`). Factored out of `init` so `reload_language`
+    // can re-run it. Never throws.
+    void load_menu_font_();
+    // Builds the per-language settings-dialog font map (`un.C8`, JS L1917)
+    // from `ui/settings_font.dat` (zstd) + `ui/settings_font.png`. Never
+    // throws; sets `settings_fonts_loaded_`.
+    void load_settings_fonts_();
+
     // The JS boot progress value (`Rg.gMa` @1014188 + `Ev.x$a` @596102):
     // 0->95 asset ramp, then the `Ev` module ramp 95,96,97,98,99,100.
     int boot_progress_pct() const;
@@ -367,6 +404,12 @@ private:
     std::string save_path_;
     // The resolved UI language (JS `G.lang`; default "en", `G.Ska` L2392).
     std::string lang_ = "en";
+    // Per-language settings-dialog fonts (`un.C8`, JS L1917) + their shared
+    // page texture (asset 252/253).
+    std::map<std::string, sf2::data::font> settings_fonts_;
+    unsigned int settings_font_tex_ = 0;
+    bool settings_fonts_loaded_ = false;
+    int reload_count_ = 0;
 
     std::unique_ptr<sf2::render::Renderer> renderer_;
     std::unique_ptr<ScreenManager> screens_;

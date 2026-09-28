@@ -72,6 +72,13 @@ inline void lang_table_load(const std::string& res_root, const std::string& path
     }
 }
 
+// Drops the cached table for `res_root` so a language switch (`G.Ska` +
+// reload, `L.K.reload`) re-reads the new `<lang>.<hash>.xml`.
+inline void lang_cache_clear(const std::string& res_root) {
+    lang_cache(res_root).clear();
+    lang_cache(res_root);  // re-sync `loaded_root`
+}
+
 // Looks up `key`, returning `fallback` when the table/file lacks it.
 inline std::string lang_text(const std::string& res_root, const std::string& key,
                              const std::string& fallback) {
