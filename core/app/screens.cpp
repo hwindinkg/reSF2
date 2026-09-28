@@ -456,6 +456,25 @@ float ui_ua_scale(App& app, float px) {
     return px / eF;
 }
 
+// The `od` dialog body glyph scale (JS `Qh.print` L1631
+// `k = fontSize/charset.eF*this.qc.ij`, `ij = 1/scale` = 1 for BMF:
+// `ve.e3` L764804 `case "BMF": new ve(uq.Qq(a), 1, uq.vAa(a))`). The dialog
+// text node `kb` is a CHILD of the `od` node, which `l4a` (L976305
+// `this.node.la(c)`, `c=(b.N-b.J)/this.AV.x`) scales by `c` — so a text node
+// sized `ua_px` draws at screen scale `(ua_px/charset.eF)*ea.a1*c`, and its
+// line advance `d` (L833608) is `(fontSize/charset.eF)*ij*lineHeight*nha`.
+// The per-kind `ua` comes from the ctors: `Od`/`uj` `qbb` L1948 `ua(100)`;
+// `Ve` L1913 `ua(125)`. `charset.eF` and `lineHeight` are per-language (the
+// active `ui/font-<lang>.fnt`: ru size=75 lh=90, en size=100 lh=126, ...).
+float dialog_text_ua_scale(App& app, float ua_px) {
+    const sf2::data::font* f = app.menu_font();
+    const float eF = (f != nullptr && f->size > 0) ? static_cast<float>(f->size) : 100.0f;
+    return ua_px / eF;  // * panel.c at the call site (the `l4a` node scale)
+}
+// `nha` authored factor: `Od.qbb` L1948 `this.kb.Kc(.9)` and `Ve` L1913
+// `this.kb.Kc(.9)` — `Kc(a){effect.Kc(a*ea.b1)}` (L876458) so `nha=.9*ea.b1`.
+constexpr float kOdBodyKc = 0.9f;
+
 // JS `Y.na(key, ...)` (L917): the runtime string-table lookup (`Cc.F().ln`,
 // L920). Returns the localized text when the key is in the loaded table, else
 // `fallback` — never a raw key. The table ships as `res/lang/en.<hash>.xml`
@@ -491,7 +510,8 @@ struct UiWrap {
 // content-height measurement (`Od.lj` L1950 `this.Md = Math.max(kb.ew(),
 // this.cv)` — `od.layout` L1898 is derived from `Md`). `kb.ew()` is the text
 // element's measured height, i.e. `lines * line_step`.
-UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale) {
+UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale,
+                    float line_factor = 1.0f) {
     UiWrap out;
     if (text.empty() || w <= 0.0f) return out;
     const sf2::data::font* font = app.menu_font();
@@ -502,9 +522,10 @@ UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale) 
     if (scale <= 0.0f) return out;
     // `nha` (L1623/L1627): `ea.Kc(a)` (L1712) sets `nha = a*ea.b1`, so the
     // per-language factor is `ea.b1` (ja/ko/ru 1.2, else 1 — L65/L1931/L2484).
-    // The authored `a` is modelled as 1 here; `ea.b1` is applied exactly.
+    // `line_factor` is the authored `Kc` argument (the `od` body `qbb` L1948
+    // uses `.9`); it multiplies `ea.b1` exactly.
     out.line_step = scale * static_cast<float>(font->line_height) *
-                    app.ui_text_spacing_scale();
+                    app.ui_text_spacing_scale() * line_factor;
     if (out.line_step <= 0.0f) return out;
     // `bx.Csb` (L1624) splits on '\n' first; `apply` char-wraps each logical
     // line.
@@ -551,16 +572,17 @@ UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale) 
 }
 
 // `kb.ew()` (L1950): the wrapped block height (`od` `Md`).
-float measure_ui_wrapped(App& app, const std::string& text, float w, float ua_scale) {
-    const UiWrap wr = wrap_ui_text(app, text, w, ua_scale);
+float measure_ui_wrapped(App& app, const std::string& text, float w, float ua_scale,
+                         float line_factor = 1.0f) {
+    const UiWrap wr = wrap_ui_text(app, text, w, ua_scale, line_factor);
     return static_cast<float>(wr.lines.size()) * wr.line_step;
 }
 
 void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                      const std::string& text, float ua_scale, UiAlign align,
-                     float r, float g, float b) {
+                     float r, float g, float b, float line_factor = 1.0f) {
     if (text.empty() || w <= 0.0f || h <= 0.0f) return;
-    const UiWrap wr = wrap_ui_text(app, text, w, ua_scale);
+    const UiWrap wr = wrap_ui_text(app, text, w, ua_scale, line_factor);
     const float line_step = wr.line_step;
     if (line_step <= 0.0f) return;
     float yy = y;
@@ -6266,11 +6288,13 @@ float dialog_content_md(App& app, const EngineDialog& d) {
     float h = 0.0f;
     if (dialog_scrolls_all_lines(d.type)) {
         for (const std::string& ln : d.lines) {  // `sqb` L1953 rows
-            h += measure_ui_wrapped(app, loc(app, ln, ln), kOdBodyW * safe_c, 0.70f);
+            h += measure_ui_wrapped(app, loc(app, ln, ln), kOdBodyW * safe_c,
+                                    dialog_text_ua_scale(app, 100.0f) * safe_c, kOdBodyKc);
         }
     } else {
         // `Od.Xma` L1948 -> `lj` re-measures the CURRENT row.
-        h = measure_ui_wrapped(app, dialog_page_body(app, d), kOdBodyW * safe_c, 0.70f);
+        h = measure_ui_wrapped(app, dialog_page_body(app, d), kOdBodyW * safe_c,
+                               dialog_text_ua_scale(app, 100.0f) * safe_c, kOdBodyKc);
     }
     return std::max(h / safe_c, d.min_content_height);
 }
@@ -6413,7 +6437,9 @@ std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
     float y = L.body_y;
     for (std::size_t i = 0; i < d.lines.size(); ++i) {
         const float h = all ? measure_ui_wrapped(app, loc(app, d.lines[i], d.lines[i]),
-                                                 kOdBodyW * c, 0.70f)
+                                                 kOdBodyW * c,
+                                                 dialog_text_ua_scale(app, 100.0f) * c,
+                                                 kOdBodyKc)
                             : L.body_h;
         const bool button = i < d.line_actions.size() && !d.line_actions[i].empty();
         if (button && (all || i == d.page)) {
@@ -6629,7 +6655,8 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_dialog_portrait(app, d, L);
     draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, kOdBodyBoxH * L.panel.c,
                     dialog_page_body(app, d),
-                    0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+                    dialog_text_ua_scale(app, 100.0f) * L.panel.c, UiAlign::Left,
+                    0.12f, 0.09f, 0.06f, kOdBodyKc);
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
 }
@@ -6652,15 +6679,19 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         float y = L.body_y;
         for (const std::string& ln : d.lines) {
             const std::string text = loc(app, ln, ln);
-            const float h = measure_ui_wrapped(app, text, kOdBodyW * c, 0.70f);
-            draw_ui_wrapped(app, L.body_x, y, L.body_w, h, text, 0.70f, UiAlign::Left,
-                            0.12f, 0.09f, 0.06f);
+            const float h = measure_ui_wrapped(app, text, kOdBodyW * c,
+                                               dialog_text_ua_scale(app, 100.0f) * c,
+                                               kOdBodyKc);
+            draw_ui_wrapped(app, L.body_x, y, L.body_w, h, text,
+                            dialog_text_ua_scale(app, 100.0f) * c, UiAlign::Left,
+                            0.12f, 0.09f, 0.06f, kOdBodyKc);
             y += h;
         }
     } else {
         draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h,
-                        dialog_page_body(app, d), 0.70f, UiAlign::Left, 0.12f, 0.09f,
-                        0.06f);
+                        dialog_page_body(app, d),
+                        dialog_text_ua_scale(app, 100.0f) * c, UiAlign::Left, 0.12f,
+                        0.09f, 0.06f, kOdBodyKc);
     }
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
@@ -6678,7 +6709,8 @@ void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     const std::string body =
         d.lines.empty() ? std::string() : loc(app, d.lines[0], d.lines[0]);
     draw_ui_wrapped(app, L.sx(kOdVeBodyX), L.body_y, kOdVeBodyW * L.panel.c, L.body_h, body,
-                    0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
+                    dialog_text_ua_scale(app, 125.0f) * L.panel.c, UiAlign::Left,
+                    0.12f, 0.09f, 0.06f, kOdBodyKc);
     draw_dialog_buttons(app, d, anim);
 }
 
@@ -18003,7 +18035,13 @@ bool run_quest_dialog_selfcheck(App& app) {
         d.has_right_button = true;
         const OdLayout L = dialog_layout_for(app, d, DialogAnim{});
         const std::string body = dialog_page_body(app, d);
-        const UiWrap wr = wrap_ui_text(app, body, L.body_w, 0.70f);
+        // JS-exact `qbb` metric: glyph scale `(ua(100)/charset.eF)*ea.a1*c`
+        // (`Qh.print` L1631, `l4a` node scale L976305), line advance
+        // `d=(fontSize/eF)*ij*lineHeight*nha` with `nha=Kc(.9)*ea.b1`
+        // (L833608 / `qbb` L1948). NOT the old `0.70` fudge.
+        const UiWrap wr = wrap_ui_text(app, body, L.body_w,
+                                       dialog_text_ua_scale(app, 100.0f) * L.panel.c,
+                                       kOdBodyKc);
         // The od280 text box height is the JS `Fa(..,800)` box, NOT `Md`:
         // `Od.lj` L1950 `Md = max(kb.ew(), cv)` sizes the PANEL (`od.layout`
         // L1898), while the text element `qbb` L1948 `Fa(DG?900:1680,800)`
@@ -18029,15 +18067,33 @@ bool run_quest_dialog_selfcheck(App& app) {
             }
         }
         const bool complete = (flat_body == flat_lines);
+        const sf2::data::font* wf = app.menu_font();
+        const int eF = (wf != nullptr) ? wf->size : 0;
+        const int lh = (wf != nullptr) ? wf->line_height : 0;
+        // The ORACLE line counts (browser capture, design-space wrap): the RU
+        // `tutorial_training_fight` sensei line wraps to 5 lines; the others
+        // are recorded here so a metric change that re-wraps them fails loud.
+        int oracle_lines = 0;
+        if (std::string(key) == "tutorial_training_fight") {
+            oracle_lines = (app.language() == "ru") ? 5 : 0;
+        }
         std::fprintf(stdout,
                      "[dlgverify][wrap] lang=%s key=%s chars=%zu lines=%zu drawn=%d "
-                     "step=%.3f md=%.1f box_h=%.1f complete=%d last=\"%s\"\n",
+                     "step=%.3f md=%.1f box_h=%.1f eF=%d lh=%d c=%.4f ua=%.4f "
+                     "kc=%.2f complete=%d last=\"%s\"\n",
                      app.language().c_str(), key, body.size(), wr.lines.size(), drawn,
-                     wr.line_step, L.md, box_h, complete ? 1 : 0, last.c_str());
+                     wr.line_step, L.md, box_h, eF, lh, L.panel.c,
+                     dialog_text_ua_scale(app, 100.0f) * L.panel.c, kOdBodyKc,
+                     complete ? 1 : 0, last.c_str());
         std::fprintf(stdout, "[dlgverify][wrap] lines=\"%s\"\n", joined.c_str());
         std::fflush(stdout);
         dlg_case(std::string("sensei wrap full text laid out: ") + key,
                  complete && drawn == static_cast<int>(wr.lines.size()));
+        if (oracle_lines > 0) {
+            dlg_case(std::string("sensei wrap line count matches the oracle (") + key +
+                         " = " + std::to_string(oracle_lines) + " lines)",
+                     static_cast<int>(wr.lines.size()) == oracle_lines);
+        }
     }
     q.clear_dialogs();
 
