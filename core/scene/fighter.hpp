@@ -358,6 +358,14 @@ public:
     void set_voice(const std::string& v) { voice_ = v; }
     const std::string& voice() const { return voice_; }
 
+    // JS `ur` L195 `QD = NotAnimation==null` (`st.fighter.parameters.QD`): a
+    // NotAnimation fighter has NO animation attach — `ia` (L499) gates the
+    // WHOLE clip advance on `this.parameters.QD && (this.da.ia(), ...)`, so a
+    // NotAnimation dummy NEVER advances a clip (the Punchbag holds its bind
+    // pose / solver pose); only `this.Nd.ia()` (the `Al` cloth solver) runs.
+    void set_not_animation(bool v) { not_animation_ = v; }
+    bool not_animation() const { return not_animation_; }
+
     // The current move's FRAME-triggered actions whose `Frame` equals the
     // clip frame the last `advance()` displayed, collected once per frame
     // change (`Te.Lwa` L563-564: `e.$eb(this.ip(), ...) && c.push(e)`).
@@ -932,6 +940,10 @@ private:
     // JS `1/v.on()` (the global timescale divisor `de.ia` feeds the animator).
     float anim_rate_ = 1.0f;
     // --- JS `Al` solver latch (see `ragdoll_start`) -----------------------
+    // `parameters.QD == false` (warrior `NotAnimation="1"`). Set by
+    // `make_fighter`; gates the clip advance in `advance_step` (JS `ia`
+    // L499) so the NotAnimation dummy never plays a reaction/desync clip.
+    bool not_animation_ = false;
     bool nk_ = false;                         // JS `Al.nk` (ragdoll active)
     int ragdoll_frame_count_ = 0;             // JS `Al.frameCount`
     std::vector<std::string> ragdoll_names_;  // JS `Al.names`

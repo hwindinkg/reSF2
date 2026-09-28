@@ -1558,7 +1558,16 @@ void Fighter::advance(float dt) {
 }
 
 void Fighter::advance_step() {
-    if (current_move_ == nullptr || current_clip_ == nullptr) {
+    // JS `ia` L499: `this.parameters.QD && (this.da.ia(), ...)` — the clip
+    // advance runs ONLY when `QD` (NotAnimation attribute ABSENT) is true. A
+    // NotAnimation dummy (`parameters.QD == false`, `mdl_skeleton_punching_bag`
+    // bag) therefore NEVER advances a clip: `Nd.ia()` (the solver) runs, but
+    // `da.ia()` never does. Without this gate the port played the picked
+    // reaction clip (`ShroudFakeRecoil`) THROUGH the bag's unrelated bone list
+    // by INDEX, pinning NPivot at the placed anchor while the top chain
+    // (Node12) flailed — the reported "pinned at the CENTRE instead of the
+    // rope" bag. `not_animation_` forces the bind/solver path below.
+    if (not_animation_ || current_move_ == nullptr || current_clip_ == nullptr) {
         // JS `ia` (L499): `this.parameters.QD && (this.da.ia(), ...)` gates
         // ONLY the clip advance (`da.ia`); `this.Nd.ia()` (the ragdoll
         // solver, L582 `sk(); jE(); nk&&frameCount++`) runs UNCONDITIONALLY
@@ -1779,6 +1788,53 @@ void Fighter::sample_current() {
 void Fighter::sample_bind_pose() {
     sf2::data::anim_clip bind_clip;
     bind_clip.frames.resize(1);
+    // [FIX bag pivot — JS `ia` L499 `this.Nd.ia()`] The JS runs the `Al`
+    // solver on EVERY fighter every frame; `Al.sk` (@296832) gates each body
+    // on `!NG && (this.nk || c.jy || oa.vc && c.vc)`, so the bag's cloth
+    // bodies (`jy`, `Cloth="1"`) integrate + relax even with NO ragdoll. The
+    // port only ran the solver when `ragdoll_start` allocated `sol_ma_`, so a
+    // NotAnimation dummy had NO physics until a knockdown (and its solver
+    // space was NPivot-anchored, so the per-sample placement re-pinned NPivot
+    // and the bag pivoted about its CENTRE). Latch a WORLD-space solver seeded
+    // from the placed bind pose — exactly `ragdoll_start`'s world promotion,
+    // WITHOUT the `nk` ragdoll latch — so the cloth hangs from its `Fixed="1"`
+    // TOP node (Node12) and swings about it (the JS node `ma` is world space
+    // and a Fixed node is immovable). `strike_node` then writes that world
+    // pose directly, exactly like `Bl.strike` (`a.sx.XA(l)`).
+    if (not_animation_ && !solver_world_) {
+        const std::size_t n = model_.bones.size();
+        sol_ma_.assign(n * 3, 0.0f);
+        sol_mf_.assign(n * 3, 0.0f);
+        if (pos_.size() == n * 2) {
+            for (std::size_t i = 0; i < n; ++i) {
+                sol_ma_[i * 3] = pos_[i * 2];
+                sol_ma_[i * 3 + 1] = pos_[i * 2 + 1];
+                sol_ma_[i * 3 + 2] = model_.bones[i].z;
+                sol_mf_[i * 3] = sol_ma_[i * 3];
+                sol_mf_[i * 3 + 1] = sol_ma_[i * 3 + 1];
+                sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
+            }
+        } else if (n > 0) {
+            int anchor = model_.bone_by_name(fighter_pivot_bone());
+            if (anchor < 0) anchor = model_.bone_by_name("COM");
+            if (anchor < 0) anchor = 0;
+            const std::size_t au = static_cast<std::size_t>(anchor);
+            for (std::size_t i = 0; i < n; ++i) {
+                sol_ma_[i * 3] =
+                    model_.bones[i].x - model_.bones[au].x + world_x_;
+                sol_ma_[i * 3 + 1] =
+                    model_.bones[i].y - model_.bones[au].y + world_y_;
+                sol_ma_[i * 3 + 2] = model_.bones[i].z;
+                sol_mf_[i * 3] = sol_ma_[i * 3];
+                sol_mf_[i * 3 + 1] = sol_ma_[i * 3 + 1];
+                sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
+            }
+        }
+        solver_init_ = true;
+        solver_world_ = true;
+        solver_base_x_ = render_offset_ + j8_x_;
+        solver_base_y_ = render_offset_y_;
+    }
     sample(bind_clip, 0, world_x_, world_y_, facing_);
 }
 

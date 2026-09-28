@@ -1613,6 +1613,10 @@ FightFighter FightController::make_fighter(
     // caller passes the enemy's model (the Punchbag) or nullptr for the
     // shared fight model.
     f.fighter.set_model(model != nullptr ? *model : model_);
+    // JS `ur` L195 `QD = NotAnimation==null` (fighter `parameters.QD`): the
+    // clip-advance gate in `ia` (L499). A NotAnimation warrior keeps its bind
+    // pose and only runs the `Al` cloth solver (see `Fighter::advance_step`).
+    f.fighter.set_not_animation(not_animation);
     // JS `uf.sja` (L115: `floor(uf.OKa.RGa()*n) + 0`, `uf.OKa.RGa()` =
     // `Math.random` at L114, `uf.OKa=new at` L2471) is the UNSHARED stream
     // the `Gc.DK` pick draws from (`e = f[uf.sja(f.length)]` L674). Install

@@ -606,6 +606,11 @@ public:
     int enemy_ragdoll_frame() const;
     std::string enemy_ragdoll_name() const;
     int enemy_moves_started() const;
+    // [probe, authorised] The bag PIVOT test (`--boss-hit-probe --zone
+    // Punchbag`): the enemy's live world (x,y) of a named bone (the drawn
+    // `pos_` pose). Used to prove the TOP bone (Node12) stays fixed while the
+    // BOTTOM (NBottom) swings about it.
+    bool enemy_bone_xy(const std::string& name, float& x, float& y) const;
 
     // Test/replay hook: inject a game key edge by key_type id (1..14) into
     // the same `player_input` path the keyboard uses, bypassing the GLFW key

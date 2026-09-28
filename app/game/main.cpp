@@ -6819,6 +6819,25 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              static_cast<double>(fs->enemy_world_x()),
                              static_cast<double>(fs->enemy_facing()));
                 std::fflush(stdout);
+                // [probe] bag PIVOT test: the bag's TOP chain (Node12) vs the
+                // BOTTOM (NBottom) and the pivot node (NPivot) over the
+                // reaction. The top must stay fixed; the bottom swings.
+                if (bag_probe) {
+                    float n12x = 0, n12y = 0, n7x = 0, n7y = 0, nb_x = 0,
+                          nb_y = 0, npx = 0, npy = 0;
+                    const bool ok12 = fs->enemy_bone_xy("Node12", n12x, n12y);
+                    const bool ok7 = fs->enemy_bone_xy("Node7", n7x, n7y);
+                    const bool okb = fs->enemy_bone_xy("NBottom", nb_x, nb_y);
+                    const bool okp = fs->enemy_bone_xy("NPivot", npx, npy);
+                    std::fprintf(stdout,
+                                 "[bagbone] t=%d ok=%d%d%d%d top12=(%.2f,%.2f) "
+                                 "n7=(%.2f,%.2f) bot=(%.2f,%.2f) "
+                                 "piv=(%.2f,%.2f)\n",
+                                 t, ok12 ? 1 : 0, ok7 ? 1 : 0, okb ? 1 : 0,
+                                 okp ? 1 : 0, n12x, n12y, n7x, n7y, nb_x, nb_y,
+                                 npx, npy);
+                    std::fflush(stdout);
+                }
                 if (t + 1 >= kLogFrames) break;
             }
         }

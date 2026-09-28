@@ -9932,6 +9932,19 @@ int FightScreen::enemy_moves_started() const {
     return fight_ != nullptr ? fight_->enemy().moves_started : 0;
 }
 
+// [probe, authorised] The bag PIVOT test: the enemy's drawn bone world (x,y).
+bool FightScreen::enemy_bone_xy(const std::string& name, float& x,
+                                float& y) const {
+    if (fight_ == nullptr) return false;
+    const sf2::scene::Fighter& f = fight_->enemy().fighter;
+    const int i = f.model().bone_by_name(name);
+    const std::vector<float>& p = f.positions();
+    if (i < 0 || p.size() < static_cast<std::size_t>(i) * 2 + 2) return false;
+    x = p[static_cast<std::size_t>(i) * 2];
+    y = p[static_cast<std::size_t>(i) * 2 + 1];
+    return true;
+}
+
 // [probe, authorised] `--tactic <Name>`: force the enemy's tactic on the
 // live fight (the per-tactic locomotion audit). No behaviour change unless
 // the flag is passed.
