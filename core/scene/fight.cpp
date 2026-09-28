@@ -2012,6 +2012,39 @@ void FightController::rules_fire(FightRule& r) {
 // round is live.
 void FightController::rules_frame() {
     if (!round_live_) return;
+    // JS `ca.e_a` (L406) + `Xwa`: the RandomArea enter/exit trigger (only when
+    // `P8`, set by `f_a` -> `qca`). It runs BEFORE the `Ih(1,3,ze)` tick (the
+    // JS `e_a` precedes `PC(1,3)` in `ca.ia` L389), so the bounds `c$`/`d$`/
+    // `g9` used here are the PREVIOUS frame's `Nma` values. `b` is the
+    // fighter's CoM world x (`a.oa.Fe().ma.x`, no `oy` shift — verbatim JS).
+    if (area_enabled_) {
+        for (int s = 0; s < 2; ++s) {
+            FightFighter& f = (s == 0) ? player_ : enemy_;
+            const float x = f.fighter.world_x();
+            if (!in_area_[s]) {
+                if (area_gate_ && x >= area_cmin_ && x <= area_cmax_) {
+                    in_area_[s] = true;  // `a.rR=!0`
+                    std::fprintf(stdout,
+                                 "[area] F%d side=%d ENTER x=%.1f c$=%.1f d$=%.1f\n",
+                                 frame_, s, static_cast<double>(x),
+                                 static_cast<double>(area_cmin_),
+                                 static_cast<double>(area_cmax_));
+                    std::fflush(stdout);
+                    bus_.fire(sf2::scene::kEvAreaEnter, sf2::scene::TrigVars(),
+                              true, s, cond_ctx(0), cond_ctx(1),
+                              oba_phase(phase_), frame_);
+                }
+            } else if (!area_gate_ || x < area_cmin_ || x > area_cmax_) {
+                in_area_[s] = false;  // `a.rR=!1`
+                std::fprintf(stdout, "[area] F%d side=%d EXIT x=%.1f\n", frame_,
+                             s, static_cast<double>(x));
+                std::fflush(stdout);
+                bus_.fire(sf2::scene::kEvAreaExit, sf2::scene::TrigVars(),
+                          true, s, cond_ctx(0), cond_ctx(1),
+                          oba_phase(phase_), frame_);
+            }
+        }
+    }
     // `du.Ih(1,3,ze)` (L896): the per-frame pass over `tX` (the `Zf(1)`
     // rules: Darkness, HotGround, LoseFall, Regeneration, RandomArea).
     // Ringout (`nj`) is the shipped one; HotGround/Regeneration now fire:
@@ -2086,6 +2119,91 @@ void FightController::rules_frame() {
                 // animation (cp==4) / Physical fall (cp==7) passes.
                 fire = rules_lose_fall(r);
                 break;
+            case FightRuleKind::random_area: {
+                // `ij.hh()` (L876-877): tick `hc`; `yk`/`QB` from the fade
+                // phases; on wrap `jyb()` draws a new center from `pX`.
+                const int pause = r.area_frames_off;
+                const int qy = pause + r.area_fade_in;
+                const int bt = qy + r.area_frames_on;
+                const int nj = bt + r.area_fade_out;
+                const float c7 = (qy > pause)
+                                     ? 255.0f / static_cast<float>(qy - pause)
+                                     : 0.0f;
+                const float c9 = (nj > bt)
+                                     ? 255.0f / static_cast<float>(nj - bt)
+                                     : 0.0f;
+                ++r.area_hc;
+                if (r.area_hc <= pause) {
+                    if (!r.active) r.area_hc = 0;  // `$r||(hc=0)`
+                    r.area_alpha = 0.0f;
+                    r.area_on = false;
+                } else if (r.area_hc <= qy) {
+                    r.area_alpha = static_cast<float>(r.area_hc - pause) * c7;
+                    r.area_on = true;
+                } else if (r.area_hc <= bt) {
+                    r.area_alpha = 255.0f;
+                    r.area_on = true;
+                } else if (r.area_hc <= nj) {
+                    r.area_alpha =
+                        255.0f - static_cast<float>(r.area_hc - bt) * c9;
+                    r.area_on = true;
+                } else {
+                    r.area_alpha = 0.0f;
+                    r.area_hc = 0;
+                    r.area_on = false;
+                    // `jyb()`: `Vpa = pX.dT(cpa, bpa)`.
+                    r.area_pos = static_cast<float>(
+                        area_prng_.dT(r.area_center_min, r.area_center_max));
+                    std::fprintf(stdout,
+                                 "[area] F%d jyb Vpa=%.1f (range [%.1f,%.1f])\n",
+                                 frame_, static_cast<double>(r.area_pos),
+                                 static_cast<double>(r.area_center_min),
+                                 static_cast<double>(r.area_center_max));
+                    std::fflush(stdout);
+                }
+                // `du.o_a` (L902) -> `ca.Nma(Vpa, yk, QB)`: world bounds.
+                area_e_ = r.area_width;
+                area_cmin_ = r.area_pos - r.area_width * 0.5f +
+                             camera_.arena_w * 0.5f;
+                area_cmax_ = r.area_pos + r.area_width * 0.5f +
+                             camera_.arena_w * 0.5f;
+                area_gate_ = r.area_on;
+                break;
+            }
+            case FightRuleKind::darkness: {
+                // `$i.hh()` (L856): tick `hc` -> `yk` alpha (0..255).
+                const int pause = r.dark_last_light;
+                const int qy = pause + r.dark_on;
+                const int bt = qy + r.dark_last;
+                const int nj = bt + r.dark_light_on;
+                const float c7 = (qy > pause)
+                                     ? 255.0f / static_cast<float>(qy - pause)
+                                     : 0.0f;
+                const float c9 = (nj > bt)
+                                     ? 255.0f / static_cast<float>(nj - bt)
+                                     : 0.0f;
+                ++r.dark_hc;
+                if (r.dark_hc <= pause) {
+                    if (!r.active) r.dark_hc = 0;  // `$r||(hc=0)`
+                    r.dark_alpha = 0.0f;
+                } else if (r.dark_hc <= qy) {
+                    r.dark_alpha = static_cast<float>(r.dark_hc - pause) * c7;
+                } else if (r.dark_hc <= bt) {
+                    r.dark_alpha = 255.0f;
+                } else if (r.dark_hc <= nj) {
+                    r.dark_alpha =
+                        255.0f - static_cast<float>(r.dark_hc - bt) * c9;
+                } else {
+                    r.dark_hc = 0;
+                }
+                darkness_ = r.dark_alpha;  // `o_a` -> `JLa(c.yk)`
+                if (r.dark_hc % 30 == 0) {
+                    std::fprintf(stdout, "[dark] F%d alpha=%.1f hc=%d\n", frame_,
+                                 static_cast<double>(r.dark_alpha), r.dark_hc);
+                    std::fflush(stdout);
+                }
+                break;
+            }
             default:
                 break;
         }
@@ -2248,6 +2366,11 @@ void FightController::rules_end_round() {
     for (FightRule& r : rules_) r.active = false;
     rule_pending_ = false;
     set_ringout_rule(false, ringout_min_, ringout_max_, ringout_speed_);
+    // JS `du.Iwb` L898: `ERuleDarkness -> this.Oe.JLa(0)`; `ca.onb`/`Lja`
+    // (L390/L406) clears the area (`P8=!1`, `Ta.ia.Lja()`).
+    area_enabled_ = false;
+    in_area_[0] = in_area_[1] = false;
+    darkness_ = 0.0f;
 }
 
 // JS `du.F1(a)` (L897) + `du.kZ` (L902) + `du.m_a` (L902-903): the per-round
@@ -2378,8 +2501,45 @@ void FightController::rules_apply_round_effects() {
                 // `ws = (0 < Upa)`.
                 r.ws = (0.0f < static_cast<float>(r.crazy_style));
                 break;
+            case FightRuleKind::random_area: {
+                // `ij.Zk(a)` (L876): `cpa=-loc.width/2 + loc.NU + zaa/2`;
+                // `bpa=loc.width/2 - loc.NU - zaa/2`; `yk=hc=0`; `QB=!1`;
+                // `pX.sL(L.pfb())`. `Va` stays 0 (the ctor value) until the
+                // first `jyb` wrap.
+                const float half_w = camera_.arena_w * 0.5f;
+                r.area_center_min = -half_w + wall_min_ + r.area_width * 0.5f;
+                r.area_center_max = half_w - wall_min_ - r.area_width * 0.5f;
+                r.area_hc = 0;
+                r.area_alpha = 0.0f;
+                r.area_on = false;
+                r.area_pos = 0.0f;
+                const std::uint32_t sd = pfb();  // `L.pfb()` once
+                area_prng_.seed(sd);
+                area_enabled_ = true;  // `f_a` -> `qca` sets `P8`
+                std::fprintf(stdout,
+                             "[area] R%d ERuleRandomArea width=%.0f "
+                             "cpa=%.1f bpa=%.1f arena_w=%.1f wall=%.1f seed=%u\n",
+                             rule_round_, static_cast<double>(r.area_width),
+                             static_cast<double>(r.area_center_min),
+                             static_cast<double>(r.area_center_max),
+                             static_cast<double>(camera_.arena_w),
+                             static_cast<double>(wall_min_), sd);
+                std::fflush(stdout);
+                break;
+            }
+            case FightRuleKind::darkness:
+                // `$i.Zk` (L856): `yk=hc=0`.
+                r.dark_hc = 0;
+                r.dark_alpha = 0.0f;
+                std::fprintf(stdout,
+                             "[dark] R%d ERuleDarkness LightLasting=%d DarkOn=%d "
+                             "DarkLasting=%d LightOn=%d\n",
+                             rule_round_, r.dark_last_light, r.dark_on,
+                             r.dark_last, r.dark_light_on);
+                std::fflush(stdout);
+                break;
             default:
-                break;  // Darkness/RandomArea resets are presentation-only
+                break;  // (no other kind carries a per-round `Zk` reset)
         }
     }
     // `du.kZ(3)` (L902): the `wV` (bit 10) AND per side -> the opposite
@@ -3394,7 +3554,7 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
     ctx.items = side == 0 ? player_items_ : enemy_items_;
     ctx.round = round_.number;
     ctx.pain = me.shock.pain_sr;
-    ctx.in_area = false;  // `rR` area bounds are OPEN
+    ctx.in_area = in_area_[side & 1];  // `rR` (RandomArea, `Xwa` L406)
     for (const auto& kv : bus_.side(side).mods) {
         ctx.mods.insert(kv.first);
         ctx.mod_ns[kv.first] = kv.second.namespc;

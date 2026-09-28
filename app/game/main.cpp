@@ -1584,6 +1584,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // part set the OLD way (yD(4) only) vs the NEW way (the xqb union over
     // every active type-4 interval), then the hit_test result. Proves the D3
     // union fix on a shipped two-interval pair (default FansSuperSlash).
+    bool area_probe = false;  // --area-probe: RandomArea/Darkness rule probe
     bool d3_probe = false;
     std::string d3_probe_move = "FansSuperSlash";
     int d3_probe_frame = 36;
@@ -2065,6 +2066,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             tactic_override = argv[++i];
         } else if (arg == "--boss-loss-probe") {
             boss_loss_probe = true;
+        } else if (arg == "--area-probe") {
+            area_probe = true;
         } else if (arg == "--d3-probe") {
             d3_probe = true;
         } else if (arg == "--d3-probe-move" && i + 1 < argc) {
@@ -6242,6 +6245,85 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          "(last fight frame %d)\n",
                          guard, ff);
             std::fflush(stdout);
+        }
+        app.shutdown();
+        return 0;
+    } else if (area_probe) {
+        // [probe] `--area-probe`: build a headless FightController with the
+        // shipped `RANDOM_AREA_ZONED_DAMAGE` rule set (stages.xml L8081:
+        // `RandomArea Width=600 FadeIn=3 FramesOn=360 FadeOut=4 FramesOff=160`
+        // + the `Darkness DarkOn=60 DarkLasting=180 LightOn=60
+        // LightLasting=30` rule, L2378), step to the live phase, then sweep
+        // the player across the area. Prints the `Zk` center range, the
+        // `Nma` bounds, the slot-15/16 enter/exit events (`rR` flag) and the
+        // Darkness alpha. No OS input, no window.
+        if (!app.has_fight_assets()) {
+            std::fprintf(stderr, "[areaprobe] fight assets not loaded\n");
+            app.shutdown();
+            return 1;
+        }
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::BattleParams battle;
+        battle.name = "Training";
+        battle.location = "dojo";
+        battle.rounds = 2;
+        battle.round_time = 99;
+        battle.max_hp = 100;
+        battle.player_spawn_x = 690.0f;
+        battle.player_spawn_y = -93.0f;
+        battle.enemy_spawn_x = 973.0f;
+        battle.enemy_spawn_y = -110.0f;
+        {
+            std::vector<sf2::scene::StageRule> rules;
+            sf2::scene::StageRule ra;
+            ra.tag = "RandomArea";
+            ra.attrs["Image"] = "ra_fight";
+            ra.attrs["Icon"] = "ra_fight_icon";
+            ra.attrs["Width"] = "600";
+            ra.attrs["FadeIn"] = "3";
+            ra.attrs["FramesOn"] = "360";
+            ra.attrs["FadeOut"] = "4";
+            ra.attrs["FramesOff"] = "160";
+            rules.push_back(ra);
+            sf2::scene::StageRule dk;
+            dk.tag = "Darkness";
+            dk.attrs["DarkOn"] = "60";
+            dk.attrs["DarkLasting"] = "180";
+            dk.attrs["LightOn"] = "60";
+            dk.attrs["LightLasting"] = "30";
+            rules.push_back(dk);
+            sf2::scene::apply_stage_ringout_rule(battle, rules);
+        }
+        const std::vector<sf2::scene::OwnedItem> owned = loadout_owned("Fists");
+        const sf2::scene::TacticDef* tactic = nullptr;
+        const auto tit = fa.tactic_defs.find("Standard");
+        if (tit != fa.tactic_defs.end()) tactic = &tit->second;
+        sf2::scene::FightController ctl;
+        std::mt19937 rng(0x5F2);
+        auto roll01 = [&rng]() {
+            return static_cast<float>(rng()) / static_cast<float>(rng.max());
+        };
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.tactics_sets,
+                       tactic, "Player", "Enemy", battle.player_spawn_x,
+                       battle.player_spawn_y, battle.enemy_spawn_x,
+                       battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
+                       roll01, owned, sf2::scene::PerkSetup(), nullptr);
+        ctl.release_intro();
+        {
+            int pg = 0;
+            while (pg < 20000 && ctl.phase() != 2) {
+                ctl.update(1.0f / 60.0f);
+                ++pg;
+            }
+            std::fprintf(stdout, "[areaprobe] phase=%d guard=%d\n", ctl.phase(), pg);
+            std::fflush(stdout);
+        }
+        for (int i = 0; i < 700; ++i) {
+            const int ph = i % 200;
+            const float px = (ph < 100) ? (700.0f - ph * 10.0f)
+                                        : (-290.0f + (ph - 100) * 10.0f);
+            ctl.debug_place_fighters(px, 900.0f);
+            ctl.update(1.0f / 60.0f);
         }
         app.shutdown();
         return 0;

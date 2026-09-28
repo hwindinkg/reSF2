@@ -328,6 +328,30 @@ struct FightRule {
     std::string hot_anim;      // last animation (native cp==4 edge: haa=false)
     int regen_counter = 0;     // `kj.jc` frames since the last landed hit
     int points_self = 0;       // `gj.qH` (Li=1) / `gj.gN` (Li=2)
+    // `ij` (`ERuleRandomArea`, L876-877): `zaa` (Width) + the `Ei` fade timer.
+    // `Ei.pause`/`Qy`/`Bt`/`NJ` = FramesOff / +FadeIn / +FramesOn / +FadeOut;
+    // `C7`/`C9` are derived (255 / the two fade spans). `hh` ticks `hc` and
+    // yields `yk` (alpha 0..255) + `QB` (gate `g9`); at the cycle wrap `jyb`
+    // draws the new center `Vpa` from the rule's own `pX` Rk. `Nma` then
+    // publishes the world bounds `c$`/`d$`.
+    float area_width = 0.0f;   // `zaa` (Width)
+    int area_frames_off = 0;   // `Ei.pause` (FramesOff)
+    int area_fade_in = 0;      // `Ei.Qy - pause` (FadeIn)
+    int area_frames_on = 0;    // `Ei.Bt - Qy` (FramesOn)
+    int area_fade_out = 0;     // `Ei.NJ - Bt` (FadeOut)
+    int area_hc = 0;           // `hc` (frame counter)
+    float area_pos = 0.0f;     // `Vpa` (center; 0 until the first `jyb`)
+    float area_alpha = 0.0f;   // `yk` (0..255)
+    bool area_on = false;      // `QB` (gate `g9`)
+    float area_center_min = 0.0f;  // `cpa` (`ij.Zk`)
+    float area_center_max = 0.0f;  // `bpa` (`ij.Zk`)
+    // `$i` (`ERuleDarkness`, L856): the `Gi` fade timer + `yk`/`hc`/`$r`.
+    int dark_last_light = 0;   // `Gi.pause` (LightLasting)
+    int dark_on = 0;           // `Gi.Qy - pause` (DarkOn)
+    int dark_last = 0;         // `Gi.Bt - Qy` (DarkLasting)
+    int dark_light_on = 0;     // `Gi.NJ - Bt` (LightOn)
+    int dark_hc = 0;           // `hc`
+    float dark_alpha = 0.0f;   // `yk` (0..255)
 };
 
 // True for the rules that extend JS `Ga` (the `bb.xe` combat rules that
@@ -614,12 +638,32 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
         r.player_rating = fight_rule_float(sr.attrs, "PlayerRating", 0.0f);
         r.enemy_rating = fight_rule_float(sr.attrs, "EnemyRating", 0.0f);
         r.rating_correction = fight_rule_float(sr.attrs, "RatingCorrection", 0.0f);
+    } else if (r.kind == FightRuleKind::random_area) {
+        // `ij.parse` (L876-877): `zaa=u.H(Width)`; `Ei.pause=FramesOff`,
+        // `Ei.Qy=pause+FadeIn`, `Ei.Bt=Qy+FramesOn`, `Ei.NJ=Bt+FadeOut`.
+        r.area_width = fight_rule_float(sr.attrs, "Width", 0.0f);
+        r.area_frames_off = fight_rule_int(sr.attrs, "FramesOff", 0);
+        r.area_fade_in = fight_rule_int(sr.attrs, "FadeIn", 0);
+        r.area_frames_on = fight_rule_int(sr.attrs, "FramesOn", 0);
+        r.area_fade_out = fight_rule_int(sr.attrs, "FadeOut", 0);
+    } else if (r.kind == FightRuleKind::darkness) {
+        // `$i.parse` (L856): `Gi.pause=LightLasting`,
+        // `Gi.Qy=pause+DarkOn`, `Gi.Bt=Qy+DarkLasting`,
+        // `Gi.NJ=Bt+LightOn`.
+        r.dark_last_light = fight_rule_int(sr.attrs, "LightLasting", 0);
+        r.dark_on = fight_rule_int(sr.attrs, "DarkOn", 0);
+        r.dark_last = fight_rule_int(sr.attrs, "DarkLasting", 0);
+        r.dark_light_on = fight_rule_int(sr.attrs, "LightOn", 0);
     }
     // ApplyTo overrides from the `bb.xe` dispatch (L891-893): Points is
     // always All (`new gj(b,3)`) -> split; Darkness always Player
     // (`new $i(b,1)`); Tactic defaults Bot (`new pj(b)`).
     if (r.kind == FightRuleKind::points) r.apply_to = 3;
     else if (r.kind == FightRuleKind::darkness) r.apply_to = 1;
+    // `ij` ctor (L876): `super("ERuleRandomArea",1,a)` hardcodes Li=1, and
+    // `du.OK` (`o4(a,!0)`) never splits it, so pin it to Player to keep the
+    // generic ApplyTo=All split (`fight_rules_split`) from duplicating it.
+    else if (r.kind == FightRuleKind::random_area) r.apply_to = 1;
     else if (r.kind == FightRuleKind::tactic) r.apply_to = 2;
     // `qj` ctor (L912): TimeOutWin forces `Li=1` (player wins on timeout;
     // `Yu=false` -> `wfa()` = 1 -> E3a `a=true`).
@@ -1898,6 +1942,20 @@ private:
     // cached here so `EachFight` groups keep the same choice across rounds.
     std::map<int, int> random_pick_;
     bool random_pick_done_ = false;
+    // JS `ca` area state (L406): `e$` (qca), `c$`/`d$` (Nma), `g9`, `P8`.
+    float area_e_ = 0.0f;           // `e$` (the RandomArea full width)
+    float area_cmin_ = 0.0f;        // `c$` (left bound, world)
+    float area_cmax_ = 0.0f;        // `d$` (right bound, world)
+    bool area_gate_ = false;        // `g9` (QB)
+    bool area_enabled_ = false;     // `P8`
+    bool in_area_[2] = {false, false};  // `rR` per fighter side
+    std::uint32_t l_seed_ = 0;      // `L.seed` analog for `L.pfb()` (L32962)
+    sf2::scene::DaPrng area_prng_;  // `ij.pX` (the rule's own Rk)
+    float darkness_ = 0.0f;         // `JLa(yk)` — the live Darkness alpha
+    std::uint32_t pfb() {           // `L.pfb` (L32962): `(seed+1)%2147483647`
+        l_seed_ = (l_seed_ + 1u) % 2147483647u;
+        return l_seed_;
+    }
     int rule_round_ = 1;            // JS `cz` (`rob(round>0?round:1)`)
     bool rule_pending_ = false;     // JS `ca.Pu != null`
     round_result rule_result_ = round_result::ko;  // JS `ca.ey`
