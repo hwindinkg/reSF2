@@ -19,6 +19,7 @@
 #include "anim_archive.hpp"
 #include "scene/ai.hpp"        // StrikeMemory (the `wd.Cn` strike accumulator)
 #include "scene/conditions.hpp"
+#include "scene/location_scene.hpp"  // `active_friction` = JS `xd.bAa`
 #include "scene/move_def.hpp"
 
 namespace sf2::scene {
@@ -610,6 +611,12 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     ragdoll_wall_min_ = wall_min;
     ragdoll_wall_max_ = wall_max;
     ragdoll_floor_y_ = floor_y;
+    // JS `Al` ctor char 296286: `this.bQa=xd.bAa` — the per-location
+    // `FrictionForce` (`Bf.init` char 241113), a process-global refreshed on
+    // every location load. The solver is created when the ragdoll starts, so
+    // capture the currently published value here. No shipped location sets
+    // it, so this resolves to `xd.uya` = 0.2.
+    ragdoll_friction_ = sf2::scene::LocationScene::active_friction();
     const std::size_t n = model_.bones.size();
     if (n == 0) return;
     sol_ma_.assign(n * 3, 0.0f);
@@ -2310,7 +2317,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // are NOT moved by the solver (they keep their `Te.eda` pose). The
         // old native integrated every non-fixed non-macro bone, dragging the
         // posed skeleton off the clip (the stretched mesh).
-        constexpr float kGrav = kGravitation;  // JS `xd.fDa` (Gravitation)
+        const float kGrav = kGravitation / (model_hd_ * model_hd_);  // JS `Al.O9a`
         for (std::size_t i = 0; i < n; ++i) {
             const Bone& b = bones[i];
             // JS `Al.sk` (L583): `!c.NG && (this.nk || c.jy || oa.vc && c.vc)`.
@@ -2387,7 +2394,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                             sol_ma_[u], sol_ma_[u + 1], sol_ma_[u + 2],
                             sol_mf_[u], sol_mf_[u + 2], bones[idx[k]].collisible,
                             ragdoll_wall_min_, ragdoll_wall_max_,
-                            ragdoll_floor_y_);
+                            ragdoll_friction_, ragdoll_floor_y_);
                         if (dx != 0.0f) {
                             ++wall_hits;
                             std::fprintf(

@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -55,6 +56,11 @@ struct EventDef {
 constexpr float kMusicVolume = 1.0f;
 // The beep fallback's own gain (a native stand-in; see init).
 constexpr float kBeepVolume = 0.4f;
+// JS `Ss.pxb` (char 1238696) -> `this.qxb=.05` (char 1236651): the default
+// per-cue re-trigger suppression window, in seconds. The per-cue override
+// table `rxb` (`new jd`, char 1236634) is never populated by shipped content,
+// so every non-`tR` cue falls back to this `qxb` default.
+constexpr double kSfxThrottleSeconds = 0.05;
 
 // The table-driven event list (Phase 7.1): built once from sfx_table.hpp so
 // the JS mapping stays in exactly one place. Stable after construction.
@@ -153,6 +159,10 @@ struct AudioEngine::Impl {
     std::vector<int> next_voice;      // round-robin cursor per event
     std::vector<unsigned char> first_logged;  // 0/1: log once per event
     std::vector<std::uint64_t> played;        // per-event counters
+    // JS `Tc.oFa` (char 1234609, initialized -1): per-cue last-play time in
+    // seconds (`Ss.pxb` reads/writes `b.oFa`). -1 = never played.
+    std::vector<double> last_play;
+    std::uint64_t suppressed_total = 0;  // JS `Ss.pxb` true results
     // Beep fallback (only when no real sample could be loaded).
     ma_audio_buffer beep{};
     bool beep_ok = false;
@@ -170,6 +180,7 @@ AudioEngine::AudioEngine() : impl_(new Impl()) {
     impl_->next_voice.assign(n, 0);
     impl_->first_logged.assign(n, 0);
     impl_->played.assign(n, 0);
+    impl_->last_play.assign(n, -1.0);  // JS `Tc.oFa=-1` (char 1234609)
 }
 
 AudioEngine::~AudioEngine() {
@@ -267,8 +278,9 @@ bool AudioEngine::init(const std::string& res_root) {
 void AudioEngine::shutdown() {
     if (impl_ == nullptr) return;
     if (impl_->engine_ok) {
-        std::fprintf(stdout, "[audio] shutdown: total=%llu",
-                     static_cast<unsigned long long>(played_total_));
+        std::fprintf(stdout, "[audio] shutdown: total=%llu suppressed=%llu",
+                     static_cast<unsigned long long>(played_total_),
+                     static_cast<unsigned long long>(suppressed_total_));
         for (std::size_t e = 0; e < events().size(); ++e) {
             std::fprintf(stdout, " %s=%llu", events()[e].name,
                          static_cast<unsigned long long>(impl_->played[e]));
@@ -414,6 +426,26 @@ void AudioEngine::play(const std::string& event) {
             log_latency(impl_->engine, false, "sfx", event, nullptr);
         }
         return;
+    }
+
+    // JS `Ss.pxb` (char 1238696), called from `Ss.O6a` (char 1238636) BEFORE
+    // the voice start: a non-`tR` cue re-triggered within `rxb.v[id] || qxb`
+    // seconds (`qxb=0.05`, char 1236651) is suppressed (`return!0`), and `O6a`
+    // then returns -1 without playing. The engine-on guard above mirrors
+    // `O6a`'s `La.context==null` early-out, which sits BEFORE the `pxb` call,
+    // so a dead engine neither throttles nor stamps `oFa`. `rxb` is never
+    // populated by shipped content, so the window is always the default.
+    {
+        const double now = std::chrono::duration<double>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count();
+        const double last = impl_->last_play[static_cast<std::size_t>(e)];
+        if (last >= 0.0 && now - last < kSfxThrottleSeconds) {
+            ++suppressed_total_;      // JS `pxb` true -> `O6a` returns -1
+            ++impl_->suppressed_total;
+            return;
+        }
+        impl_->last_play[static_cast<std::size_t>(e)] = now;  // `b.oFa=c`
     }
 
     // Round-robin over the event's voices: voice v always holds the sample

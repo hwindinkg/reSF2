@@ -50,6 +50,12 @@ constexpr bool kSequentionEnabled = true;
 // `framing_sya_impl` (fight_camera_sya.hpp) consumes it. 0 = no location yet.
 float g_active_arena_height = 0.0f;
 
+// The per-location `FrictionForce` (`xd.bAa`) of the most recently loaded
+// location — the native analogue of the JS process-global set by `Bf.init`
+// (char 241113) and consumed by every `Al` solver (`this.bQa=xd.bAa`, char
+// 296286). Defaults to `xd.uya` = 0.2 (internal_settings, char 648056).
+float g_active_friction = 0.2f;
+
 // A ClassName resolved against an atlas: the frame rect plus the pixel size
 // of the atlas texture it lives in (for UV normalization).
 struct FrameRef {
@@ -884,6 +890,11 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
     // hard-coding dojo's 80 for every location.
     arena_wall_ = sf2::data::xml_attr_float(root, "Wall", 0.0f);
     arena_position_y_ = sf2::data::xml_attr_float(root, "PositionY", 0.0f);
+    // JS `Bf.init` char 241113: `xd.bAa=u.H(a.attributes.get("FrictionForce"),
+    // xd.uya)`. `xd.uya` is the internal_settings default 0.2 (char 648056).
+    // No shipped location carries the attr, so this resolves to 0.2.
+    arena_friction_ = sf2::data::xml_attr_float(root, "FrictionForce", 0.2f);
+    g_active_friction = arena_friction_;
     // The Root Color (the fighters' silhouette fill, JS `Na.cd`). Default
     // black when the attr is absent.
     if (root.attribute("Color")) {
@@ -1092,6 +1103,8 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
 }
 
 float LocationScene::active_arena_height() { return g_active_arena_height; }
+
+float LocationScene::active_friction() { return g_active_friction; }
 
 void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
                                    float view_h, float focus_x, float fighter_span) const {

@@ -455,6 +455,14 @@ public:
     // (L867 `this.eC=-a.location.Tza`); all shipped locations use -93/-94.
     // 0 when absent (the caller falls back as needed).
     float arena_position_y() const { return arena_position_y_; }
+    // Root `FrictionForce` -> JS `Bf.init` char 241113:
+    // `xd.bAa=u.H(a.attributes.get("FrictionForce"),xd.uya)`. The fallback
+    // `xd.uya` is the internal_settings `<FrictionForce Value="0.2"/>`
+    // (char 648056). No shipped location carries the attr, so this is 0.2 —
+    // the value is nevertheless per-location and per-update, so it is handed
+    // to the `Al` solver (`this.bQa=xd.bAa`, char 296286) rather than a
+    // compile-time constant.
+    float arena_friction() const { return arena_friction_; }
     // The location Root Color (the `Root` element's Color attr, e.g.
     // "0x000000" for the dojo). The game's fighters are silhouettes filled
     // with this flat color (JS `Na.cd`); the fight screen sets the fighter
@@ -469,6 +477,11 @@ public:
     // no pointer to the scene. 0 until a location has been loaded, so callers
     // with no scene (the standalone demos) keep their own default.
     static float active_arena_height();
+    // The per-location `FrictionForce` of the most recently loaded location,
+    // published for the fight controller's `Al` solver (the JS `xd.bAa` is a
+    // process-global set by `Bf.init`, char 241113). Defaults to `xd.uya` =
+    // 0.2 until a location is loaded.
+    static float active_friction();
 
 private:
     // JS `jh.update` (L1149-1151) for one emitter: advance the spawn clock,
@@ -508,6 +521,7 @@ private:
     float arena_h_ = 0.0f;
     float arena_floor_ = 0.0f;
     float arena_wall_ = 0.0f;        // Root Wall (JS NU, L474)
+    float arena_friction_ = 0.2f;    // Root FrictionForce (JS xd.bAa, char 241113)
     float arena_position_y_ = 0.0f;  // Root PositionY (JS Tza, L474)
     std::uint32_t root_color_ = 0x000000u;  // default black (the dojo's Color)
     // JS `Ut.uo` alpha (`yk`, 0..255) — the Darkness ambient (see header).

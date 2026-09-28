@@ -149,9 +149,13 @@ struct BodyState {
 };
 
 // --- arena/ground response (JS `Al.fha` L582 + `Al.P6a` L582) ----------
-// `this.bQa` = `xd.bAa` (`internal_settings.xml` `<FrictionForce Value="0.2"/>`;
-// JS default `xd.uya` = 0.2).
-inline constexpr float kFrictionForce = 0.2f;
+// `this.bQa` = `xd.bAa`. JS `Bf.init` (char 241113) sets the per-LOCATION
+// override: `xd.bAa=u.H(a.attributes.get("FrictionForce"),xd.uya)` — the
+// fallback `xd.uya` is the internal_settings `<FrictionForce Value="0.2"/>`
+// (char 648056; default .2 when absent). No shipped location carries the
+// attr, so `xd.bAa` is always 0.2 — but the value is per-location, so it is
+// passed to `fha_body` rather than read from this default constant.
+inline constexpr float kFrictionForce = 0.2f;  // JS `xd.bAa` default (`xd.uya`)
 
 // Applies `Al.fha` (L582) to ONE solver body (`Vc`), verbatim:
 //   fha(a){ let b=a.ma; b.y>=0 && this.P6a(a);
@@ -167,8 +171,10 @@ inline constexpr float kFrictionForce = 0.2f;
 // parse negates the XML Y — so `y >= 0` means at/below the floor and the JS
 // friction term `a.y*bQa` is the depth below the floor).
 // Returns `x_after - x_before` (the horizontal effect of the response).
+// `friction` = `this.bQa` = `xd.bAa` (per-location, JS `Bf.init` char 241113).
 float fha_body(float& x, float& y, float& z, float px, float pz,
-               bool collisible, float wall_min, float wall_max, float floor_y);
+               bool collisible, float wall_min, float wall_max, float friction,
+               float floor_y);
 
 // --- impulse / knockback (JS `Bl.strike` L582 + `wd.Kwb` L509) ---------
 // Applies the move interval's Impulse (X/Y/Z) to the target's hit capsule

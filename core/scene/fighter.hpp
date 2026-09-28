@@ -303,8 +303,14 @@ public:
 
     // Anim timescale (SlowModel `Kvb`/`KT`): apply sets scale (Speed>=1;
     // Speed<1 is a verbatim no-op), revert restores 1.0 (`v.dB` assumed).
-    void set_time_scale(float s) { time_scale_ = s; scale_acc_ = 0.0f; }
+    // JS `KT` (char 271499) writes the model scale too: `NMa(b)` (char 251149)
+    // sets `Ita`; `HD()` (char 251101) returns it. `Al.O9a` divides gravity by
+    // `HD()*HD()`. The port keeps one channel, so it tracks the same `b`.
+    void set_time_scale(float s) { time_scale_ = s; model_hd_ = s; scale_acc_ = 0.0f; }
     float time_scale() const { return time_scale_; }
+    // JS `this.oa.model.HD()` (`Ita`), used by `Al.O9a` (char 296359):
+    // `xd.fDa/(HD()*HD())`. 1.0 unless a SlowModel `KT` is active.
+    float model_hd() const { return model_hd_; }
     // JS `wd.y5(a)`/`Dfa()` (L251005/L251095): `wd.xpa` — the ACT-ALLOWED
     // flag. `ca.uhb` calls `a.model.y5(!1)` on the finishing blow (Dfa() then
     // false, so `uhb` cannot re-arm), and the `cu` timer restores it after
@@ -900,6 +906,7 @@ private:
     int clip_mirror_ = 1;
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
+    float model_hd_ = 1.0f;    // JS `KT`->`NMa` model scale (`HD()`, `Al.O9a`)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
     // JS `wd.xpa` (`y5`): false while the finishing-blow disable holds.
     bool action_disabled_ = false;
@@ -927,6 +934,8 @@ private:
     float ragdoll_wall_min_ = 0.0f;
     float ragdoll_wall_max_ = 0.0f;
     float ragdoll_floor_y_ = 0.0f;
+    // `this.bQa` = `xd.bAa` (per-location `FrictionForce`, char 241113).
+    float ragdoll_friction_ = kFrictionForce;
     std::set<std::string> active_intervals_;
     // Clip-end snapshot of the above (JS `Ae.xb` at the `AnimationEnd` pass).
     std::vector<std::pair<std::string, int>> ended_intervals_; // active interval names (JS `Te.xj`)

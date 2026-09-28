@@ -117,6 +117,16 @@ public:
     // Diagnostics (headless verification).
     std::uint64_t played_total() const { return played_total_; }
     std::uint64_t played(const std::string& event) const;
+    // JS `Ss.pxb` (char 1238696), reached from `Ss.O6a` (char 1238636): a
+    // non-`tR` cue re-triggered within `rxb.v[id] || qxb` seconds
+    // (`qxb = 0.05`, char 1236651) is SUPPRESSED — `pxb` returns true and
+    // `O6a` returns -1 without ever starting the voice. `suppressed_total()`
+    // counts those suppressed re-triggers. `play()` is keyed by the
+    // `ta.WBa` asset-event name, and `WBa` maps a name to exactly one cue id,
+    // so the per-cue-id throttle is per-event here. `rxb` is never populated
+    // by shipped content (`new jd` only, char 1236634), so every non-`tR`
+    // event uses the `qxb = 0.05` default window.
+    std::uint64_t suppressed_total() const { return suppressed_total_; }
 
 private:
     struct Impl;
@@ -126,6 +136,7 @@ private:
     bool music_muted_ = false;  // JS `ta.$D` (L1264), `lb.Mz()` (L1276).
     bool sfx_muted_ = false;    // JS `ta.ZD` (L1264), `lb.Lz()` (L1276).
     std::uint64_t played_total_ = 0;
+    std::uint64_t suppressed_total_ = 0;  // JS `Ss.pxb` suppressed plays
 };
 
 }  // namespace sf2::audio

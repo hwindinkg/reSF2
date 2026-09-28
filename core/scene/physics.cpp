@@ -280,7 +280,8 @@ const HitCapsule* BodyState::by_name(const std::string& name) const {
 }
 
 float fha_body(float& x, float& y, float& z, float px, float pz,
-               bool collisible, float wall_min, float wall_max, float floor_y) {
+               bool collisible, float wall_min, float wall_max, float friction,
+               float floor_y) {
     const float x_before = x;
     // JS `Al.fha` L582: `b=a.ma; b.y>=0 && this.P6a(a)` — the response runs
     // only for a body at/below the floor plane.
@@ -295,7 +296,7 @@ float fha_body(float& x, float& y, float& z, float px, float pz,
             const float dx = x - px;
             const float dz = z - pz;
             const float e = dx * dx + dz * dz;         // `c*c+d*d`
-            float f = (y - floor_y) * kFrictionForce;  // `a.y*this.bQa`
+            float f = (y - floor_y) * friction;        // `a.y*this.bQa`
             x = px;                                    // `a.x=b.x`
             y = floor_y;                               // `a.y=0`
             z = pz;                                    // `a.z=b.z`
