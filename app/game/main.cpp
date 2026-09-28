@@ -1513,6 +1513,11 @@ int main(int argc, char** argv) {
 bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool enchant_stat_probe_mode = false;  // --enchant-stat-probe
     bool perk_set_probe_mode = false;  // --perk-set-probe
+    // --save-fields-probe: JS-exact save field round-trip (Fight ID +
+    // RandomGroupSeed/RandomRuleSeed, Battle EndTime/Fight/random seeds,
+    // Timer EndTime attr, Currencies/Resistances) + the SF2User/`.sf2`
+    // envelope (encode/decode/import). No OS input, no sim.
+    bool save_fields_probe_mode = false;
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
@@ -1728,6 +1733,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // `Ji.vva`/`Gt.$jb`) instead of the previous `{}`. Dispatched after
             // the RULE 0 watchdog install (see below).
             perk_set_probe_mode = true;
+        } else if (arg == "--save-fields-probe") {
+            // JS-exact save field + envelope round-trip (dispatched after the
+            // RULE 0 watchdog install; no OS input, no sim).
+            save_fields_probe_mode = true;
         } else if (arg == "--mode-probe") {
             // Mode series advance + reward proof (JS `Onb` L209117 win
             // handler -> `mfb` L205744 `Rk++`/`Zb=pf[Rk]` -> `D0(i)`
@@ -2301,6 +2310,99 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      row_aspect.c_str(), def_aspect.c_str(),
                      resolve_ok ? "4000" : "-", resolve_ok ? "PASS" : "FAIL",
                      ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return ok ? 0 : 1;
+    }
+
+    // `--save-fields-probe`: JS-exact save-field + envelope round-trip.
+    // Synthetic users.xml (a Warrior with a Fight / Battle / Timer /
+    // Currencies / Resistances), then SaveSystem load -> save -> reload
+    // equality of every JS field, plus the `SF2User` storage form
+    // (`Aa.save` L34817) and the `.sf2` export/import (`Aa.Dpb`/`Aa.Ddb`
+    // L35024/L35628). RULE 0: dispatched after the watchdog.
+    if (save_fields_probe_mode) {
+        const std::string tmp_path = "reference/saves/save_fields_probe.xml";
+        const std::string xml =
+            "<Root><CurrentUser><Sounds><Sound Mute=\"0\"/><Music Mute=\"0\"/>"
+            "</Sounds></CurrentUser><Warriors><Warrior ID=\"1\" FirstName=\"X\" "
+            "Money=\"7\" Level=\"1\" CurrentZone=\"ZONE_1\">"
+            "<Currencies RUBY=\"3\" COIN=\"4\"/>"
+            "<Resistances Resistance_2=\"5\" Resistance_3=\"0\"/>"
+            "<Battles><Battle Name=\"ZONE_1|BOSS_LYNX|\" Locked=\"0\" "
+            "RandomGroupSeed=\"11\" RandomRuleSeed=\"12\" EndTime=\"99\" "
+            "ReplayCount=\"2\" Fight=\"1\"/></Battles>"
+            "<Fights><Fight IDS=\"ZONE_1|BOSS_LYNX|\" ID=\"7\" "
+            "CompletedCount=\"3\" RandomGroupSeed=\"21\" "
+            "RandomRuleSeed=\"22\"/></Fights>"
+            "<Timers><Timer Name=\"Delivery\" EndTime=\"123456\"/></Timers>"
+            "</Warrior></Warriors></Root>";
+        {
+            std::ofstream o(tmp_path, std::ios::binary | std::ios::trunc);
+            o.write(xml.data(), static_cast<std::streamsize>(xml.size()));
+        }
+        bool read_ok = false, write_ok = false, env_ok = false, sf2_ok = false;
+        std::string detail;
+        try {
+            sf2::app::SaveSystem ss(tmp_path, tmp_path);
+            sf2::app::WarriorSave w = ss.load();
+            read_ok = w.fights.size() == 1 &&
+                      w.fights[0].name == "ZONE_1|BOSS_LYNX|" &&
+                      w.fights[0].id == 7 && w.fights[0].wins == 3 &&
+                      w.fights[0].has_random_group_seed &&
+                      w.fights[0].random_group_seed == 21 &&
+                      w.fights[0].has_random_rule_seed &&
+                      w.fights[0].random_rule_seed == 22 &&
+                      w.battle_records.size() == 1 &&
+                      w.battle_records[0].has_random_group_seed &&
+                      w.battle_records[0].random_group_seed == 11 &&
+                      w.battle_records[0].has_random_rule_seed &&
+                      w.battle_records[0].random_rule_seed == 12 &&
+                      w.battle_records[0].has_end_time &&
+                      w.battle_records[0].end_time == 99 &&
+                      w.battle_records[0].replay_count == 2 &&
+                      w.battle_records[0].fight &&
+                      w.timers.count("Delivery") == 1 &&
+                      w.timers["Delivery"] == 123456 &&
+                      w.currencies.count("RUBY") == 1 && w.currencies["RUBY"] == 3 &&
+                      w.resistances.count("Resistance_2") == 1 &&
+                      w.resistances["Resistance_2"] == 5;
+            ss.save(w);
+            sf2::app::WarriorSave w2 = ss.load();
+            write_ok = w2.fights.size() == 1 && w2.fights[0].id == 7 &&
+                       w2.fights[0].wins == 3 &&
+                       w2.fights[0].has_random_group_seed &&
+                       w2.fights[0].random_group_seed == 21 &&
+                       w2.fights[0].has_random_rule_seed &&
+                       w2.fights[0].random_rule_seed == 22 &&
+                       w2.battle_records.size() == 1 &&
+                       w2.battle_records[0].has_random_group_seed &&
+                       w2.battle_records[0].random_group_seed == 11 &&
+                       w2.battle_records[0].has_random_rule_seed &&
+                       w2.battle_records[0].random_rule_seed == 12 &&
+                       w2.battle_records[0].has_end_time &&
+                       w2.battle_records[0].end_time == 99 &&
+                       w2.battle_records[0].fight &&
+                       w2.timers.count("Delivery") == 1 &&
+                       w2.timers["Delivery"] == 123456;
+            // Envelope: the `SF2User` storage form (no `SF2` prefix) decodes
+            // byte-exactly; the `.sf2` framed export imports users+packs+flags.
+            const std::string stored = SaveSystem::envelope_encode_users(xml);
+            env_ok = SaveSystem::envelope_decode(stored) == xml;
+            const std::string sf2 =
+                SaveSystem::export_sf2(xml, "<Packs/>", true, false);
+            const SaveSystem::Sf2Package pkg = SaveSystem::import_sf2(sf2);
+            sf2_ok = pkg.users_xml == xml && pkg.packs_xml == "<Packs/>" &&
+                     pkg.h1 && !pkg.vf;
+        } catch (const std::exception& e) {
+            detail = e.what();
+        }
+        const bool ok = read_ok && write_ok && env_ok && sf2_ok;
+        std::fprintf(stdout,
+                     "[save-fields] read=%s write=%s SF2User-envelope=%s "
+                     ".sf2=%s %s\n[save-fields] RESULT %s\n",
+                     read_ok ? "PASS" : "FAIL", write_ok ? "PASS" : "FAIL",
+                     env_ok ? "PASS" : "FAIL", sf2_ok ? "PASS" : "FAIL",
+                     detail.c_str(), ok ? "PASS" : "FAIL");
         std::fflush(stdout);
         return ok ? 0 : 1;
     }

@@ -204,6 +204,22 @@ WarriorSave SaveSystem::load() {
         r.locked = sf2::data::xml_attr_bool(b, "Locked", false);
         r.hidden = sf2::data::xml_attr_bool(b, "Hidden", false);
         r.replay_count = sf2::data::xml_attr_int(b, "ReplayCount", 0);
+        // `hl` (L140070) optional attrs. `RandomGroupSeed`/`RandomRuleSeed`
+        // presence is the JS `UV`/`VV` (`!Xa(attr)`) test; `EndTime` is
+        // `xb(attr,-1)`; `Fight` is `!Xa(attr)` (`Sqa`).
+        if (const pugi::xml_attribute a = b.attribute("RandomGroupSeed")) {
+            r.has_random_group_seed = true;
+            r.random_group_seed = a.as_int(0);
+        }
+        if (const pugi::xml_attribute a = b.attribute("RandomRuleSeed")) {
+            r.has_random_rule_seed = true;
+            r.random_rule_seed = a.as_int(0);
+        }
+        if (const pugi::xml_attribute a = b.attribute("EndTime")) {
+            r.has_end_time = true;
+            r.end_time = a.as_int(-1);
+        }
+        r.fight = b.attribute("Fight") != nullptr;
         out.battle_records.push_back(std::move(r));
     }
 
@@ -228,6 +244,18 @@ WarriorSave SaveSystem::load() {
         fw.randomize_time_left =
             sf2::data::xml_attr_int(f, "RandomizeTimeLeft", 0);
         fw.level = sf2::data::xml_attr_int(f, "Level", 0);
+        // `ID` (il ctor L141476 force-materializes it, default "-1").
+        fw.id = sf2::data::xml_attr_int(f, "ID", -1);
+        // `RandomGroupSeed`/`RandomRuleSeed` (`il.fv`/`il.Qm`, default 0;
+        // written only by `vla`/`wla`). Presence mirrors the JS `Xa` test.
+        if (const pugi::xml_attribute a = f.attribute("RandomGroupSeed")) {
+            fw.has_random_group_seed = true;
+            fw.random_group_seed = a.as_int(0);
+        }
+        if (const pugi::xml_attribute a = f.attribute("RandomRuleSeed")) {
+            fw.has_random_rule_seed = true;
+            fw.random_rule_seed = a.as_int(0);
+        }
         out.fights.push_back(std::move(fw));
     }
 
@@ -396,16 +424,19 @@ WarriorSave SaveSystem::load() {
     // avatar name on the `<Warrior>` node; absent in the seed -> "".
     out.avatar = warrior.attribute("Avatar").as_string("");
 
-    // Delivery timers (`yl`/`Ct` under save `<Timers>`, L250: `Uaa/BXa`
-    // set, `gJ` get, `H4` clear). Child schema `<Timer Name Due>` is the
-    // shell's choice (no Timers element ships in the seed).
+    // Delivery timers (`yl`/`Ct` under save `<Timers>`, L250; the timer
+    // record `bh` L147227 writes/reads `<Timer Name EndTime>` — `bh.hi`
+    // `set("EndTime",K.T(b))`, `bh.Qd` `xb(attributes.get("EndTime"))`).
+    // Legacy native saves used a `Due` attribute; accepted as a fallback.
     out.timers.clear();
     if (pugi::xml_node timers = warrior.child("Timers")) {
         for (pugi::xml_node t : timers.children("Timer")) {
             if (!t.attribute("Name")) continue;
+            const pugi::xml_attribute at =
+                t.attribute("EndTime") ? t.attribute("EndTime") : t.attribute("Due");
+            if (!at) continue;
             try {
-                out.timers[t.attribute("Name").value()] =
-                    std::stoll(t.attribute("Due").value());
+                out.timers[t.attribute("Name").value()] = std::stoll(at.value());
             } catch (const std::exception&) {
             }
         }
@@ -662,6 +693,32 @@ void SaveSystem::save(const WarriorSave& w) {
             } else if (ra) {
                 node.remove_attribute("ReplayCount");
             }
+            // `hl` optional attrs (L140070): presence-tracked seeds + EndTime,
+            // and the boolean `Fight` marker (`hl.Sqa`).
+            const auto patch_opt_int =
+                [&node](const char* key, bool present, int value) {
+                    pugi::xml_attribute a = node.attribute(key);
+                    if (present) {
+                        if (!a) a = node.append_attribute(key);
+                        a.set_value(value);
+                    } else if (a) {
+                        node.remove_attribute(key);
+                    }
+                };
+            patch_opt_int("RandomGroupSeed", r.has_random_group_seed,
+                          r.random_group_seed);
+            patch_opt_int("RandomRuleSeed", r.has_random_rule_seed,
+                          r.random_rule_seed);
+            patch_opt_int("EndTime", r.has_end_time, r.end_time);
+            {
+                pugi::xml_attribute fa = node.attribute("Fight");
+                if (r.fight) {
+                    if (!fa) fa = node.append_attribute("Fight");
+                    fa.set_value("1");
+                } else if (fa) {
+                    node.remove_attribute("Fight");
+                }
+            }
         }
     }
 
@@ -677,6 +734,8 @@ void SaveSystem::save(const WarriorSave& w) {
         for (const WarriorSave::FightWins& fw : w.fights) {
             pugi::xml_node f = fights.append_child("Fight");
             f.append_attribute("IDS").set_value(fw.name.c_str());
+            // `ID` (il ctor L141476 force-materializes it, default "-1").
+            f.append_attribute("ID").set_value(fw.id);
             f.append_attribute("CompletedCount").set_value(fw.wins);
             f.append_attribute("LossCount").set_value(fw.losses);
             f.append_attribute("EclipseCompletedCount")
@@ -688,6 +747,13 @@ void SaveSystem::save(const WarriorSave& w) {
             f.append_attribute("RandomizeTimeLeft")
                 .set_value(fw.randomize_time_left);
             f.append_attribute("Level").set_value(fw.level);
+            // `il.vla`/`wla`: only materialize when the seed was set/present.
+            if (fw.has_random_group_seed) {
+                f.append_attribute("RandomGroupSeed").set_value(fw.random_group_seed);
+            }
+            if (fw.has_random_rule_seed) {
+                f.append_attribute("RandomRuleSeed").set_value(fw.random_rule_seed);
+            }
         }
     }
 
@@ -778,7 +844,8 @@ void SaveSystem::save(const WarriorSave& w) {
         for (const auto& kv : w.timers) {
             pugi::xml_node t = timers.append_child("Timer");
             t.append_attribute("Name").set_value(kv.first.c_str());
-            t.append_attribute("Due").set_value(kv.second);
+            // `bh.hi` (L147227): `set("EndTime", K.T(b))`.
+            t.append_attribute("EndTime").set_value(kv.second);
         }
     }
 
@@ -920,9 +987,10 @@ void SaveSystem::save(const WarriorSave& w) {
 }
 
 std::string SaveSystem::envelope_decode(const std::string& envelope_text) {
-    // `Aa.load` (L70-71) shape, extended: strip whitespace; a leading
-    // `SF2` selects the framed form (`Ddb`); otherwise the legacy
-    // whole-blob form (base64 -> un-zstd -> XML).
+    // `Aa.load` (L70-71) shape: strip whitespace; a leading `SF2` selects
+    // the `.sf2` framed form (`Ddb`); otherwise it is the `SF2User` STORAGE
+    // form `base64(ke(compressed-len)+compressed)` (also one framed chunk).
+    // A raw whole-blob `base64(compressed)` is accepted as a legacy fallback.
     std::string b64;
     for (char c : envelope_text) {
         if (c != ' ' && c != '\t' && c != '\r' && c != '\n') b64.push_back(c);
@@ -931,10 +999,40 @@ std::string SaveSystem::envelope_decode(const std::string& envelope_text) {
         return sf2::data::envelope_decode_users(
             sf2::data::base64_decode(b64.substr(3)));
     }
-    const std::vector<std::uint8_t> compressed = sf2::data::base64_decode(b64);
-    const std::vector<std::uint8_t> xml =
-        sf2::data::zstd_decompress(compressed.data(), compressed.size());
-    return std::string(xml.begin(), xml.end());
+    const std::vector<std::uint8_t> raw = sf2::data::base64_decode(b64);
+    try {
+        return sf2::data::envelope_decode_users(raw);  // `Yt(ti())` frame
+    } catch (const std::exception&) {
+        const std::vector<std::uint8_t> xml =
+            sf2::data::zstd_decompress(raw.data(), raw.size());
+        return std::string(xml.begin(), xml.end());
+    }
+}
+
+std::string SaveSystem::envelope_encode_users(const std::string& users_xml) {
+    return sf2::data::envelope_encode_storage(users_xml);
+}
+
+SaveSystem::Sf2Package SaveSystem::import_sf2(const std::string& envelope_text) {
+    // `Aa.Ddb` (L35024): a leading `SF2` + base64 payload; a bare base64
+    // payload (the `SF2User` storage form) yields users + empty packs.
+    std::string b64;
+    for (char c : envelope_text) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') b64.push_back(c);
+    }
+    Sf2Package out;
+    if (b64.size() >= 3 && b64[0] == 'S' && b64[1] == 'F' && b64[2] == '2') {
+        const sf2::data::EnvelopePackage p =
+            sf2::data::envelope_import(sf2::data::base64_decode(b64.substr(3)));
+        out.users_xml = p.users;
+        out.packs_xml = p.packs;
+        out.h1 = p.h1;
+        out.vf = p.vf;
+    } else {
+        out.users_xml = sf2::data::envelope_decode_users(
+            sf2::data::base64_decode(b64));
+    }
+    return out;
 }
 
 std::string SaveSystem::export_sf2(const std::string& users_xml,

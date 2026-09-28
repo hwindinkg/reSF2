@@ -61,14 +61,49 @@ inline std::uint32_t envelope_ti(const std::vector<std::uint8_t>& raw, std::size
     return v;
 }
 
-// Decodes the users frame (first) from raw envelope bytes (post-base64).
-inline std::string envelope_decode_users(const std::vector<std::uint8_t>& raw) {
-    std::size_t pos = 0;
+// Reads one length-prefixed zstd frame (`Yt(ti())`), advancing `pos`.
+inline std::string envelope_decode_frame(const std::vector<std::uint8_t>& raw,
+                                         std::size_t& pos) {
     const std::uint32_t len = envelope_ti(raw, pos);
     if (pos + len > raw.size()) throw std::runtime_error("sf2 frame overrun");
     const std::vector<std::uint8_t> xml =
         zstd_decompress(raw.data() + pos, static_cast<std::size_t>(len));
+    pos += len;
     return std::string(xml.begin(), xml.end());
+}
+
+// Decodes the users frame (first) from raw envelope bytes (post-base64).
+inline std::string envelope_decode_users(const std::vector<std::uint8_t>& raw) {
+    std::size_t pos = 0;
+    return envelope_decode_frame(raw, pos);
+}
+
+// The full `.sf2` payload (`Aa.Ddb` L35024): users frame, packs frame, then
+// the H1/VF flag bytes (`Aa.flags.H1 = e==1`, `Aa.flags.VF = e==1`).
+struct EnvelopePackage {
+    std::string users;
+    std::string packs;
+    bool h1 = false;
+    bool vf = false;
+};
+
+inline EnvelopePackage envelope_import(const std::vector<std::uint8_t>& raw) {
+    EnvelopePackage p;
+    std::size_t pos = 0;
+    p.users = envelope_decode_frame(raw, pos);
+    p.packs = envelope_decode_frame(raw, pos);
+    if (pos + 2 > raw.size()) throw std::runtime_error("sf2 flags truncated");
+    p.h1 = raw[pos++] == 1;
+    p.vf = raw[pos++] == 1;
+    return p;
+}
+
+// `Aa.save` (L34817) STORAGE payload: `ke(compressed-len) + zstd(xml)` (the
+// `.sf2` file adds the `"SF2"` prefix + packs/flags; `SF2User` does not).
+inline std::string envelope_encode_storage(const std::string& xml) {
+    std::vector<std::uint8_t> out;
+    envelope_yna(out, xml);
+    return base64_encode(out);
 }
 
 }  // namespace sf2::data

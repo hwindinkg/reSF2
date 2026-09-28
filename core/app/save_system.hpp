@@ -191,6 +191,19 @@ struct BattleRecord {
     bool locked = false;   // `hl.zo` / `tt()` (Locked attr)
     bool hidden = false;   // `hl.d9` / `li()` (Hidden attr)
     int replay_count = 0;  // `hl.zH` / `yla` (ReplayCount attr, L279)
+    // `hl` (L140070) also reads/writes `RandomGroupSeed` (`hl.fv`, presence
+    // flag `hl.UV = !Xa(attr)`; written by `vla`), `RandomRuleSeed`
+    // (`hl.Qm`/`hl.VV`; written by `wla`), `EndTime` (`hl.D9 = xb(attr,-1)`;
+    // read-only, `c$a` compares it to `p.Dc`) and `Fight` (`hl.Sqa = !Xa(attr)`;
+    // `P9a()` returns the RandomRule presence). The port carries them so a
+    // reconstructed `<Battle>` keeps the JS attributes.
+    bool has_random_group_seed = false;
+    int random_group_seed = 0;
+    bool has_random_rule_seed = false;
+    int random_rule_seed = 0;
+    bool has_end_time = false;
+    int end_time = -1;     // `hl.D9` (`xb(attr,-1)`)
+    bool fight = false;    // `hl.Sqa` (`Fight` attr present)
 };
     std::vector<BattleRecord> battle_records;
 
@@ -278,7 +291,11 @@ struct BattleRecord {
     // (`il.Fab` L143548: `this.no++; this.node.set("CompletedCount", K.T(no))`).
     // `il` also reads/writes LossCount, EclipseCompletedCount,
     // EclipseLossCount, StoryCount, CompletedTime, TimeLeft,
-    // RandomizeTimeLeft and Level; the port tracks only the win count.
+    // RandomizeTimeLeft and Level. The ctor (L141476) force-materializes
+    // `ID` (default "-1"), `IDS` ("-1|-1|-1") and the ten count attrs;
+    // `RandomGroupSeed`/`RandomRuleSeed` are read (`il.fv`/`il.Qm`,
+    // default 0) but only written by `vla`/`wla`, so their presence is
+    // tracked (`Xa` test) to round-trip an explicit value.
     struct FightWins {
         std::string name;            // `IDS` (the JS `il.yG`, `Atb` L143548)
         int wins = 0;                // `CompletedCount` (`il.no`, `Fab`)
@@ -290,6 +307,16 @@ struct BattleRecord {
         int time_left = 0;           // `TimeLeft` (`il.Gs`; `?Fight.Timestamp`)
         int randomize_time_left = 0; // `RandomizeTimeLeft` (`il.wH`)
         int level = 0;               // `Level` (`il.ZB`, `xL` L143548)
+        // `ID` (`il` ctor L141476: `Xa(attr)&&set("ID","-1")`; the value is
+        // read with `u.I` and discarded). The ctor always materializes it.
+        int id = -1;
+        // `RandomGroupSeed`/`RandomRuleSeed` (`il.fv`/`il.Qm`, default 0;
+        // `bga = fv!=0 || Qm!=0`). Presence mirrors the JS `Xa` test so an
+        // explicit "0" round-trips instead of being dropped.
+        bool has_random_group_seed = false;
+        int random_group_seed = 0;
+        bool has_random_rule_seed = false;
+        int random_rule_seed = 0;
     };
     std::vector<FightWins> fights;
 
@@ -637,6 +664,23 @@ public:
     static std::string envelope_decode(const std::string& envelope_text);
     static std::string export_sf2(const std::string& users_xml,
                                   const std::string& packs_xml, bool h1, bool vf);
+
+    // JS `Aa.save` (L34817): the `SF2User` STORAGE form —
+    // `base64(ke(len)+yna(xml))` with `len` = the COMPRESSED byte count
+    // (`b = kb.f3(a,qf.aG).length`). `envelope_decode` accepts this form
+    // (and the `.sf2` framed form).
+    static std::string envelope_encode_users(const std::string& users_xml);
+
+    // JS `Aa.Ddb` (L35024) import: `"SF2" + base64(ke+yna(users) +
+    // ke+yna(packs) + $p(H1) + $p(VF))` -> the decoded users XML, the packs
+    // XML, and the two flag bytes (`Aa.flags.H1`/`VF`).
+    struct Sf2Package {
+        std::string users_xml;
+        std::string packs_xml;
+        bool h1 = false;
+        bool vf = false;
+    };
+    static Sf2Package import_sf2(const std::string& envelope_text);
 
     // Path of the save file (for logging/tests).
     const std::string& save_path() const { return save_path_; }
