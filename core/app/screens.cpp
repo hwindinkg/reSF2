@@ -6157,6 +6157,7 @@ constexpr float kOdTitleH = 160.0f;
 constexpr float kOdBtnH = 125.0f;       // `Bb.Pb(125)` L1899/L1944
 constexpr float kOdBtnW = 600.0f;       // `od.rI` L1948 `Rb.xc(600)`
 constexpr float kOdBodyW = 900.0f;      // `sqb` L1953 `a = DG?900:1680`
+constexpr float kOdBodyBoxH = 800.0f;   // `qbb` L1948 `Fa(DG?900:1680,800)`
 constexpr float kOdBodyX = -100.0f;     // `f.C(this.DG?-100:0)` L1954
 constexpr float kOdAvatarX = -450.0f;   // `ala` L1947 `b = -450`
 constexpr float kOdAvatarSrc = 512.0f;  // `oe` sheet (L1823)
@@ -6626,7 +6627,8 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_od_base(app, ren, L.panel);
     draw_dialog_title(app, L, d.title);
     draw_dialog_portrait(app, d, L);
-    draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h, dialog_page_body(app, d),
+    draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, kOdBodyBoxH * L.panel.c,
+                    dialog_page_body(app, d),
                     0.70f, UiAlign::Left, 0.12f, 0.09f, 0.06f);
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
@@ -17983,6 +17985,61 @@ bool run_quest_dialog_selfcheck(App& app) {
     // D13: the Settings `un` dialog a pushed `SettingsScreen` hosts (the D3
     // Settings iteration) must not leak into the next section.
     close_settings_dialog();
+
+    // --- Sensei dialog wrap probe (user-reported #1b) ------------------------
+    // The shipped tutorial `Regular` sensei dialogs carry ONE row
+    // (tutorial_quests.xml L37/L62 `tutorial_training_fight`); the dojo
+    // guidance line is `tutorial_dojo_new_move` (L182/L199). Assert the FULL
+    // localized string is laid out by the od280 body wrap + draw loop in the
+    // CURRENT language: no dropped tail, every wrapped line actually drawn.
+    for (const char* key : {"tutorial_training_fight", "tutorial_dojo_new_move",
+                            "tutorial_shop", "tutorial_map"}) {
+        q.clear_dialogs();
+        EngineDialog d;
+        d.type = "Regular";
+        d.title = "characterSensei";
+        d.image = "character_sensei";
+        d.lines = {std::string(key)};
+        d.has_right_button = true;
+        const OdLayout L = dialog_layout_for(app, d, DialogAnim{});
+        const std::string body = dialog_page_body(app, d);
+        const UiWrap wr = wrap_ui_text(app, body, L.body_w, 0.70f);
+        // The od280 text box height is the JS `Fa(..,800)` box, NOT `Md`:
+        // `Od.lj` L1950 `Md = max(kb.ew(), cv)` sizes the PANEL (`od.layout`
+        // L1898), while the text element `qbb` L1948 `Fa(DG?900:1680,800)`
+        // clips at 800 design px. Clipping at `Md` (`L.body_h`) drops the
+        // last line to a `(lines*step/Md)*Md` float round-trip (the #1b bug).
+        const float box_h = kOdBodyBoxH * L.panel.c;
+        int drawn = 0;
+        for (float yy = L.body_y; drawn < static_cast<int>(wr.lines.size());) {
+            if (yy + wr.line_step > L.body_y + box_h) break;
+            yy += wr.line_step;
+            ++drawn;
+        }
+        std::string flat_body, flat_lines, joined, last;
+        for (char ch : body) {
+            if (ch != ' ' && ch != '\n') flat_body.push_back(ch);
+        }
+        for (const std::string& ln : wr.lines) {
+            if (!joined.empty()) joined += "|";
+            joined += ln;
+            last = ln;
+            for (char ch : ln) {
+                if (ch != ' ') flat_lines.push_back(ch);
+            }
+        }
+        const bool complete = (flat_body == flat_lines);
+        std::fprintf(stdout,
+                     "[dlgverify][wrap] lang=%s key=%s chars=%zu lines=%zu drawn=%d "
+                     "step=%.3f md=%.1f box_h=%.1f complete=%d last=\"%s\"\n",
+                     app.language().c_str(), key, body.size(), wr.lines.size(), drawn,
+                     wr.line_step, L.md, box_h, complete ? 1 : 0, last.c_str());
+        std::fprintf(stdout, "[dlgverify][wrap] lines=\"%s\"\n", joined.c_str());
+        std::fflush(stdout);
+        dlg_case(std::string("sensei wrap full text laid out: ") + key,
+                 complete && drawn == static_cast<int>(wr.lines.size()));
+    }
+    q.clear_dialogs();
 
     std::fprintf(stdout, "[dlgverify] %d passed, %d failed\n", g_dlg_passed, g_dlg_failed);
     std::fflush(stdout);
