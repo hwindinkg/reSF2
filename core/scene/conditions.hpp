@@ -191,8 +191,12 @@ struct FightContext {
     int round_timer = 0;          // Fm.he RoundResult (zd/Jq = Victory/Defeat)
     bool round_victory = false;   // Fm.zd — "victory round" flag
     int screen = 0;               // Gm.he Screen (0=Fight,10=...)
-    int bullets_me = 0;           // om.he Bullets (cl)
-    int bullets_enemy = 0;        // om.he Bullets (Glb)
+    int bullets_me = 0;           // `lp` Bullets: my `bh` (`Lh(Ob==1).bh`)
+    int bullets_enemy = 0;        // `lp` Bullets: enemy `bh` (`Lh(Ob==2).bh`)
+    int raid_me = 0;              // `lp` Bullets: my `dO` (RaidChargeBullet)
+    int raid_enemy = 0;           // `lp` Bullets: enemy `dO`
+    double charge_me = 0.0;       // `sp` MagicCharge: my `my` [0,1]
+    double charge_enemy = 0.0;    // `sp` MagicCharge: enemy `my` [0,1]
     std::string battle_type;      // lm.he BattleType ("FightNone" default)
     bool boss_ability_state = false;  // nm.he BossAbilityState (Value)
     std::string fighter_name;     // Am.he Name — the fighter's model name

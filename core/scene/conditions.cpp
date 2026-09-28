@@ -421,12 +421,22 @@ bool eval_round_result(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `lp.he`: Bullets — count for MagicBullet/RaidChargeBullet in [Min,Max].
+// JS `lp.isEqual` (L673495): `b = this.Lh(a)` selects the fighter by the
+// condition's `Player`/`Ob` (1=Me default from `Jf.parse` L667647, 2=Enemy
+// -> its `jb` opponent), then `Type=="MagicBullet" -> b.bh`;
+// `Type=="RaidChargeBullet" -> b.dO`; any other Type -> `return !1`.
+// `Lh(a){return this.Ob==1?a:this.Ob==2?a.jb:null}` (L668014). `xE` range
+// (`Oc.xE` L669732) leaves open ends passing.
 bool eval_bullets(const Cond& c, const FightContext& ctx) {
+    const bool enemy = (c.player == 2);
     int count = 0;
-    if (c.subtype == "MagicBullet") count = ctx.bullets_me;
-    else if (c.subtype == "RaidChargeBullet") count = ctx.bullets_enemy;
-    else return true;  // no type -> unconstrained
+    if (c.subtype == "MagicBullet") {
+        count = enemy ? ctx.bullets_enemy : ctx.bullets_me;
+    } else if (c.subtype == "RaidChargeBullet") {
+        count = enemy ? ctx.raid_enemy : ctx.raid_me;
+    } else {
+        return false;  // JS: unknown Type -> isEqual false
+    }
     bool ok = (!c.has_min || c.min <= count) && (!c.has_max || count <= c.max);
     return ok;
 }
@@ -450,11 +460,12 @@ bool eval_perk(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `sp.he`: MagicCharge in [Min,Max].
+// JS `sp.isEqual` (L673800): `b = this.Lh(a)` (Ob 1=Me / 2=Enemy via
+// `Jf.parse`/`Lh` L667647/L668014), then `return this.xE(b.my)` — the
+// selected fighter's magic charge `my` in [Min,Max] (`Oc.xE` L669732).
 bool eval_magic_charge(const Cond& c, const FightContext& ctx) {
-    (void)c; (void)ctx;
-    // Native port has no magic-charge meter yet; treat as unconstrained.
-    bool ok = true;
+    const double v = (c.player == 2) ? ctx.charge_enemy : ctx.charge_me;
+    bool ok = (!c.has_min || c.min <= v) && (!c.has_max || v <= c.max);
     return ok;
 }
 

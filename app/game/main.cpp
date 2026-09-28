@@ -1409,6 +1409,96 @@ static void install_watchdog(int seconds) {
 // (any flag does), so it can never leave a visible window behind.
 bool g_dojo_cam_probe = false;
 
+// `--magic-charge-probe`: JS-exact self-check for the magic bullet/charge
+// condition wiring. Before this fix `?PlayerParameter[Me].MagicBullet` was
+// hardcoded 0.0 (`trigger.hpp`), the `Bullets` move condition read the wrong
+// side/field and `MagicCharge` was unconditionally true (`conditions.cpp`).
+// Both engines are driven here with a live `bh`/`dO`/`my` and the JS outcome
+// is asserted (no OS input, no sim; dispatched after the RULE 0 watchdog).
+static int magic_charge_probe() {
+    int fails = 0;
+
+    // --- (1) move-condition engine: `lp`/`sp` read the live per-side state.
+    sf2::scene::FightContext ctx;
+    ctx.bullets_me = 0;
+    ctx.raid_me = 1;      // my `dO`
+    ctx.charge_me = 0.7;  // my `my`
+    sf2::scene::Cond raid;
+    raid.type = "Bullets";
+    raid.subtype = "RaidChargeBullet";
+    raid.has_min = true;
+    raid.min = 1.0f;
+    const bool raid1 = sf2::scene::eval_conditions(raid, ctx);
+    ctx.raid_me = 0;
+    const bool raid0 = sf2::scene::eval_conditions(raid, ctx);
+    if (!raid1 || raid0) ++fails;
+    // `<MagicCharge Min="1.5" />` FAILS at my=0.7 (was unconditionally TRUE),
+    // PASSES at my=1.8.
+    sf2::scene::Cond charge;
+    charge.type = "MagicCharge";
+    charge.has_min = true;
+    charge.min = 1.5f;
+    const bool ch_lo = sf2::scene::eval_conditions(charge, ctx);
+    ctx.charge_me = 1.8;
+    const bool ch_hi = sf2::scene::eval_conditions(charge, ctx);
+    if (ch_lo || !ch_hi) ++fails;
+
+    // --- (2) perk engine: `?PlayerParameter[Me].MagicBullet` / `.MagicCharge`
+    // inside a `kp` comparison (the shipped MagicCharge perk shape). One bus
+    // per condition so the pair count identifies WHICH trigger fired.
+    auto fire_count = [](const char* cond_xml, int bh, double my) -> int {
+        std::string xml =
+            std::string("<Perks><Perk Name=\"ProbeMagic\"><Set Step=\"1\" />"
+                        "<Trigger><Events><EveryFrame Step=\"_Step\" /></Events>"
+                        "<Conditions>") +
+            cond_xml +
+            "</Conditions><Actions><AddMagicCharge Value=\"0.5\" /></Actions>"
+            "</Trigger></Perk></Perks>";
+        const std::map<std::string, sf2::scene::PerkDef> defs =
+            sf2::scene::parse_perks_xml(xml);
+        std::vector<sf2::scene::ItemPerkRef> refs;
+        refs.push_back(sf2::scene::ItemPerkRef{"ProbeMagic", {}, {}, false});
+        sf2::scene::TrigBus bus;
+        bus.log = [](const std::string&) {};
+        bus.register_side(0, sf2::scene::build_side_triggers(refs, defs, bus.log),
+                          {});
+        sf2::scene::CondCtx owner, foe;
+        owner.bullets = bh;
+        owner.charge = my;
+        sf2::scene::TrigVars v;
+        bus.fire(sf2::scene::kEvEveryFrame, v, true, 0, owner, foe, 2, 0);
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>>
+            pairs;
+        bus.drain(0, pairs);
+        return static_cast<int>(pairs.size());
+    };
+    const char* kLessBullet =
+        "<Less Value1=\"?PlayerParameter[Me].MagicBullet\" Value2=\"1\" />";
+    const char* kGeBullet =
+        "<GreaterEqual Value1=\"?PlayerParameter[Me].MagicBullet\" Value2=\"1\" />";
+    const char* kGeCharge =
+        "<GreaterEqual Value1=\"?PlayerParameter[Me].MagicCharge\" Value2=\"0.5\" />";
+    const int less0 = fire_count(kLessBullet, 0, 0.0);
+    const int less1 = fire_count(kLessBullet, 1, 0.0);
+    const int ge0 = fire_count(kGeBullet, 0, 0.0);
+    const int ge1 = fire_count(kGeBullet, 1, 0.0);
+    const int cf0 = fire_count(kGeCharge, 0, 0.4);
+    const int cf1 = fire_count(kGeCharge, 0, 0.7);
+    std::fprintf(stdout,
+                 "[magic-charge] raid dO=1:%d dO=0:%d; MagicCharge my=0.7<1.5:%d "
+                 "my=1.8:%d; ?MagicBullet Less bh=0:%d bh=1:%d; "
+                 ">=1 bh=0:%d bh=1:%d; ?MagicCharge >=0.5 my=0.4:%d my=0.7:%d\n",
+                 raid1 ? 1 : 0, raid0 ? 1 : 0, ch_lo ? 1 : 0, ch_hi ? 1 : 0,
+                 less0, less1, ge0, ge1, cf0, cf1);
+    std::fflush(stdout);
+    const bool ok = raid1 && !raid0 && !ch_lo && ch_hi && less0 == 1 &&
+                    less1 == 0 && ge0 == 0 && ge1 == 1 && cf0 == 0 && cf1 == 1 &&
+                    fails == 0;
+    std::fprintf(stdout, "[magic-charge] RESULT %s\n", ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     std::string res_root = "reference/www/res";
     std::string save_path = "reference/saves/save.xml";
@@ -1418,6 +1508,7 @@ int main(int argc, char** argv) {
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool rating_perk_probe_mode = false;  // --rating-perk-probe
     bool perk_trigger_probe_mode = false;  // --perk-trigger-probe
+    bool magic_charge_probe_mode = false;  // --magic-charge-probe
 bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool enchant_stat_probe_mode = false;  // --enchant-stat-probe
     bool perk_set_probe_mode = false;  // --perk-set-probe
@@ -1613,6 +1704,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // mirroring the shipped `PERK_BEGINNER` trigger (no OS input, no
             // sim). Dispatched after the RULE 0 watchdog install (see below).
             perk_trigger_probe_mode = true;
+        } else if (arg == "--magic-charge-probe") {
+            // Magic bullet/charge self-check: the move `<Bullets>`/
+            // `<MagicCharge>` conditions and the perk `?PlayerParameter[Me]
+            // .MagicBullet`/`.MagicCharge` operands (no OS input, no sim).
+            // Dispatched after the RULE 0 watchdog install (see below).
+            magic_charge_probe_mode = true;
         } else if (arg == "--enchant-stat-probe") {
             // Item-enchant `<Set>` -> `perk_aspect` -> `Be.eea` -> rating
             // consumer self-check (no OS input, no sim). Dispatched after the
@@ -2100,6 +2197,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // dispatched after the watchdog (RULE 0) so it can never leave a process.
     if (perk_trigger_probe_mode) {
         return sf2::scene::perk_trigger_probe() ? 0 : 1;
+    }
+
+    // `--magic-charge-probe`: the `<Bullets>`/`<MagicCharge>` move conditions +
+    // the perk `?PlayerParameter[Me].MagicBullet`/`.MagicCharge` operands.
+    if (magic_charge_probe_mode) {
+        return magic_charge_probe();
     }
 
     // `--perk-set-probe`: proves the saved warrior `<Perks><Perk><Set>` row is

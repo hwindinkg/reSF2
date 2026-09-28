@@ -4025,6 +4025,17 @@ void FightController::fill_ctx_geometry(FightContext& ctx, const FightFighter& m
     // `battle_type_for_kind`). Every fight.cpp `FightContext` site routes
     // through this fill, so the rule evaluates instead of reading "".
     ctx.battle_type = battle_.type;
+    // `lp`/`sp` condition sources: the `Lh(Ob)`-selected fighter's live
+    // `bh`/`dO`/`my` (JS `lp.isEqual` L673495, `sp.isEqual` L673800). The
+    // `Bullets`/`MagicCharge` moves.xml conditions (`<Bullets Type="..." Min>`
+    // on RaidChargeSphere*/MagicPlayer*) read these; without the fill they
+    // were always 0/0.0.
+    ctx.bullets_me = me.bullets;
+    ctx.bullets_enemy = foe.bullets;
+    ctx.raid_me = me.raid_bullets;
+    ctx.raid_enemy = foe.raid_bullets;
+    ctx.charge_me = me.charge;
+    ctx.charge_enemy = foe.charge;
 }
 
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {

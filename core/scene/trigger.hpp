@@ -175,8 +175,9 @@ struct TrigVars {
     std::map<std::string, std::string> str;
 };
 
-// Condition context for ONE side (`Ae` analog). Magic/bullets stay 0
-// (no magic system — OPEN). `hp` is ABSOLUTE (`gd`, L1310-1311 — not a
+// Condition context for ONE side (`Ae` analog). `bullets`/`raid`/`charge`
+// carry the live `bh`/`dO`/`my` (wired by `FightController::cond_ctx`).
+// `hp` is ABSOLUTE (`gd`, L1310-1311 — not a
 // ratio); `hit_dmg` is the in-flight `mg.Damage` for `?Hit[].Damage`;
 // `q3` is the side's `Fc.Q3` store (`SetModVariable`, `dka`).
 struct CondCtx {
@@ -235,8 +236,8 @@ inline bool range_check(const TrigCond& c, double v) {
 // +,-,*,/,(,) combinations. Unknown fields/functions fail closed
 // (same as the old always-false, but numerics now evaluate).
 // Supported `?PlayerParameter` fields: Health (absolute `gd`),
-// MagicBullet (0 — no magic system, OPEN); DamageConverter and anything
-// else fail closed (OPEN).
+// MagicBullet (`bh`) and MagicCharge (`my`); DamageConverter and
+// anything else fail closed (OPEN).
 
 struct ExprParse {
     const std::string& s;
@@ -370,7 +371,10 @@ struct ExprParse {
             const CondCtx& m = (arg == "Enemy") ? foe : (arg == "Me" ? owner : owner);
             if (arg != "Me" && arg != "Enemy") return std::nullopt;
             if (field == "Health") return m.hp;
-            if (field == "MagicBullet") return 0.0;  // no magic (OPEN)
+            // JS `Pgb` (L686713): `case "MagicBullet":d.result=K.T(a.bh)`,
+            // `case "MagicCharge":d.result=K.T(a.my)`.
+            if (field == "MagicBullet") return static_cast<double>(m.bullets);
+            if (field == "MagicCharge") return m.charge;
             return std::nullopt;  // DamageConverter etc. OPEN
         }
         return std::nullopt;
