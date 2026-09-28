@@ -420,11 +420,16 @@ int main() {
             sf2::scene::ImpulseResult imp2;
             sf2::scene::apply_impulse(cap, ch, {10.0f, 4.0f, 0.0f}, 500.0f, 80.0f,
                                       1880.0f, imp2);
-            std::vector<sf2::scene::Vec3> offs = {{10.0f, 0.0f, 0.0f},
-                                                  {0.0f, 5.0f, 0.0f}};
-            sf2::scene::decay_knockback(offs);
-            std::vector<sf2::scene::Vec3> tiny = {{0.0001f, 0.0f, 0.0f}};
-            sf2::scene::decay_knockback(tiny);
+            // JS `Vc.sk(a)` @405734 one-step (non-cloth, a = `xd.fDa`=0.4):
+            // the strike offset is CARRIED as Verlet velocity — it does NOT
+            // decay. The old `decay_knockback` 0.9 exponential (a port
+            // invention) is removed; these vectors pin the real integrator.
+            sf2::scene::Vec3 d1{10.0f, 0.0f, 0.0f}, d1m{0.0f, 0.0f, 0.0f};
+            sf2::scene::Vec3 d2{0.0f, 5.0f, 0.0f}, d2m{0.0f, 0.0f, 0.0f};
+            sf2::scene::verlet_step(d1, d1m, false, 0.0f, sf2::scene::kGravitation);
+            sf2::scene::verlet_step(d2, d2m, false, 0.0f, sf2::scene::kGravitation);
+            sf2::scene::Vec3 tiny{0.0001f, 0.0f, 0.0f}, tinym{0.0f, 0.0f, 0.0f};
+            sf2::scene::verlet_step(tiny, tinym, false, 0.0f, sf2::scene::kGravitation);
             std::printf("  \"wea\": {\"n1\": [%.17g, %.17g], \"n2\": [%.17g, %.17g], "
                         "\"clamp\": [%.17g, %.17g, %.17g], "
                         "\"decay\": [%.17g, %.17g, %.17g, %.17g], "
@@ -433,8 +438,8 @@ int main() {
                         (double)imp.node2_vec.x, (double)imp.node2_vec.y,
                         (double)(500.0f / 100.0f > 1.0f ? 1.0 : 0.0),
                         (double)imp2.node1_vec.x, (double)imp2.node2_vec.x,
-                        (double)offs[0].x, (double)offs[0].y, (double)offs[1].x,
-                        (double)offs[1].y, (double)tiny[0].x, (double)tiny[0].y);
+                        (double)d1.x, (double)d1.y, (double)d2.x,
+                        (double)d2.y, (double)tiny.x, (double)tiny.y);
         }
         // S17b verbatim Bz (mirrors combat_golden.js S17b).
         {

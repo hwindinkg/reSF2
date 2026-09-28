@@ -185,18 +185,18 @@ float fha_body(float& x, float& y, float& z, float px, float pz,
 // node starts receiving the strike impulse; `NG` = `MG || !nh` (MacroNodes
 // are immovable). Normal dynamic endpoints are `MG=false, NG=false`, i.e.
 // the gate always passes and both endpoints move — unchanged behavior.
-// Unmodeled by design: s2a() midpoint smoothing (presentation average
-// over Va.all, L588) and bFa length refit (cA-gated spring solve,
-// L583/L792 — needs the Vc.sk integrator state). Both are outside the
-// static milestone (REVIEW A LOW NOTEs).
-// The displacement is applied to the DEMO's fighter world-x directly (the
-// full ragdoll integration — Vc.sk L796 gravity/friction — is out of scope
-// for this milestone; the knockback FEEL — direction, weight split,
-// bounds clamp — is exact). The per-bone vectors below describe the hit
-// capsule endpoint displacement (WEA_STATIC §5); the JS `Bl.strike`
-// (L587-588) writes the endpoint node `ma` — there is no per-bone clip-space
-// knock pool (the old `Fighter::add_knockback` pool was a port invention and
-// has been removed).
+// `s2a()` midpoint smoothing and `bFa` length refit are now ported JS-exact:
+// see `Fighter::strike_midpoint_smooth` and the `Al.jE` relax loop in
+// `fighter.cpp` (JS `bFa` @403731, `xd.jE` IterativeProcess=2). The per-bone
+// vectors below describe the hit capsule endpoint displacement
+// (WEA_STATIC §5); the JS `Bl.strike` (L587-588) writes the endpoint node
+// `ma` — there is no per-bone clip-space knock pool (the old
+// `Fighter::add_knockback` pool was a port invention and has been removed).
+// The JS knockback "decay" is NOT an exponential: the impulse written to `ma`
+// becomes Verlet VELOCITY on the next `Vc.sk` (@405734) and is arrested only
+// by `bFa` edge relaxation (@403731) and the `fha`/`P6a` ground friction
+// (@296991/@297085) — all ported JS-exact in `fighter.cpp`. The former
+// `kKnockDecay` exponential (a port invention, no JS counterpart) is removed.
 struct ImpulseResult {
     Vec3 impulse;       // the scaled impulse vector
     Vec3 node1_vec;     // full-vector displacement of endpoint 1
@@ -206,19 +206,29 @@ struct ImpulseResult {
     float clamped_dx = 0.0f;  // how much the bounds clamp ate
 };
 
-// `hit_pos` is the hit point on the target capsule (from the collision
-// test). `fighter_x` is the target fighter's world x (for the clamp);
-// returns the target's new world x after the impulse + clamp.
-// Per-frame knockback decay for the bone offsets (the `Vc.sk` L796
-// friction/gravity integrator is out of scope): uniform exponential with
-// `kKnockDecay` per 60 Hz tick. OPEN exact value — pinned by S17 vectors,
-// not by trace.
-inline constexpr float kKnockDecay = 0.9f;
-inline void decay_knockback(std::vector<Vec3>& offs, float factor = kKnockDecay) {
-    for (Vec3& v : offs) {
-        v = v * factor;
-        if (v.dot(v) < 1e-6f) v = Vec3{};
-    }
+// `fighter_x` is the target fighter's world x (for the clamp); returns the
+// target's new world x after the impulse + clamp.
+//
+// --- Verlet step (JS `Vc.sk(a)` @405734) -------------------------------
+// `a` = `Al.O9a()` @296359: `xd.fDa/(this.oa.model.HD()*HD())`. `xd.fDa`
+// parses `internal_settings.xml` `<Gravitation Value="0.4"/>` (default 0.4)
+// and HD() is the model scale (=1 for every shipped fighter), so `a` = 0.4.
+inline constexpr float kGravitation = 0.4f;  // JS `xd.fDa` (Gravitation)
+// `Al` constructor `this.oTa=xd.jE` -> `<IterativeProcess Value="2"/>`.
+inline constexpr int kIterativeProcess = 2;  // JS `xd.jE`
+// JS `Vc.sk(a)` verbatim (@405734):
+//   b=Vc.yC; c=this.ma; b=c; b-=this.mf; this.jy&&(c=1-this.bI,b*=c);
+//   b+=this.ma; Vc.yC.y+=a; this.mf=this.ma; this.ma=Vc.yC;
+// i.e. vel = ma - mf; if (cloth) vel *= 1-attenuation; ma = ma + vel;
+// ma.y += gravity; mf = old ma. `cloth` = `jy`, `attenuation` = `bI`.
+inline void verlet_step(Vec3& ma, Vec3& mf, bool cloth, float attenuation,
+                        float gravity) {
+    Vec3 vel = ma - mf;                            // b = ma - mf
+    if (cloth) vel = vel * (1.0f - attenuation);   // jy && b *= 1-bI
+    const Vec3 old = ma;                           // mf = ma (pre-step)
+    ma = ma + vel;                                 // b += ma
+    ma.y += gravity;                               // Vc.yC.y += a
+    mf = old;                                      // mf = old ma
 }
 float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
                     Vec3 impulse, float fighter_x, float wall,

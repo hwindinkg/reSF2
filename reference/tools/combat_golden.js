@@ -544,8 +544,8 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
     dot: [o16.dots[0].name, o16.dots[0].frames, o16.dots[0].per],
     noop: o16.log, tickHp: hp16, expiry: [h, dots16b.length] });
   // S17: Bl.strike split (L582): b=min(1,|hit-p1|/rest), full-vector
-  // node displacements, knockback decay. Verbatim C++ twin: apply_impulse
-  // + decay_knockback (physics.hpp).
+  // node displacements, JS `Vc.sk` Verlet carry. Verbatim C++ twin:
+  // apply_impulse + verlet_step (physics.hpp).
   function blSplit(p1, hit, rest, w1, w2, imp) {
     const dist = Math.hypot(hit.x - p1.x, hit.y - p1.y);
     const b = rest < 1e-6 ? 1 : Math.min(1, dist / rest);
@@ -553,12 +553,15 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
       n1: { x: imp.x * (1 - b) / w1, y: imp.y * (1 - b) / w1 },
       n2: { x: imp.x * b / w2, y: imp.y * b / w2 } };
   }
-  function kbDecay(offs, f) {
-    return offs.map(v => {
-      const r = { x: v.x * f, y: v.y * f };
-      if (r.x * r.x + r.y * r.y < 1e-6) { r.x = 0; r.y = 0; }
-      return r;
-    });
+  // JS `Vc.sk(a)` @405734 one-step: vel = ma - mf; if (jy) vel *= 1-bI;
+  // ma += vel; ma.y += a; mf = old ma. `a` = `Al.O9a()` = `xd.fDa` = 0.4.
+  function skStep(ma, mf, cloth, bI, a) {
+    const v = { x: ma.x - mf.x, y: ma.y - mf.y };
+    if (cloth) { const k = 1 - bI; v.x *= k; v.y *= k; }
+    const old = { x: ma.x, y: ma.y };
+    const r = { x: ma.x + v.x, y: ma.y + v.y };
+    r.y += a;
+    return { ma: r, mf: old };
   }
   const s17 = blSplit({ x: 0, y: 0 }, { x: 30, y: 0 }, 100, 2, 1, { x: 10, y: 4 });
   eq("S17 b", s17.b, 0.3);
@@ -566,10 +569,11 @@ const VY = { Mk: "BD", Bc: 1 }, HZ = { Mk: "CH", Bc: 0.5 };
   eq("S17 n2", [s17.n2.x, s17.n2.y], [3, 1.2]);
   const s17c = blSplit({ x: 0, y: 0 }, { x: 500, y: 0 }, 100, 2, 1, { x: 10, y: 4 });
   eq("S17 clamp", [s17c.b, s17c.n1.x, s17c.n2.x], [1, 0, 10]);
-  const s17d = kbDecay([{ x: 10, y: 0 }, { x: 0, y: 5 }], 0.9);
-  eq("S17 decay", [s17d[0].x, s17d[0].y, s17d[1].x, s17d[1].y], [9, 0, 0, 4.5]);
-  const s17e = kbDecay([{ x: 1e-4, y: 0 }], 0.9);
-  eq("S17 decayzero", [s17e[0].x, s17e[0].y], [0, 0]);
+  const s17d = [skStep({ x: 10, y: 0 }, { x: 0, y: 0 }, false, 0, 0.4).ma,
+                skStep({ x: 0, y: 5 }, { x: 0, y: 0 }, false, 0, 0.4).ma];
+  eq("S17 decay", [s17d[0].x, s17d[0].y, s17d[1].x, s17d[1].y], [20, 0.4, 0, 10.4]);
+  const s17e = [skStep({ x: 1e-4, y: 0 }, { x: 0, y: 0 }, false, 0, 0.4).ma];
+  eq("S17 decayzero", [s17e[0].x, s17e[0].y], [0.0002, 0.4]);
   out.scenarios.push({ id: "S17-blstrike",
     b: s17.b, n1: [s17.n1.x, s17.n1.y], n2: [s17.n2.x, s17.n2.y],
     clamp: [s17c.b, s17c.n1.x, s17c.n2.x],

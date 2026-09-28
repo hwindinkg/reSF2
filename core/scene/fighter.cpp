@@ -1529,10 +1529,11 @@ void Fighter::advance(float dt) {
     // advance() are what the caller dispatches (JS `Te.Lwa` L563-564 runs
     // inside `Te.ia`, i.e. once per frame advance).
     frame_actions_.clear();
-    // Knockback offsets decay every tick (JS Vc.sk friction - OPEN rate).
-    // DEAD: the `kb_` pool + `decay_knockback` were a port-only invention
-    // (no JS counterpart) and are no longer fed or decayed — the JS impulse
-    // path is `Bl.strike` (L587-588) -> `strike_node` (endpoint node `ma`).
+    // Knockback decay is the JS `Vc.sk` (@405734) Verlet VELOCITY carry
+    // (the shared `verlet_step`), arrested by the `Al.jE` `bFa` relax and the
+    // `fha`/`P6a` ground friction. The former `kb_` pool + `decay_knockback`
+    // exponential was a port-only invention (no JS counterpart) and is
+    // REMOVED. The JS impulse path is `Bl.strike` (@299122) -> node `ma`.
     // Timescale steps (SlowModel KT): scale>=1 verbatim (Speed<1 no-ops
     // at apply); fractional remainder carries to the next tick.
     // [FIX finishing-blow slow-mo — JS `de.ia` L248219] The GLOBAL timescale
@@ -2309,7 +2310,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // are NOT moved by the solver (they keep their `Te.eda` pose). The
         // old native integrated every non-fixed non-macro bone, dragging the
         // posed skeleton off the clip (the stretched mesh).
-        constexpr float kGrav = 0.4f;
+        constexpr float kGrav = kGravitation;  // JS `xd.fDa` (Gravitation)
         for (std::size_t i = 0; i < n; ++i) {
             const Bone& b = bones[i];
             // JS `Al.sk` (L583): `!c.NG && (this.nk || c.jy || oa.vc && c.vc)`.
@@ -2323,21 +2324,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // JS `Al.sk` L583: `!c.NG && (this.nk || c.jy || oa.vc && c.vc)`.
             if (ng || !(nk_ || jy || (shock_latch_ && b.shock))) continue;
             const std::size_t i3 = i * 3;
-            float vx = sol_ma_[i3] - sol_mf_[i3];
-            float vy = sol_ma_[i3 + 1] - sol_mf_[i3 + 1];
-            float vz = sol_ma_[i3 + 2] - sol_mf_[i3 + 2];
-            if (b.cloth) {
-                const float k = 1.0f - b.attenuation;  // `Vc.bI` damp
-                vx *= k;
-                vy *= k;
-                vz *= k;
-            }
-            sol_mf_[i3] = sol_ma_[i3];
-            sol_mf_[i3 + 1] = sol_ma_[i3 + 1];
-            sol_mf_[i3 + 2] = sol_ma_[i3 + 2];
-            sol_ma_[i3] += vx;
-            sol_ma_[i3 + 1] += vy + kGrav;
-            sol_ma_[i3 + 2] += vz;
+            // JS `Vc.sk(a)` @405734 — one Verlet step (shared, JS-exact).
+            Vec3 ma{sol_ma_[i3], sol_ma_[i3 + 1], sol_ma_[i3 + 2]};
+            Vec3 mf{sol_mf_[i3], sol_mf_[i3 + 1], sol_mf_[i3 + 2]};
+            verlet_step(ma, mf, b.cloth, b.attenuation, kGrav);
+            sol_ma_[i3] = ma.x;
+            sol_ma_[i3 + 1] = ma.y;
+            sol_ma_[i3 + 2] = ma.z;
+            sol_mf_[i3] = mf.x;
+            sol_mf_[i3 + 1] = mf.y;
+            sol_mf_[i3 + 2] = mf.z;
         }
         // (c) jE: 2 edge-relaxation passes (`yu.bFa` mass-weighted).
         // JS `Al.jE` (L583) cA per node: `d.cA = d.nh && !d.NG &&

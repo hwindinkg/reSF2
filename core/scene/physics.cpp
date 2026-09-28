@@ -350,11 +350,18 @@ float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
     out.node1_disp = out.node1_vec.x;
     out.node2_disp = out.node2_vec.x;
 
-    // The demo tracks the fighter's COM x; the capsule midpoint shift is
-    // the average of the two node displacements (the ragdoll COM follows
-    // the weighted node average — `Dl.v6` L573).
-    const float mid_disp = (out.node1_disp + out.node2_disp) * 0.5f;
-    float new_x = fighter_x + mid_disp;
+    // JS `Dl.v6` @293501: `Eu = (1/VR) * Σ(node.ma * node.weight)` over ALL
+    // bodies (`VR` = Σ weight). The strike moves only the two endpoint nodes,
+    // so their strike-induced contribution to the COM delta is the
+    // MASS-WEIGHTED mean of their displacements: (w1*d1 + w2*d2)/(w1+w2).
+    // The old plain average `(d1+d2)/2` was unweighted and ignored the NG
+    // gate (a skipped endpoint's d is zero) — it is what the demo moved.
+    const float wsum = w1 + w2;
+    const Vec3 com_delta =
+        wsum > 0.0f
+            ? (out.node1_vec * w1 + out.node2_vec * w2) * (1.0f / wsum)
+            : Vec3{};
+    float new_x = fighter_x + com_delta.x;
 
     // Bounds clamp (JS `Al.fha` L582): x in [wall, width-wall].
     if (new_x < wall) {
