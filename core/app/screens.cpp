@@ -14158,8 +14158,12 @@ void ShopScreen::render_impl(App& app) {
 // profile atlas id 258, `Tw=[0,1,2,3]`). `Eg` is the shared bottom tab strip
 // (L1851: height = za.Sp*1.3, `node.D(rect.v - height)`, buttons scaled
 // `height/button.Y.fa.y`, spread lc-dependent). The `y.*` frame table for
-// `cs` (`y.WRa/YRa/XRa` ...) is OPEN (PORT_AUDIT_UI §5 OPEN #2); the art
-// names below are the profile atlas `buttons/*` frames (sourceSize 199x190).
+// `cs` (`y.WRa/YRa/XRa` ...) frames are RESOLVED. JS L1268677 defines
+// `y.WRa="buttons/Progress"` / `y.XRa="buttons/Progress_active"` /
+// `y.YRa="buttons/Progress_pushed"` (+ Strikes/Achiev/Seal), consumed by the
+// `a(0,y.WRa,y.YRa,y.XRa)` table at L1126792 (arg order = normal, pushed,
+// active). All four `buttons/*` frames ship in `profile.ff77c0ff.json` and
+// resolve (`[ui] atlas frame hit: buttons/Progress*`).
 // Tab content: `vb.hla` (L2190-2191) routes tab 0 -> `Rl=ds`
 // (POWERLEVELING_SLIDER L2227), tab 1 -> `qv=es` (SKILLS_SLIDER L2239),
 // tab 2 -> `Zr=fs` (ACHIEVEMENT_SLIDER L2213), tab 3 -> `lv=gs`
@@ -14168,11 +14172,14 @@ void ShopScreen::render_impl(App& app) {
 // seals (`gs`). The earlier "tabs 0/2 are OPEN" note was STALE and misled the
 // UI audit: each body docks into the real `vb.layout` `a = b.fn(.75)` viewer
 // rect (L2195).
-// UNVERIFIED (OPEN): the `Xd`/`Gg` slider cell scaling. `ff.kf(a)` (L1893)
-// sets the cell node scale to `a/ce.x`, so the RENDERED row height is
-// `ce.y * node.Eb` (`ff.qa`), not the declared `ff.ba(w,h)` — resolving the
-// per-row pitch needs `Gg`'s slot width. The tab rows below therefore still
-// use measured fixed pitches (150 Moves, 46 Achiev, 400x300 Seals cells).
+// VERIFIED: the `Xd`/`Gg` slider cell scaling. `Gg.ba` (L1884) runs
+// `f.kf(a); c += f.qa()+spacing` with `ff.kf(a){ node.la(a/ce.x) }` (L1893)
+// and `ff.qa(){ return ce.y*node.Eb }` — so the pitch is `ce.y*a/ce.x`. The
+// `Gg` slot width `a` is `scroll.Gv-8` (`Xd.Pn` L2185) and `scroll.Gv` is
+// `(a.N-a.J)-2*(a.N-a.J)*.08` (`Fg.ba` case 0, L1871), i.e. `0.84*v.width()-8`
+// — exactly `profile_list_w`/`profile_cell_h`/`profile_cell_pitch` below
+// (L14311/L14322/L14327). Rows: Moves `400x150`+10, Achiev `400x130`+10,
+// Seals `400x300`+0 (all `gs.init`/`es.init` leave spacing as declared).
 //
 // Nav/`cs` badge counters (`Eg.GU` L1853 -> `Le.badge`, `Dg` L1850-1851).
 // JS `cs.getCounterValue` (L2189) defines each tab badge EXACTLY — it is not
@@ -15982,20 +15989,25 @@ void EquipmentScreen::render_impl(App& app) {
             ++col;
         }
         // `Zr` improve button (`ygb` L2222 -> `vb.Cab` L2199): shown while
-        // the selected row is buyable (`Zr.ROa` L2222 `Be==0 && !zo`). The
-        // `Zr` `EButtonWhite` ASTC art (`y.qB`) is OPEN (PORT_AUDIT_UI §5);
-        // the label is `Y.na("profile_BtnImprove")` (L2219).
+        // the selected row is buyable (`Zr.ROa` L2222 `Be==0 && !zo`). Art:
+        // `this.Yk=new Bb("EButtonWhite"); this.Yk.Wm(null, y.qB)` (L2218)
+        // with `y.qB="highlightButton"` (L1270804) — the SAME sliced-atlas-260
+        // frame the `$r.Op` VIEW button uses (`$r.ba`, L2234). The former
+        // flat quad was a placeholder. Label `Y.na("profile_BtnImprove")`.
         if (perk_sel_ >= 0 && perk_buyable(perk_sel_)) {
             const ShopRect ib = profile_improve_rect();
             const float bx = (ib.J + ib.N) * 0.5f;
             const float by = (ib.P + ib.W) * 0.5f;
             const bool hov = app.pointer().x >= ib.J && app.pointer().x <= ib.N &&
                              app.pointer().y >= ib.P && app.pointer().y <= ib.W;
-            draw_flat_button(app, "IMPROVE", bx, by, ib.width(), ib.height(),
-                             hov ? 0.55f : 0.4f, 0.4f, 0.25f, hov);
+            if (!try_draw_atlas_button(app, "highlightButton", bx, by, ib.width(),
+                                       ib.height(), hov ? 1.0f : 0.92f)) {
+                draw_flat_button(app, "IMPROVE", bx, by, ib.width(), ib.height(),
+                                 hov ? 0.55f : 0.4f, 0.4f, 0.25f, hov);
+            }
             draw_ui_label(app, ib.J, by - 10.0f, ib.width(), 20.0f,
                           loc(app, "profile_BtnImprove", "Improve"), 0.65f,
-                          UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                          UiAlign::Center, 0.2f, 0.15f, 0.08f);
         }
     }
     } else if (tab_ == kProfileTabMoves) {
