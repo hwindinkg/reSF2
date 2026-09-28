@@ -1424,6 +1424,15 @@ void LocationScene::render_layers(sf2::render::Renderer& renderer,
     }
 }
 
+// JS `Ut.C1`/`Ut.Lka` (L832): the Darkness ambient `uo` — a black quad at
+// alpha `yk`/255, appended to the camera-glued `Cu` container (the last child
+// of the render container `go`), so it composites over every location layer
+// and the fighters. The port maps the 1.5xW x 3xH map quad to a full-screen
+// black quad at the same alpha.
+void LocationScene::render_darkness(sf2::render::Renderer& renderer) const {
+    renderer.draw_darkness_overlay(darkness_alpha_ / 255.0f);
+}
+
 void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& layer,
                                  const sf2::render::Camera& camera) const {
     // The per-layer node scale (JS L488 `b.lEa()||b.ij?b.setScale(Bj)`):

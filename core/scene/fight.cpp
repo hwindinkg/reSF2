@@ -2209,6 +2209,15 @@ void FightController::rules_frame() {
         }
         if (fire) rules_fire(r);
     }
+    // [probe, authorised] SF2_FORCE_DARKNESS=<0..255>: render-probe override of
+    // the live Darkness alpha (`yk`). Unset in every shipped gate, so the
+    // rule-driven value above is the only production path; this exists solely
+    // so `--darkness-probe` can sample the darkness window of a battle whose
+    // `<Darkness/>` rule sits behind a `<RandomRule>` draw (no shipped battle
+    // carries one directly in Fight 1).
+    if (const char* fd = std::getenv("SF2_FORCE_DARKNESS")) {
+        darkness_ = static_cast<float>(std::atoi(fd));
+    }
     // JS `ca.ia` L412: `this.ha.PEa()` (NF<=0) -> `Ema(9); ud.Ih(9,3,ze)`;
     // `qj.hh` (L912) is `return true`, so an active TimeOutWin fires.
     if (round_.time_nf <= 0) {

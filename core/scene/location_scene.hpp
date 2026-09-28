@@ -429,6 +429,17 @@ public:
     // ON TOP of the fighters (JS_RENDER §7, "Что у нас не так" #1).
     std::size_t fighter_layer() const { return fighter_layer_; }
 
+    // JS `Ut` Darkness ambient `uo` (L832 `C1`/`Lka`, offsets 423259/423228):
+    // a black quad appended to the camera-glued `Cu` container, alpha =
+    // `yk`/255. `set_darkness_alpha` mirrors `JLa(yk)` each frame; the pass is
+    // drawn AFTER every location layer (and the fighters) because `Cu` is the
+    // last child of the render container `go`. `darkness_alpha()` returns the
+    // live 0..255 value.
+    void set_darkness_alpha(float a) { darkness_alpha_ = a; }
+    float darkness_alpha() const { return darkness_alpha_; }
+    // Draws the ambient (JS `uo`) — a full-screen black quad at `yk`/255.
+    void render_darkness(sf2::render::Renderer& renderer) const;
+
     static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
     float arena_width() const { return arena_w_; }
@@ -499,6 +510,8 @@ private:
     float arena_wall_ = 0.0f;        // Root Wall (JS NU, L474)
     float arena_position_y_ = 0.0f;  // Root PositionY (JS Tza, L474)
     std::uint32_t root_color_ = 0x000000u;  // default black (the dojo's Color)
+    // JS `Ut.uo` alpha (`yk`, 0..255) — the Darkness ambient (see header).
+    float darkness_alpha_ = 0.0f;
     // ModelsViewer spawns (JS `Yia`/`B_`, Bf.zjb L476).
     bool has_spawns_ = false;
     float player_spawn_x_ = 0.0f, player_spawn_y_ = 0.0f;

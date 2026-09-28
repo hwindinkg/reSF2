@@ -147,6 +147,24 @@ public:
     void draw_triangles(const float* verts, std::size_t vertex_count, float r,
                         float g, float b, float a = 1.0f);
 
+    // Darkness ambient pass (JS `Ut.C1` L832 + `Ut.Lka` L832):
+    //   `C1(){this.uo==null&&(this.uo=R.Ed(-16777216,1,1), ...,
+    //          this.uo.Rh(this.Lb.width*1.5), this.uo.mj(this.Lb.height*3),
+    //          this.uo.wa(0), this.Cu.go.node.appendChild(this.uo.L))}` (offset
+    //          423259) creates a BLACK quad `uo` (`-16777216` = 0xFF000000 ->
+    //   `Na.Rv` = rgba(0,0,0,1)), 1.5x the map width by 3x the map height,
+    //   alpha 0, appended to the camera-glued `Cu` container (the LAST child of
+    //   the render container `go`, so it draws over every location layer AND the
+    //   fighters). `Lka(a){this.uo!=null&&this.uo.wa(a/255)}` (offset 423228) is
+    //   the per-frame alpha write; the fight feeds it `yk` (0..255) via
+    //   `ca.JLa(a){this.Ta.ia.Lka(a)}` (offset 199211). The quad is
+    //   viewport-covering (1.5x/3x the map), so the pass is a screen-space
+    //   full-screen black quad at alpha = `yk`/255 — the standard
+    //   SRC_ALPHA/ONE_MINUS_SRC_ALPHA blend set by `begin_frame`. `alpha` is the
+    //   normalized darkness (0..1); alpha<=0 skips the draw (the JS node exists
+    //   with `wa(0)` = fully transparent).
+    void draw_darkness_overlay(float alpha);
+
     // Effect-layer primitive: a screen-space tinted quad centered on (cx,cy)
     // in SCREEN pixels, size (w,h) in screen pixels, rotated `rotation_deg`
     // about its center (JS `R3a` L486 `Wg` + the effect sprites' `Ga`

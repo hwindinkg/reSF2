@@ -359,6 +359,21 @@ void Renderer::draw_triangles(const float* verts, std::size_t vertex_count,
     batch_.add_triangles(verts, vertex_count, r, g, b, a);
 }
 
+// Darkness ambient pass (see the header): the JS `uo` quad is 1.5x the map
+// width by 3x the map height — overwhelmingly larger than the viewport — so it
+// is a full-screen black quad. Colour is rgb(0,0,0), alpha = `yk`/255.
+void Renderer::draw_darkness_overlay(float alpha) {
+    if (alpha <= 0.0f) {
+        return;  // JS `uo.wa(0)` — transparent, nothing composited
+    }
+    const float w = camera_.view_w;
+    const float h = camera_.view_h;
+    // TL, TR, BL, TR, BR, BL — matches `draw_effect_quad`'s winding.
+    const float verts[12] = {0.0f, 0.0f, w, 0.0f, 0.0f, h,
+                              w,    0.0f, w, h,    0.0f, h};
+    batch_.add_triangles(verts, 6, 0.0f, 0.0f, 0.0f, alpha);
+}
+
 // Explicit-geometry textured quad (see the header). Corners are already in
 // screen pixels; the two triangles use the sprite path's winding
 // (TL,TR,BL) (BL,TR,BR).

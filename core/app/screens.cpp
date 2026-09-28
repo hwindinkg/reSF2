@@ -10892,6 +10892,18 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
+    // --- Darkness ambient (JS `Ut.C1`/`Ut.Lka` L832) ---------------------
+    // `ca.JLa(a){this.Ta.ia.Lka(a)}` (offset 199211) forwards the live Darkness
+    // `yk` to the LOCATION renderer, whose `uo` quad is appended to the
+    // camera-glued `Cu` container — the LAST child of the render container `go`,
+    // so it draws over every location layer AND the fighters, in BOTH the
+    // visible and the `XF(!1)` round-plate states (`Ut.visible` L826 hides only
+    // the `Rf` fighter/effects container, not `Cu`). It sits under the arrow
+    // marker (a later `go.node` child) and under the HUD (`Ar`/`Sf`). Place it
+    // after the scene draw (both branches) and before the HUD.
+    assets.fight_location.set_darkness_alpha(fight_->darkness_alpha());
+    assets.fight_location.render_darkness(ren);
+
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player
     // fill), HealthBarBlue_Full (enemy fill), HealthBar_Hit/Blue_Hit (leak),

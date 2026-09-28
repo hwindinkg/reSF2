@@ -47,6 +47,7 @@
 #include "scene/fight.hpp"
 #include "scene/magic_effects.hpp"
 #include "scene/renderer.hpp"
+#include "render/gl.hpp"
 #include "xml_archive.hpp"
 #include "zstd_stream.hpp"
 
@@ -1563,6 +1564,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool capture_fight = false;
     bool capture_idle_fight = false;  // --capture-idle-fight-at N: boot direct + no input, capture at fight frame N
     bool round_log = false;  // --round-log: per-frame scene_visible/x/camera around a round transition
+    // [RULE 0 probe] --darkness-probe: boot a Darkness battle, run headless and
+    // sample the framebuffer centre pixel per frame (proves the `Ut.C1`/`Lka`
+    // ambient darkens the arena). Pair with --headless N --watchdog S --hidden.
+    bool darkness_probe = false;
+    int darkness_probe_stride = 15;  // sample every N frames
     // --boss-hit-probe: boot a BOSS fight, drive the player into range via the
     // internal `player_input` path (no OS input), land an attack, and log the
     // boss's per-frame hit reaction (move/ragdoll/world_x).
@@ -2054,6 +2060,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         } else if (arg == "--capture-idle-fight-at" && i + 1 < argc) {
             capture_idle_fight = true;
             capture_fight_frame = std::atoi(argv[++i]);
+        } else if (arg == "--darkness-probe") {
+            darkness_probe = true;
+        } else if (arg == "--darkness-stride" && i + 1 < argc) {
+            darkness_probe_stride = std::atoi(argv[++i]);
+            if (darkness_probe_stride < 1) darkness_probe_stride = 1;
         } else if (arg == "--round-log") {
             // Per-frame round-transition log (scene_visible + fighter x +
             // camera x); no input, no capture, no OS input.
@@ -6154,6 +6165,82 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // Windowed: run until the window closes (the user plays).
             app.run(0, false);
         }
+    } else if (darkness_probe) {
+        // [RULE 0 probe] Darkness ambient pixel proof (JS `Ut.C1`/`Ut.Lka`).
+        // Boot a battle that carries an `<Darkness/>` rule (default
+        // Duel_INTERMISSION, location mountain: stages.xml L1958 fight 1 ->
+        // L2378 `Darkness DarkOn=60 DarkLasting=180 LightOn=60 LightLasting=30`),
+        // step one fixed frame per present, and sample the framebuffer CENTRE
+        // (+ a corner) pixel every `--darkness-stride` frames. The `[dark]`
+        // lines from the fight emitter (`yk`) line up 1:1 with the samples, so
+        // the arena pixel must go from its lit colour to near-black as `yk`
+        // ramps 0 -> 255, and recover as it ramps back. No OS input, no window.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("Duel_INTERMISSION") : fight_battle;
+            pb.zone = fight_zone;
+            pb.location = fight_location.empty() ? std::string("mountain") : fight_location;
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout);
+            std::fprintf(stdout, "[dprobe] boot battle=%s zone=%s location=%s\n",
+                         pb.battle_name.c_str(), pb.zone.c_str(), pb.location.c_str());
+            std::fflush(stdout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        // Advance ~200 frames so the location layers are loaded and live.
+        int dguard = 0;
+        while (dguard < 200 && dguard < (headless > 0 ? headless : 200)) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++dguard;
+            if (app.screens().current_id() != kScreenFight) break;
+        }
+        // Manual composed render of the SAME location through the SAME
+        // renderer, with the Darkness ambient (`Ut.C1`/`Lka` pass) swept
+        // 0 -> 128 -> 255. `LocationScene::render_darkness` is the exact call
+        // the fight screen issues per frame; sampling the centre/corner pixel
+        // proves the pass composites (0,0,0) at alpha = yk/255.
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::LocationScene& loc = fa.fight_location;
+        sf2::render::Renderer& ren = app.renderer();
+        GLFWwindow* dwin = ren.window();
+        const int dvw = app.view_w(), dvh = app.view_h();
+        sf2::render::Camera cam;
+        cam.view_w = static_cast<float>(dvw);
+        cam.view_h = static_cast<float>(dvh);
+        cam.arena_h = loc.arena_height();
+        cam.arena_floor = loc.arena_floor();
+        cam.layer_zoom = 1.0f;
+        cam.arena_center_x = loc.arena_width() * 0.5f;
+        const std::size_t nl = loc.layers().size();
+        const float alphas[3] = {0.0f, 128.0f, 255.0f};
+        for (const float av : alphas) {
+            ren.begin_frame(cam);
+            loc.render_layers(ren, cam, 0, nl);
+            loc.set_darkness_alpha(av);
+            loc.render_darkness(ren);  // JS `Ut.C1`/`Ut.Lka` ambient pass
+            ren.end_frame();
+            sf2::render::gl_read_buffer_front(dwin);
+            unsigned char c[4] = {0, 0, 0, 0};
+            unsigned char q[4] = {0, 0, 0, 0};
+            sf2::render::gl::glReadPixels(dvw / 2, dvh / 2, 1, 1, 0x1908, 0x1401, c);
+            sf2::render::gl::glReadPixels(dvw / 8, dvh / 8, 1, 1, 0x1908, 0x1401, q);
+            std::fprintf(stdout,
+                         "[dprobe] yk=%.0f alpha=%.4f center=(%d,%d,%d,%d) "
+                         "corner=(%d,%d,%d,%d)\n",
+                         static_cast<double>(av),
+                         static_cast<double>(av / 255.0f), c[0], c[1], c[2], c[3],
+                         q[0], q[1], q[2], q[3]);
+            std::fflush(stdout);
+        }
+        std::fprintf(stdout, "[dprobe] done guard=%d\n", dguard);
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (round_log) {
         // [probe] Round-transition frame log (M2 verification). Boot the
         // direct fight, run with NO input until the first round transition

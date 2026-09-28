@@ -1737,6 +1737,13 @@ public:
     // `FightScreen::render_impl` reads this; the HUD is never hidden.
     bool scene_visible() const { return camera_.visible; }
     void set_scene_visible(bool a) { camera_.visible = a; }
+
+    // JS `ca.JLa(a){this.Ta.ia.Lka(a)}` (offset 199211) via `du`'s per-frame
+    // `this.Oe.JLa(c.yk)` (offset 460081): the live Darkness alpha (`yk`,
+    // 0..255). `ia.Lka(a){this.uo.wa(a/255)}` (offset 423228) writes it onto
+    // the location renderer's black ambient quad. 0 when no Darkness rule is
+    // active (JS `JLa(0)` on deactivate, offset 457997).
+    float darkness_alpha() const { return darkness_; }
     // The battle winner (null until the battle ends).
     const FightFighter* winner() const { return winner_; }
     const std::vector<RoundOutcome>& round_history() const { return history_; }
