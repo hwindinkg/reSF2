@@ -303,13 +303,17 @@ public:
 
     // Anim timescale (SlowModel `Kvb`/`KT`): apply sets scale (Speed>=1;
     // Speed<1 is a verbatim no-op), revert restores 1.0 (`v.dB` assumed).
-    // JS `KT` (char 271499) writes the model scale too: `NMa(b)` (char 251149)
-    // sets `Ita`; `HD()` (char 251101) returns it. `Al.O9a` divides gravity by
-    // `HD()*HD()`. The port keeps one channel, so it tracks the same `b`.
-    void set_time_scale(float s) { time_scale_ = s; model_hd_ = s; scale_acc_ = 0.0f; }
+    // NOTE: JS `KT` (char 271499) also writes the MODEL scale via `dba`
+    // (char 271571) -> `NMa` (char 251149) -> `Ita`, but that write is gated
+    // by `this.lb==null` and no shipped fighter model carries a scale attr, so
+    // `HD()` (char 251101) is 1 for shipped data. The timescale channel and
+    // the gravity model scale are therefore kept SEPARATE here (`model_hd_`).
+    void set_time_scale(float s) { time_scale_ = s; scale_acc_ = 0.0f; }
     float time_scale() const { return time_scale_; }
     // JS `this.oa.model.HD()` (`Ita`), used by `Al.O9a` (char 296359):
-    // `xd.fDa/(HD()*HD())`. 1.0 unless a SlowModel `KT` is active.
+    // `xd.fDa/(HD()*HD())`. 1.0 for every shipped fighter (no model Scale
+    // attr; the JS `KT`->`NMa` writer does not fire on shipped data), so the
+    // divisor is inert: `kGravitation/1^2 == 0.4`.
     float model_hd() const { return model_hd_; }
     // JS `wd.y5(a)`/`Dfa()` (L251005/L251095): `wd.xpa` — the ACT-ALLOWED
     // flag. `ca.uhb` calls `a.model.y5(!1)` on the finishing blow (Dfa() then
