@@ -9394,9 +9394,11 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
     if (!resolved) return false;
     // The resolved warrior's item NAMES -> the catalog Type/SubType/Name
     // rows (the same shape the live `resolve_enemy_loadout` builds).
-    // [FIX bug #3 — frozen non-Shin enemies] JS `ur` (char 245250, L192)
-    // applies a node's `<Items>` on TOP of its cloned base template
-    // (`b=b.clone()`), so a derived warrior's OWN items are APPENDED to the
+    // [FIX bug #3 — frozen non-Shin enemies] JS `ur` (char 94004, line 186;
+    // its `<Items>` copy is `c=a.A("Items")` at char 96947, line 192) applies
+    // a node's `<Items>` on TOP of its cloned base template
+    // (`b=b!=null?b.clone():new xc`), so a derived warrior's OWN items are
+    // APPENDED to the
     // template chain's items. `resolve_tournament_fight` (modes.hpp L698-701)
     // instead REPLACES the template list when the row has own items, which
     // dropped the `Skeleton` the `Man_Fist`/`Default` chain carries. Every
