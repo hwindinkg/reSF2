@@ -27,21 +27,25 @@
 
 namespace sf2::app {
 
-// The shared Title -> text cache (one res_root per process run).
+// The per-language Title -> text caches (one `lang` per `res_root`). Keyed by
+// BOTH `res_root` and the language: the settings dialog re-localizes every
+// string to the DISPLAYED language (`un.Pj(key) = bf(bf(IVa,key),$u)`, class
+// `Pb` `static bf(a,b){try{return a[b]}catch(c){return null}}` off 0x5760;
+// `Pj(a){...}` off 0xf3364) while `G.Rq()` still points at the committed one,
+// so the two tables must coexist. The JS `IVa` table ships embedded for all
+// ten `iv` languages (off 0xf1261); the port's equivalent is the per-language
+// `lang/<lang>.<hash>.xml` Words table, cached per language.
 inline std::unordered_map<std::string, std::string>& lang_cache(
-    const std::string& res_root) {
-    static std::unordered_map<std::string, std::string> cached;
-    static std::string loaded_root;
-    if (loaded_root != res_root) {
-        loaded_root = res_root;
-        cached.clear();
-    }
-    return cached;
+    const std::string& res_root, const std::string& lang) {
+    static std::unordered_map<std::string,
+                              std::unordered_map<std::string, std::string>> caches;
+    return caches[res_root + "\n" + (lang.empty() ? "en" : lang)];
 }
 
-// Loads one resolved lang file into the cache (called once by the shell;
-// `path` = the hashed `en.<hash>.xml`). Never throws.
-inline void lang_table_load(const std::string& res_root, const std::string& path) {
+// Loads one resolved `<lang>.<hash>.xml` lang file into ITS language cache
+// (called once per language by the shell). Never throws.
+inline void lang_table_load(const std::string& res_root, const std::string& lang,
+                            const std::string& path) {
     try {
         std::ifstream in(path, std::ios::binary);
         if (!in) return;
@@ -54,7 +58,7 @@ inline void lang_table_load(const std::string& res_root, const std::string& path
         if (!root) return;
         // Walk the tree; every <Word Title="k">text</Word> is an entry (the
         // file nests Words under Localization — depth varies, single line).
-        std::unordered_map<std::string, std::string>& out = lang_cache(res_root);
+        std::unordered_map<std::string, std::string>& out = lang_cache(res_root, lang);
         std::vector<pugi::xml_node> stack;
         stack.push_back(root);
         while (!stack.empty()) {
@@ -72,20 +76,46 @@ inline void lang_table_load(const std::string& res_root, const std::string& path
     }
 }
 
-// Drops the cached table for `res_root` so a language switch (`G.Ska` +
-// reload, `L.K.reload`) re-reads the new `<lang>.<hash>.xml`.
-inline void lang_cache_clear(const std::string& res_root) {
-    lang_cache(res_root).clear();
-    lang_cache(res_root);  // re-sync `loaded_root`
+// Drops one language's cached table so a language switch re-reads its
+// `<lang>.<hash>.xml` (the JS reload does `X.clear(this.QU)` before refilling,
+// off 0x73586).
+inline void lang_cache_clear(const std::string& res_root, const std::string& lang) {
+    lang_cache(res_root, lang).clear();
 }
 
-// Looks up `key`, returning `fallback` when the table/file lacks it.
+// Looks up `key` in the `lang` table, then the EN table (the JS `G.bg` L2394
+// EN fallback), returning `fallback` when both lack it.
+inline std::string lang_text(const std::string& res_root, const std::string& lang,
+                             const std::string& key, const std::string& fallback) {
+    const auto& table = lang_cache(res_root, lang);
+    const auto it = table.find(key);
+    if (it != table.end() && !it->second.empty()) return it->second;
+    if (lang != "en") {
+        const auto& en = lang_cache(res_root, "en");
+        const auto eit = en.find(key);
+        if (eit != en.end() && !eit->second.empty()) return eit->second;
+    }
+    return fallback;
+}
+
+// The ACTIVE language for `res_root` — the JS `QU` global the `Y.na` lookup
+// reads (`X.clear(this.QU); ... lang/<G.Rq()>.xml ... Words`, off 0x73586).
+// `ensure_lang` sets it; `loc`/the settings `Pj` pass their language
+// explicitly. Defaults to EN until the shell loads a table.
+inline std::string& lang_active(const std::string& res_root) {
+    static std::unordered_map<std::string, std::string> active;
+    return active[res_root];
+}
+
+inline void lang_set_active(const std::string& res_root, const std::string& lang) {
+    lang_active(res_root) = lang.empty() ? "en" : lang;
+}
+
+// Active-language lookup (the `Y.na` 3-arg path used where the language is not
+// threaded through, e.g. `quest_panel`). Falls back to EN when unset.
 inline std::string lang_text(const std::string& res_root, const std::string& key,
                              const std::string& fallback) {
-    const auto& table = lang_cache(res_root);
-    const auto it = table.find(key);
-    if (it == table.end() || it->second.empty()) return fallback;
-    return it->second;
+    return lang_text(res_root, lang_active(res_root), key, fallback);
 }
 
 } // namespace sf2::app

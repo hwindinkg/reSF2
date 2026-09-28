@@ -462,7 +462,7 @@ float ui_ua_scale(App& app, float px) {
 // and is loaded once by `ensure_lang`; a missing file/key falls back silently.
 std::string loc(App& app, const std::string& key, const std::string& fallback) {
     if (key.empty()) return fallback;
-    return lang_text(app.res_root(), key, fallback);
+    return lang_text(app.res_root(), app.language(), key, fallback);
 }
 
 // Item display name: JS `Y.na(item.Cg || item.name)` (L2246-2247 `Ne.refresh`
@@ -5256,44 +5256,51 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
     return out;
 }
 
-// Resolves + loads the hashed `en.<hash>.xml` lang file once (the
-// controller-atlas prefix-scan pattern). Silent when absent — callers fall
-// back to embedded EN (headless-safe).
-void ensure_lang(App& app) {
-    const std::string active = app.language().empty() ? "en" : app.language();
-    // Keyed on the active language so the `L.K.reload()` language switch
-    // re-reads the new string table. `lang_cache_clear` drops the old keys —
-    // `lang_table_load` never overwrites a key already present.
-    static std::string loaded_lang;
-    if (loaded_lang == active) return;
-    loaded_lang = active;
-    lang_cache_clear(app.res_root());
-    try {
-        const std::string dir = app.res_root() + "/lang";
-        std::string path;
-        // The ACTIVE language's string table (`G.lang`/`G.Rq`; `Y.na` L917
-        // resolves every key through it). The shipped files are
-        // `<lang>.<hash>.xml` (ru.f7d5b2da.xml ships with Cyrillic); an absent
-        // active file falls back to EN (`G.bg` L2394). This was EN-only, which
-        // is why every UI label rendered the EN fallback regardless of the
-        // resolved language.
-        for (const std::string& lang : {active, std::string("en")}) {
+// Resolves + loads one language's hashed `<lang>.<hash>.xml` Words table into
+// its own cache, once (the controller-atlas prefix-scan pattern). JS reload
+// path (off 0x73586): `X.clear(this.QU); var a=Rb.Nia(G.ln(G.qf("lang/"+
+// G.Rq()+".xml"))).A("Words")`. Silent when absent — callers fall back to the
+// EN table / embedded EN (headless-safe). Loaded PER LANGUAGE (not one shared
+// slot) because the settings dialog re-localizes to `un.$u` (off 0xf3364)
+// while `G.Rq()` is still the committed language.
+void ensure_lang_for(App& app, const std::string& lang) {
+    const std::string active = lang.empty() ? "en" : lang;
+    static std::map<std::string, bool> loaded;
+    if (!loaded.emplace(app.res_root() + "\n" + active, true).second) return;
+    const auto load_one = [&](const std::string& want) {
+        try {
+            const std::string dir = app.res_root() + "/lang";
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 const std::string name = entry.path().filename().string();
-                if (name.size() > lang.size() + 1 && name.rfind(lang + ".", 0) == 0 &&
+                if (name.size() > want.size() + 1 && name.rfind(want + ".", 0) == 0 &&
                     entry.path().extension().string() == ".xml") {
-                    path = entry.path().string();
-                    break;
+                    lang_table_load(app.res_root(), want, entry.path().string());
+                    std::fprintf(stdout, "[lang] loaded %s (lang=%s)\n",
+                                 entry.path().string().c_str(), want.c_str());
+                    std::fflush(stdout);
+                    return;
                 }
             }
-            if (!path.empty()) break;
+        } catch (const std::exception&) {
         }
-        if (path.empty()) return;
-        lang_table_load(app.res_root(), path);
-        std::fprintf(stdout, "[lang] loaded %s (active=%s)\n", path.c_str(), active.c_str());
-        std::fflush(stdout);
-    } catch (const std::exception&) {
-    }
+    };
+    load_one(active);
+    if (active != "en") load_one("en");  // `G.bg` L2394 EN fallback
+}
+
+void ensure_lang(App& app) {
+    lang_set_active(app.res_root(), app.language());  // `QU` = active table
+    ensure_lang_for(app, app.language());
+}
+
+// `un.Pj` (off 0xf3364) = `bf(bf(IVa,key),$u)`: resolve through the DISPLAYED
+// language (`un.$u`, the settings dialog's pending language) instead of the
+// committed `G.Rq()`.
+std::string loc_lang(App& app, const std::string& lang, const std::string& key,
+                     const std::string& fallback) {
+    if (key.empty()) return fallback;
+    ensure_lang_for(app, lang);
+    return lang_text(app.res_root(), lang, key, fallback);
 }
 
 // Registers the map zone backdrops (res/map/part0..6 + buttons frames) into
@@ -16750,7 +16757,7 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     draw_od_base(app, ren, s.panel);
     // Title `Vc`: `IVa.Settings_Title` (L1917); `ua(152)` + `La(Z.W6)` (L1900).
     draw_ui_label_font(app, sfont, stex, s.title_x, s.title_y, s.title_w, s.title_h,
-                       loc(app, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
+                       loc_lang(app, lang, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
                        0.243f, 0.141f);
     // JS `y.loa/koa` (L1928): the Sound row icon reflects the SFX mute (`lb.Mz()`).
     const bool sfx_on = !sf2::audio::AudioEngine::instance().sfx_muted();
@@ -16768,10 +16775,10 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         std::string text;
     };
     const RowLabel labels[4] = {
-        {s.sound_cx, s.sound_cy, loc(app, "Settings_Sound", "Sound")},
-        {s.music_cx, s.music_cy, loc(app, "Settings_Music", "Music")},
-        {s.credits_cx, s.credits_cy, loc(app, "Settings_Credits", "Credits")},
-        {s.lang_cx, s.lang_cy, loc(app, "Settings_Language", "English")},
+        {s.sound_cx, s.sound_cy, loc_lang(app, lang, "Settings_Sound", "Sound")},
+        {s.music_cx, s.music_cy, loc_lang(app, lang, "Settings_Music", "Music")},
+        {s.credits_cx, s.credits_cy, loc_lang(app, lang, "Settings_Credits", "Credits")},
+        {s.lang_cx, s.lang_cy, loc_lang(app, lang, "Settings_Language", "English")},
     };
     for (const RowLabel& row : labels) {
         draw_ui_label_font(app, sfont, stex, row.cx + s.icon * 0.7f,
@@ -16784,7 +16791,7 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     if (g_settings_restart_visible) {
         draw_ui_label(app, s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
                       s.notice_y - 25.0f * s.panel.c, 1500.0f * s.panel.c, 50.0f * s.panel.c,
-                      loc(app, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
+                      loc_lang(app, lang, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
                       kSettingsTextR, kSettingsTextG, kSettingsTextB);
     }
     // BACK (`Bb("EButtonDark")` L1930 -> `btnDark`), `Ge(0)` closes.
@@ -16794,7 +16801,7 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
                          g_settings_hover == 0);
     }
     draw_ui_label_font(app, sfont, stex, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f,
-                       s.btn_w, 28.0f, loc(app, "Settings_Back", "BACK"), 0.9f, UiAlign::Center,
+                       s.btn_w, 28.0f, loc_lang(app, lang, "Settings_Back", "BACK"), 0.9f, UiAlign::Center,
                        kSettingsTextR, kSettingsTextG, kSettingsTextB);
     // RESTART (`Bb("EButtonBeige")` L1930 -> `btnBeige`), revealed by L1931.
     if (g_settings_restart_visible) {
@@ -16806,7 +16813,7 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         }
         draw_ui_label_font(app, sfont, stex, s.restart_cx - s.btn_w * 0.5f,
                            s.restart_cy - 14.0f, s.btn_w, 28.0f,
-                           loc(app, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
+                           loc_lang(app, lang, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
                            kSettingsTextR, kSettingsTextG, kSettingsTextB);
     }
     // `xh` credits overlay (L1854-1857): drawn over the settings surface,
@@ -18056,32 +18063,57 @@ int run_shell_probe(App& app) {
               "(ix) achievement counter write path: Survival1 rises + achievement unlocks");
     }
     // (x) Settings language cycle -> RESTART (JS `un.rHa` case 4/5, offsets
-    // 995437/995553): cycling `$u` reveals RESTART (`t9`) and selects the
-    // DISPLAYED language's settings font (`C8[$u]`); RESTART then commits
-    // `G.Ska($u)` and runs the `L.K.reload()` reset (`App::reload_language`).
+    // 995437/995553): cycling `$u` reveals RESTART (`t9`), selects the
+    // DISPLAYED language's settings font (`C8[$u]`) AND re-localizes every
+    // string (`un.Pj = bf(bf(IVa,key),$u)`, off 0xf3364); RESTART then commits
+    // `G.Ska($u)` + `p.TJ.save(!0)` and runs the `L.K.reload()` reset.
     {
+        if (app.language() != "en") app.reload_language("en");  // deterministic start
         const std::string before_lang = app.language();
         const int reloads0 = app.reload_count();
         open_settings_dialog(app);
-        settings_dialog_cycle_language(app);  // `rHa` case 4
+        g_settings_lang = "en";                 // `un.$u=G.Rq()`; cycle starts at EN
+        settings_dialog_cycle_language(app);    // `rHa` case 4 -> `iv` next = "de"
         const bool restart_vis = settings_dialog_restart_visible();
-        const std::string shown = g_settings_lang;
+        const std::string shown = g_settings_lang;  // "de"
         const sf2::data::font* sf = app.settings_font(shown);
         const std::size_t sf_chars = sf != nullptr ? sf->chars.size() : 0;
         const unsigned int sf_tex = app.settings_font_texture();
         const bool font_ok = sf != nullptr && sf_tex != 0;
+        // `un.Pj("Settings_Title")` for the DISPLAYED `$u` vs the committed
+        // language: the string must follow the pending language immediately.
+        const std::string title_shown = loc_lang(app, shown, "Settings_Title", "SETTINGS");
+        const std::string title_committed = loc(app, "Settings_Title", "SETTINGS");
         const bool reloaded = settings_run_row(app, SettingsRow::kRestart);  // case 5
         const std::string after_lang = app.language();
+        // After the commit the ACTIVE language resolves the same string, and
+        // the save carries the persisted `Language` the boot reader consumes.
+        const std::string title_active = loc(app, "Settings_Title", "SETTINGS");
+        const std::string persisted = app.save().save_language();
+        const std::string boot_lang =
+            App::resolve_boot_language("en", std::string(), app.save().save_path());
         std::fprintf(stdout,
                      "[sps] restart: cycle %s->%s shown=%d atlas=%s(%zu chars) tex=%u "
                      "reload=%d lang=%s\n",
                      before_lang.c_str(), shown.c_str(), restart_vis ? 1 : 0,
                      font_ok ? shown.c_str() : "none", sf_chars, sf_tex,
                      app.reload_count(), after_lang.c_str());
+        std::fprintf(stdout,
+                     "[sps] relocalize: Pj(\"Settings_Title\") %s->%s "
+                     "(en=\"%s\" shown=\"%s\" active=\"%s\") persisted=\"%s\" "
+                     "boot(platform=en)=\"%s\"\n",
+                     shown.c_str(), shown.c_str(), title_committed.c_str(),
+                     title_shown.c_str(), title_active.c_str(), persisted.c_str(),
+                     boot_lang.c_str());
         std::fflush(stdout);
         check(restart_vis && font_ok && reloaded && after_lang == shown &&
                   app.reload_count() == reloads0 + 1,
               "(x) Settings language cycle -> C8[$u] font + RESTART commits G.Ska + reload");
+        check(title_committed == "SETTINGS" && title_shown == "EINSTELLUNGEN" &&
+                  title_active == "EINSTELLUNGEN",
+              "(x) Pj re-localizes the settings strings to the displayed language");
+        check(persisted == shown && boot_lang == shown,
+              "(x) Language persists to the save + the boot reader restores it");
         close_settings_dialog();
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",

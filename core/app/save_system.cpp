@@ -127,6 +127,9 @@ WarriorSave SaveSystem::load() {
             out.music_muted =
                 sf2::data::xml_attr_bool(snd_root.child("Music"), "Mute", false);
         }
+        // The persisted language (JS `Aa.load().st().attributes.get("Language")`
+        // off 0x7d0b; `st()` = the first child = `<CurrentUser>`). Absent -> "".
+        if (cu.attribute("Language")) out.language = cu.attribute("Language").value();
     }
 
     // The owned items (JS `$g.parse` reads the Warrior <Items> children).
@@ -502,6 +505,20 @@ std::string SaveSystem::data_version() {
     return v ? std::string(v.value()) : std::string();
 }
 
+// JS `Aa.load().st().attributes.get("Language")` (off 0x7d0b): `st()` is the
+// document's first child (`<CurrentUser>`). Empty when no save / absent.
+std::string SaveSystem::save_language() {
+    if (!has_save()) return std::string();
+    sf2::data::xml_doc doc;
+    doc.parse(read_file_text(save_path_));
+    const pugi::xml_node root = doc.root().first_child();
+    if (root == nullptr || std::string(root.name()) != "Root") return std::string();
+    const pugi::xml_node cu = root.child("CurrentUser");
+    if (!cu) return std::string();
+    const pugi::xml_attribute a = cu.attribute("Language");
+    return a ? std::string(a.value()) : std::string();
+}
+
 void SaveSystem::save(const WarriorSave& w) {
     // Load the current document (the save, or the template when none yet),
     // patch the Warrior attributes, and write back. This preserves the
@@ -548,6 +565,20 @@ void SaveSystem::save(const WarriorSave& w) {
         pugi::xml_node mus = snd_root.child("Music");
         if (!mus) mus = snd_root.append_child("Music");
         mus.attribute("Mute").set_value(w.music_muted ? "1" : "0");
+
+        // The persisted language (JS `sc.oF` off 0x1bdda: `G.Rq()!="en" ?
+        // this.Ju.set("Language", G.Rq()) : this.Ju.removeAttribute("Language")`
+        // — this.Ju = `<CurrentUser>`, saved via `Aa.save(this.Ju.parent)`).
+        // A native reconstructed `WarriorSave{}` (not via `load`) leaves
+        // `language` empty; keep any existing attribute then so a partial save
+        // cannot silently wipe the persisted language.
+        if (w.language == "en") {
+            cu.remove_attribute("Language");
+        } else if (!w.language.empty()) {
+            pugi::xml_attribute la = cu.attribute("Language");
+            if (!la) la = cu.append_attribute("Language");
+            la.set_value(w.language.c_str());
+        }
     }
 
     // The owned items (JS `$g` + `Aa.save`): replace the <Items> children.

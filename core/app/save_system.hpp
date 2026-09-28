@@ -385,6 +385,14 @@ struct BattleRecord {
 
     std::string map_focus;  // `ys` (MapFocus attr; absent in seed)
 
+    // The persisted UI language (JS `sc.oF` off 0x1bdda: `G.Rq()!="en" ?
+    // this.Ju.set("Language", G.Rq()) : this.Ju.removeAttribute("Language")`
+    // on the `<CurrentUser>` node). Empty = not persisted; the boot reader
+    // (`Aa.load().st().attributes.get("Language")` off 0x7d0b) treats it as
+    // "use the platform locale". The ten `iv` tokens (off 0x137170) are the
+    // only valid values.
+    std::string language;
+
     // Session settings (JS `Aka` -> `xLa` L264: `<SessionSettings><Name
     // Value="0|1"/>`). `Disciple` = `Y0()` (L271) — the dojo disciple toggle
     // (`oub(a)` L271 writes it; `za.Nfb` L1981 flips it); `ShowDojoDisciple`
@@ -650,6 +658,11 @@ public:
     // Reads the ROOT-level `<Versions><DataVersion Value>` back (empty when
     // absent). Lets the probe observe `Oqb`.
     std::string data_version();
+
+    // Reads the `<CurrentUser Language>` attribute back (empty when absent —
+    // the boot `Aa.load().st().attributes.get("Language")`, off 0x7d0b). Lets
+    // the probe observe `sc.oF`'s persisted language.
+    std::string save_language();
 
     // The SF2User envelope (FLOW_STATIC section 3.1 + R7, JS L70-73/L2333):
     // decode: base64 -> `Ug` frames (`ke(len)+yna(bytes)` length-prefixed

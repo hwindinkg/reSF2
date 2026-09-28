@@ -232,6 +232,14 @@ public:
     int reload_count() const { return reload_count_; }
     // The resolved UI language (JS `G.lang`, default "en").
     const std::string& language() const { return lang_; }
+    // The boot language (JS off 0x7d0b: `b=Aa.load().st().attributes.get(
+    // "Language"); b=b!=null?b:""; b!=""&&Cc.OEa(b)&&G.Ska(b)` — the persisted
+    // `<CurrentUser Language>` wins over the platform locale). An explicit CLI
+    // `cli_lang` overrides; else the persisted token (validated against `iv`,
+    // off 0x137170); else `platform_lang`. Reads the save at `save_path`.
+    static std::string resolve_boot_language(const std::string& platform_lang,
+                                             const std::string& cli_lang,
+                                             const std::string& save_path);
     // Per-language UI text scale (JS `ea.a1`): the boot bootstrap switches on
     // `G.Rq()` and sets `ea.a1=.8, ea.b1=1.2` for ja/ko/ru, leaving the L2484
     // globals at 1 for every other locale (L65; the settings picker repeats

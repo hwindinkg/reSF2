@@ -142,6 +142,18 @@ std::string resolve_language(const std::string& lang) {
     return "en";
 }
 
+// JS `Cc.OEa` (off 0x7366e: `(new Ua("^("+iv.join("|")+")$","")).match(a)`) —
+// the `iv` regex (off 0x137170 `iv="en de it fr pt ru es tr ja ko".split(" ")`)
+// accepts only the ten lowercase tokens.
+bool valid_language_token(const std::string& l) {
+    static const char* const kSupported[] = {"tr", "ru", "pt", "ko", "ja",
+                                             "it", "fr", "es", "en", "de"};
+    for (const char* const s : kSupported) {
+        if (l == s) return true;
+    }
+    return false;
+}
+
 // The platform UI language's primary subtag (the native analog of the browser
 // `navigator.language` the JS platform bridge returns — `Ca.c6a()` =
 // `window.GameInterface.getCurrentLanguage()` = `p.get().locale ||
@@ -408,6 +420,24 @@ void App::load_settings_fonts_() {
     }
 }
 
+// JS boot reader (off 0x7d0b): `var b=Aa.load().st().attributes.get(
+// "Language"); b=b!=null?b:""; b!=""&&Cc.OEa(b)&&G.Ska(b);` — the persisted
+// `<CurrentUser Language>` (validated against `iv`) overrides the platform
+// locale. An explicit CLI `cli_lang` wins. `Aa.load()` uses the template when
+// no save exists, which carries no `Language` -> platform.
+std::string App::resolve_boot_language(const std::string& platform_lang,
+                                       const std::string& cli_lang,
+                                       const std::string& save_path) {
+    if (!cli_lang.empty()) return resolve_language(cli_lang);
+    try {
+        SaveSystem ss(save_path, std::string());
+        const std::string saved = ss.save_language();
+        if (!saved.empty() && valid_language_token(saved)) return saved;
+    } catch (const std::exception&) {
+    }
+    return resolve_language(platform_lang);
+}
+
 // JS `L.K.reload()` (offset 27162: `a?window.location=window.location.pathname
 // :window.location.reload(!0)`) — a full browser page reload, which has NO
 // exact desktop analogue. The closest JS-exact state reset: `G.Ska(lang)`
@@ -419,6 +449,27 @@ bool App::reload_language(const std::string& lang) {
     std::fprintf(stdout, "[app] L.K.reload(): G.Ska('%s') -> reload #%d\n", lang_.c_str(),
                  reload_count_);
     std::fflush(stdout);
+    // JS `un.rHa` case 5 (off 0x995553): `this.t9&&(G.Ska(this.$u),
+    // p.TJ.save(!0)),L.K.reload()` — the language is committed to the save
+    // BEFORE the reload, so a fresh process boots into it.
+    if (save_) {
+        try {
+            WarriorSave w = save_->load();
+            w.language = lang_;
+            save_->save(w);
+            // JS `oF`: `G.Rq()!="en" ? set : removeAttribute` — mirror the
+            // log to the actual attribute state.
+            if (lang_ == "en") {
+                std::fprintf(stdout, "[app] language persisted: Language removed (en)\n");
+            } else {
+                std::fprintf(stdout, "[app] language persisted: Language=\"%s\"\n",
+                             lang_.c_str());
+            }
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[app] language persist failed: %s\n", e.what());
+        }
+    }
     load_menu_font_();
     settings_fonts_.clear();
     settings_font_tex_ = 0;
@@ -436,12 +487,14 @@ bool App::init(const std::string& res_root, const std::string& save_path,
     res_root_ = res_root;
     save_path_ = save_path;
     // JS `G.Ska` (L2392): lowercase + default/coerce to "en" (the supported
-    // set is `G.v9`, L2492). The runtime lang source is the platform locale
-    // (JS `Ca.c6a()`, see platform_language) unless the caller passes one.
-    const std::string requested = lang.empty() ? platform_language() : lang;
-    lang_ = resolve_language(requested);
+    // set is `G.v9`, L2492). The runtime lang source is the boot reader (off
+    // 0x7d0b: the persisted `<CurrentUser Language>`, else the platform
+    // locale — JS `Ca.c6a()`, see platform_language) unless the caller passed
+    // one explicitly.
+    const std::string platform = platform_language();
+    lang_ = resolve_boot_language(platform, lang, save_path);
     std::fprintf(stdout, "[app] language: platform='%s' requested='%s' -> '%s'\n",
-                 platform_language().c_str(), lang.c_str(), lang_.c_str());
+                 platform.c_str(), lang.c_str(), lang_.c_str());
     std::fflush(stdout);
 
     renderer_ = std::make_unique<sf2::render::Renderer>();
