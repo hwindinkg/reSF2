@@ -17,18 +17,20 @@
 //   6 HitPostCrit 7 PostHit 8 MagicCharged 9 AnimStart 10 AnimEnd
 //   11 AnimInterrupted 12 IntervalStart 13 IntervalEnd 14 ModExpires
 //   15 AreaEnter 16 AreaExit.
-// Publishers wired: hit `Sba` slots 6 (post-crit, Damage=0 — `Bb.Zi`
-// reset at strike start) + 7 (post-hit, Damage=base); EveryFrame slot 2
-// per fighter tick; RoundStageStart slot 1 on phase change; Interval
-// 12/13 on edge detect; ModExpires 14 on mod expiry. NOT wired (OPEN,
-// parsed but never fired): 3 Style, 4 Combo (battle-end `TYa→Gj(a,4)`
-// noted), 5 HitPreCrit (`Egb` site unknown), 8 MagicCharged (no magic),
-// 9/10/11 anim (plumbing cost), 15/16 area (`rR` bounds OPEN).
-// Log-only exec types (JS applies; needs magic/presentation/timing
-// systems — REVIEW B LOW): StealMagicMod(1 shipped use), SlowModel(3),
-// ChangeModelColor(3), SetCooldown(4), SetDarkness(3), MoveModel(1),
-// AddBullets(2), AddMagicCharge(1); JNa revert log-only for 27/28/29;
-// Bullets/MagicCharge conditions read 0 (no bh/dO, 2 perks). (`rR` bounds OPEN).
+// Publishers wired: hit `Sba` slots 5 (pre-crit `Egb` L259516 — a SetHit
+// `Block` override writes `Bb.block` and feeds the crit decision + damage),
+// 6 (post-crit, Damage=0 — `Bb.Zi` reset at strike start) + 7 (post-hit,
+// Damage=base); EveryFrame slot 2 per fighter tick; RoundStageStart slot 1
+// on phase change; Interval 12/13 on edge detect; ModExpires 14 on mod
+// expiry; MagicCharged 8 on the `bh<1 -> bh>=1` edge (`Cgb` L201). NOT
+// wired (OPEN, parsed but never fired): 3 Style, 4 Combo (battle-end
+// `TYa→Gj(a,4)` noted), 9/10/11 anim (plumbing cost), 15/16 area (`rR`
+// bounds OPEN — `ERuleRandomArea` `qca`/`Nma`/`Xwa` L206514 + rule `ij`
+// L446758 not simulated). `bc.FE` (disable a model's triggers + purge its
+// Fw entries, L700207) has no ported call site (`Wqb` L268150, the
+// weapon-swap timer `Wx` path — unported). Bullets/MagicCharge conditions
+// read the live `bh/dO/my` state (ranged/magic wave); `InTheArea` reads the
+// `rR` flag (OPEN). JNa revert log-only for 27/28/29.
 
 #include <cctype>
 #include <cmath>
@@ -1238,6 +1240,66 @@ inline std::vector<PerkTrigger> build_side_triggers(
         }
     }
     return out;
+}
+
+// `--perk-trigger-probe`: proves the slot-5 (HitPreCrit) routing end to end
+// through the real `TrigBus` + `decide_hit_perks`. The fixture mirrors the
+// shipped `PERK_BEGINNER` trigger (perks.xml: `<HitPreCrit Player="Me"
+// Block="1"/>` -> `<SetHit Block="0"/>`) — the pre-crit block cancel that
+// can only fire once slot 5 is published (JS `Egb` L259516).
+inline bool perk_trigger_probe() {
+    static const char* kPerkXml =
+        "<Perks><Perk Name=\"ProbeBeginner\">"
+        "<Set Health=\"0.4\" />"
+        "<Trigger Name=\"Probe\">"
+        "<Events><HitPreCrit Player=\"Me\" Block=\"1\" /></Events>"
+        "<Actions><SetHit Block=\"0\" /></Actions>"
+        "</Trigger></Perk></Perks>";
+    const std::map<std::string, PerkDef> defs = parse_perks_xml(kPerkXml);
+    std::vector<ItemPerkRef> refs;
+    refs.push_back(ItemPerkRef{"ProbeBeginner", {}, {}, false});
+    TrigBus bus;
+    bus.log = [](const std::string&) {};
+    bus.register_side(0, build_side_triggers(refs, defs, bus.log), {});
+    CondCtx owner, foe;
+    owner.hp = 100.0;
+    foe.hp = 100.0;
+    TrigVars v;
+    v.str["Defense"] = "BodyDefense";
+    v.str["Animation"] = "Punch";
+    v.num["Critical"] = 0.0;
+    v.num["Shock"] = 0.0;
+    v.num["Block"] = 1.0;
+    v.num["Damage"] = 0.0;
+    // Slot 5 (HitPreCrit, JS `Egb` L259516): the block cancel fires.
+    bus.fire(kEvHitPreCrit, v, true, 0, owner, foe, 0, 0);
+    std::vector<std::pair<PerkTrigger, PerkAction>> pairs5;
+    bus.drain(0, pairs5);
+    std::vector<PerkAction> combat;
+    for (const auto& pr : pairs5) {
+        const std::string& t = pr.second.type;
+        if (t == "SetHit" || t == "Lifesteal" || t == "DisableInterval") {
+            combat.push_back(pr.second);
+        }
+    }
+    HitRecord rec;
+    rec.blocked = true;  // the fixture event gates Block="1"
+    rec.critical = false;
+    const PerkHitOutcome po = decide_hit_perks(combat, rec, 1.0f, 1.0f);
+    const bool after = po.has_block ? po.f_block : rec.blocked;
+    // Slot 6 (HitPostCrit, `Dgb`) must NOT match the HitPreCrit-only trigger.
+    bus.fire(kEvHitPostCrit, v, true, 0, owner, foe, 0, 0);
+    std::vector<std::pair<PerkTrigger, PerkAction>> pairs6;
+    bus.drain(0, pairs6);
+    const bool ok = pairs5.size() == 1 && po.has_block && po.f_block == false &&
+                    pairs6.empty();
+    std::fprintf(stdout,
+                 "[perk-trigger] HitPreCrit pairs=%zu -> SetHit Block 1->%d; "
+                 "HitPostCrit pairs=%zu; RESULT %s\n",
+                 pairs5.size(), after ? 1 : 0, pairs6.size(),
+                 ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return ok;
 }
 
 }  // namespace sf2::scene

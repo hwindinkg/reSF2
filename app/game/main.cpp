@@ -1417,6 +1417,7 @@ int main(int argc, char** argv) {
     bool headless_loop = false;
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool rating_perk_probe_mode = false;  // --rating-perk-probe
+    bool perk_trigger_probe_mode = false;  // --perk-trigger-probe
 bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool enchant_stat_probe_mode = false;  // --enchant-stat-probe
     bool perk_set_probe_mode = false;  // --perk-set-probe
@@ -1601,6 +1602,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // input, no sim): the before/after rating with a `<Rating>` perk.
             // Dispatched after the RULE 0 watchdog install (see below).
             rating_perk_probe_mode = true;
+        } else if (arg == "--perk-trigger-probe") {
+            // Slot-5 (HitPreCrit) bus routing self-check against a fixture
+            // mirroring the shipped `PERK_BEGINNER` trigger (no OS input, no
+            // sim). Dispatched after the RULE 0 watchdog install (see below).
+            perk_trigger_probe_mode = true;
         } else if (arg == "--enchant-stat-probe") {
             // Item-enchant `<Set>` -> `perk_aspect` -> `Be.eea` -> rating
             // consumer self-check (no OS input, no sim). Dispatched after the
@@ -2080,6 +2086,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // pure-computation self-check can never leave a process behind.
     if (rating_perk_probe_mode) {
         return sf2::scene::rating_perk_probe() ? 0 : 1;
+    }
+
+    // `--perk-trigger-probe`: slot-5 (HitPreCrit) bus routing self-check,
+    // dispatched after the watchdog (RULE 0) so it can never leave a process.
+    if (perk_trigger_probe_mode) {
+        return sf2::scene::perk_trigger_probe() ? 0 : 1;
     }
 
     // `--perk-set-probe`: proves the saved warrior `<Perks><Perk><Set>` row is

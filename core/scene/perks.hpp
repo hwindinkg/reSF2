@@ -1,26 +1,30 @@
 #pragma once
 
-// Perk hit-actions (PERKS_STATIC section 5.2, JS L1290-1300): the 31-name
-// `Ma` action factory. Combat-affecting actions execute for real;
-// UI/presentation/magic ones are logged no-ops (exact list below).
+// Perk hit-actions (PERKS_STATIC section 5.2, JS L1290-1300): the `Ma`
+// action factory (`Ma.create` L703951). The hit-scope subset folds into
+// `decide_hit_perks` (PURE, pinned by S16); `fight.cpp::exec_action` runs
+// the rest via the JS `Fw.lF` switch (type numbers below).
 // Design mirrors combat_decide.hpp: `decide_hit_perks` is PURE (inputs ->
 // outcome, no fighters) so the combat golden pins it 1:1 (S16); fight.cpp
-// applies the outcome. Trigger routing (bc bus/Kw.c8a/Fw queue) is OPEN —
-// the fight calls the decider with the attacker's equipped list (empty
-// until the perk-equip mapping lands) on every landed hit + ticks dots.
+// applies the outcome. Trigger routing (bc bus/Kw.c8a/Fw queue) is WIRED in
+// trigger.hpp's `TrigBus` + `FightController::run_bus_hit` (slots 1/2/5/6/7/
+// 12/13/14/8); this pure decider is the hit-scope (SetHit/Lifesteal/
+// DisableInterval) reducer `run_bus_hit` calls.
 //
-// Action semantics (spec table):
-//   REAL: SetHit(9) override, ModAttributes(3) instant add,
-//     ChangeAdditionalDamageValue(22) +Ly, DisableInterval(6) hT/F4,
-//     Lifesteal(14) heal, ChangeImpulse(20) knockback scale,
-//     ModHealthChange(12) DoT/HoT install, TurnOffCollision(30) vZ toggle.
-//   NO-OP+log: ModIcon(1), ClearMods(4), ApplyModEffect(11), Provoke(13),
-//     ModInvisibility(15), SetTactic(16), SetModVariable(17),
-//     SetRangeVariable(18), SetCooldown(19), ChangeHitEffectScale(21),
-//     SetDarkness(25), Switch(26, inert per spec), StealMagicMod(27),
-//     SlowModel(28), ChangeModelColor(29), MoveModel(31), ModFlag(5),
-//     ShowDebugLine(23), MarkPerkAsUsed(24), AddBullets(7), AddMagicCharge(8)
-//     (last two need the magic/bullet systems).
+// Action semantics (type numbers = the JS `Fw.lF` switch, L661209):
+//   REAL: ModIcon(1), ModAttributes(3), ClearMods(4), ModFlag(5),
+//     DisableInterval(6), AddBullets(7) `Rob`, AddMagicCharge(8) `Sob`,
+//     SetHit(9), SetModFrames(10), Provoke(13), Lifesteal(14),
+//     ModInvisibility(15), SetTactic(16) `qpb`, SetModVariable(17) `dka`,
+//     SetRangeVariable(18), ChangeImpulse(20), ChangeHitEffectScale(21),
+//     ChangeAdditionalDamageValue(22) +Ly, SlowModel(28) `Kvb`,
+//     ChangeModelColor(29), TurnOffCollision(30), ModHealthChange(12)
+//     DoT/HoT install.
+//   NO-OP+log: ApplyModEffect(11), SetCooldown(19), SetDarkness(25),
+//     Switch(26, inert per spec), StealMagicMod(27), MoveModel,
+//     ShowDebugLine(23), MarkPerkAsUsed(24). (`Effect`/`StopEffect`/
+//     `StopFollowEffect` are handled by `exec_action` but are not shipped
+//     `Ma` tags.)
 
 #include <map>
 #include <string>
@@ -77,8 +81,8 @@ inline double perk_num(const PerkAction& a, const std::string& key, double def =
     return it != a.num.end() ? it->second : def;
 }
 
-// Pure decider over the attacker's equipped actions (JS `lF` dispatch
-// restricted to hit scope; trigger routing OPEN).
+// Pure decider over the hit-scope actions the bus collected (JS `Fw.lF`
+// dispatch, combat subset).
 // `atk_so`/`foe_so` feed Lifesteal's exact ratio (`apb` L1294:
 // `aM(model, VZ·Zi·(model.jb.so/model.so))` — heal = DamagePart × Zi ×
 // foe_so/atk_so; both default 1.0).

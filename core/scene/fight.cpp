@@ -4445,6 +4445,37 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         def.fighter.clear_block();
     }
     bool blocked = def.fighter.has_block();
+    const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
+    // Slot 5 = HitPreCrit at the `Egb` point (L259516-259620): fires AFTER
+    // `Bb.block = Nbb()` + `Bb.JP = LAa(g,block,a)` but BEFORE the crit
+    // decision `se = !block && !a3 && Lcb(A9a())` (L259661). The JS record is
+    // the persistent `Bb`: `bR`/`Zi` were zeroed at strike start (L259192),
+    // while `se`/`Ub` carry the PREVIOUS hit (no reset) — but NO shipped
+    // `<HitPreCrit>` gates on Critical/Shock (0 of 86), so 0 is passed here.
+    // A `SetHit Block="0"` action writes `Bb.block` (JS `ppb` L2594) and
+    // therefore feeds the crit decision + damage below (`bCa(g, Bb.block, …)`).
+    sf2::scene::HitRecord rec;
+    rec.defense = defense_attr;
+    rec.target_part = hit_cap.body_part;
+    rec.hit_edge = iv.attacking_parts.empty() ? "" : iv.attacking_parts[0];
+    rec.blocked = blocked;
+    rec.critical = false;   // pre-crit (JS `Bb.se`, not yet recomputed)
+    rec.shock = false;      // JS `Bb.Ub` (set only after the post-crit rolls)
+    rec.raw_damage = 0.0f;  // JS `Bb.Zi = 0` at strike start
+    {
+        sf2::scene::TrigVars hv5;
+        hv5.str["Defense"] = defense_attr;
+        hv5.str["Animation"] = move.name;
+        hv5.num["Critical"] = 0.0;
+        hv5.num["Shock"] = 0.0;
+        hv5.num["Block"] = blocked ? 1.0 : 0.0;
+        hv5.num["Damage"] = 0.0;
+        // `out_*` stay null: JS overwrites `bR` at `bCa` then `Zi = bR`
+        // (L259746), so a slot-5 SetHit Damage must NOT reach `sethit_*`.
+        run_bus_hit(sf2::scene::kEvHitPreCrit, hv5, def.is_player ? 0 : 1, rec, atk, def,
+                    0, nullptr, nullptr);
+        blocked = rec.blocked;  // `SetHit Block` feeds the crit + damage
+    }
     // JS `wd.strike` crit (L510): `se = !block && !g.a3 && Lcb(A9a())`;
     // JS `Lcb(a)` = `Da.cT(a*100)` (L1204): `a>1 -> true` (the `a>b` shortcut)
     // else a fresh draw `< a`. `A9a = pga?100:gya.p8a` (L529; `pga` setter
@@ -4453,7 +4484,6 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     const float a9 = sf2::scene::crit_chance(atk.params);
     bool critical =
         !blocked && !iv.no_critical && (a9 > 1.0f || draw01() < a9);
-    const std::string defense_attr = sf2::scene::select_defense(idmg, blocked, &hit_cap);
     // JS `bCa` L510: `g *= a.Cea(f.parameters.qb?1:2).bp` — the ATTACKER's
     // side (`Cea(1)` = `k$` for the player, `Cea(2)` = `FV` for the bot).
     // The per-round `ERuleDamageFactor` pass filled `damage_bp_`.
@@ -4475,13 +4505,9 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             if (v.ju && v.ku) v.bp *= v.rja;
         }
     }
-    sf2::scene::HitRecord rec;
-    rec.raw_damage = dmg;
-    rec.defense = defense_attr;
-    rec.target_part = hit_cap.body_part;
-    rec.hit_edge = iv.attacking_parts.empty() ? "" : iv.attacking_parts[0];
     bool sethit_damage = false;
     float sethit_value = 0.0f;
+    rec.raw_damage = dmg;
     rec.blocked = blocked;
     rec.critical = critical;
     // Slot 6 = HitPostCrit at the Dgb point (post-se, pre-Ca;
