@@ -927,6 +927,27 @@ bool Fighter::move_conditions_pass(const MoveDef& move, FightContext& ctx,
     return eval_move_conditions(move.conditions, ctx, trace);
 }
 
+// JS `Gc.EZa` (L676-677): the reaction candidate's own `<Conditions>`
+// (`f.Yz(b,null,g)`) tested BEFORE `Gc.DK` (L673-674) partitions by
+// `priority`. `Yz` (L352569) walks `this.va.rb` (the move's `<Conditions>`)
+// and requires every node to pass; the fighter record is the DEFENDER.
+// `EZa` sets `this.Ek[d].xK = f.xl` (L677) before the test, and `Yz` runs at
+// the event pass where the Keys condition is trivially true (`vm.he` L749:
+// `a.gm ? ... : true`; only the type-2 KeyPressed event clears `gm`, L677) —
+// so `keys_gm` stays false here. `Ek[d].xb` is the defender's live interval
+// set (`Gc.yma` `a.xb=b.P0()`), filled so a `<CurrentInterval>` gate is not
+// base-FALSE.
+bool Fighter::react_conditions_pass(const MoveDef& move,
+                                    FightContext& ctx) const {
+    ctx.candidate_moves = move.anim_names;  // `Ek[d].xK = f.xl` (L677)
+    ctx.keys_gm = false;                    // `vm.he` L749 returns true
+    ctx.intervals.clear();
+    for (const std::string& n : intervals_at(move_frame_)) {
+        ctx.intervals.push_back({n, interval_type(n), true});
+    }
+    return eval_move_conditions(move.conditions, ctx);
+}
+
 // JS `de.V1` (L601-602): the AI tests a candidate with `Fc.gm=!1`, which
 // makes every Keys condition pass (`vm.he` L749 returns true). The native
 // port mirrors this with `keys_gm=false`.
@@ -1468,6 +1489,14 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
         if (m->template_tags.count("Block") != 0) continue;
         const bool is_fall = m->name.find("Fall") != std::string::npos;
         if (prefer_fall != is_fall) continue;
+        // JS `Gc.EZa` (L676-677): `f.Yz(b,null,g)` — the candidate's OWN
+        // `<Conditions>` MUST pass before it enters `Gc.DK`'s priority
+        // partition. This is what makes the dojo bag pick `PhysicalDummy`
+        // (`Physics="1"` -> `jJa` ragdoll, Priority 0, locked
+        // `SkeletonPunchingBag`) instead of `ShroudFakeRecoil` (Priority 600,
+        // `<Conditions><CurrentAnimation Name="ShroudFakeStance"/></...>`,
+        // false on the NotAnimation bag, so the JS skips it).
+        if (!react_conditions_pass(*m, ctx)) continue;
         cands.push_back(m);
     }
     if (cands.empty() && prefer_fall) {

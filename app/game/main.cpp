@@ -6722,6 +6722,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         int react_at = -1;
         int react_started = 0;
         std::string react_move;
+        // [bag probe assertion] see the `[bagcheck]` line below.
+        bool bag_reaction_ok = false;
         for (int f = 0; f < 1200; ++f) {
             glfwPollEvents();
             if (react_at < 0) {
@@ -6806,6 +6808,29 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              f, react_move.c_str(),
                              fs->enemy_ragdoll_active() ? 1 : 0, react_started);
                 std::fflush(stdout);
+                // [bag probe assertion] The dojo bag's reaction MUST be the
+                // `Physics="1"` `PhysicalDummy` (the `jJa` ragdoll branch,
+                // `nk=1`) — NOT `ShroudFakeRecoil`, whose
+                // `<Conditions><CurrentAnimation Name="ShroudFakeStance"/>`
+                // is FALSE on the NotAnimation bag. This proves the JS
+                // `Gc.EZa` `f.Yz(b,null,g)` candidate condition-test (L677)
+                // runs BEFORE `Gc.DK`'s priority partition: a
+                // `<Conditions>`-gated reaction is skipped when its condition
+                // is false even though its Priority (600) tops the group.
+                if (bag_probe) {
+                    const bool is_dummy = (react_move == "PhysicalDummy");
+                    const bool ragdoll = fs->enemy_ragdoll_active();
+                    const bool shroud_skipped =
+                        (react_move.find("ShroudFakeRecoil") == std::string::npos);
+                    bag_reaction_ok = is_dummy && ragdoll && shroud_skipped;
+                    std::fprintf(stdout,
+                                 "[bagcheck] reaction='%s' dummy=%d ragdoll=%d "
+                                 "shroud_skipped=%d -> %s\n",
+                                 react_move.c_str(), is_dummy ? 1 : 0,
+                                 ragdoll ? 1 : 0, shroud_skipped ? 1 : 0,
+                                 bag_reaction_ok ? "PASS" : "FAIL");
+                    std::fflush(stdout);
+                }
             }
             if (react_at >= 0) {
                 const int t = f - react_at;
@@ -6848,6 +6873,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      fs->enemy_moves_started(), react_at >= 0 ? "HIT" : "NO-HIT");
         std::fflush(stdout);
         app.shutdown();
+        // The bag probe additionally requires the JS-correct reaction (the
+        // `Bag` assertion above); the default boss probe keeps HIT/NO-HIT.
+        if (bag_probe) return bag_reaction_ok ? 0 : 1;
         return react_at >= 0 ? 0 : 1;
     } else if (mode_enemy_probe) {
         // [probe, authorised] `--mode-enemy-probe`: boot a TOURNAMENT mode

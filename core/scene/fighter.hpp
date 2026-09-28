@@ -301,6 +301,20 @@ public:
     bool move_conditions_pass(const MoveDef& move, FightContext& ctx,
                               std::string* trace = nullptr) const;
 
+    // Hit-reaction candidate gate (JS `Gc.EZa` L676-677): `f.Yz(b,null,g)` —
+    // the candidate reaction's own `<Conditions>` tree, tested BEFORE the
+    // `Gc.DK` (L673-674) priority partition. The event pass runs with `gm`
+    // false (`vm.he` L749 returns true for every Keys condition — only the
+    // type-2 KeyPressed event clears `gm` in `EZa`), so `<CurrentAnimation>`,
+    // `<ModExists>`, `<CurrentInterval>`, `<Hit>`, ... are what admit a
+    // reaction. Without this, a higher-Priority reaction whose `<Conditions>`
+    // are false (e.g. `ShroudFakeRecoil`, Priority 600,
+    // `<CurrentAnimation Name="ShroudFakeStance"/>`) dominates the `Aua`
+    // max-priority group and wins the pick. Sets `ctx.candidate_moves` to the
+    // candidate's animation-name list (JS `Ek[d].xK = f.xl` L677) and
+    // snapshots the fighter's live intervals (JS `Ek[d].xb = b.P0()`).
+    bool react_conditions_pass(const MoveDef& move, FightContext& ctx) const;
+
     // Anim timescale (SlowModel `Kvb`/`KT`): apply sets scale (Speed>=1;
     // Speed<1 is a verbatim no-op), revert restores 1.0 (`v.dB` assumed).
     // NOTE: JS `KT` (char 271499) also writes the MODEL scale via `dba`
