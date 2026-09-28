@@ -64,7 +64,8 @@ void print_usage(const char* argv0) {
                   "                  [--quest-query-probe] [--quest-action-probe]\n"
                   "                  [--dialog-verify] [--replay [file]] [--verify-input]\n"
                   "                  [--round-log] [--fx-probe] [--hit-audit]\n"
-                  "                  [--enemy-move-probe] [--tactic <Name>]\n"
+                  "                  [--enemy-move-probe] [--mode-enemy-probe]\n"
+                  "                  [--tactic <Name>]\n"
                   "  --watchdog N     RULE 0: force-exit a driver run after N seconds\n"
                    "                   (0 disables; default 900)\n"
                    "  --windowed       open the VISIBLE interactive window (the ONLY\n"
@@ -1585,6 +1586,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // player win or the port mis-resolves the loss.
     bool boss_loss_probe = false;
     bool enemy_move_probe = false;
+    // --mode-enemy-probe: boot a TOURNAMENT/SURVIVAL mode fight and verify a
+    // non-Shin enemy's animation (stance clip starts), the `Skeleton`-lock
+    // move list, the gear model, the round counting and the hittability after
+    // a mode-series advance (`begin_next_mode_fight`). No OS input.
+    bool mode_enemy_probe = false;
     // `--tactic <Name>`: force the ENEMY's tactic by name (the
     // tactic_settings.xml `<Tactic Name=..>`), overriding the battle's
     // shipped tactic. Used by `--enemy-move-probe` to audit EVERY shipped
@@ -2082,6 +2088,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             boss_hit_probe = true;
         } else if (arg == "--enemy-move-probe") {
             enemy_move_probe = true;
+        } else if (arg == "--mode-enemy-probe") {
+            mode_enemy_probe = true;
         } else if (arg == "--tactic" && i + 1 < argc) {
             tactic_override = argv[++i];
         } else if (arg == "--boss-loss-probe") {
@@ -6819,6 +6827,95 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return react_at >= 0 ? 0 : 1;
+    } else if (mode_enemy_probe) {
+        // [probe, authorised] `--mode-enemy-probe`: boot a TOURNAMENT mode
+        // fight (default Tournament/ZONE_1 -> the "monkey", `Man_Fist`) and
+        // prove: (a) the enemy's move list kept the `<Skeleton>`-lock stance/
+        // attack moves (a non-zero `hb`), (b) the enemy renders its OWN gear
+        // model (bone count > the shared base 205), (c) the intro/idle stance
+        // clip actually starts, (d) the round counter increments on a KO, and
+        // (e) after the best-of-N battle ends and the series advances
+        // (`begin_next_mode_fight`) the player's round-over latch `kh` is
+        // clear, i.e. the next fight is still HITTABLE. No OS input.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("Tournament") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "arena";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[meprobe] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        auto at_fight = [&]() { return app.screens().current_id() == kScreenFight; };
+        auto step = [&](int n) {
+            for (int i = 0; i < n && at_fight(); ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+        };
+        // Wait for phase 2 (the live round).
+        for (int g = 0; g < 4000 && at_fight(); ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+            if (fs->probe_phase() == 2 && fs->fight_frame() >= 145) break;
+        }
+        std::fprintf(stdout,
+                     "[meprobe] fight1 phase=%d f=%d enemy_hb=%zu enemy_bones=%zu "
+                     "enemy_move='%s' moves_started=%d rounds P=%d E=%d latch=%d\n",
+                     fs->probe_phase(), fs->fight_frame(), fs->enemy_move_list_size(),
+                     fs->enemy_model_bone_count(), fs->enemy_current_move().c_str(),
+                     fs->enemy_moves_started(), fs->player_rounds_won(),
+                     fs->enemy_rounds_won(), fs->player_round_latch() ? 1 : 0);
+        std::fflush(stdout);
+        // Force two player round wins, exercising the mode-series advance.
+        for (int round = 0; round < 2 && at_fight(); ++round) {
+            // Wait for the live phase of this round (phase 2, frame past the
+            // stance). `probe_phase` is phase-local (enter_start_stance resets
+            // `frame_`), so this re-arms after each break plate.
+            for (int g = 0; g < 6000 && at_fight(); ++g) {
+                glfwPollEvents();
+                app.run_one_frame();
+                if (fs->probe_phase() == 2 && fs->fight_frame() >= 145) break;
+            }
+            fs->probe_set_hp(100.0f, 0.0f);  // KO the enemy
+            step(3);
+            for (int g = 0; g < 6000 && at_fight(); ++g) {
+                glfwPollEvents();
+                app.run_one_frame();
+                if (fs->player_rounds_won() > round) break;
+            }
+            std::fprintf(stdout,
+                         "[meprobe] KO%d rounds P=%d E=%d latch=%d phase=%d f=%d\n",
+                         round + 1, fs->player_rounds_won(), fs->enemy_rounds_won(),
+                         fs->player_round_latch() ? 1 : 0, fs->probe_phase(),
+                         fs->fight_frame());
+            std::fflush(stdout);
+        }
+        // Give the battle-end plate + series advance frames, then report the
+        // (possibly swapped) enemy and the hit gate.
+        step(400);
+        std::fprintf(stdout,
+                     "[meprobe] final screen=%d phase=%d f=%d enemy_hb=%zu "
+                     "enemy_bones=%zu enemy_move='%s' moves_started=%d rounds P=%d "
+                     "E=%d latch=%d\n",
+                     app.screens().current_id(), fs->probe_phase(), fs->fight_frame(),
+                     fs->enemy_move_list_size(), fs->enemy_model_bone_count(),
+                     fs->enemy_current_move().c_str(), fs->enemy_moves_started(),
+                     fs->player_rounds_won(), fs->enemy_rounds_won(),
+                     fs->player_round_latch() ? 1 : 0);
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (enemy_move_probe) {
         // [probe, authorised] `--enemy-move-probe`: boot a fight, leave BOTH
         // fighters to the AI/idle (NO input), and log the ENEMY's per-frame

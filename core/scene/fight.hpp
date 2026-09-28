@@ -1648,6 +1648,17 @@ public:
         enemy_.ai->set_tactic(tactic_);
         return true;
     }
+    // [FIX mode enemy model — bug #3] The app layer resolves the mode
+    // (tournament/survival) enemy's OWN gear model (JS `xc.cM` L809-810
+    // Skeleton+Weapon+Armor+Helm merge) and hands the pointer here BEFORE
+    // `apply_mode_setup`/`begin_next_mode_fight`. Without it the enemy rebuild
+    // fell back to the shared base `model_` and every mode enemy rendered
+    // WITHOUT its armor/weapon skin (the reported "броня и оружие" loss). The
+    // caller owns the storage; the pointer is consumed (and cleared) by the
+    // next `apply_mode_setup`.
+    void set_pending_enemy_model(const sf2::scene::Model* m) {
+        pending_enemy_model_ = m;
+    }
     // [dojo lesson] The PLAYER fighter's animation START since the last drain
     // (JS `Te.x3` L508 -> `Gc.Pf` L671: the model's `Pf` event the lesson
     // handlers `Bo`/`Do`/`Eo` listen on, sf2 L1121/L1123/L1125). `name` is the
@@ -1677,6 +1688,14 @@ public:
     void debug_place_fighters(float me_x, float enemy_x) {
         player_.fighter.teleport(me_x, player_.fighter.world_y());
         enemy_.fighter.teleport(enemy_x, enemy_.fighter.world_y());
+    }
+    // [probe, authorised] `--mode-enemy-probe`: overwrite both fighters' live
+    // HP (JS `parameters.gd`) so a probe can force a round KO and exercise the
+    // mode-series advance (`mfb`/`begin_next_mode_fight`) and its round
+    // counting/hittability. No behaviour change unless the probe calls it.
+    void debug_set_hp(float player_hp, float enemy_hp) {
+        player_.hp = player_hp;
+        enemy_.hp = enemy_hp;
     }
     // Test hook (`--verify-place`): drop the player's current move so a probe
     // starts from a neutral state.
@@ -1771,6 +1790,9 @@ public:
 private:
     BattleParams battle_;
     sf2::scene::Model model_;
+    // [FIX mode enemy model] See `set_pending_enemy_model`: consumed (and
+    // cleared) by `apply_mode_setup` when it rebuilds the mode enemy.
+    const sf2::scene::Model* pending_enemy_model_ = nullptr;
     const std::map<std::string, sf2::scene::MoveDef>* moves_ = nullptr;
     // JS `Vm` per interval per side (`bp`/`Rja`/`JU`/`KU`, L396), driven by
     // the `ERuleDamageFactor` rules: `bn.clear` (L436, via `du.mxa` L457799)

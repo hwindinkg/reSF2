@@ -9394,11 +9394,40 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
     if (!resolved) return false;
     // The resolved warrior's item NAMES -> the catalog Type/SubType/Name
     // rows (the same shape the live `resolve_enemy_loadout` builds).
+    // [FIX bug #3 — frozen non-Shin enemies] JS `ur` (char 245250, L192)
+    // applies a node's `<Items>` on TOP of its cloned base template
+    // (`b=b.clone()`), so a derived warrior's OWN items are APPENDED to the
+    // template chain's items. `resolve_tournament_fight` (modes.hpp L698-701)
+    // instead REPLACES the template list when the row has own items, which
+    // dropped the `Skeleton` the `Man_Fist`/`Default` chain carries. Every
+    // move with a `<Skeleton>` lock (the whole stance/attack set) then fell
+    // out of `hb_`: the tournament monkey/brick never started its stance or
+    // any move (`started=0`). Re-apply the chain, base-first, exactly like
+    // `battle_warrior`.
     BattleWarriorInfo mw;
-    mw.items = mf.enemy.items;
+    mw.items = sf2::scene::template_items(mf.enemy.template_name, mode_templates_);
+    for (const std::string& it : mf.enemy.items) mw.items.push_back(it);
     sf2::scene::BattleParams mrow;
     resolve_enemy_loadout(app(), mw, mrow);
     out = sf2::scene::mode_setup_from_fight(mf, mrow.enemy_owned);
+    // JS `xc.cM` (L809-810): resolve the mode enemy's OWN gear model
+    // (Skeleton+Weapon+Armor+Helm merged) and hand it to the controller so
+    // `apply_mode_setup` rebuilds the enemy WITH its armor/weapon instead of
+    // the shared base body. Storage lives on the screen (stable across the
+    // call); the controller consumes the pointer in `apply_mode_setup`.
+    {
+        const std::vector<std::string> mnames = fighter_model_names(app(), mw.items);
+        if (!mnames.empty() && !mnames[0].empty()) {
+            mode_enemy_model_storage_ = app().fight_assets().merge_names(mnames);
+        } else {
+            mode_enemy_model_storage_ = sf2::scene::Model{};
+        }
+        if (fight_ != nullptr) {
+            fight_->set_pending_enemy_model(mode_enemy_model_storage_.bones.empty()
+                                                ? nullptr
+                                                : &mode_enemy_model_storage_);
+        }
+    }
     // JS `Wk` L811-812: after the warrior's own `<Perks>` (`AK`), merge EACH
     // equipped item's `Oa` (its catalog `<Perks>`/`<Enchantments><Perk>` with
     // the `<Set>` overrides) — the mode enemy's GEAR perks. Resolved here (the
@@ -9778,6 +9807,29 @@ void FightScreen::reset_player_move() {
 
 std::size_t FightScreen::move_list_size() const {
     return fight_ != nullptr ? fight_->player().fighter.hb().size() : 0;
+}
+
+// [probe] Mode-enemy state for `--mode-enemy-probe` (see screens.hpp).
+std::size_t FightScreen::enemy_move_list_size() const {
+    return fight_ != nullptr ? fight_->enemy().fighter.hb().size() : 0;
+}
+std::size_t FightScreen::enemy_model_bone_count() const {
+    return fight_ != nullptr ? fight_->enemy().fighter.model().bones.size() : 0;
+}
+int FightScreen::enemy_rounds_won() const {
+    return fight_ != nullptr ? fight_->enemy().rounds_won : 0;
+}
+int FightScreen::player_rounds_won() const {
+    return fight_ != nullptr ? fight_->player().rounds_won : 0;
+}
+bool FightScreen::player_round_latch() const {
+    return fight_ != nullptr && fight_->player().kh;
+}
+void FightScreen::probe_set_hp(float player_hp, float enemy_hp) {
+    if (fight_ != nullptr) fight_->debug_set_hp(player_hp, enemy_hp);
+}
+int FightScreen::probe_phase() const {
+    return fight_ != nullptr ? static_cast<int>(fight_->phase()) : -1;
 }
 
 // The ordered player move-list names, ","-joined — the boot-vs-Map

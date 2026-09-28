@@ -2712,8 +2712,15 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     const float ey = enemy_.fighter.world_y();
     const int emax =
         enemy_.max_hp > 0.0f ? static_cast<int>(enemy_.max_hp) : 100;
+    // [FIX mode enemy model — bug #3] Rebuild with the enemy's OWN gear model
+    // the app resolved (JS `xc.cM` L809-810). Passing none made `make_fighter`
+    // fall back to the shared base `model_`, so the tournament/survival enemy
+    // lost its armor/weapon skin. The pointer is a one-shot handoff.
+    const sf2::scene::Model* mode_model = pending_enemy_model_;
+    pending_enemy_model_ = nullptr;
     enemy_ = make_fighter(enemy_.name, false, ex, ey, emax, "Fists",
-                          setup.enemy.owned);
+                          setup.enemy.owned, battle_.enemy_not_ai,
+                          battle_.enemy_not_animation, mode_model, {});
     for (const auto& kv : setup.enemy.attrs) {
         enemy_.params.attributes[kv.first] += static_cast<float>(kv.second);
     }
@@ -3217,9 +3224,14 @@ void FightController::apply_round_result(round_result result, const FightFighter
 // fighters' HP (`mfb` runs `NA` = the +HealthRecovery heal, then continues),
 // and re-applies the next `ModeSetup` (enemy rebuild + that row's reward).
 void FightController::begin_next_mode_fight(const ModeSetup& setup) {
-    const float heal = battle_.health_recovery;
-    player_.hp = std::min(player_.max_hp, player_.hp + heal);
-    enemy_.hp = std::min(enemy_.max_hp, enemy_.hp + heal);
+    // [FIX bug #4 — mode enemy INTANGIBLE] JS `mfb` (char 205745) opens with
+    // `this.NA()` — the between-round recovery that heals both fighters AND
+    // clears the per-fighter round latches, `kh` included (`NA` L414
+    // `c.kh=!1`). The old code healed by hand and never ran `NA`, so the
+    // PLAYER's `kh` latch (set by `E3a` L413 at the battle-winning round)
+    // stayed true and the hit pass (`ca.Hnb` L389 `if(!this.kc.kh)`) never
+    // ran again: the next series opponent was unhittable. Run the real `NA`.
+    between_rounds_recover();  // JS `NA()` (L414): heal + clear kh/sn/vc/zd
     battle_over_ = false;
     battle_end_pending_ = false;
     winner_ = nullptr;

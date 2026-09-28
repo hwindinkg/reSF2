@@ -636,6 +636,23 @@ public:
     // Defined in screens.cpp (needs the full FightController type).
     std::size_t move_list_size() const;
 
+    // [probe, authorised] `--mode-enemy-probe`: the mode (tournament/
+    // survival) enemy's resolved state — its move-list size (proves the
+    // `<Skeleton>`-lock moves survived the mode loadout), its model bone
+    // count (proves the gear merge), its current intro/idle clip name (proves
+    // the stance plays), the per-fighter round-win counters and the player's
+    // round-over latch `kh` (proves a mode series advance stays hittable).
+    // Read-only; no behaviour change.
+    std::size_t enemy_move_list_size() const;
+    std::size_t enemy_model_bone_count() const;
+    int enemy_rounds_won() const;
+    int player_rounds_won() const;
+    bool player_round_latch() const;
+    // [probe] Force both fighters' live HP so the probe can KO a round.
+    void probe_set_hp(float player_hp, float enemy_hp);
+    // [probe] The live fight phase id (1=start_stance, 2=fight; -1 = none).
+    int probe_phase() const;
+
     // Test hooks for the input replay/verification harness (no behavior
     // change): the player's last decision and started-move count.
     std::string player_last_decision() const;
@@ -729,6 +746,11 @@ private:
     // `p.F().efa` warrior generation + `reward_for`). False when the row does
     // not resolve. Defined in screens.cpp (needs `resolve_enemy_loadout`).
     bool resolve_mode_setup(int fight_index, int wave, sf2::scene::ModeSetup& out);
+    // [FIX mode enemy model] The merged gear model of the resolved mode
+    // enemy (JS `xc.cM` L809-810). Owned here so the pointer handed to
+    // `FightController::set_pending_enemy_model` stays valid through the
+    // enemy rebuild.
+    sf2::scene::Model mode_enemy_model_storage_;
     bool key_state_[16] = {};
     // The keyboard directional state (JS `gu` + the `Za.bbb` key-pair table).
     KeyInputState keys_;
