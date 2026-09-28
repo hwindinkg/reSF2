@@ -57,7 +57,7 @@ using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop] [--windowed|--hidden]\n"
-                  "                  [--fight] [--battle <name>] [--zone <name>]\n"
+                  "                  [--fight] [--battle <name>] [--zone <name>] [--location <name>]\n"
                   "                  [--dump-pose N] [--dump-clip <name>]\n"
                   "                  [--ui-tour] [--fidelity-tour] [--quest-verify]\n"
                   "                  [--quest-query-probe] [--quest-action-probe]\n"
@@ -1509,6 +1509,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // the Training dojo battle with no zone (legacy first-match scan).
     std::string fight_battle;
     std::string fight_zone;
+    // `--location <name>` (used with --fight): override the location the
+    // direct-boot fight loads. Empty = the historical dojo (all shipped
+    // gates). The particle-layer pass is only reachable when this is a
+    // particle location (volcano / autumn / factory / ...), so this is the
+    // probe hook that exercises it (e.g. `--fight --location volcano`).
+    std::string fight_location;
     // `--loadout <WeaponSubType>`: pins the player's EQUIPPED Weapon slot for
     // the direct-boot paths (`--fight` / `--verify-input` / `--input-tape`).
     // Empty = resolve from the save (the shipped JS behaviour: `owned_items`
@@ -1995,6 +2001,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             fight_battle = argv[++i];
         } else if (arg == "--zone" && i + 1 < argc) {
             fight_zone = argv[++i];
+        } else if (arg == "--location" && i + 1 < argc) {
+            fight_location = argv[++i];
         } else if (arg == "--windowed") {
             // Explicit override: a human wants the real, visible window.
             force_windowed = true;
@@ -5968,7 +5976,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             PendingBattle& pb = app.pending_battle();
             pb.battle_name = fight_battle.empty() ? "Training" : fight_battle;
             pb.zone = fight_zone;
-            pb.location = "dojo";
+            pb.location = fight_location.empty() ? std::string("dojo") : fight_location;
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;

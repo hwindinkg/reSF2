@@ -63,12 +63,12 @@ struct Particle {
 // effects atlas `E.get(1304)`, sampler keyed on `Params/@Frame`.
 //
 // STATUS: the SIM is ported (`jh.update` L1149-1151: emission, force/gravity
-// integration, life/alpha, cap). The RENDER pass is OPEN (D7): it needs the
-// effects atlas `E.get(1304)` (Frame name -> id `b.re.et.v[Frame].id`, L1148),
-// the instanced billboard batch `Xb`/`Ah` (`Ah.submit`, L1150; gradient start/
-// end colour `BA.rP = Zib(Color)`, L1151) and the per-particle scale divisor
-// `sourceSize.x` (L1151) — all owned by the renderer/effects layer, not this
-// file. `particle_draws()` exposes the layer-local draws that renderer needs.
+// integration, life/alpha, cap). The RENDER pass is SHIPPED (D7 CLOSED):
+// `Renderer::ensure_particle_atlas` loads `fight/particles` (L1148
+// `E.get(1304)`), and `Renderer::draw_particle` draws the billboard quad
+// (`Xb`/`Ah`, L1147/L1150) with the per-particle scale divisor `sourceSize.x`
+// (L1151). `render_layer`'s particle branch drives it in document order;
+// `particle_draws()` exposes the layer-local draws the renderer consumes.
 //
 // D7 ROUTING (CONFIRMED N/A for locations): the `OnBackground` -> `Gfb`
 // bg/fg split is a FIGHT-effect property, never a location-layer one. `Gfb`
@@ -83,8 +83,8 @@ struct Particle {
 // appends the layer nodes to the Render node in XML order. No shipped
 // location params XML carries an `OnBackground` attribute (0 of 45). The
 // native layer-ordered `draw_order` interleave is therefore JS-exact; do NOT
-// add `Gfb` routing here. Only the effects-atlas billboard *draw*
-// (`Ah.submit`, L1150) is still OPEN, and it is owned by the renderer.
+// add `Gfb` routing here. The effects-atlas billboard *draw* (`Ah.submit`,
+// L1150) is SHIPPED in `Renderer::draw_particle` (renderer.cpp).
 // Range attrs follow the JS `Ie` reader (L1152-1153): "a,b" = random in [a,b],
 // a single number = a fixed value (min == max).
 struct ParticleLayer {

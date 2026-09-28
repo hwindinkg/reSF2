@@ -216,7 +216,8 @@ void parse_emitter_attr(const pugi::xml_node& node, float& ex, float& ey) {
 // JS `QIa` L481-482 + `jh` ctor L1147-1148: one particle emitter. `a.st()`
 // is the node's FIRST child (`st(){return this.children[0]}`), i.e. the
 // `<Params>` element carrying every emitter attribute. The SIM runs in
-// `LocationScene::update`; the render pass is OPEN (see ParticleLayer).
+// `LocationScene::update`; the render pass is SHIPPED — `render_layer`
+// draws each emitter via `Renderer::draw_particle` (see ParticleLayer).
 // `ordinal` seeds the private deterministic LCG so emitters do not phase-lock
 // (JS draws from the wall-clock `oa.eT`; the native is deliberately stable).
 ParticleLayer parse_particle(const pugi::xml_node& node, std::uint32_t ordinal) {
@@ -1011,9 +1012,9 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                 // JS `Bf.zjb` L476-477: both tags route to `QIa` ->
                 // `fXa(new jh)`. Parse the emitter, run the ctor `Prewarm`
                 // loop, attach it, then the `Qi.fXa` warm-up; `update` runs
-                // the `jh` sim and `particle_draws()` exposes the render data
-                // (the effects-atlas draw pass itself is OPEN, D7; it is owned
-                // by the renderer). D7 routing is N/A for locations: `QIa`
+                // the `jh` sim and `particle_draws()` exposes the render data.
+                // The effects-atlas draw pass is SHIPPED (D7 CLOSED) in
+                // `Renderer::draw_particle`. D7 routing is N/A for locations: `QIa`
                 // appends the `jh` node to the owning `Qi` layer (`Qi.fXa`
                 // L488 `this.go.node.appendChild(a.node)`), so emitters are
                 // layer children in document order — the `OnBackground`/`Gfb`
@@ -1068,6 +1069,25 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
             layer->draw_order.clear();
         }
         layers_.push_back(std::move(layer));
+    }
+
+    // [location probe] Load summary: layer / emitter / live-particle counts
+    // after the 150-tick attach warm-up (JS `Qi.fXa` L488). Gated on
+    // SF2_LOCATION_LOG so the deterministic gates stay byte-identical; the
+    // particle probe (`--fight --location volcano`) sets it to prove the
+    // ParticleEffect / NewParticleEffect layers actually load and emit.
+    if (std::getenv("SF2_LOCATION_LOG") != nullptr) {
+        std::size_t emitters = 0;
+        std::size_t particles = 0;
+        for (const auto& layer : layers_) {
+            emitters += layer->particles.size();
+            for (const auto& emitter : layer->particles) {
+                particles += emitter.live.size();
+            }
+        }
+        std::fprintf(stdout, "[location] %zu layers, %zu emitters, %zu live particles\n",
+                     layers_.size(), emitters, particles);
+        std::fflush(stdout);
     }
 }
 
@@ -1308,9 +1328,10 @@ void LocationScene::spawn_particle_(ParticleLayer& emitter) {
     // JS `c.wY = wY.Gb()*.0174532925199432` (radians/second).
     p.ang_vel_rad =
         rand_range_(emitter, emitter.ang_vel_min, emitter.ang_vel_max) * kParticleDegToRad;
-    // JS `d = vwb.Gb()/BA.qc.re.dt[cOa].fa.x` (L1151): dividing by the frame
-    // `sourceSize.x` needs the effects atlas `E.get(1304)` (OPEN), so the raw
-    // StartSize is carried and the renderer scales at draw time.
+    // JS `d = vwb.Gb()/BA.qc.re.dt[cOa].fa.x` (L1151): the frame
+    // `sourceSize.x` comes from the effects atlas `E.get(1304)`
+    // (`Renderer::ensure_particle_atlas`), so the raw StartSize is carried
+    // and the renderer applies the divisor at draw time (`draw_particle`).
     p.start_size = rand_range_(emitter, emitter.start_size_min, emitter.start_size_max);
     emitter.live.push_back(p);  // JS `this.BA.pl.push(c.view)`
 }
@@ -1350,8 +1371,10 @@ void LocationScene::step_particle_(ParticleLayer& emitter, float dt) {
         p.y += p.vy * dt;
     }
     // JS removal loop (L1150): drop every particle whose life ran out. The
-    // oracle also `BA.submit()`s the GPU batch here — that flush is the effects
-    // renderer's job (OPEN, L1150); the sim only fills `live`.
+    // oracle calls `BA.submit()` at the tail, but the shipped `Ah.submit` is
+    // EMPTY (`submit(){}`, JS char 844463) — the particle geometry is flushed
+    // by the node traversal (`Xb` render, char 902396/903...), which the
+    // renderer mirrors in `Renderer::draw_particle`.
     emitter.live.erase(
         std::remove_if(emitter.live.begin(), emitter.live.end(),
                        [](const Particle& p) { return p.life <= 0.0f; }),
@@ -1435,6 +1458,12 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
     // (manifest L2490 token 1304; frames in token 1305). Lazy + cached.
     renderer.ensure_particle_atlas(res_root_);
 
+    // Probe kill-switch (env `SF2_NO_PARTICLE_DRAW`): when set, sprites still
+    // draw but the emitter billboards are skipped, so a capture differs from
+    // the normal run ONLY by the particle layer's pixels. Zero effect on the
+    // shipped gates (the env is unset).
+    const bool draw_particles = std::getenv("SF2_NO_PARTICLE_DRAW") == nullptr;
+
     const auto draw_emitter = [&](const ParticleLayer& emitter) {
         for (const Particle& p : emitter.live) {
             renderer.draw_particle(make_particle_draw_(layer, emitter, p), camera, ls, layer_y);
@@ -1450,8 +1479,10 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
             }
             renderer.draw_sprite(*sprite, camera, layer.factor, ls, layer_y);
         }
-        for (const ParticleLayer& emitter : layer.particles) {
-            draw_emitter(emitter);
+        if (draw_particles) {
+            for (const ParticleLayer& emitter : layer.particles) {
+                draw_emitter(emitter);
+            }
         }
         return;
     }
@@ -1461,7 +1492,7 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
     // WebGL context disables depth (L64), so this is the exact composition.
     for (const Layer::DrawItem& item : layer.draw_order) {
         if (item.is_particle) {
-            if (item.particle_index < layer.particles.size()) {
+            if (draw_particles && item.particle_index < layer.particles.size()) {
                 draw_emitter(layer.particles[item.particle_index]);
             }
         } else if (const std::shared_ptr<Sprite> sprite = item.sprite.lock()) {
