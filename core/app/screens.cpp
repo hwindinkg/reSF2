@@ -4454,8 +4454,38 @@ namespace {
 bool g_entry_audio_done = false;
 }  // namespace
 
-// The reward of a battle's first non-zero <Reward> (JS `tt.bm` L116924).
-void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp) {
+// One `<Reward>`/`<NormalModeReward>` node's contribution to a reward field:
+// the node's OWN attr plus every `<Level>` row whose `Min <= level <= Max`.
+// JS `eg.Qd` (L116425) parses the node (`npa.parse`) then `eg.bm` (L116493)
+// starts from `npa` and `iba`s each matching row; `Yg.parse` (L121628) reads
+// `Money`->`Tb`, `Bonus`->`Uo`, `Exp`->`exp`. `Zf` (L6140) defaults a missing
+// `Min`/`Max` to INT_MIN/INT_MAX (`u.I(attr, -2147483648 / 2147483647)`).
+static int reward_field(const pugi::xml_node& node, int level, const char* attr) {
+    int v = sf2::data::xml_attr_int(node, attr, 0);
+    for (const pugi::xml_node lv : node.children("Level")) {
+        const int mn = sf2::data::xml_attr_int(lv, "Min", -2147483647 - 1);
+        const int mx = sf2::data::xml_attr_int(lv, "Max", 2147483647);
+        if (mn <= level && level <= mx) v += sf2::data::xml_attr_int(lv, attr, 0);
+    }
+    return v;
+}
+
+// The reward of a battle's LAST `<Reward>` (JS `dl.$L` L730889 takes
+// `this.wi[wi.length-1]`; `Wjb` L105391 pushes one `tt` per `<Reward>`
+// child, then `$L(level)` resolves it). `tt.bm(level)` L116924 builds the
+// value as the `<Reward>` node's own attrs + its matching `<Level>` rows
+// (`eg.Qd`/`eg.bm` L116425/L116493), merged (`Yg.iba` L122690) with the
+// `<NormalModeReward>` (or `<EclipseModeReward>` when `p.o.Yh`) node's own
+// attrs + matching rows. `zone_name` scopes the battle (`hp` semantics,
+// exactly like `battle_fight_rules`/`battle_warrior`: the same battle NAME
+// repeats per zone with DIFFERENT reward rows); `fight_index` selects the
+// Nth `<Fight>` (`sjb` L105116 walks `a.YW.hp("Fight")`); `level` is
+// `p.o.bb()`. `RewardDigits`/`PrizeBaseDigits` (`bL`/`LK`, `IIa` L104528)
+// are absent from the shipped stages.xml, so the `*10^digits` factors are 1.
+// `p.o.Yh` (profile `EclipseMode`, ctor L125469) is not modelled by the
+// port, so the NormalModeReward branch is always taken.
+void battle_rewards(const std::string& battle_name, const std::string& zone_name,
+                    int fight_index, int level, int& out_money, int& out_exp) {
     out_money = 0;
     out_exp = 0;
     try {
@@ -4468,24 +4498,55 @@ void battle_rewards(const std::string& battle_name, int& out_money, int& out_exp
         doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
         const pugi::xml_node root = doc.root().first_child();
         if (!root) return;
-        for (const pugi::xml_node zone : root.child("Zones").children("Zone")) {
-            for (const pugi::xml_node battle : zone.children("Battle")) {
-                if (std::string(battle.attribute("Name").value()) != battle_name) continue;
-                const pugi::xml_node fight = battle.child("Fight");
-                if (!fight) return;
-                const pugi::xml_node rewards = fight.child("Rewards");
-                if (!rewards) return;
-                for (const pugi::xml_node reward : rewards.children("Reward")) {
-                    const int m = sf2::data::xml_attr_int(reward, "Money", 0);
-                    const int e = sf2::data::xml_attr_int(reward, "Exp", 0);
-                    if (m > 0 || e > 0) {
-                        out_money = m;
-                        out_exp = e;
-                        return;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return;
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
                     }
                 }
-                return;
+                break;  // the zone was found (whether or not it had the battle)
             }
+        }
+        if (!battle) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return;
+        pugi::xml_node fight;
+        {
+            int fi = 0;
+            for (const pugi::xml_node f : battle.children("Fight")) {
+                if (fi++ == fight_index) {
+                    fight = f;
+                    break;
+                }
+            }
+        }
+        if (!fight) return;
+        const pugi::xml_node rewards = fight.child("Rewards");
+        if (!rewards) return;
+        pugi::xml_node last;  // `wi[wi.length-1]`
+        for (const pugi::xml_node r : rewards.children("Reward")) last = r;
+        if (!last) return;
+        out_money = reward_field(last, level, "Money");
+        out_exp = reward_field(last, level, "Exp");
+        const pugi::xml_node mode = last.child("NormalModeReward");  // `p.o.Yh` == false
+        if (mode) {
+            out_money += reward_field(mode, level, "Money");
+            out_exp += reward_field(mode, level, "Exp");
         }
     } catch (const std::exception&) {
     }
@@ -5199,6 +5260,14 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
 }
 
 } // namespace
+
+// External entry for the `--reward-probe` driver: `battle_rewards` itself has
+// internal linkage (this file's anonymous namespace), so this thin wrapper
+// gives the probe a symbol to link against.
+void battle_rewards_probe(const std::string& battle_name, const std::string& zone_name,
+                          int fight_index, int level, int& out_money, int& out_exp) {
+    battle_rewards(battle_name, zone_name, fight_index, level, out_money, out_exp);
+}
 
 // JS `Oa.f5` (L2286-2288): the shop tab lists are the `it.Lia` type
 // partitions (L166-167: Weapon `Au`, Armor `Cva`, Helm `sDa`, Ranged `SJa`,
@@ -6882,7 +6951,13 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
     pb.enemy_name = battle;
     pb.has_result = false;
     pb.player_won = false;
-    battle_rewards(battle, pb.reward_money, pb.reward_exp);
+    int player_level = 1;  // JS `p.o.bb()` (the `tt.bm` level arg)
+    try {
+        player_level = app().save().load().level;
+    } catch (const std::exception&) {
+    }
+    battle_rewards(battle, zone, pending_fight_ordinal(app()), player_level,
+                   pb.reward_money, pb.reward_exp);
     pb.prize_base_coins = 0;
     pb.prize_bonus = 0;
     pb.prize_gems = 0;
@@ -7489,9 +7564,15 @@ void MapScreen::launch_battle(const Node& n) {
     pb.zone = n.zone;  // stages.xml Zone (`hp` scope for the <Rules> feeder)
     pb.location = n.location.empty() ? "dojo" : n.location;
     pb.has_result = false;
-    // The node's fight -> reward. The Training fight has
-    // Money=0; use the battle's own reward lookup.
-    battle_rewards(n.name, pb.reward_money, pb.reward_exp);
+    // The node's fight -> reward (JS `dl.$L` L730889: the LAST <Reward> of
+    // THIS zone's Nth <Fight>). The Training fight has Money=0.
+    int player_level = 1;  // JS `p.o.bb()` (the `tt.bm` level arg)
+    try {
+        player_level = app().save().load().level;
+    } catch (const std::exception&) {
+    }
+    battle_rewards(n.name, n.zone, fight_index, player_level, pb.reward_money,
+                   pb.reward_exp);
     // The owned items (JS `ra.Hza` move list input).
     pb.owned = owned_items(app());
     std::fprintf(stdout, "[map] click %s [%s] -> Fight (reward money=%d exp=%d)\n",

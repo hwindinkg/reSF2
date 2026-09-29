@@ -198,6 +198,12 @@ private:
     void launch_quest_fight(const std::string& triple);
 };
 
+// JS-exact battle reward (`dl.$L` L730889 -> `tt.bm` L116924): the LAST
+// `<Reward>` of the zone-scoped Nth `<Fight>`, resolved at `level` (`p.o.bb()`).
+// External bridge over the internal `battle_rewards` (see screens.cpp).
+void battle_rewards_probe(const std::string& battle_name, const std::string& zone_name,
+                          int fight_index, int level, int& out_money, int& out_exp);
+
 // One boss-intro roster entry (JS `jk.init` L2062 iterates the `lD` boss
 // battle list: `g.Hf` = the warrior portrait, `g.$s` = its name).
 struct BossRosterEntry {

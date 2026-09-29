@@ -2134,6 +2134,28 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             fight_zone = argv[++i];
         } else if (arg == "--location" && i + 1 < argc) {
             fight_location = argv[++i];
+        } else if (arg == "--reward-probe" && i + 1 < argc) {
+            // `--reward-probe <zone|battle|fight>`: print the JS-exact
+            // `battle_rewards` (`dl.$L` L730889) and exit (no window). The
+            // level arg is `p.o.bb()`; the tutorial save sits at level 1.
+            const std::string t = argv[++i];
+            const std::size_t p1 = t.find('|');
+            const std::size_t p2 =
+                p1 == std::string::npos ? std::string::npos : t.find('|', p1 + 1);
+            if (p1 == std::string::npos || p2 == std::string::npos) {
+                std::fprintf(stderr,
+                             "game: --reward-probe needs zone|battle|fight\n");
+                return 1;
+            }
+            const std::string z = t.substr(0, p1);
+            const std::string b = t.substr(p1 + 1, p2 - (p1 + 1));
+            const int fi = std::atoi(t.substr(p2 + 1).c_str()) - 1;
+            int money = 0, exp = 0;
+            sf2::app::battle_rewards_probe(b, z, fi < 0 ? 0 : fi, 1, money, exp);
+            std::printf("[reward-probe] %s -> money=%d exp=%d\n", t.c_str(), money,
+                        exp);
+            std::fflush(stdout);
+            return 0;
         } else if (arg == "--windowed") {
             // Explicit override: a human wants the real, visible window.
             force_windowed = true;
