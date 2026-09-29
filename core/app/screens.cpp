@@ -4353,10 +4353,38 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
     return out;
 }
 
-// The battle's music track (stages.xml Battle Music="fightN_..." attr;
-// JS `ta.Ut(this.Da.tp)`, L2008). Empty when the battle has none (the
-// Training dummy) — the caller then keeps the current track.
-void battle_music(const std::string& battle_name, std::string& out_track) {
+// The pending battle's `<Fight>` ordinal — the `|n` tail of the `hb` triple
+// (`zone|battle|n`, JS `hb.toString` L1416), 0-based and clamped at 0. Shared
+// by the fight-music lookup (`battle_music`, JS `IIa` L98560 selects the Nth
+// `<Fight>`) and the FightScreen's `battle_warrior` call.
+int pending_fight_ordinal(App& app) {
+    const std::string& ft = app.pending_battle().fight_triple;
+    const std::size_t p1 = ft.find('|');
+    const std::size_t p2 = (p1 == std::string::npos) ? std::string::npos
+                                                     : ft.find('|', p1 + 1);
+    if (p2 == std::string::npos) return 0;
+    try {
+        const int n = std::stoi(ft.substr(p2 + 1)) - 1;
+        return n < 0 ? 0 : n;
+    } catch (const std::exception&) {
+        return 0;
+    }
+}
+
+// The battle's music track (stages.xml). JS `ta.Ut(this.Da.tp)` L2008, where
+// `Da` is the zone-scoped `dl` fight: `IIa` (L98560) sets
+// `a.tp = b.attributes.get("Music") != null ? <Fight Music> : e`, `e` being the
+// owning `<Battle>`'s Music passed by `sjb` (`this.IIa(g, f[e++], a.type, b, c,
+// a)`, `c = a.tp`). The same battle NAME repeats in every zone with a DIFFERENT
+// track (11 shipped names: Tournament has 6), so the battle MUST be resolved
+// among the current zone's direct `<Battle>` children (`hp` semantics, exactly
+// like `battle_fight_rules`/`battle_warrior`); an empty `zone_name` (direct
+// boot) keeps the legacy first-match scan. The `<Fight Music>` override is
+// honoured for the selected `fight_index` (ZONE_7 C3_BOSS_TITAN fight 6 ships
+// one). Empty when neither carries a track (the Training dummy) — the caller
+// then keeps the current track.
+void battle_music(const std::string& battle_name, const std::string& zone_name,
+                  int fight_index, std::string& out_track) {
     out_track.clear();
     try {
         sf2::data::xml_doc doc;
@@ -4368,14 +4396,50 @@ void battle_music(const std::string& battle_name, std::string& out_track) {
         doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
         const pugi::xml_node root = doc.root().first_child();
         if (!root) return;
-        for (const pugi::xml_node zone : root.child("Zones").children("Zone")) {
-            for (const pugi::xml_node battle : zone.children("Battle")) {
-                if (std::string(battle.attribute("Name").value()) != battle_name) continue;
-                if (battle.attribute("Music")) {
-                    out_track = battle.attribute("Music").value();
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return;
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
                 }
-                return;
+                break;  // the zone was found (whether or not it had the battle)
             }
+        }
+        if (!battle) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return;
+        // `IIa` selects the Nth `<Fight>` (`sjb` walks `a.YW.hp("Fight")`).
+        pugi::xml_node fight;
+        {
+            int fi = 0;
+            for (const pugi::xml_node f : battle.children("Fight")) {
+                if (fi++ == fight_index) {
+                    fight = f;
+                    break;
+                }
+            }
+        }
+        if (fight && fight.attribute("Music")) {
+            out_track = fight.attribute("Music").value();
+            return;
+        }
+        if (battle.attribute("Music")) {
+            out_track = battle.attribute("Music").value();
         }
     } catch (const std::exception&) {
     }
@@ -7506,7 +7570,7 @@ void MapScreen::start_battle(const Node& n) {
         sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
         au.play("snd_gong");
         std::string track;
-        battle_music(n.name, track);
+        battle_music(n.name, n.zone, fight_index, track);
         if (!track.empty()) au.play_music(track);
         au.reset_music_guard();  // JS `ai.Ut` L2008: `lb.rJ=!1`
     }
@@ -7598,7 +7662,15 @@ const UrBlinkCfg& ur_blink_cfg() {
             doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
             const pugi::xml_node root = doc.root().first_child();
             if (!root) return c;
-            const pugi::xml_node zs = root.child("ZoneSwitch");
+            // JS `Mb.parse` is handed `a.A("GUI").A("Map")` (L594320:
+            // `ge.parse(a.A("GUI").A("Basic")); Mb.parse(a.A("GUI").A("Map"))`),
+            // so `<ZoneSwitch>` lives at `Settings/GUI/Map/ZoneSwitch` — NOT a
+            // root child. Reading `root.child("ZoneSwitch")` returned NULL and
+            // left `battle_types` EMPTY, so `ur_zone_red` (JS `Ya.VEa`
+            // L2131-2132, invoked L2116) never matched Tournament/Challenge and
+            // the whole red-bulb/selected-slot blink stayed off.
+            const pugi::xml_node zs =
+                root.child("GUI").child("Map").child("ZoneSwitch");
             if (!zs) return c;
             c.battle_types.clear();
             for (const pugi::xml_node b : zs.child("BattleTypes").children("BattleType")) {
@@ -8919,7 +8991,8 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // Only a DIRECT boot (which never goes through the Map) plays them here.
     {
         std::string track;
-        battle_music(battle_name_, track);
+        battle_music(battle_name_, app().pending_battle().zone,
+                     pending_fight_ordinal(app()), track);
         if (!entry_audio_from_map) {
             if (!track.empty()) {
                 sf2::audio::AudioEngine::instance().play_music(track);
@@ -9123,21 +9196,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // opponent while `<Fight>` 1 was re-fought). The ladder index rides
     // `pending_battle().fight_triple` as the 1-based ordinal
     // (`zone|battle|<n>`, `hb.toString` L1416) written by `launch_battle`.
-    int pending_fight_index = 0;
-    {
-        const std::string& ft = app().pending_battle().fight_triple;
-        const std::size_t p1 = ft.find('|');
-        const std::size_t p2 = (p1 == std::string::npos) ? std::string::npos
-                                                         : ft.find('|', p1 + 1);
-        if (p2 != std::string::npos) {
-            try {
-                pending_fight_index = std::stoi(ft.substr(p2 + 1)) - 1;
-            } catch (const std::exception&) {
-                pending_fight_index = 0;
-            }
-        }
-        if (pending_fight_index < 0) pending_fight_index = 0;
-    }
+    int pending_fight_index = pending_fight_ordinal(app());
     BattleWarriorInfo bw =
         battle_warrior(battle_name_, app().pending_battle().zone, pending_fight_index);
     // An ordinal past the battle's `<Fight>` count (a cleared-ladder replay)
