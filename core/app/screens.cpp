@@ -9029,7 +9029,18 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         battle.enemy_spawn_x = assets.fight_location.enemy_spawn_x();
         battle.enemy_spawn_y = assets.fight_location.enemy_spawn_y();
     }
-    battle.max_hp = 1;  // the game's HP fallback (Zn = aB>0 ? aB : 1)
+    // JS `v.Wka` @618958: `let b=a.aB; a.Zn=b>0?b:1`. `aB` is assigned ONLY
+    // `-1` (profile parse @124469, `xc` ctor `this.L5=this.aB=-1` @411642) or
+    // copied (@410920); the shipped JS has NO positive `aB` write, so `Zn`
+    // (= max HP) is ALWAYS 1 — the HP scale is NORMALIZED to 1.0 and the
+    // DAMAGE is fractional, not ~15. Quotes: moves.xml
+    // `<Damage Value="0.06".."0.15">` (the `wd.bCa` base `a.Xb` @261014),
+    // internal_settings `<Damage Name="Unarmed" AverageBaseDamage="0.1">`,
+    // and `v.iea`/`v.l5a` = `2^(t/BP)` with `BP` (`DamageDoublingRange`) = 10.
+    // Observed `--boss-hit-probe` / `--headless-loop` raw_damage 0.004..0.205
+    // vs hp 1.0 -> ~13 hits to KO (NO one-shot). Do NOT raise this to ~100:
+    // that would diverge from the shipped scale.
+    battle.max_hp = 1;
     // JS `wd.Fm` L811 — the player's resolved attribute map (defense/block/
     // crit included; see the helper). `player_unarmed_damage` is kept as the
     // rounded bCa fallback.
