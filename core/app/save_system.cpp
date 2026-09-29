@@ -94,7 +94,7 @@ WarriorSave SaveSystem::load() {
     out.id = sf2::data::xml_attr_int(warrior, "ID", 1);
     if (warrior.attribute("FirstName")) out.first_name = warrior.attribute("FirstName").value();
     out.money = warrior.attribute("Money") ? warrior.attribute("Money").as_llong() : 0;
-    out.bonus = sf2::data::xml_attr_int(warrior, "Bonus", 50);
+    out.bonus = warrior.attribute("Bonus") ? warrior.attribute("Bonus").as_llong() : 50;
     out.strength = sf2::data::xml_attr_int(warrior, "Strength", 3);
     out.stamina = sf2::data::xml_attr_int(warrior, "Stamina", 3);
     out.level = sf2::data::xml_attr_int(warrior, "Level", 1);

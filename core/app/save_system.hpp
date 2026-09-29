@@ -39,7 +39,10 @@ struct WarriorSave {
     // prices reach 1.9e13, so a 32-bit int (2.147e9) cannot represent them.
     // int64 is exact for every JS integer magnitude here (< 2^53).
     std::int64_t money = 0;
-    int bonus = 50;
+    // `p.o.fd` (the Ruby/Bonus balance). The fight reward's `Uo` is granted
+    // here (`Ewa(Uo,3)` -> `vl(fd+Uo,3)`); int64 to match the JS number and
+    // the int64 reward flow.
+    std::int64_t bonus = 50;
     int strength = 3;
     int stamina = 3;
     int level = 1;

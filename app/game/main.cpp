@@ -1786,16 +1786,18 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 std::fprintf(
                     stdout,
                     "[modeprobe] TOURNAMENT '%s' BEFORE fight=0 enemy='%s' "
-                    "reward m=%d e=%d\n",
+                    "reward m=%lld e=%lld\n",
                     tourn->name.c_str(), f0.enemy.template_name.c_str(),
-                    f0.reward.money, f0.reward.exp);
+                    static_cast<long long>(f0.reward.money),
+                    static_cast<long long>(f0.reward.exp));
                 std::fprintf(
                     stdout,
                     "[modeprobe] TOURNAMENT '%s' AFTER  advance=%d fight=%d "
-                    "enemy='%s' reward m=%d e=%d\n",
+                    "enemy='%s' reward m=%lld e=%lld\n",
                     tourn->name.c_str(), adv ? 1 : 0, s.fight_index,
-                    f1.enemy.template_name.c_str(), f1.reward.money,
-                    f1.reward.exp);
+                    f1.enemy.template_name.c_str(),
+                    static_cast<long long>(f1.reward.money),
+                    static_cast<long long>(f1.reward.exp));
                 sf2::scene::ModeSeries s2;
                 const bool adv_lose =
                     sf2::scene::advance_series(*tourn, s2, false);
@@ -1826,24 +1828,26 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 auto draw = []() { return 0.5; };
                 const bool r0 = sf2::scene::resolve_survival_warrior(
                     f, 0, tmpl, grps, draw, u0, w0);
-                const int m0 =
+                const std::int64_t m0 =
                     sf2::scene::reward_for(surv->type, f, 0, true).money;
                 const bool adv =
                     sf2::scene::advance_series(*surv, s, true);
                 const bool r1 = sf2::scene::resolve_survival_warrior(
                     f, s.wave, tmpl, grps, draw, u1, w1);
-                const int m1 =
+                const std::int64_t m1 =
                     sf2::scene::reward_for(surv->type, f, s.wave, true).money;
                 std::fprintf(stdout,
                              "[modeprobe] SURVIVAL '%s' waves=%d BEFORE wave=0 "
-                             "enemy='%s' reward m=%d\n",
+                             "enemy='%s' reward m=%lld\n",
                              surv->name.c_str(), total,
-                             w0.template_name.c_str(), m0);
+                             w0.template_name.c_str(),
+                             static_cast<long long>(m0));
                 std::fprintf(stdout,
                              "[modeprobe] SURVIVAL '%s' AFTER  advance=%d "
-                             "wave=%d enemy='%s' reward m=%d\n",
+                             "wave=%d enemy='%s' reward m=%lld\n",
                              surv->name.c_str(), adv ? 1 : 0, s.wave,
-                             w1.template_name.c_str(), m1);
+                             w1.template_name.c_str(),
+                             static_cast<long long>(m1));
                 pass = pass && r0 && adv && r1 && s.wave == 1 && total > 1;
             } else {
                 std::fprintf(stdout, "[modeprobe] no SURVIVAL battle\n");
@@ -2150,10 +2154,24 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             const std::string z = t.substr(0, p1);
             const std::string b = t.substr(p1 + 1, p2 - (p1 + 1));
             const int fi = std::atoi(t.substr(p2 + 1).c_str()) - 1;
-            int money = 0, exp = 0;
-            sf2::app::battle_rewards_probe(b, z, fi < 0 ? 0 : fi, 1, money, exp);
-            std::printf("[reward-probe] %s -> money=%d exp=%d\n", t.c_str(), money,
-                        exp);
+            std::int64_t money = 0, exp = 0, bonus = 0, pbase = 0;
+            sf2::app::battle_rewards_probe(b, z, fi < 0 ? 0 : fi, 1, money, exp, bonus,
+                                           pbase);
+            // JS `Sua` (L635964) prize-base select + `Fh.lXa` (L1058250) total:
+            // `prize_base = ph>0 ? ph : ceil(money*0.003)` (xya), then
+            // `m6 = money + P3+ep+Ui+DZ+Ub` (the performance part is 0 with a
+            // fresh per-battle `Fh`), `mOa = OY = bonus`.
+            const double xya = 0.003;
+            const std::int64_t pb_used =
+                pbase > 0 ? pbase
+                          : static_cast<std::int64_t>(
+                                std::ceil(static_cast<double>(money) * xya));
+            std::printf(
+                "[reward-probe] %s -> money=%lld exp=%lld bonus=%lld "
+                "prizeBase=%lld (Fh.lXa base %lld)\n",
+                t.c_str(), static_cast<long long>(money),
+                static_cast<long long>(exp), static_cast<long long>(bonus),
+                static_cast<long long>(pbase), static_cast<long long>(pb_used));
             std::fflush(stdout);
             return 0;
         } else if (arg == "--windowed") {
@@ -4430,7 +4448,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     return -1;
                 }
             };
-            const auto bonus_now = [&]() -> int {
+            const auto bonus_now = [&]() -> std::int64_t {
                 try {
                     return app.save().load().bonus;
                 } catch (const std::exception&) {
@@ -4447,15 +4465,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 }
             };
             const std::int64_t m0 = money_now();
-            const int b0 = bonus_now(), r0 = ruby_now();
+            const std::int64_t b0 = bonus_now(), r0 = ruby_now();
             fire_action("GiveCurrency", {{"Type", "Gold"}, {"Value", "500"}});
             fire_action("GiveCurrency", {{"Type", "Bonus"}, {"Value", "7"}});
             fire_action("GiveCurrency", {{"Type", "Ruby"}, {"Value", "3"}});
             const std::int64_t m1 = money_now();
-            const int b1 = bonus_now(), r1 = ruby_now();
+            const std::int64_t b1 = bonus_now(), r1 = ruby_now();
             std::fprintf(stdout,
-                         "[qa] CURRENCY give: Money %lld->%lld Bonus %d->%d Ruby %d->%d\n",
-                         static_cast<long long>(m0), static_cast<long long>(m1), b0, b1, r0, r1);
+                         "[qa] CURRENCY give: Money %lld->%lld Bonus %lld->%lld Ruby %d->%d\n",
+                         static_cast<long long>(m0), static_cast<long long>(m1),
+                         static_cast<long long>(b0), static_cast<long long>(b1), r0, r1);
             std::fflush(stdout);
             check(m1 == m0 + 500 && b1 == b0 + 7 && r1 == r0 + 3,
                   "GiveCurrency Gold/Bonus/Ruby -> money/bonus/currencies");
@@ -4463,14 +4482,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             fire_action("TakeCurrency",
                         {{"Type", "Ruby"}, {"Name", "Ruby"}, {"Value", "9999"}});
             const std::int64_t m2 = money_now();
-            const int b2 = bonus_now(), r2 = ruby_now();
+            const std::int64_t b2 = bonus_now(), r2 = ruby_now();
             check(m2 == m1 && b2 == b1 && r2 == r1,
                   "TakeCurrency unaffordable -> no write (Xfa/Error branch)");
             // `rg` affordable: `J0a` deducts exactly (`Gold` -> `Fr(Tb-c)`).
             fire_action("TakeCurrency",
                         {{"Type", "Gold"}, {"Name", "Gold"}, {"Value", "200"}});
             const std::int64_t m3 = money_now();
-            const int b3 = bonus_now(), r3 = ruby_now();
+            const std::int64_t b3 = bonus_now(), r3 = ruby_now();
             std::fprintf(stdout, "[qa] CURRENCY take: Money %lld->%lld\n",
                          static_cast<long long>(m2), static_cast<long long>(m3));
             std::fflush(stdout);

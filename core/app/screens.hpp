@@ -200,9 +200,13 @@ private:
 
 // JS-exact battle reward (`dl.$L` L730889 -> `tt.bm` L116924): the LAST
 // `<Reward>` of the zone-scoped Nth `<Fight>`, resolved at `level` (`p.o.bb()`).
-// External bridge over the internal `battle_rewards` (see screens.cpp).
+// `bonus` = the merged `Uo` (Bonus) and `prize_base` = the merged `ph`
+// (PrizeBase; JS default -1) of the same row. External bridge over the
+// internal `battle_rewards` (see screens.cpp).
 void battle_rewards_probe(const std::string& battle_name, const std::string& zone_name,
-                          int fight_index, int level, int& out_money, int& out_exp);
+                          int fight_index, int level, std::int64_t& out_money,
+                          std::int64_t& out_exp, std::int64_t& out_bonus,
+                          std::int64_t& out_prize_base);
 
 // One boss-intro roster entry (JS `jk.init` L2062 iterates the `lD` boss
 // battle list: `g.Hf` = the warrior portrait, `g.$s` = its name).
@@ -534,7 +538,8 @@ public:
     // EMPTY means "resolve from the save" (`owned_items`) so the direct boot
     // and the Map/Dojo launch build the identical list.
     FightScreen(ScreenManager& mgr, const std::string& battle_name,
-                const std::string& location, int reward_money, int reward_exp,
+                const std::string& location, std::int64_t reward_money,
+                std::int64_t reward_exp,
                 const std::vector<sf2::scene::OwnedItem>& owned);
 
     ScreenId id() const override { return kScreenFight; }
@@ -734,8 +739,8 @@ public:
 private:
     std::string battle_name_;
     std::string location_;
-    int reward_money_ = 0;
-    int reward_exp_ = 0;
+    std::int64_t reward_money_ = 0;
+    std::int64_t reward_exp_ = 0;
     // The owned items this screen actually built the player's move list from
     // (the ctor param, or `owned_items(app())` when it was empty). The
     // boot-vs-Map comparison reads it back.
@@ -751,8 +756,8 @@ private:
     std::map<std::string, sf2::scene::TemplateDef> mode_templates_;
     std::map<std::string, sf2::scene::GroupDef> mode_groups_;
     sf2::scene::ModeSeries mode_series_;
-    int mode_reward_money_ = 0;
-    int mode_reward_exp_ = 0;
+    std::int64_t mode_reward_money_ = 0;
+    std::int64_t mode_reward_exp_ = 0;
     // Resolve the live series cursor into a `ModeSetup` (JS `v.EQ`/
     // `p.F().efa` warrior generation + `reward_for`). False when the row does
     // not resolve. Defined in screens.cpp (needs `resolve_enemy_loadout`).
@@ -895,8 +900,8 @@ private:
 // updates + saves the Warrior, and returns to the map on click.
 class ResultsScreen : public Screen {
 public:
-    ResultsScreen(ScreenManager& mgr, bool player_won, int money_reward,
-                  int exp_reward);
+    ResultsScreen(ScreenManager& mgr, bool player_won, std::int64_t money_reward,
+                  std::int64_t exp_reward);
 
     ScreenId id() const override { return kScreenResults; }
 
@@ -908,13 +913,13 @@ public:
 
 private:
     bool player_won_ = false;
-    int money_reward_ = 0;
-    int exp_reward_ = 0;
+    std::int64_t money_reward_ = 0;
+    std::int64_t exp_reward_ = 0;
     bool applied_ = false;
     // Prize breakdown snapshot (copied from PendingBattle in update — the
     // `v.kD`/`bzb` factor lines; render reads these, never the sim).
-    int prize_base_ = 0;
-    int prize_bonus_ = 0;
+    std::int64_t prize_base_ = 0;
+    std::int64_t prize_bonus_ = 0;
     int prize_combo_ = 0;
     int prize_shocks_ = 0;
     bool prize_perfect_ = false;
@@ -922,15 +927,15 @@ private:
     // Per-category bonus COINS (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`): the Results
     // rows show these; `prize_combo_`/`prize_shocks_` are the counts (`jU`/
     // `e6`) that label them (`PERFECT ×{0}`).
-    int prize_perfect_coins_ = 0;
-    int prize_first_coins_ = 0;
-    int prize_combo_coins_ = 0;
-    int prize_style_coins_ = 0;
+    std::int64_t prize_perfect_coins_ = 0;
+    std::int64_t prize_first_coins_ = 0;
+    std::int64_t prize_combo_coins_ = 0;
+    std::int64_t prize_style_coins_ = 0;
     int prize_style_level_ = 0;  // `b6`: EAa style index -> the row key
-    int prize_shock_coins_ = 0;
+    std::int64_t prize_shock_coins_ = 0;
     // `oc.OY` ruby (`Fh.lXa` arg `c`, L2054-2055; `oc.mOa = oc.OY`). The
     // goldPrize row's `Or.x_` (`Lr.ZMa` L2078) renders it as the `Qw` sub-row.
-    int prize_ruby_ = 0;
+    std::int64_t prize_ruby_ = 0;
     // JS `Lr`/`Or` reveal clock (L2057-2081): the `kk` results container
     // holds the list for 500 ms (`kk.rxa` `wh.delay(...,500)`), then row `i`
     // slides in (`Or.aa` case 0, `ed(.5)` = 500 ms) and counts up (case 1,

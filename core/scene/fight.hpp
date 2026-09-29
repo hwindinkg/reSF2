@@ -1721,28 +1721,37 @@ public:
     // Styles pk (Turtle 0 .. Fantastic 15; `b6` = the live high-water mark).
     // Totals come from exact `fh_lxa` below (`m6`/`mOa`); `coins_bonus`
     // is the performance part (total minus base) for the results display.
-    // `gems_bonus` (`hj.Uo`) has no evidenced fight source (Bonus stays
-    // save-driven).
+    // `gems_bonus` (`hj.Uo` = `oc.mOa` = `oc.OY`) is the reward row's `Bonus`
+    // (`Uo`) handed to `Fh.lXa` as its `c` arg (JS `Sua` L635983
+    // `bzb(..., c=e.Tb, a!=null?e.Uo:0, ...)`) and granted via `Ewa(Uo,3)`.
+    // The shipped `<Reward Money>` reaches 7.46e12, so the coin fields are
+    // int64 (JS numbers are float64).
     struct BattlePrize {
         bool perfect = false;      // player took no hits
         bool first_strike = false;  // player landed the battle's first hit
         int max_combo = 0;         // player's best consecutive run
         int shocks = 0;            // player's shock hits
         int style_value = 0;       // `b6`: EAa style index 0..5 (JS `Fh.HNa`)
-        int coins_bonus = 0;       // m6 minus base (display)
-        int coins_total = 0;       // m6: what the player receives
-        int gems_bonus = 0;        // mOa (no fight source evidenced)
+        std::int64_t coins_bonus = 0;   // m6 minus base (display)
+        std::int64_t coins_total = 0;   // m6: what the player receives
+        std::int64_t gems_bonus = 0;    // mOa = OY: the reward row's `Bonus`
         // Per-category bonus COINS (`Fh.lXa` L2054-2056 `oc.P3/ep/Ui/DZ/Ub`).
         // The `goldPerfect`/`goldFirstStrike`/`goldCombo`/`goldShock`/style
         // RESULT rows show these values; the row's `{0}` suffix is the COUNT
         // (`d6`/`c6`/`jU`/`e6`), never the value (see screens.cpp ResultsScreen).
-        int coins_perfect = 0;     // oc.P3
-        int coins_first = 0;       // oc.ep
-        int coins_combo = 0;       // oc.Ui
-        int coins_style = 0;       // oc.DZ
-        int coins_shock = 0;       // oc.Ub
+        std::int64_t coins_perfect = 0;  // oc.P3
+        std::int64_t coins_first = 0;    // oc.ep
+        std::int64_t coins_combo = 0;    // oc.Ui
+        std::int64_t coins_style = 0;    // oc.DZ
+        std::int64_t coins_shock = 0;    // oc.Ub
     };
-    BattlePrize prize(int base_coins) const;
+    // JS `hp.pwa`/`Sua` (L635627/L635964) -> `Fh.lXa` (L1058250). The three
+    // reward-row inputs are `Sua`'s `prizeBase` (`ph>0 ? ph : dl.ph>=0 ?
+    // dl.ph : bool ? ceil(money*xya) : 0`, `xya` = internal_settings
+    // `<DefaultPrizeBaseFactor Value="0.003">`), the row's `Tb` (money) and
+    // the row's `Uo` (bonus).
+    BattlePrize prize(std::int64_t prize_base, std::int64_t money,
+                      std::int64_t bonus) const;
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }

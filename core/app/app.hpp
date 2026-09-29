@@ -79,16 +79,22 @@ struct PendingBattle {
     // "Punchbag" dummy (JS stages.xml Fight 1 Warrior FirstName="Punchbag");
     // the map flow keeps the default "Enemy".
     std::string enemy_name = "Enemy";
-    int reward_money = 0;  // the first non-zero <Reward> of the fight
-    int reward_exp = 0;
+    // JS `dl.$L` (L730889) -> `Yg.Tb`/`Uo`/`exp`/`ph` of the LAST `<Reward>`
+    // (or the selected `D0` row for the grant). JS numbers are float64 and the
+    // shipped `<Reward Money>` reaches 7.46e12, so int64 (exact < 2^53).
+    std::int64_t reward_money = 0;
+    std::int64_t reward_exp = 0;
+    std::int64_t reward_bonus = 0;      // `Uo` (Bonus)
+    std::int64_t reward_prize_base = 0;  // `ph` (PrizeBase; JS default -1)
     // Prize snapshot (JS `v.kD`/`bzb`, FLOW_STATIC §4): filled by the
     // FightScreen at battle end from FightController::prize() BEFORE the
     // bonus is folded into reward_money, so Results can show the breakdown
     // (base + Perfect/FirstStrike/Combo/Shock lines). `prize_gems` carries
-    // `hj.Uo` (0: no fight gem source evidenced — applied to Bonus anyway).
-    int prize_base_coins = 0;
-    int prize_bonus = 0;
-    int prize_gems = 0;
+    // `hj.Uo`/`oc.mOa` (= `oc.OY`) = the reward row's `Bonus`, granted via
+    // `Ewa(Uo,3)` and shown as the goldPrize row's ruby sub-value.
+    std::int64_t prize_base_coins = 0;
+    std::int64_t prize_bonus = 0;
+    std::int64_t prize_gems = 0;
     int prize_combo = 0;
     int prize_shocks = 0;
     bool prize_perfect = false;
@@ -96,12 +102,12 @@ struct PendingBattle {
     // Per-category bonus COINS (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`, L2054-2056): the
     // Results rows show these values; `prize_combo`/`prize_shocks` above are
     // the counts (`jU`/`e6`) that label them (`PERFECT ×{0}`).
-    int prize_perfect_coins = 0;
-    int prize_first_coins = 0;
-    int prize_combo_coins = 0;
-    int prize_style_coins = 0;
+    std::int64_t prize_perfect_coins = 0;
+    std::int64_t prize_first_coins = 0;
+    std::int64_t prize_combo_coins = 0;
+    std::int64_t prize_style_coins = 0;
     int prize_style_level = 0;  // `b6`: EAa style index 0..5 (`Fh.HNa`)
-    int prize_shock_coins = 0;
+    std::int64_t prize_shock_coins = 0;
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;
     bool player_won = false;

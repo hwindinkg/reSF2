@@ -22,6 +22,7 @@
 // energy (`qZa`/`uZa`), repeat caps (`Replays`, map-side YL) are map/UI
 // side — noted, not fight scope.
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
@@ -109,10 +110,12 @@ struct StageRule {
     bool random_each_round = false;
 };
 
-// One <Reward> row.
+// One <Reward> row. The JS fields are float64 (`Yg.Tb`/`Uo`/`exp`/`ph`); the
+// shipped `<Reward Money>` reaches 7.46e12, so the money-carrying fields are
+// int64 (`< 2^53` is exact for every JS integer here).
 struct StageReward {
-    int money = 0, exp = 0, bonus = 0;
-    int prize_base = 0;
+    std::int64_t money = 0, exp = 0, bonus = 0;
+    std::int64_t prize_base = 0;  // `ph` (PrizeBase attr; JS default -1)
 };
 
 struct StageFight {
@@ -192,6 +195,21 @@ inline int xml_int(const pugi::xml_node& n, const char* attr, int def) {
     if (!a) return def;
     try {
         return std::stoi(a.value());
+    } catch (...) {
+        return def;
+    }
+}
+
+// JS numbers are float64 and the shipped `<Reward Money>` reaches 7.46e12
+// (`stages.xml` ZONE_7 titan rows), which `std::stoi`/`as_int` would either
+// throw on (-> default) or saturate. `stoll` is exact for every JS integer
+// magnitude here (< 2^53).
+inline std::int64_t xml_i64(const pugi::xml_node& n, const char* attr,
+                            std::int64_t def) {
+    const pugi::xml_attribute a = n.attribute(attr);
+    if (!a) return def;
+    try {
+        return std::stoll(a.value());
     } catch (...) {
         return def;
     }
@@ -476,10 +494,10 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                     if (rewards) {
                         for (const pugi::xml_node r : rewards.children("Reward")) {
                             StageReward rw;
-                            rw.money = xml_int(r, "Money", 0);
-                            rw.exp = xml_int(r, "Exp", 0);
-                            rw.bonus = xml_int(r, "Bonus", 0);
-                            rw.prize_base = xml_int(r, "PrizeBase", 0);
+                            rw.money = xml_i64(r, "Money", 0);
+                            rw.exp = xml_i64(r, "Exp", 0);
+                            rw.bonus = xml_i64(r, "Bonus", 0);
+                            rw.prize_base = xml_i64(r, "PrizeBase", -1);
                             fight.rewards.push_back(rw);
                         }
                     }
@@ -712,7 +730,12 @@ inline bool resolve_tournament_fight(const StageBattle& battle, int fight_index,
     out.location = battle.location;
     out.music = battle.music;
     if (!f.rewards.empty()) {
-        out.reward = f.rewards.size() > 1 ? f.rewards[1] : f.rewards[0];
+        // JS `D0(i)` (L728050) row select for a single-warrior `<Fight>`: the
+        // series cursor `PU` (`Da.PU` = `Rk`, the warrior/wave index) is 0
+        // here, and `kD` (L622194) uses `D0(PU + (won?1:0))` -> row 1 on a win.
+        // The row is only ever GRANTED on the terminal win, where `D0(1)` is
+        // the LAST row of a 2-row fight (`$L` L730889 also takes the last).
+        out.reward = f.rewards.back();
     }
     if (!f.warriors.empty()) {
         const StageWarrior& w = f.warriors[0];
@@ -729,18 +752,22 @@ inline bool resolve_tournament_fight(const StageBattle& battle, int fight_index,
     return true;
 }
 
-// Reward row select: tournament participation row [0] vs win row [1];
-// survival per-wave row (clamped).
-inline StageReward reward_for(const std::string& battle_type, const StageFight& fight, int wave,
-                              bool won) {
+// Reward row select (JS `dl.D0(i)` L728050 called from `v.kD` L622194):
+// `c = b.PU; f.zd() && ++c; b.sR() && (c = f.zd() ? 1 : 0)`, where `PU` =
+// `Rk` (the warrior/wave cursor, set by `bea` L210375) and `sR()` =
+// `Xs.length>1 ? pT>1 : false` (L729188). For the shipped content `sR()` is
+// always false (single `<Warrior>` per fight; Survival `Rounds="1"`), so the
+// row is `wave + (won?1:0)`; the terminal win therefore lands on
+// `rewards.back()` (rows = waves + 1 in every shipped Survival fight). The
+// row is granted ONLY on a win (the port grants nothing on a loss, matching
+// `f.zd()` gating in the flow), so the last row is the JS-exact grant value.
+inline StageReward reward_for(const std::string& battle_type, const StageFight& fight,
+                              int wave, bool won) {
+    (void)battle_type;
+    (void)wave;
+    (void)won;
     if (fight.rewards.empty()) return StageReward();
-    if (battle_type == "SURVIVAL") {
-        std::size_t i = static_cast<std::size_t>(wave < 0 ? 0 : wave);
-        if (i >= fight.rewards.size()) i = fight.rewards.size() - 1;
-        return fight.rewards[i];
-    }
-    if (won && fight.rewards.size() > 1) return fight.rewards[1];
-    return fight.rewards[0];
+    return fight.rewards.back();
 }
 
 // Series advance (`Da.sR` shape): tournament next fight while fights

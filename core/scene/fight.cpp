@@ -5366,33 +5366,49 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     (void)move;
 }
 
-// JS `v.kD`/`bzb` prize factors (FLOW_STATIC section 4.3;
+// JS `v.kD`/`bzb`/`Fh.lXa` prize factors (FLOW_STATIC section 4.3;
 // internal_settings `<RewardsPrize>` values verified 2026-09-04).
-FightController::BattlePrize FightController::prize(int base_coins) const {
+FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
+                                                    std::int64_t money,
+                                                    std::int64_t bonus) const {
     BattlePrize p;
     p.perfect = player_.hits_taken == 0;
     p.first_strike = battle_first_hit_ && battle_first_by_player_;
     p.max_combo = player_.max_combo;
     p.shocks = player_.shocks_dealt;
     p.style_value = prize_fh_.b6;  // `b6` -> `Fh.HNa` EAa row key (L2055)
-    // Exact `Fh.lXa` (L2054-2056): prize-base `a` = the head prize `ph`
-    // (OPEN D0-table value -> base coins used); coins `b` = base;
-    // gems 0; Ia/epF/UiF/UbF = 5/2/1/3; pk EAa order; kq = 0
+    // Exact `hp.Sua` (L635964) prize-base select:
+    //   `trunc(a.ph>0 ? a.ph : dl.ph>=0 ? dl.ph : bool ? ceil(money*xya) : 0)`
+    // `a.ph` = the merged `<Reward>`/`<NormalModeReward>` `PrizeBase`
+    // (`Yg.ph`, JS default -1; `iba` L122728 merges it). `dl.ph` = the
+    // `<Fight PrizeBase>` attr (JS default -1) — the shipped stages.xml has NO
+    // `<Fight PrizeBase>` (0 hits), so that branch is unreachable here. The
+    // `bool` is false exactly when a `ph>0` exists (the shipped
+    // `<NormalModeReward>` nodes are empty, ph=-1), hence the fallback
+    // `ceil(money * xya)` with `xya` = `<DefaultPrizeBaseFactor Value="0.003">`.
+    // The old code passed the MONEY as the prize base, which inflated every
+    // `ceil(prizeBase * factor)` term (P3/ep/Ui/DZ/Ub) by ~333x.
+    const double xya = 0.003;  // internal_settings DefaultPrizeBaseFactor
+    const double prize_base =
+        prize_base_in > 0 ? static_cast<double>(prize_base_in)
+                          : std::ceil(static_cast<double>(money) * xya);
+    // Exact `Fh.lXa` (L1058250): `(prizeBase, coins, bonus, Ia, epF, UiF,
+    // UbF, pk)`; Ia/epF/UiF/UbF = 5/2/1/3; pk = EAa order; kq = 0
     // (DenominationDigits absent in seed).
     static const double kPk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};
     PrizeKx kx;
-    fh_lxa(kx, prize_fh_, static_cast<double>(base_coins),
-           static_cast<double>(base_coins), 0.0, 5.0, 2.0, 1.0, 3.0, kPk, 0);
-    p.coins_total = static_cast<int>(kx.m6);
-    p.coins_bonus = p.coins_total - static_cast<int>(prize_vk(base_coins, 0));
-    p.gems_bonus = static_cast<int>(kx.mOa);
+    fh_lxa(kx, prize_fh_, prize_base, static_cast<double>(money),
+           static_cast<double>(bonus), 5.0, 2.0, 1.0, 3.0, kPk, 0);
+    p.coins_total = static_cast<std::int64_t>(kx.m6);
+    p.coins_bonus = p.coins_total - static_cast<std::int64_t>(prize_vk(prize_base, 0));
+    p.gems_bonus = static_cast<std::int64_t>(kx.mOa);  // `mOa` = `OY` = bonus
     // The per-category `Fh.Kx` rows (JS `oc.P3/ep/Ui/DZ/Ub`): the Results
     // breakdown shows each bonus, not the 0/1 flag or the combo count.
-    p.coins_perfect = static_cast<int>(kx.p3);
-    p.coins_first = static_cast<int>(kx.ep);
-    p.coins_combo = static_cast<int>(kx.ui);
-    p.coins_style = static_cast<int>(kx.dz);
-    p.coins_shock = static_cast<int>(kx.ub);
+    p.coins_perfect = static_cast<std::int64_t>(kx.p3);
+    p.coins_first = static_cast<std::int64_t>(kx.ep);
+    p.coins_combo = static_cast<std::int64_t>(kx.ui);
+    p.coins_style = static_cast<std::int64_t>(kx.dz);
+    p.coins_shock = static_cast<std::int64_t>(kx.ub);
     return p;
 }
 

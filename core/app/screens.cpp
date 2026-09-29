@@ -4458,14 +4458,33 @@ bool g_entry_audio_done = false;
 // the node's OWN attr plus every `<Level>` row whose `Min <= level <= Max`.
 // JS `eg.Qd` (L116425) parses the node (`npa.parse`) then `eg.bm` (L116493)
 // starts from `npa` and `iba`s each matching row; `Yg.parse` (L121628) reads
-// `Money`->`Tb`, `Bonus`->`Uo`, `Exp`->`exp`. `Zf` (L6140) defaults a missing
-// `Min`/`Max` to INT_MIN/INT_MAX (`u.I(attr, -2147483648 / 2147483647)`).
-static int reward_field(const pugi::xml_node& node, int level, const char* attr) {
-    int v = sf2::data::xml_attr_int(node, attr, 0);
+// `Money`->`Tb`, `Bonus`->`Uo`, `Exp`->`exp`, `PrizeBase`->`ph` (JS default
+// -1). `Zf` (L6140) defaults a missing `Min`/`Max` to INT_MIN/INT_MAX
+// (`u.I(attr, -2147483648 / 2147483647)`). The field is parsed as int64
+// (`stoll`): the shipped `<Reward Money>` reaches 7.46e12 and `as_int`/
+// `stoi` would saturate or throw.
+static std::int64_t reward_field(const pugi::xml_node& node, int level,
+                                 const char* attr, std::int64_t def = 0) {
+    const pugi::xml_attribute own = node.attribute(attr);
+    std::int64_t v = def;
+    if (own) {
+        try {
+            v = std::stoll(own.value());
+        } catch (...) {
+            v = def;
+        }
+    }
     for (const pugi::xml_node lv : node.children("Level")) {
         const int mn = sf2::data::xml_attr_int(lv, "Min", -2147483647 - 1);
         const int mx = sf2::data::xml_attr_int(lv, "Max", 2147483647);
-        if (mn <= level && level <= mx) v += sf2::data::xml_attr_int(lv, attr, 0);
+        if (mn <= level && level <= mx) {
+            const pugi::xml_attribute a = lv.attribute(attr);
+            if (!a) continue;
+            try {
+                v += std::stoll(a.value());
+            } catch (...) {
+            }
+        }
     }
     return v;
 }
@@ -4483,11 +4502,16 @@ static int reward_field(const pugi::xml_node& node, int level, const char* attr)
 // `p.o.bb()`. `RewardDigits`/`PrizeBaseDigits` (`bL`/`LK`, `IIa` L104528)
 // are absent from the shipped stages.xml, so the `*10^digits` factors are 1.
 // `p.o.Yh` (profile `EclipseMode`, ctor L125469) is not modelled by the
-// port, so the NormalModeReward branch is always taken.
+// port, so the NormalModeReward branch is always taken (the 2 shipped
+// `<EclipseModeReward>` nodes are EMPTY, so this is inert).
 void battle_rewards(const std::string& battle_name, const std::string& zone_name,
-                    int fight_index, int level, int& out_money, int& out_exp) {
+                    int fight_index, int level, std::int64_t& out_money,
+                    std::int64_t& out_exp, std::int64_t& out_bonus,
+                    std::int64_t& out_prize_base) {
     out_money = 0;
     out_exp = 0;
+    out_bonus = 0;
+    out_prize_base = -1;
     try {
         sf2::data::xml_doc doc;
         const std::string path = "reference/extracted/xml/res/stages.xml";
@@ -4543,10 +4567,22 @@ void battle_rewards(const std::string& battle_name, const std::string& zone_name
         if (!last) return;
         out_money = reward_field(last, level, "Money");
         out_exp = reward_field(last, level, "Exp");
+        out_bonus = reward_field(last, level, "Bonus");
+        out_prize_base = reward_field(last, level, "PrizeBase", -1);
         const pugi::xml_node mode = last.child("NormalModeReward");  // `p.o.Yh` == false
         if (mode) {
             out_money += reward_field(mode, level, "Money");
             out_exp += reward_field(mode, level, "Exp");
+            out_bonus += reward_field(mode, level, "Bonus");
+            // `Yg.iba` (L122728): `this.ph<0 ? this.ph=a.ph : a.ph>0 &&
+            // (this.ph+=a.ph)` — the mode node's `ph` only replaces a missing
+            // base `ph`; an explicit base `ph` accumulates it.
+            const std::int64_t mph = reward_field(mode, level, "PrizeBase", -1);
+            if (out_prize_base < 0) {
+                out_prize_base = mph;
+            } else if (mph > 0) {
+                out_prize_base += mph;
+            }
         }
     } catch (const std::exception&) {
     }
@@ -5265,8 +5301,11 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
 // internal linkage (this file's anonymous namespace), so this thin wrapper
 // gives the probe a symbol to link against.
 void battle_rewards_probe(const std::string& battle_name, const std::string& zone_name,
-                          int fight_index, int level, int& out_money, int& out_exp) {
-    battle_rewards(battle_name, zone_name, fight_index, level, out_money, out_exp);
+                          int fight_index, int level, std::int64_t& out_money,
+                          std::int64_t& out_exp, std::int64_t& out_bonus,
+                          std::int64_t& out_prize_base) {
+    battle_rewards(battle_name, zone_name, fight_index, level, out_money, out_exp,
+                   out_bonus, out_prize_base);
 }
 
 // JS `Oa.f5` (L2286-2288): the shop tab lists are the `it.Lia` type
@@ -6957,7 +6996,8 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
     } catch (const std::exception&) {
     }
     battle_rewards(battle, zone, pending_fight_ordinal(app()), player_level,
-                   pb.reward_money, pb.reward_exp);
+                   pb.reward_money, pb.reward_exp, pb.reward_bonus,
+                   pb.reward_prize_base);
     pb.prize_base_coins = 0;
     pb.prize_bonus = 0;
     pb.prize_gems = 0;
@@ -6968,9 +7008,10 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
     pb.prize_first = false;
     // The owned items feed the FightScreen's move list (`ra.Hza`).
     pb.owned = owned_items(app());
-    std::fprintf(stdout, "[quest] Fight '%s' -> %s [%s] (%s, reward money=%d exp=%d)\n",
+    std::fprintf(stdout, "[quest] Fight '%s' -> %s [%s] (%s, reward money=%lld exp=%lld)\n",
                  triple.c_str(), battle.c_str(), zone.c_str(), pb.location.c_str(),
-                 pb.reward_money, pb.reward_exp);
+                 static_cast<long long>(pb.reward_money),
+                 static_cast<long long>(pb.reward_exp));
     std::fflush(stdout);
     push(kScreenFight);
     // Harness-only post-tutorial seed (see App::finish_tutorial_handoff):
@@ -7572,11 +7613,13 @@ void MapScreen::launch_battle(const Node& n) {
     } catch (const std::exception&) {
     }
     battle_rewards(n.name, n.zone, fight_index, player_level, pb.reward_money,
-                   pb.reward_exp);
+                   pb.reward_exp, pb.reward_bonus, pb.reward_prize_base);
     // The owned items (JS `ra.Hza` move list input).
     pb.owned = owned_items(app());
-    std::fprintf(stdout, "[map] click %s [%s] -> Fight (reward money=%d exp=%d)\n",
-                 n.name.c_str(), n.zone.c_str(), pb.reward_money, pb.reward_exp);
+    std::fprintf(stdout, "[map] click %s [%s] -> Fight (reward money=%lld exp=%lld)\n",
+                 n.name.c_str(), n.zone.c_str(),
+                 static_cast<long long>(pb.reward_money),
+                 static_cast<long long>(pb.reward_exp));
     std::fflush(stdout);
     push(kScreenFight);
 }
@@ -9035,7 +9078,8 @@ void MapScreen::render_impl(App& app) {
 // ---------------------------------------------------------------------------
 
 FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
-                         const std::string& location, int reward_money, int reward_exp,
+                         const std::string& location, std::int64_t reward_money,
+                         std::int64_t reward_exp,
                          const std::vector<sf2::scene::OwnedItem>& owned)
     : Screen(mgr, "Fight"),
       battle_name_(battle_name),
@@ -9550,13 +9594,14 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                              "[mode] %s setup: rounds=%d time=%d recovery=%.3f "
                              "enemy_perks=%zu enemy_item_refs=%zu enemy_items=%zu "
                              "dmgP=%.0f dmgE=%.0f "
-                             "noBullets=%d reward m=%d e=%d\n",
+                             "noBullets=%d reward m=%lld e=%lld\n",
                              battle.type.c_str(), setup.rounds, setup.round_time,
                              setup.health_recovery, setup.enemy.perks.size(),
                              setup.enemy.item_refs.size(),
                              setup.enemy.owned.size(), setup.player_damage_factor,
                              setup.enemy_damage_factor, setup.no_bullets ? 1 : 0,
-                             setup.reward.money, setup.reward.exp);
+                             static_cast<long long>(setup.reward.money),
+                             static_cast<long long>(setup.reward.exp));
                 std::fflush(stdout);
             } else {
                 std::fprintf(stdout, "[mode] %s: no resolved row (battle='%s')\n",
@@ -10798,10 +10843,11 @@ void FightScreen::update_impl(float dt) {
                                    next)) {
                 fight_->begin_next_mode_fight(next);
                 std::fprintf(stdout,
-                             "[mode] advance -> fight=%d wave=%d (reward m=%d "
-                             "e=%d)\n",
+                             "[mode] advance -> fight=%d wave=%d (reward m=%lld "
+                             "e=%lld)\n",
                              mode_series_.fight_index, mode_series_.wave,
-                             next.reward.money, next.reward.exp);
+                             static_cast<long long>(next.reward.money),
+                             static_cast<long long>(next.reward.exp));
                 std::fflush(stdout);
                 return;
             }
@@ -10822,6 +10868,8 @@ void FightScreen::update_impl(float dt) {
         if (mode_active_ && player_won) {
             pb.reward_money = fight_->mode_reward().money;
             pb.reward_exp = fight_->mode_reward().exp;
+            pb.reward_bonus = fight_->mode_reward().bonus;
+            pb.reward_prize_base = fight_->mode_reward().prize_base;
         }
         // Quest FightEnd (JS `ha.RA("FightEnd")`): records the triple for
         // later ChangeTab evaluations and fires quests listening for it
@@ -10852,11 +10900,19 @@ void FightScreen::update_impl(float dt) {
         // Snapshot the breakdown into pending_battle, then set the reward
         // to the lXa TOTAL (m6, base included) — not base+bonus.
         {
-            const auto prize = fight_->prize(pb.reward_money);
+            const auto prize =
+                fight_->prize(pb.reward_prize_base, pb.reward_money, pb.reward_bonus);
             std::fprintf(stdout,
-                         "[fight] prize: perfect=%d first=%d combo=%d shocks=%d total=%d\n",
+                         "[fight] prize: perfect=%d first=%d combo=%d shocks=%d "
+                         "rowMoney=%lld rowBonus=%lld prizeBaseAttr=%lld "
+                         "m6=%lld mOa=%lld\n",
                          prize.perfect ? 1 : 0, prize.first_strike ? 1 : 0,
-                         prize.max_combo, prize.shocks, prize.coins_total);
+                         prize.max_combo, prize.shocks,
+                         static_cast<long long>(pb.reward_money),
+                         static_cast<long long>(pb.reward_bonus),
+                         static_cast<long long>(pb.reward_prize_base),
+                         static_cast<long long>(prize.coins_total),
+                         static_cast<long long>(prize.gems_bonus));
             pb.prize_base_coins = pb.reward_money;
             pb.prize_bonus = prize.coins_bonus;
             pb.prize_gems = prize.gems_bonus;
@@ -11855,8 +11911,8 @@ void FightScreen::render_impl(App& app) {
 // ResultsScreen
 // ---------------------------------------------------------------------------
 
-ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won, int money_reward,
-                             int exp_reward)
+ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won,
+                             std::int64_t money_reward, std::int64_t exp_reward)
     : Screen(mgr, "Results"), player_won_(player_won), money_reward_(money_reward),
       exp_reward_(exp_reward) {
     // JS `ai.B()` fight teardown (L384): `this.Da.type!="FightNone"&&lb.OS()`
@@ -12075,8 +12131,8 @@ void apply_fight_reward(App& app) {
     if (pb.reward_applied) return;
     pb.reward_applied = true;
     const bool player_won = pb.player_won;
-    const int money_reward = pb.reward_money;
-    const int exp_reward = pb.reward_exp;
+    const std::int64_t money_reward = pb.reward_money;
+    const std::int64_t exp_reward = pb.reward_exp;
     WarriorSave w;
     try {
         w = app.save().load();
@@ -12090,13 +12146,22 @@ void apply_fight_reward(App& app) {
         // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
         const std::int64_t before = w.money;
         w.money += money_reward;
-        w.experience += exp_reward;
-        // JS `hj.Uo` gems (FLOW_STATIC section 4.4 `emb`): applied to Bonus.
-        w.bonus += pb.prize_gems;
+        w.experience += static_cast<int>(exp_reward);
+        // JS `emb` (L93552) `c>0 && p.Ewa(c,3)` -> `p.o.vl(p.o.fd+c,3,false)`:
+        // the reward row's `Uo` (Bonus) is added to the profile Bonus balance
+        // (`p.o.fd`) and written as `Bonus`. `pb.prize_gems` carries
+        // `hj.Uo` = `oc.mOa` = `oc.OY` = that same `Uo` (the old code added 0).
+        const std::int64_t bonus_grant = pb.prize_gems;
+        if (bonus_grant > 0) w.bonus += bonus_grant;
         std::fprintf(stdout,
-                     "[result] WIN reward money=%d exp=%d (money %lld -> %lld)\n",
-                     money_reward, exp_reward, static_cast<long long>(before),
-                     static_cast<long long>(w.money));
+                     "[result] WIN reward money=%lld exp=%lld bonus=%lld "
+                     "(money %lld -> %lld, bonus -> %lld)\n",
+                     static_cast<long long>(money_reward),
+                     static_cast<long long>(exp_reward),
+                     static_cast<long long>(bonus_grant),
+                     static_cast<long long>(before),
+                     static_cast<long long>(w.money),
+                     static_cast<long long>(w.bonus));
         // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2).
         {
             w.battle_unlock(pb.zone, pb.battle_name);
@@ -12288,9 +12353,9 @@ void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, flo
 // zero-padded) and the suffix is the lang `tsdShort`/`mlnShort`/`blnShort`
 // ("K"/"m"/"bn" in EN). The exp counter (`Pr.exp`) is the ONE raw value
 // (`Pr.aa` L2083 `""+a`), so it keeps `std::to_string`.
-std::string results_coin_text(App& app, int value) {
+std::string results_coin_text(App& app, std::int64_t value) {
     if (value < 1000) return std::to_string(value);  // `K.T(b.gM)`
-    int whole = 0, frac = 0;
+    std::int64_t whole = 0, frac = 0;
     const char* key = "tsdShort";
     const char* fb = "K";
     if (value < 1000000) {  // `a<1E6`: gM=trunc(a/1E3), UR=trunc(a%1E3/10)
@@ -12313,7 +12378,7 @@ std::string results_coin_text(App& app, int value) {
 // JS `We.Sfa` (L2445): the ruby sub-row formatter — digits grouped in 3s
 // from the right, joined by a space (`b=" "`). `1000` -> "1 000",
 // `1234567` -> "1 234 567"; below 1000 it is the raw `c` digits.
-std::string results_spaced_text(int value) {
+std::string results_spaced_text(std::int64_t value) {
     std::string digits = std::to_string(value < 0 ? -value : value);
     std::string out;
     const std::size_t n = digits.size();
@@ -12387,7 +12452,7 @@ void ResultsScreen::render_impl(App& app) {
     struct KkRow {
         const char* key;
         const char* fallback;
-        int value;      // the `Fh.Kx` bonus COIN value (`oc.P3/ep/Ui/DZ/Ub`)
+        std::int64_t value;  // the `Fh.Kx` bonus COIN value (`oc.P3/ep/Ui/DZ/Ub`)
         int count;      // the `{0}` suffix (the row multiplier `d6`/`c6`/`jU`/`e6`)
         bool has_count;
         bool star;
@@ -12446,7 +12511,8 @@ void ResultsScreen::render_impl(App& app) {
         const float from = r.star ? row_to : row_from;  // rows 0..n-2 set -500
         const float rx = from + (row_to - from) * slide;
         const float ry = kKkRowY0 + static_cast<float>(i) * kKkRowStep;
-        const int shown = static_cast<int>(static_cast<float>(r.value) * count + 0.5f);
+        const std::int64_t shown =
+            static_cast<std::int64_t>(static_cast<double>(r.value) * count + 0.5);
         const float coin_dx = kKkCoinX - kKkRowX;
         const float val_dx = kKkValX - kKkRowX;
         if (r.star) {
@@ -12462,8 +12528,8 @@ void ResultsScreen::render_impl(App& app) {
             // `1-(1-b)^2` ease over the same `ed(1)` clock as the LINEAR
             // star value (`this.exp` = `Math.round(this.B3a*b)`, `B3a` =
             // `Hi.ap` exp). The port rendered the gold value STATIC.
-            const int money_shown = static_cast<int>(
-                static_cast<float>(money_reward_) * dialog_ease_out(count) + 0.5f);
+            const std::int64_t money_shown = static_cast<std::int64_t>(
+                static_cast<double>(money_reward_) * dialog_ease_out(count) + 0.5);
             draw_ui_label(app, rx + 60.0f, ry - 16.0f, 120.0f, 32.0f,
                           std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
                           0.79f * slide, 0.84f * slide);
@@ -12491,8 +12557,8 @@ void ResultsScreen::render_impl(App& app) {
         // (`Or.align` L2088 `Qw.C(el.node.ya - Qw.za())`). `Lr.ZMa` (L2078)
         // passes `oc.OY` only to the `goldPrize` row, so this is row 0.
         if (i == 0 && prize_ruby_ > 0) {
-            const int ruby_shown =
-                static_cast<int>(static_cast<float>(prize_ruby_) * count + 0.5f);
+            const std::int64_t ruby_shown = static_cast<std::int64_t>(
+                static_cast<double>(prize_ruby_) * count + 0.5);
             (void)try_draw_atlas_button(app, "ruby", rx + coin_dx - 66.0f, ry, 40.0f,
                                         40.0f, slide);
             draw_ui_label(app, rx + coin_dx - 252.0f, ry - 16.0f, 160.0f, 32.0f,
