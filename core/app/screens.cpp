@@ -10342,17 +10342,85 @@ void FightScreen::push_callout_element(int side, int type, int value) {
     }
     el->count = life;
     el->value = value;
-    static bool logged[6] = {};
-    if (type >= 0 && type < 6 && !logged[type]) {
-        logged[type] = true;
-        std::fprintf(stdout, "[callout] HUD side=%d type=%d value=%d life=%d\n",
-                     side, type, value, life);
+    el->born_f = callout_sim_frame_;
+    // [callout-probe] For BOTH a PLAYER-landed and an ENEMY-landed hit print
+    // the callout `side` (the `Sf.strike` recipient `b`), the JS panel it maps
+    // to (`Sf.Id` = the player/left panel, `Sf.je` = the enemy/right), the
+    // `Gr.addElement` spawn/target x (`Ix.Pp` = the `pe==0?0:N.width` edge /
+    // `Ix.y_` = `pe==0?400:-400`) and the `Gr.Qq` lifetime. One line per
+    // (side, type) so the proof is a fixed table (no flood).
+    static bool logged[2][6] = {};
+    if (side >= 0 && side <= 1 && type >= 0 && type < 6 && !logged[side][type]) {
+        logged[side][type] = true;
+        const char* src = (type == 3) ? "pCa=Combo.Time"
+                        : (type == 4) ? "R9a=HotGroundTimer.Time"
+                                      : "u9a=Announcements.Time";
+        std::fprintf(stdout,
+                     "[callout-probe] side=%d panel=%s type=%d value=%d "
+                     "life=%d born_f=%d last_f=%d spawn_x=%.1f target_x=%.1f "
+                     "js=%s\n",
+                     side,
+                     side == 0 ? "Sf.Id(player,left)" : "Sf.je(enemy,right)",
+                     type, value, life, callout_sim_frame_,
+                     callout_sim_frame_ + life + 60,
+                     static_cast<double>(side == 0 ? 0.0f : kViewW),
+                     static_cast<double>(side == 0 ? 400.0f : -400.0f), src);
         std::fflush(stdout);
+    }
+}
+
+// JS `Gr.azb` (@1057251) + `Ix.move` (@1057918): ONE sim-frame tick over the
+// per-side `Gr.Gu` element lists. `azb`:
+//   `l_a(d) && (d.count>0 ? (d.vga=!1, !d.move() || d.type==4&&v.on()!=1 ||
+//      (d.vga=!0, --d.count==0 && (d.fp=!0, d.time=0)))
+//     : (d.vga=!1, d.move() && a.push(d)))`
+// then every element whose `move()` returned `a==1` is removed (`J.remove`).
+// `move()` adds `L.K.sk.Bm` (the fixed frame step) to `time`, sets
+// `a = min(1, time/.5)` and returns `a==1`. So: while the slide is unfinished
+// `count` is untouched; once landed `--count`; at 0 -> `fp/time=0` (the `dc.KK`
+// retract); the element is dropped when the retract lands. THIS is the
+// fixed-step tick (`update_impl`); `render_impl` only replays the stored clock.
+void FightScreen::tick_callouts() {
+    constexpr float kSlide = 0.5f;  // `Ix.move` `.5`
+    for (int side = 0; side < 2; ++side) {
+        ComboTracker& tr = combo_callout_[side];
+        for (std::size_t i = 0; i < tr.elements.size();) {
+            ComboElement& e = tr.elements[i];
+            e.time += 1.0f / 60.0f;  // `L.K.sk.Bm` (the fixed step)
+            const float a = std::min(1.0f, e.time / kSlide);
+            const bool landed = (a >= 1.0f);
+            if (e.count > 0) {
+                if (landed && --e.count == 0) {
+                    e.fp = true;
+                    e.time = 0.0f;
+                }
+                ++i;
+            } else if (landed) {
+                // `Gr.azb` `J.remove(this.Gu,c)`: the retract landed. The
+                // element lived `Qq(type)` count frames after the 0.5 s slide
+                // plus the 0.5 s `dc.KK` retract -> `life + 60` fixed steps.
+                static bool life_logged[2][6] = {};
+                if (e.type >= 0 && e.type < 6 && !life_logged[side][e.type]) {
+                    life_logged[side][e.type] = true;
+                    std::fprintf(stdout,
+                                 "[callout-life] side=%d type=%d born_f=%d "
+                                 "last_f=%d span_frames=%d\n",
+                                 side, e.type, e.born_f, callout_sim_frame_,
+                                 callout_sim_frame_ - e.born_f);
+                    std::fflush(stdout);
+                }
+                tr.elements.erase(tr.elements.begin() +
+                                  static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
     }
 }
 
 void FightScreen::update_impl(float dt) {
     if (fight_ == nullptr) return;
+    ++callout_sim_frame_;  // fixed-step frame for the `[callout-life]` span
     // Sensei dialog modal gate (quest engine `He` records): a dialog queued
     // while the fight is up owns the input (`He` `IgnoreBack="1"`), so the
     // fight's own input path is skipped until its plate fires. The Dojo/Map/
@@ -10478,6 +10546,15 @@ void FightScreen::update_impl(float dt) {
     for (const sf2::scene::CalloutSignal& s : fight_->take_callouts()) {
         push_callout_element(s.side, s.type, s.value);
     }
+    // `Gr.ia`/`Gr.azb` are SIM-frame ticks (JS: the fight model's `aa` runs the
+    // element slide + `--count` once per 60 Hz frame). The tick MUST NOT live
+    // in `render_impl`: the port's present loop is uncapped (`--hidden` /
+    // vsync-off) — `App::render_frame` runs once per PRESENT frame while
+    // `App::update_fixed` is the fixed step — so ticking in the render made the
+    // plates vanish after ~`present_rate` frames instead of 120 sim frames
+    // (reported: "too fast"). Ticked here, once per fixed step, `Ix.move`'s
+    // 0.5 s slide + `count` frames + the 0.5 s retract are rate-independent.
+    tick_callouts();
     // [child-model probe] The shipped fights reach 0 `<CreatePlayer>` rows
     // (the action-kind census), so `SF2_CHILD_PROBE=1` drives one synthetic
     // create -> render -> delete cycle through the EXACT dispatch path and
@@ -11452,9 +11529,10 @@ void FightScreen::render_impl(App& app) {
                 const float panel_x = (side == 0) ? panel_player_x : panel_enemy_x;
                 for (std::size_t i = 0; i < tr.elements.size();) {
                     ComboElement& e = tr.elements[i];
-                    // `Ix.move`: time += frame; a=min(1,time/.5);
-                    // b = fp ? (1-a)^2 (`KK`) : 1-(1-a)^2 (`Ln`).
-                    e.time += 1.0f / 60.0f;
+                    // `Ix.move` is REPLAYED here, never ticked: `update_impl`
+                    // -> `tick_callouts()` advances `time` once per fixed
+                    // 60 Hz step (`L.K.sk.Bm`), so the slide is present-rate
+                    // independent. `b` = `fp ? KK(1-a) : Ln(a)`.
                     const float a = std::min(1.0f, e.time / kSlide);
                     const float b = e.fp ? (1.0f - a) * (1.0f - a)
                                          : 1.0f - (1.0f - a) * (1.0f - a);
@@ -11469,9 +11547,9 @@ void FightScreen::render_impl(App& app) {
                     {
                         // One-shot per type: the JS-exact geometry (`Pp`, the
                         // land `y_` mapped to screen, `d`).
-                        static bool hud_dbg[6] = {};
-                        if (e.type >= 0 && e.type < 6 && !hud_dbg[e.type]) {
-                            hud_dbg[e.type] = true;
+                        static bool hud_dbg[2][6] = {};
+                        if (e.type >= 0 && e.type < 6 && !hud_dbg[side][e.type]) {
+                            hud_dbg[side][e.type] = true;
                             std::fprintf(stdout,
                                          "[callout-hud] side=%d type=%d spawn_x=%.1f "
                                          "land_x=%.1f ey=%.1f stack_y=%.1f\n",
@@ -11521,18 +11599,8 @@ void FightScreen::render_impl(App& app) {
                                                std::to_string(e.value), nscale, lr, lg,
                                                lb, 1.0f);
                     }
-                    // `Gr.azb`: while sliding (`a<1`) `count` is untouched;
-                    // once landed `count--`; at 0 -> `fp=true, time=0`.
-                    if (e.count > 0) {
-                        if (a >= 1.0f && --e.count == 0) {
-                            e.fp = true;
-                            e.time = 0.0f;
-                        }
-                    } else if (a >= 1.0f) {
-                        tr.elements.erase(tr.elements.begin() +
-                                          static_cast<std::ptrdiff_t>(i));
-                        continue;
-                    }
+                    // The `Gr.azb` state machine (`--count` / `fp` / `J.remove`)
+                    // is `tick_callouts()` (the fixed step). Pure draw here.
                     ++i;
                 }
             }

@@ -859,15 +859,26 @@ private:
         float spawn_x = 0.0f;  // `Ix.Pp`
         float target_x = 0.0f; // `Ix.y_` (JS-local ±400)
         float stack_y = 200.0f;// `d` at spawn (JS-local 200 + Gu.length*100)
+        // Sim frame at spawn: with the fixed-step tick the element is removed
+        // exactly `Qq(type) + 60` fixed steps later (30 slide + `count` hold
+        // + 30 `dc.KK` retract). `[callout-life]` prints the observed span.
+        int born_f = 0;
     };
     struct ComboTracker {
         int last_signal = 0;                  // `combos_announced` high-water
         std::vector<ComboElement> elements;   // `Gr.Gu`
     };
     ComboTracker combo_callout_[2];           // [0]=player, [1]=enemy
+    int callout_sim_frame_ = 0;               // the fixed-step frame counter
     // Appends one `Gr.Gu` element for a drained `CalloutSignal` (JS
     // `Gr.addElement` + `Hx.init`). Defined in screens.cpp.
     void push_callout_element(int side, int type, int value);
+    // JS `Gr.azb` + `Ix.move` — advances every `Gr.Gu` element one SIM frame
+    // (`count--`, `fp`, `J.remove`). Called once per fixed step from
+    // `update_impl`; the render only replays the stored clock (`Ix.move`'s
+    // 0.5 s slide + `Qq` life + the 0.5 s retract must not depend on the
+    // uncapped present rate). Defined in screens.cpp.
+    void tick_callouts();
 };
 
 // The battle results — native results flow (JS `v.kD` L622187 -> the

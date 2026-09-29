@@ -5250,13 +5250,36 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         battle_first_hit_ = true;
         battle_first_by_player_ = atk.is_player;
     }
-    // HUD callouts (JS `ca` L200998 `this.ha.Gzb(b.aI,b.Zi,b.target,b.ep,
-    // b.Uq,b.se,b.block,b.Ub)` -> `Sf.strike` L2038). The callouts land on
-    // the DEFENDER's `Gr`: `h&&b.yvb()` = shock (`Ub`), `f&&b.Uub()` =
-    // critical (`se`), then the `g?b.UYa():` else branch fires `d&&b.cvb()`
-    // (first_strike, `ep`) and `e&&b.fvb()` (head_hit, `Uq`). Note shock and
-    // critical are evaluated BEFORE the block test; first_strike/head_hit
-    // only on the unblocked branch.
+    // HUD callouts (JS `ca` @200999 `this.ha.Gzb(b.aI,b.Zi,b.target,b.ep,
+    // b.Uq,b.se,b.block,b.Ub)` -> `Sf.strike` @1049901). VERBATIM, @1049940:
+    //   `strike(a,b,c,d,e,f,g,h){ this.Id!=null&&this.je!=null&&(
+    //      b=c==0?this.je:this.Id, c=c==0?this.Id:this.je, h&&b.yvb(),
+    //      f&&b.Uub(), g?b.UYa():(b.Vma(a), d&&b.cvb(), e&&b.fvb(),
+    //      c.Lga=!1)) }`
+    // so the callout/damage recipient `b` is the panel OPPOSITE `c==0`: `c`
+    // is the 3rd arg = `Bb.target`, set by the STRIKING model @259273
+    // (`this.Bb.target=this.parameters.qb?0:1`; `qb` = the PLAYER flag,
+    // `v.cw` @618981 `a.qb=!0`). `Sf.Id`/`Sf.je` = `new lk(0)`/`new lk(1)`
+    // (Sf ctor tail @~1047900) = the LEFT/RIGHT panels (`Sf.layout` @1048949
+    // `Id.node.C(cx-520*c*e)`, `je.node.C(cx+520*c*e)`) = the PLAYER/ENEMY
+    // panels (`Sf.init` @1048190 `wI(this.Id,b,d)`, caller @207144
+    // `Ezb(round,this.kc,this.Zb,..)`, `kc` = the player warrior). The
+    // recipient TAKES the loss (`b.Vma(a)` -> `Br.KDa` @1077040) and carries
+    // the plates, i.e. the plate is on the VICTIM's panel:
+    //   atk = PLAYER -> target 0 -> recipient `je` = enemy  = HUD side 1
+    //   atk = ENEMY  -> target 1 -> recipient `Id` = player = HUD side 0
+    // hence `dside = def.is_player ? 0 : 1` (side 0 = player/left panel,
+    // 1 = enemy/right). Oracle-verified: `reference/traces/oracle_matrix/
+    // fight_hit.png` is the raw JS game, a PLAYER punch vs the passive
+    // BOSS_LYNX (MANIFEST: "punch landed (FIRST STRIKE!)", input
+    // "punch (1135,540)"): the plate anchors at x~732 of 1280 (its
+    // left-aligned label centres at x~794) = the `je` (enemy/victim) panel;
+    // the `Id` panel would anchor at x~549.
+    // `h&&b.yvb()` = shock (`Ub`), `f&&b.Uub()` = critical (`se`), then the
+    // `g?b.UYa():` else branch fires `d&&b.cvb()` (first_strike, `ep`) and
+    // `e&&b.fvb()` (head_hit, `Uq`). Note shock and critical are evaluated
+    // BEFORE the block test; first_strike/head_hit only on the unblocked
+    // branch.
     {
         const int dside = def.is_player ? 0 : 1;  // `c==0?Sf.je:Sf.Id`
         if (rec.shock) callouts_.push_back({dside, 5, 0});        // `yvb`
@@ -5267,10 +5290,12 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         }
         if (!callouts_.empty()) {
             std::fprintf(stdout,
-                         "[callout] F%d %s announc side=%d shock=%d crit=%d "
-                         "first=%d head=%d\n",
-                         frame_, def.name.c_str(), dside, rec.shock ? 1 : 0,
-                         hit_critical ? 1 : 0,
+                         "[callout] F%d hitter=%s(%s) victim=%s(%s) side=%d "
+                         "shock=%d crit=%d first=%d head=%d\n",
+                         frame_, atk.name.c_str(),
+                         atk.is_player ? "player" : "enemy", def.name.c_str(),
+                         def.is_player ? "player" : "enemy", dside,
+                         rec.shock ? 1 : 0, hit_critical ? 1 : 0,
                          (rec.first_hit && !hit_blocked) ? 1 : 0,
                          (rec.head_hit && !hit_blocked) ? 1 : 0);
             std::fflush(stdout);
