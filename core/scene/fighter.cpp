@@ -1024,6 +1024,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // advances `mo` by `Tx` per step with HD()==1). MidFrames=2 -> 3.
     sub_ = std::max(1, (move.mid_frames + 1) * 1);
     subframe_ = 0;
+    sub_frac_ = 0.0f;  // [FIX slow-mo] JS-exact start sample (frac 0)
 
     // The buffered Tap is NOT consumed here. JS `Okb` (L506:
     // `Kl.reset(); Kl.Ptb(a); Kl.rwa()`) is called ONLY from the AI path
@@ -1575,15 +1576,33 @@ void Fighter::advance(float dt) {
     // [FIX finishing-blow slow-mo — JS `de.ia` L248219] The GLOBAL timescale
     // `v.on()` divides the animator rate (`a=1/v.on()`), and the per-fighter
     // KT channel multiplies it. The old clamp `[1,4]` made a sub-1 rate
-    // STRUCTURALLY impossible, so `v.YT(v.kNa)` (on()=kNa=7) could never
-    // slow the clip. Now the effective rate is `time_scale_ * anim_rate_`:
-    // at 1/7 the animator advances one clip sub-step every 7 fight frames.
+    // STRUCTURALLY impossible, so `v.YT(v.kNa)` (on()=kNa) could never slow
+    // the clip. The old code then fed `int(scale_acc_)` INTEGER sub-steps:
+    // at 1/7 that is `0,0,0,0,0,0,1` — the pose froze six frames and jumped
+    // one subframe on the seventh (the reported jerky slow-mo).
+    //
+    // [FIX slow-mo smoothness] JS-exact shape: the animated entities get a
+    // FRACTIONAL time delta (`Qi.ia` L248219 `c[b].update(1/60 * 1/v.on())`,
+    // `WD.WL` L427772 `d.animate.ia(L.K.sk.Bm * 1/v.on())`), not an integer
+    // step count. So: the INTEGER part of the accumulator fires the discrete
+    // `advance_step()` (frame/interval/action dispatch — JS `Te.ia` `Xh++`),
+    // and the FRACTIONAL remainder is fed to the pose sampler as the
+    // sub-frame position (`sub_frac_`), giving a smooth fractional ramp.
     scale_acc_ += time_scale_ * anim_rate_;
     int steps = static_cast<int>(scale_acc_);
     if (steps < 0) steps = 0;
     if (steps > 64) steps = 64;
     scale_acc_ -= static_cast<float>(steps);
+    sub_frac_ = 0.0f;  // integer samples are JS-exact (frac 0)
     for (int i = 0; i < steps; ++i) advance_step();
+    sub_frac_ = scale_acc_;
+    // No integer step this frame (the slow-mo case): re-pose at the
+    // fractional sub-frame position so the motion keeps advancing smoothly
+    // instead of holding the previous pose.
+    if (steps == 0 && sub_frac_ > 0.0f && !not_animation_ &&
+        current_move_ != nullptr && current_clip_ != nullptr) {
+        sample_current();
+    }
 }
 
 void Fighter::advance_step() {
@@ -1803,8 +1822,18 @@ void Fighter::sample_current() {
         // `hd()`), not the `b6a` facing lock.
         sample(*current_clip_, move_frame_, world_x_, world_y_, clip_mirror_,
                /*interp=*/true, current_move_ != nullptr ? current_move_->first_frame : 0,
-               playhead_);
+               playhead_, sub_frac_);
     }
+}
+
+// [FIX finishing-blow slow-mo] The continuous clip position in clip frames:
+// the discrete clip frame (`move_frame_`) plus the fractional subframe
+// position. At a JS-exact integer sample `sub_frac_ == 0` and this equals
+// `move_frame_ + subframe_/sub_`; during the slow-mo it ramps smoothly.
+float Fighter::anim_time() const {
+    if (sub_ <= 0) return static_cast<float>(move_frame_);
+    return static_cast<float>(move_frame_) +
+           (static_cast<float>(subframe_) + sub_frac_) / static_cast<float>(sub_);
 }
 
 // JS `ia` (L499) clip-less cadence: with `parameters.QD` (NotAnimation) the
@@ -1918,6 +1947,7 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     sub_ = std::max(1, (move.mid_frames + 1) * 1);  // JS `Gka`: (XJ+1)*HD
     subframe_ = 0;
+    sub_frac_ = 0.0f;  // [FIX slow-mo] JS-exact start sample (frac 0)
     last_action_frame_ = -1;  // the `cX` sentinel (first `vp` sees a change)
     ended_move_ = nullptr;
     sample_current();  // the first `Te.eda` pose
@@ -2196,7 +2226,7 @@ void Fighter::build_prepend(const MoveDef& move) {
 
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      float y, int mirror_sign, bool interp, int first_frame,
-                     int playhead) {
+                     int playhead, float sub_frac) {
     if (clip.frames.empty()) {
         return;
     }
@@ -2220,8 +2250,25 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
 
     // [FIX root-motion] JS `wu` Bezier (Te.Gka/wu.f6a L1284-1286):
     // P0=mid(a,b), P1=b, P2=mid(b,c) at t=(mo+1)/UM. Linear over-scales.
+    //
+    // [FIX finishing-blow slow-mo] `sub_frac` (JS: the fractional dt the
+    // animated lists get, `Qi.ia` L248219 / `WD.WL` L427772) shifts `t`
+    // CONTINUOUSLY from the JS integer sample `(subframe_+1)/sub_i` toward
+    // the next sample. When the shifted `t` passes the span end (`t_num >
+    // sub_i`) the slot window rolls to the NEXT play-buffer span
+    // (`play + 1`), exactly where the JS `mo` wrap lands, so the pose ramps
+    // smoothly across clip frames instead of holding at the JS span end.
     const int sub_i = std::max(1, sub_);
-    const float t_bez = (static_cast<float>(subframe_) + 1.0f) / static_cast<float>(sub_i);
+    int play = playhead;  // the play-buffer slot the Bezier window starts on
+    float t_num = static_cast<float>(subframe_) + 1.0f;
+    if (sub_i > 1 && sub_frac > 0.0f) {
+        t_num += sub_frac;
+        if (t_num > static_cast<float>(sub_i)) {
+            t_num -= static_cast<float>(sub_i);
+            ++play;  // roll to the next span (JS `mo` wrap)
+        }
+    }
+    const float t_bez = t_num / static_cast<float>(sub_i);
     const float omt = 1.0f - t_bez;
     const float w0 = omt * omt;
     const float w1 = 2.0f * omt * t_bez;
@@ -2250,7 +2297,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     auto ctl = [&](int rel, std::size_t i, float& ox, float& oy, float& oz) -> bool {
         int abs_slot;
         if (interp) {
-            abs_slot = playhead + rel;
+            abs_slot = play + rel;
             if (abs_slot < 2) {
                 if (i >= nclip || prepend_.size() != nclip * 6) return false;
                 const std::size_t u = (static_cast<std::size_t>(abs_slot) * nclip + i) * 3;

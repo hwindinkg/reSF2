@@ -3385,6 +3385,64 @@ void FightController::tick_finish_slowmo() {
             finish_frozen_ = nullptr;
         }
     }
+
+    // [probe, authorised] `SF2_SLOWMO_PROBE=1`: the per-sim-frame animation
+    // time of the PLAYER during the finishing-blow slow-mo, plus the
+    // smoothness assertion. The slow-mo rate is `time_scale_ * anim_rate_`
+    // (= `1/v.on()` = 1/7 for the shipped SlowMode Value=7) subframes per
+    // sim frame, so `anim_time()` (clip frames, `move_frame_ +
+    // (subframe_+sub_frac_)/sub_`) must ramp by a CONSTANT
+    // `rate/sub_` per frame. The old integer-`steps` code froze the pose
+    // 6 of every 7 frames (`dt == 0`) then jumped — the assertion fails on
+    // any `dt <= 0`.
+    static const bool slowmo_probe_on = [] {
+        const char* e = std::getenv("SF2_SLOWMO_PROBE");
+        return e != nullptr && std::atoi(e) != 0;
+    }();
+    static bool smp_run = false;
+    static float smp_prev = 0.0f;
+    static float smp_min = 0.0f, smp_max = 0.0f;
+    static float smp_expect = 0.0f;
+    static int smp_n = 0, smp_bad = 0;
+    if (!slowmo_probe_on) return;
+    const float t = player_.fighter.anim_time();
+    float d = 0.0f;
+    if (slowmo_on_) {
+        if (!smp_run) {
+            smp_run = true;
+            smp_min = 1.0e9f;
+            smp_max = -1.0e9f;
+            smp_n = 0;
+            smp_bad = 0;
+            const float sub = static_cast<float>(
+                player_.fighter.sub() > 0 ? player_.fighter.sub() : 1);
+            smp_expect = player_.fighter.time_scale() *
+                         player_.fighter.anim_rate() / sub;
+        } else {
+            d = t - smp_prev;
+            if (d < smp_min) smp_min = d;
+            if (d > smp_max) smp_max = d;
+            if (!(d > 0.0f) || std::fabs(d - smp_expect) > 0.01f) ++smp_bad;
+        }
+        smp_prev = t;
+        ++smp_n;
+        std::fprintf(stdout,
+                     "[slowmo-probe] F%d on()=%.1f sub=%d t=%.5f dt=%.5f\n",
+                     frame_, static_cast<double>(game_speed_),
+                     player_.fighter.sub(), static_cast<double>(t),
+                     static_cast<double>(d));
+        std::fflush(stdout);
+    } else if (smp_run) {
+        smp_run = false;
+        const bool ok = (smp_bad == 0 && smp_min > 0.0f && smp_n > 1);
+        std::fprintf(stdout,
+                     "[slowmo-probe] SUMMARY frames=%d expect_dt=%.5f "
+                     "min_dt=%.5f max_dt=%.5f stair_steps=%d %s\n",
+                     smp_n, static_cast<double>(smp_expect),
+                     static_cast<double>(smp_min), static_cast<double>(smp_max),
+                     smp_bad, ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+    }
 }
 
 // JS `ca.uhb`'s prediction `b = a.Pd.bCa(b,!1,!1,null,null)` (L211214): the

@@ -471,6 +471,14 @@ public:
     // Pose-trace accessors only — no behavior change.
     int subframe() const { return subframe_; }
     int sub() const { return sub_; }
+    // [FIX finishing-blow slow-mo] The FRACTIONAL subframe position in
+    // [0, 1): the sub-frame progress toward the next integer subframe
+    // (`sub_frac_`). 0 at a JS-exact integer sample; during the slow-mo
+    // (`anim_rate_ < 1`) it carries the fractional part the old integer-only
+    // `steps` accumulator threw away. `anim_time()` is the resulting
+    // continuous clip position in clip frames (the probe ramp).
+    float subframe_frac() const { return sub_frac_; }
+    float anim_time() const;
     int facing() const { return facing_; }
     // JS `Te.FX` / `hd()` (L547): the CLIP MIRROR (±1). Distinct from the
     // `b6a` facing lock above; the impulse mirror (`wd.Kwb` L509) uses THIS.
@@ -630,9 +638,14 @@ public:
     // control points are buffer [playhead, playhead+1, playhead+2]. With
     // `interp=false` the legacy static mapping (frame, frame+1, frame+2) is
     // kept for the dojo probe/bag poses.
+    // [FIX finishing-blow slow-mo] `sub_frac` is the fractional sub-frame
+    // position in [0,1) (JS: the animated lists get a fractional dt
+    // `1/60 * 1/v.on()`; `Qi.ia` L248219 / `WD.WL` L427772). It shifts the
+    // Bezier parameter continuously between the JS integer samples so the
+    // slow-mo pose ramps instead of stepping.
     void sample(const sf2::data::anim_clip& clip, int frame, float x, float y,
                 int mirror_sign, bool interp = false, int first_frame = 0,
-                int playhead = 0);
+                int playhead = 0, float sub_frac = 0.0f);
 
     // Flat fill color (RGB, 0..255).
     void set_color(std::uint32_t rgb) {
@@ -821,6 +834,10 @@ private:
     // at `subframe_/sub_`.
     int sub_ = 1;
     int subframe_ = 0;
+    // [FIX finishing-blow slow-mo] Fractional sub-frame progress in [0,1)
+    // toward the next integer subframe (see `subframe_frac()`/`anim_time()`).
+    // 0 at every JS-exact integer sample; carries the slow-mo remainder.
+    float sub_frac_ = 0.0f;
     // [FIX stretched mesh — ragdoll solver] The game's `Al` Verlet solver
     // state (JS `Vc.ma`/`Vc.mf`): current and previous posed position per
     // bone, in the CLIP's model space (before the COM/world placement).
