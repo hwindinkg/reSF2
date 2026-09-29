@@ -859,9 +859,11 @@ private:
         float spawn_x = 0.0f;  // `Ix.Pp`
         float target_x = 0.0f; // `Ix.y_` (JS-local ±400)
         float stack_y = 200.0f;// `d` at spawn (JS-local 200 + Gu.length*100)
-        // Sim frame at spawn: with the fixed-step tick the element is removed
-        // exactly `Qq(type) + 60` fixed steps later (30 slide + `count` hold
-        // + 30 `dc.KK` retract). `[callout-life]` prints the observed span.
+        // Sim frame at spawn: the `[callout-life]` log prints the OBSERVED
+        // `Gr.azb` span (`J.remove` frame - spawn frame) — for `u9a`=60 it is
+        // 118 fixed steps (the 30-step slide, whose landing tick takes the
+        // first `--count`, then `life-1`, then the 29 steps to the retract's
+        // landing tick, which IS the removal).
         int born_f = 0;
     };
     struct ComboTracker {

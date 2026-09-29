@@ -10357,12 +10357,10 @@ void FightScreen::push_callout_element(int side, int type, int value) {
                                       : "u9a=Announcements.Time";
         std::fprintf(stdout,
                      "[callout-probe] side=%d panel=%s type=%d value=%d "
-                     "life=%d born_f=%d last_f=%d spawn_x=%.1f target_x=%.1f "
-                     "js=%s\n",
+                     "life=%d born_f=%d spawn_x=%.1f target_x=%.1f js=%s\n",
                      side,
                      side == 0 ? "Sf.Id(player,left)" : "Sf.je(enemy,right)",
                      type, value, life, callout_sim_frame_,
-                     callout_sim_frame_ + life + 60,
                      static_cast<double>(side == 0 ? 0.0f : kViewW),
                      static_cast<double>(side == 0 ? 400.0f : -400.0f), src);
         std::fflush(stdout);
