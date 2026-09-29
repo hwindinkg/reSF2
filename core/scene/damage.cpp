@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "xml_doc.hpp"
 
@@ -907,6 +909,18 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
     }
     if (d < 0.0f) {
         d = warrior_rating(b, a, side2_attrs, fp);  // `d<0 -> b.JBa(a,k)`
+    }
+    // `--map-difficulty-probe` observation hook (`SF2_RATING_WALK=1`): the two
+    // resolved side ratings the returned ratio is built from (`d/c`) plus each
+    // side's effective `IY` row count (`pAa` L1204's kept-row list — 0 makes
+    // `pAa` collapse to `+/-FLT_MAX` and zeroes the corresponding rating).
+    if (const char* rw = std::getenv("SF2_RATING_WALK")) {
+        if (*rw != '\0' && *rw != '0') {
+            std::fprintf(stdout, "[walk] c=%.6f d=%.6f iy_a=%zu iy_b=%zu\n",
+                         static_cast<double>(c), static_cast<double>(d),
+                         a.iy.size(), b.iy.size());
+            std::fflush(stdout);
+        }
     }
     // `t=b.clone(); x=a.clone(); t.Bua(k); x.Bua(h); t.attributes.get(n,q);
     // x.attributes.get(n,r)` (JS L728750-728752): the side lists are applied to

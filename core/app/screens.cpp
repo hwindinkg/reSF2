@@ -4698,9 +4698,23 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         const pugi::xml_node w = warriors.child("Warrior");
         if (!w) return out;
         {
-            // `xc.IY`: the warrior's own rows appended after `Default`'s
-            // (JS `pGa` L198; `stage_warrior_align` in modes.hpp).
-            const pugi::xml_node templates = root.child("Templates");
+            // `xc.IY`: the warrior's own rows appended after its `<Template>`'s
+            // resolved rows (JS `pGa` L198; `stage_warrior_align` in modes.hpp).
+            //
+            // The `<Templates>` section is NESTED: stages.xml has
+            // `<Stages><Zones>…</Zones><Warriors><Templates>…</Templates>…`
+            // (JS `ukb` L198: `this.cN=this.vG.A("Warriors").clone();
+            // this.cN.A("Templates")`), NOT a root sibling of `<Zones>`. Reading
+            // it as `root.child("Templates")` returned NULL, so `default_align`
+            // was always empty and `stage_warrior_align` never inherited:
+            // every templated enemy's `IY` collapsed to its own rows only, and
+            // an enemy with no own `<AttributesAlign>` (BOSS_HERMIT f0-4,
+            // BOSS_LYNX f1, both `<Warrior Template="Man_…">` only) shipped an
+            // EMPTY `iy`, which zeroes `pAa` (L1204: the kept-row min/max loop
+            // never runs) and hence `d` in `A8a` (ratio 0.0000, tier 0). See the
+            // chain analysis in modes.hpp `stage_warrior_align`.
+            const pugi::xml_node templates =
+                root.child("Warriors").child("Templates");
             out.align = sf2::scene::modes_detail::stage_warrior_align(w, templates);
             out.player_align = sf2::scene::modes_detail::default_align(templates);
         }

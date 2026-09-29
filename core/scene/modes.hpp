@@ -243,14 +243,40 @@ inline std::vector<StageWarrior::Delta> default_align(
     return out;
 }
 
-// JS `pGa` (L198) + `xc` parse (L191): the EFFECTIVE `<AttributesAlign>` rows
-// of a stage warrior. `pGa` appends the derived node's `<AttributesAlign>`
-// child to the base clone, so inherited rows come FIRST and the warrior's own
-// rows last; the whole `Templates` section carries exactly ONE such block
-// (`<Template Name="Default">`, the player/avatar base), so the resolved list
-// is `Default`'s rows + the warrior's own. `Ci.a5a` (L800) then keeps only the
-// max-`Priority` rows — which is how a per-warrior set overrides `Default`'s
-// (e.g. Dojo_Disciple's two `Priority="1"` rows).
+// JS `lzb`/`pGa` (L101849) + the `xc` parse (L191): the EFFECTIVE
+// `<AttributesAlign>` rows of a stage warrior.
+//
+// The chain (char offsets in reference/www/sf2.502f0946.js):
+//   * L198 `ur(d, g.Ze)` — a `<Warrior Template="T">` clones the resolved
+//     template object `T.Ze` (`nfa` L198), so it STARTS from the template's
+//     `IY`; L191 (`d=a.A("AttributesAlign") … b.IY.push(g)`) then APPENDS the
+//     Warrior node's own first `<AttributesAlign>` rows. Inherited FIRST, own
+//     LAST (no clear, so it is an append).
+//   * L198 `lzb` resolves a template's chain: `g = e.Os(a.Ze.node.clone())`
+//     (deep `Rb.clone`, L1261758) then `pGa(g, d.node)`; `T.Ze=ur(g, a.Ze)`.
+//   * L106212 `pGa` appends the derived node's `<AttributesAlign>` AFTER the
+//     cloned base's, and its removal guard is `a.attributes.get("AttributesAlign")`
+//     (an ATTRIBUTE lookup, always null) so the base block is never removed.
+//     `Rb.A(tag)` (L1259690) returns the FIRST child with that name, so
+//     `g.A("AttributesAlign")` is the BASE's block: the derived template's own
+//     rows are shadowed, and each chain level appends the base's rows again.
+//
+// Shipped stages.xml has exactly ONE `<AttributesAlign>` inside `<Templates>`
+// — `<Template Name="Default">`'s (offset 1058701; the other 345 blocks are on
+// Zone `<Warrior>` nodes) — and all 188 templates carry `Template="Default"`
+// (or a chain through it), so EVERY named template resolves to `Default`'s
+// rows. The recursion `res(T) = res(base) + [res(base)[0]]` therefore yields
+// 1..n copies of `Default`'s 7 rows per chain depth (Ascension_2→Ninja_…→Default
+// = 3 copies). `pAa` (L1204) only min/maxes over the kept rows, which is
+// duplicate-invariant, so this port keeps the one-copy form: `Default`'s rows +
+// the warrior's own. `Ci.a5a` (L800) then keeps only the max-`Priority` rows —
+// which is how a per-warrior set overrides `Default`'s (e.g. Dojo_Disciple's
+// two `Priority="1"` rows, or BOSS_LYNX f1's `1.008`/`0` pair at stages.xml).
+// `default_align` reads that same one-copy `Default` block.
+//
+// NOTE on the TEMPLATE source node: it must be `<Stages>/<Warriors>/<Templates>`
+// (JS L198 `this.vG.A("Warriors")…A("Templates")`), NOT a root sibling — see
+// the call site in `screens.cpp::battle_warrior`.
 inline std::vector<StageWarrior::Delta> stage_warrior_align(
     const pugi::xml_node& warrior, const pugi::xml_node& templates) {
     std::vector<StageWarrior::Delta> out;
