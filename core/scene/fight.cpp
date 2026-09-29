@@ -2786,6 +2786,79 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     std::fflush(stdout);
 }
 
+// JS `mfb` (L205855) `a &&` block: the multi-wave enemy advance. After a
+// PLAYER round-win (`Onb` L208997 -> `mfb(kc==wo.nB)`), `Rk++` and the enemy
+// is rebuilt from `pf[Rk]` (`Gf(this.Zb)` = a FRESH `wd`), positioned at the
+// enemy spawn (`this.Zb.position=this.location.B_`) and carrying the
+// rounds-won counter (`this.Zb.ng=b`). The per-wave items/subtype/template
+// chain (voice/align/name/avatar), tactic and `Wk` perk refs all come from
+// the new warrior. `NA()` (the +HealthRecovery heal + latch clear) already
+// ran in the caller, exactly as `mfb` opens with `this.NA()`.
+void FightController::spawn_next_enemy_wave() {
+    if (battle_.enemy_waves.empty()) return;
+    const int next = battle_.enemy_wave + 1;
+    if (next < 0 || next >= static_cast<int>(battle_.enemy_waves.size())) return;
+    battle_.enemy_wave = next;
+    const BattleParams::EnemyWave& wv =
+        battle_.enemy_waves[static_cast<std::size_t>(next)];
+    // JS `var b=this.Zb.ng` — the rounds-won counter carried to the new
+    // warrior. `Gf` makes a fresh `wd`, so everything else resets.
+    const int carried_ng = enemy_.rounds_won;
+    // The JS style meter lives on the HUD (`ha`), NOT the fresh `wd`:
+    // `mfb` runs `ha.reset(); ha.E1(a,b)` with a/b captured BEFORE the reset,
+    // so the per-side `Gr` meter survives the wave. Preserve it here (the
+    // port keeps it on the fighter).
+    const StyleMeter carried_style = enemy_.style;
+    // Per-wave `xc.IY`/`xc.voice` are read by `make_fighter` off `battle_`.
+    battle_.enemy_align = wv.align;
+    battle_.enemy_voice = wv.voice;
+    const float ex = battle_.enemy_spawn_x;  // JS `position=location.B_`
+    const float ey = battle_.enemy_spawn_y;
+    const int emax = battle_.max_hp > 0 ? battle_.max_hp : 100;
+    const sf2::scene::Model* wmodel =
+        enemy_model_provider_ ? enemy_model_provider_(next) : nullptr;
+    const std::string nm = wv.first_name.empty() ? enemy_.name : wv.first_name;
+    enemy_ = make_fighter(nm, false, ex, ey, emax,
+                          wv.weapon_subtype.empty() ? std::string("Fists")
+                                                    : wv.weapon_subtype,
+                          wv.owned, wv.not_ai, wv.not_animation, wmodel, {});
+    enemy_.rounds_won = carried_ng;  // JS `this.Zb.ng=b`
+    enemy_.style = carried_style;    // the HUD `Gr` meter survives `mfb`
+    // The new warrior's tactic (JS `Gf` -> `new wd(a)` reads the warrior's
+    // `Gc`); mirror `apply_mode_setup`'s enemy tactic resolution.
+    if (!wv.tactic.empty() && enemy_.ai != nullptr && tactic_defs_ != nullptr) {
+        const auto it = tactic_defs_->find(wv.tactic);
+        if (it != tactic_defs_->end()) enemy_.ai->set_tactic(&it->second);
+    }
+    // `Wk` (L811) enemy perk refs: warrior `<Perks>` then item `Oa` — the
+    // combined list `equipped_perks` built (AK-before-Oa order preserved).
+    perk_setup_.enemy_refs.clear();
+    for (const sf2::scene::ItemPerkRef& ir : wv.perk_refs) {
+        if (ir.name.empty()) continue;
+        perk_setup_.enemy_refs.push_back(ir);
+    }
+    // JS `wd.K0` (L505): a `NoRanged` equipped item means `K2 = +1`.
+    for (const auto& ow : wv.owned) {
+        if (ow.name == "NoRanged" || ow.subtype == "NoRanged" ||
+            ow.type == "NoRanged") {
+            enemy_.ranged_available = false;
+        }
+    }
+    sample_enemy_idle();
+    rebuild_body(player_, enemy_);
+    rebuild_body(enemy_, player_);
+    setup_bus(perk_setup_);
+    std::fprintf(stdout,
+                 "[fight] wave advance: Rk=%d/%d enemy='%s' power=%d items=%zu "
+                 "subtype=%s not_ai=%d not_anim=%d ng=%d hp=%.0f\n",
+                 battle_.enemy_wave, static_cast<int>(battle_.enemy_waves.size()),
+                 wv.first_name.c_str(), wv.warrior_power, wv.owned.size(),
+                 wv.weapon_subtype.empty() ? "Fists" : wv.weapon_subtype.c_str(),
+                 wv.not_ai ? 1 : 0, wv.not_animation ? 1 : 0,
+                 enemy_.rounds_won, static_cast<double>(enemy_.hp));
+    std::fflush(stdout);
+}
+
 // JS `xF` (L388): set the fight phase and sync the fighters' `Je` stance
 // (the move conditions' RoundStage reads it).
 void FightController::set_phase(fight_phase p) {
@@ -3181,17 +3254,28 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // Battle end: the winner reached `round.eL` (Rounds) — JS `Onb` (L411)
     // `a = wo.nB.ng >= round.eL`. Computed here (before the visibility gate)
     // because `Onb` chooses the `XF(!1)` branch by `a`.
-    const bool battle_end = w.rounds_won >= round_.length;
+    const bool a_end = w.rounds_won >= round_.length;
+    // JS `Onb` (L208997): `b = wo.nB.qb && Rk < pf.length-1` (the PLAYER won
+    // and enemy waves remain) and `c = Da.sR()` (the multi-wave fight,
+    // `Xs.length>1 && pT>1`). The series-advance branch `(!a&&c)||(a&&b)` runs
+    // `mfb` (the next wave) and NEVER ends the battle; only a plain `a` runs
+    // `bea(wo.nB)`. `spawn_wave = mfb(!c || c&&kc==wo.nB)`: a wave ALWAYS
+    // spawns when `!c`; when `c` it spawns only on a PLAYER round-win.
+    const int wave_count = static_cast<int>(battle_.enemy_waves.size());
+    const bool b_more = w.is_player && battle_.enemy_wave < wave_count - 1;
+    const bool c_multi = battle_.multi_wave;
+    const bool series_advance = (!a_end && c_multi) || (a_end && b_more);
+    const bool spawn_wave = !c_multi || w.is_player;
 
-    // JS `Onb` (L411): `this.Ta.XF(!1)` runs ONLY in the round-transition
-    // branches — `(!a&&c)||(a&&b)` (the mode-series advance) and the trailing
+    // JS `Onb` (L411): `this.Ta.XF(!1)` runs in the round-transition
+    // branches — `(!a&&c)||(a&&b)` (the series advance) and the trailing
     // `else` (the next round). The battle-end branch (`a ? this.bea(...)`,
     // L413) NEVER hides the view (`bea` has no `XF`), so the arena stays drawn
     // behind the `kk` results dialog. Hiding unconditionally here made the
     // Results screen render on black. It stays hidden through `ZK()`/`NA()`/
     // `Z2()` (the round-reset reposition) until `FNa` (L409) re-shows it, so
     // the reset never draws a visible teleport. The HUD keeps drawing.
-    if (!battle_end) {
+    if (!a_end || series_advance) {
         set_scene_visible(false);
     }
 
@@ -3207,9 +3291,9 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // the end-stance hold (the JS advances the round only when the end-stance
     // animation finishes: `kg` L387 `h4a` -> `Ewb` L404 `h9` -> `Onb` L411
     // `ZK(); NA(); Z2()`), so `banner_action::next_round` runs `NA` + `Z2` on
-    // the plate's expiry. A BATTLE-ENDING round raises no plate here:
-    // `end_battle` raises the result plate with the same `fu(1.166)` hold.
-    if (!battle_end) {
+    // the plate's expiry. A BATTLE-ENDING round with NO waves left raises no
+    // plate here: `end_battle` raises the result plate with the same hold.
+    if (!a_end || series_advance) {
         banner_kind result_plate = banner_kind::ko;
         const char* plate_name = "K.O.";
         if (result == round_result::timeout_win) {
@@ -3228,11 +3312,20 @@ void FightController::apply_round_result(round_result result, const FightFighter
     enter_end_stance();
     history_.push_back(oc);
 
-    if (battle_end) {
+    if (a_end && !series_advance) {
         // JS `bea` (L413): the battle end. `end_battle` raises the result
         // plate (fu(1.166)) and `battle_over_` flips only on its expiry.
         end_battle(w);
     } else {
+        if (series_advance) {
+            // JS `Onb` (L411): `mfb(!c || c&&kc==wo.nB)` (the wave spawn runs
+            // after `NA()` in `banner_expire`'s `next_round`) plus
+            // `c ? this.ha.lna() : this.kc.ng=0`. For a NON-multi-wave fight
+            // (`!c`, the Rounds=1 gauntlet) the PLAYER's counter resets so the
+            // next round can advance the wave again.
+            wave_advance_pending_ = spawn_wave;
+            if (!c_multi) player_.rounds_won = 0;  // JS `this.kc.ng=0`
+        }
         // The result plate holds the break; its expiry runs `NA()` + `Z2()`
         // through `banner_expire` (`banner_action::next_round`). There is no
         // host "Next" button in the JS: the round-break plate raised by `Z2`
@@ -6025,6 +6118,14 @@ void FightController::banner_expire() {
             // (`kg` L387 -> `h4a` L413 -> `Ewb` L404 -> `h9` -> `Onb`
             // L411): `ZK(); NA(); Z2()` � the round AUTO-advances.
             between_rounds_recover();
+            // JS `mfb` (L205855): the wave spawn runs AFTER `NA()` and before
+            // `this.xF(0); this.tx()` (the port's `round_start`). Only a
+            // PLAYER round-win in a multi-wave fight (or ANY win when `!c`)
+            // armed this in `apply_round_result`.
+            if (wave_advance_pending_) {
+                wave_advance_pending_ = false;
+                spawn_next_enemy_wave();
+            }
             round_start();
             break;
         case banner_action::end_battle:

@@ -1589,6 +1589,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // player win or the port mis-resolves the loss.
     bool boss_loss_probe = false;
     bool enemy_move_probe = false;
+    // --wave-probe: boot a MULTI-WAVE boss fight (default BOSS_LYNX/ZONE_1
+    // Fight 6, Rounds=3, 3 warriors) and KO each wave in turn, logging the
+    // per-round enemy WarriorPower/name/index — the JS `mfb` wave advance
+    // evidence. No OS input.
+    bool wave_probe = false;
+    // `--fight-ordinal N`: seed `pending_battle().fight_triple` to
+    // `zone|battle|N` so a probe boots the ladder's Nth `<Fight>` (the boss
+    // probes otherwise leave it unset -> `pending_fight_ordinal`=0 -> the
+    // ladder's FIRST fight). 0 = unset (historical behaviour).
+    int fight_ordinal = 0;
     // --mode-enemy-probe: boot a TOURNAMENT/SURVIVAL mode fight and verify a
     // non-Shin enemy's animation (stance clip starts), the `Skeleton`-lock
     // move list, the gear model, the round counting and the hittability after
@@ -2093,6 +2103,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             round_log = true;
         } else if (arg == "--boss-hit-probe") {
             boss_hit_probe = true;
+        } else if (arg == "--wave-probe") {
+            wave_probe = true;
+        } else if (arg == "--fight-ordinal" && i + 1 < argc) {
+            fight_ordinal = std::atoi(argv[++i]);
         } else if (arg == "--enemy-move-probe") {
             enemy_move_probe = true;
         } else if (arg == "--mode-enemy-probe") {
@@ -5601,6 +5615,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // a probe boots the ladder's Nth `<Fight>` instead of the first
+            // (`pending_fight_ordinal` parses the `|n` tail; 0 = unset).
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);
@@ -6414,6 +6435,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // a probe boots the ladder's Nth `<Fight>` instead of the first
+            // (`pending_fight_ordinal` parses the `|n` tail; 0 = unset).
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);  // uncapped deterministic stepping
@@ -6668,6 +6696,76 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const bool hit = ctl.debug_d3_probe(d3_probe_frame);
         app.shutdown();
         return hit ? 0 : 1;
+    } else if (wave_probe) {
+        // [probe] `--wave-probe`: boot a MULTI-WAVE boss fight (default
+        // BOSS_LYNX/ZONE_1 Fight 6: Rounds=3, 3 warriors 195/198/200) and KO
+        // each wave in turn, logging the live enemy WarriorPower/name/index —
+        // the JS `mfb` (L205855) wave-advance evidence. `--fight-ordinal`
+        // seeds the ladder index (default 6 = the final fight).
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("BOSS_LYNX") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned =
+                loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            const int ord = fight_ordinal > 0 ? fight_ordinal : 6;
+            pb.fight_triple =
+                pb.zone + "|" + pb.battle_name + "|" + std::to_string(ord);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);  // uncapped deterministic stepping
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        std::fprintf(stdout, "[waveprobe] boot battle=%s zone=%s ordinal=%d\n",
+                     app.pending_battle().battle_name.c_str(),
+                     app.pending_battle().zone.c_str(),
+                     fight_ordinal > 0 ? fight_ordinal : 6);
+        std::fflush(stdout);
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[waveprobe] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        for (int round = 0; round < 3; ++round) {
+            int guard = 0;
+            while (guard < 20000 && !fs->battle_over() && fs->probe_phase() != 2) {
+                glfwPollEvents();
+                app.run_one_frame();
+                ++guard;
+            }
+            if (fs->battle_over()) break;
+            std::fprintf(stdout,
+                         "[waveprobe] round %d: enemy='%s' power=%d wave=%d/%d "
+                         "enemy_ng=%d player_ng=%d\n",
+                         round + 1, fs->enemy_wave_name().c_str(),
+                         fs->enemy_warrior_power(), fs->enemy_wave_index(),
+                         fs->enemy_wave_count(), fs->enemy_rounds_won(),
+                         fs->player_rounds_won());
+            std::fflush(stdout);
+            const int before = fs->enemy_wave_index();
+            fs->probe_set_hp(1.0f, 0.0f);  // KO the enemy -> the player wins
+            guard = 0;
+            while (guard < 20000 && !fs->battle_over() &&
+                   fs->enemy_wave_index() == before) {
+                glfwPollEvents();
+                app.run_one_frame();
+                ++guard;
+            }
+        }
+        std::fprintf(stdout,
+                     "[waveprobe] final: wave=%d/%d enemy='%s' power=%d "
+                     "battle_over=%d player_ng=%d enemy_ng=%d\n",
+                     fs->enemy_wave_index(), fs->enemy_wave_count(),
+                     fs->enemy_wave_name().c_str(), fs->enemy_warrior_power(),
+                     fs->battle_over() ? 1 : 0, fs->player_rounds_won(),
+                     fs->enemy_rounds_won());
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (boss_hit_probe) {
         // [probe] `--boss-hit-probe`: boot a BOSS fight (default
         // BOSS_LYNX/ZONE_1), drive the player into range through the internal
@@ -6690,6 +6788,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // a probe boots the ladder's Nth `<Fight>` instead of the first
+            // (`pending_fight_ordinal` parses the `|n` tail; 0 = unset).
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);  // uncapped deterministic stepping
@@ -6938,6 +7043,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // a probe boots the ladder's Nth `<Fight>` instead of the first
+            // (`pending_fight_ordinal` parses the `|n` tail; 0 = unset).
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);
@@ -7024,6 +7136,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // a probe boots the ladder's Nth `<Fight>` instead of the first
+            // (`pending_fight_ordinal` parses the `|n` tail; 0 = unset).
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);

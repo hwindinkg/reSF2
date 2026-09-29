@@ -664,10 +664,21 @@ public:
     int enemy_rounds_won() const;
     int player_rounds_won() const;
     bool player_round_latch() const;
+    // [probe, authorised] MULTI-WAVE evidence (`--wave-probe`): the live `Rk`
+    // (current wave index), `pf.length` (the launched `<Fight>`'s warrior
+    // count), the current wave's raw `WarriorPower` and resolved FirstName.
+    // Read-only; no behaviour change.
+    int enemy_wave_index() const;
+    int enemy_wave_count() const;
+    int enemy_warrior_power() const;
+    std::string enemy_wave_name() const;
     // [probe] Force both fighters' live HP so the probe can KO a round.
     void probe_set_hp(float player_hp, float enemy_hp);
     // [probe] The live fight phase id (1=start_stance, 2=fight; -1 = none).
     int probe_phase() const;
+    // [probe, authorised] `--wave-probe`: the fight's battle-over flag (JS
+    // `ca.xJ`, set when the result plate expires). Read-only.
+    bool battle_over() const;
 
     // Test hooks for the input replay/verification harness (no behavior
     // change): the player's last decision and started-move count.
@@ -746,6 +757,10 @@ private:
     // boot-vs-Map comparison reads it back.
     std::vector<sf2::scene::OwnedItem> player_owned_;
     std::unique_ptr<sf2::scene::FightController> fight_;
+    // MULTI-WAVE (JS `Da.pf`): the per-wave enemy gear models resolved from
+    // the launched `<Fight>`'s `<Warrior>`s (`xc.cM` per wave). Served to the
+    // controller via `set_enemy_model_provider`; stable for the screen's life.
+    std::vector<sf2::scene::Model> enemy_wave_models_;
     bool results_pushed_ = false;
     // --- mode series state (JS `Da.sR` / `Onb` / `mfb`) ------------------
     // The zone-scoped mode battle + the parsed pools, the live cursor

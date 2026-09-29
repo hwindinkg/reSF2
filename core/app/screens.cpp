@@ -4695,6 +4695,9 @@ struct BattleWarriorInfo {
     std::string first_name;
     bool has_not_ai = false;
     bool has_not_animation = false;
+    // True when the requested `<Fight>`/`<Warrior>` actually resolved (the
+    // multi-wave builder stops when a warrior index is past the end).
+    bool has_warrior = false;
     std::string tactic;
     std::map<std::string, std::string> attrs;
     std::vector<std::string> items;
@@ -4756,7 +4759,8 @@ std::vector<sf2::scene::AlignDelta> to_align_deltas(
 }
 
 BattleWarriorInfo battle_warrior(const std::string& battle_name,
-                                 const std::string& zone_name, int fight_index = 0) {
+                                 const std::string& zone_name, int fight_index = 0,
+                                 int warrior_index = 0) {
     BattleWarriorInfo out;
     try {
         sf2::data::xml_doc doc;
@@ -4856,8 +4860,21 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             sf2::scene::FightParams::defaults().align_target_attributes);
         const pugi::xml_node warriors = fight.child("Warriors");
         if (!warriors) return out;
-        const pugi::xml_node w = warriors.child("Warrior");
+        // The Nth `<Warrior>` of the launched `<Fight>` (JS `Da.Xs`): the
+        // multi-wave pipeline (`vJa` L619534 -> `pf`) resolves EVERY warrior;
+        // index 0 keeps the historical first-warrior behaviour.
+        pugi::xml_node w;
+        {
+            int wi = 0;
+            for (const pugi::xml_node wc : warriors.children("Warrior")) {
+                if (wi++ == warrior_index) {
+                    w = wc;
+                    break;
+                }
+            }
+        }
         if (!w) return out;
+        out.has_warrior = true;
         {
             // `xc.IY`: the warrior's own rows appended after its `<Template>`'s
             // resolved rows (JS `pGa` L198; `stage_warrior_align` in modes.hpp).
@@ -9391,6 +9408,68 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     battle.enemy_align = to_align_deltas(bw.align);
     battle.player_align = to_align_deltas(bw.player_align);
     resolve_enemy_loadout(app(), bw, battle);
+    // MULTI-WAVE (JS `Da.Xs` -> `pf`, `vJa` L619534): resolve EVERY
+    // `<Warrior>` of the launched `<Fight>` into `battle.enemy_waves`, so the
+    // round-win advance (`mfb` L205855, driven by `Onb` L208997) can spawn the
+    // next one. `sR()` (L729205) gates the multi-wave round branch on
+    // `Xs.length>1 && pT>1`. The Tournament/Survival mode path keeps its own
+    // series pipeline (`resolve_mode_setup`/`begin_next_mode_fight`), so the
+    // list is built only for the normal stage battles (boss ladder,
+    // INTERMISSION, FINAL_BATTLE, Challenge, ...).
+    if (battle.type != "FightTournament" && battle.type != "FightSurvival") {
+        for (int wi = 0; wi < 16; ++wi) {
+            const BattleWarriorInfo bwi =
+                battle_warrior(battle_name_, app().pending_battle().zone,
+                               pending_fight_index, wi);
+            if (!bwi.has_warrior) break;
+            sf2::scene::BattleParams::EnemyWave wv;
+            {
+                sf2::scene::BattleParams tmp;
+                resolve_enemy_loadout(app(), bwi, tmp);
+                wv.owned = tmp.enemy_owned;
+                wv.weapon_subtype = tmp.enemy_weapon_subtype;
+            }
+            wv.not_ai = bwi.has_not_ai;
+            wv.not_animation = bwi.has_not_animation;
+            wv.voice = bwi.voice;
+            wv.item_names = bwi.items;
+            wv.align = to_align_deltas(bwi.align);
+            wv.first_name = bwi.first_name;
+            if (const auto av = bwi.attrs.find("Avatar"); av != bwi.attrs.end())
+                wv.avatar = av->second;
+            if (const auto wp = bwi.attrs.find("WarriorPower");
+                wp != bwi.attrs.end()) {
+                try {
+                    wv.warrior_power = std::stoi(wp->second);
+                } catch (const std::exception&) {
+                }
+            }
+            wv.tactic = bwi.tactic;
+            wv.perk_refs = equipped_perks(app(), assets, bwi).enemy_refs;
+            battle.enemy_waves.push_back(std::move(wv));
+        }
+        battle.enemy_wave = 0;
+        // `Da.sR()` (L729205): `Xs.length>1 ? pT>1 : false`.
+        battle.multi_wave =
+            battle.enemy_waves.size() > 1 && battle.rounds > 1;
+        std::fprintf(stdout,
+                     "[fight] waves: %zu warrior(s) resolved, multi_wave=%d "
+                     "(Rounds=%d)\n",
+                     battle.enemy_waves.size(), battle.multi_wave ? 1 : 0,
+                     battle.rounds);
+        for (std::size_t wi = 0; wi < battle.enemy_waves.size(); ++wi) {
+            const auto& wv = battle.enemy_waves[wi];
+            std::fprintf(stdout,
+                         "[fight]   wave %zu: name='%s' power=%d items=%zu "
+                         "subtype=%s tactic='%s'\n",
+                         wi, wv.first_name.c_str(), wv.warrior_power,
+                         wv.owned.size(),
+                         wv.weapon_subtype.empty() ? "Fists"
+                                                   : wv.weapon_subtype.c_str(),
+                         wv.tactic.c_str());
+        }
+        std::fflush(stdout);
+    }
     if (!bw.tactic.empty()) { const auto tit = assets.tactic_defs.find(bw.tactic); if (tit != assets.tactic_defs.end()) tactic = &tit->second; }  // JS `ur` L194: stage warrior `Tactic`
     // P4b — the PLAYER's roulette tactic (JS `IKa` L672):
     //   `this.pb.NT(this.tC);                       // ENEMY  <- `tactic` above
@@ -9467,6 +9546,44 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                          : (enemy_model != nullptr ? "gear" : "base"),
                      em.bones.size(), em.resolved_tris.size());
         std::fflush(stdout);
+
+        // MULTI-WAVE: resolve EACH wave's gear model (JS `xc.cM` per wave;
+        // `mfb` L205855 -> `Gf` rebuilds the NEW warrior's model from its OWN
+        // items). Stable storage is this screen's `enemy_wave_models_`; the
+        // controller gets a provider and swaps the enemy's model on advance.
+        enemy_wave_models_.clear();
+        enemy_wave_models_.reserve(battle.enemy_waves.size());
+        for (std::size_t wi = 0; wi < battle.enemy_waves.size(); ++wi) {
+            const auto& wv = battle.enemy_waves[wi];
+            sf2::scene::Model m;
+            if (wv.not_animation && !assets.merged_bag.bones.empty()) {
+                m = assets.merged_bag;
+            } else {
+                const std::vector<std::string> enames =
+                    fighter_model_names(app(), wv.item_names);
+                if (!enames.empty() && !enames[0].empty()) {
+                    sf2::scene::Model built = assets.merge_names(enames);
+                    if (!built.bones.empty()) m = std::move(built);
+                }
+            }
+            enemy_wave_models_.push_back(std::move(m));
+        }
+        {
+            FightScreen* self = this;
+            fight_->set_enemy_model_provider(
+                [self](int wave_index) -> const sf2::scene::Model* {
+                    if (wave_index < 0 ||
+                        wave_index >=
+                            static_cast<int>(self->enemy_wave_models_.size())) {
+                        return nullptr;
+                    }
+                    const sf2::scene::Model& m =
+                        self->enemy_wave_models_[static_cast<std::size_t>(
+                            wave_index)];
+                    return m.bones.empty() ? nullptr : &m;
+                });
+        }
+
 
         // JS `wd.fya` (L535-536) + `wd.ylb` (L268939): give the fight the
         // child's OWN model (its `<Item>` set resolved against list.xml + the
@@ -10078,11 +10195,26 @@ int FightScreen::player_rounds_won() const {
 bool FightScreen::player_round_latch() const {
     return fight_ != nullptr && fight_->player().kh;
 }
+int FightScreen::enemy_wave_index() const {
+    return fight_ != nullptr ? fight_->enemy_wave_index() : 0;
+}
+int FightScreen::enemy_wave_count() const {
+    return fight_ != nullptr ? fight_->enemy_wave_count() : 0;
+}
+int FightScreen::enemy_warrior_power() const {
+    return fight_ != nullptr ? fight_->enemy_warrior_power() : 0;
+}
+std::string FightScreen::enemy_wave_name() const {
+    return fight_ != nullptr ? fight_->enemy_wave_name() : std::string();
+}
 void FightScreen::probe_set_hp(float player_hp, float enemy_hp) {
     if (fight_ != nullptr) fight_->debug_set_hp(player_hp, enemy_hp);
 }
 int FightScreen::probe_phase() const {
     return fight_ != nullptr ? static_cast<int>(fight_->phase()) : -1;
+}
+bool FightScreen::battle_over() const {
+    return fight_ != nullptr && fight_->battle_over();
 }
 
 // The ordered player move-list names, ","-joined — the boot-vs-Map

@@ -847,6 +847,54 @@ struct BattleParams {
     // (stages.xml). Empty = no voice -> every Voice-gated action silent.
     std::string player_voice;
     std::string enemy_voice;
+    // -----------------------------------------------------------------------
+    // MULTI-WAVE enemy pipeline (JS `Da.Xs` -> `Da.pf`).
+    //
+    // `vJa` (L619534) builds the fight's enemy array from EVERY `<Warrior>`
+    // of the launched `<Fight>`: `e = v.EQ(a.Xs)` (default branch) and the
+    // `ca` ctor stores it as `pf` (`this.pf=c`, L193117). The enemy fought is
+    // `pf[Rk]`; `bob` (battle start) sets `Rk=0` / `Zb=pf[0]`, and on a won
+    // round `mfb` (L205855) runs `Rk++; Zb=pf[Rk]; Zb.position=location.B_;
+    // Zb.ng=b` — the NEXT warrior spawns at the enemy spawn and CARRIES the
+    // rounds-won counter. `sR()` (L729205 `Xs.length>1 ? pT>1 : !1`) gates
+    // the multi-wave branch (`c`), and `Onb` (L208997) decides the spawn:
+    //   a = wo.nB.ng >= round.eL   (a fighter reached Rounds)
+    //   b = wo.nB.qb && Rk < pf.length-1  (the PLAYER won and waves remain)
+    //   c = Da.sR()
+    //   (!a&&c)||(a&&b) -> mfb(!c || c&&kc==wo.nB); c ? ha.lna() : kc.ng=0
+    //   a              -> bea(wo.nB)          (battle end)
+    //   else           -> XF(!1); ZK(); NA(); Z2()   (next round, same enemy)
+    // So a PLAYER round-win advances the wave (when `!c` it ALWAYS spawns and
+    // resets `kc.ng=0`); an ENEMY round-win in a multi-wave fight keeps the
+    // SAME enemy for the next round.
+    //
+    // One row per `<Warrior>`, in document order. The scalar enemy fields
+    // above stay the CURRENT wave (index 0 at init) so the non-wave callers
+    // (dojo/mode) are untouched.
+    struct EnemyWave {
+        std::vector<sf2::scene::OwnedItem> owned;  // per-wave items (move list)
+        // The warrior's RAW `<Items>` names (XML order, incl. the template
+        // chain) — `fighter_model_names` merges the gear model from these
+        // (`xc.cM`), exactly as the init path uses `bw.items`.
+        std::vector<std::string> item_names;
+        std::string weapon_subtype;   // equipped Weapon slot `SubType` ("" -> Fists)
+        bool not_ai = false;          // `ur` L194 (`Fj = NotAI==null`)
+        bool not_animation = false;   // `ur` L195 (`QD = NotAnimation==null`)
+        std::string voice;            // `xc.voice` (template chain)
+        std::vector<sf2::scene::AlignDelta> align;  // `xc.IY` (template chain)
+        std::string first_name;       // resolved `FirstName` (display/report)
+        std::string avatar;           // resolved `Avatar` (display)
+        int warrior_power = 0;        // `OU` (raw `WarriorPower`; report only)
+        std::string tactic;           // `ur` L194 stage warrior `Tactic`
+        // `Wk` (L811) enemy refs: the warrior's own `<Perks>` (with `<Set>`)
+        // FIRST, then each equipped item's catalog `Oa` — the exact order
+        // `equipped_perks` (screens.cpp) builds. Combined, one list.
+        std::vector<sf2::scene::ItemPerkRef> perk_refs;
+    };
+    std::vector<EnemyWave> enemy_waves;  // `pf` (the launched `<Fight>`'s warriors)
+    int enemy_wave = 0;                  // `Rk` (current wave index)
+    // `Da.sR()` (L729205): `Xs.length>1 && pT>1`. The multi-wave round branch.
+    bool multi_wave = false;
 };
 
 // JS `bb.OE` (L887-888) + `bb.M3`/`bb.xe` (L888-894): parse the stage
@@ -1663,6 +1711,40 @@ public:
     void set_pending_enemy_model(const sf2::scene::Model* m) {
         pending_enemy_model_ = m;
     }
+    // MULTI-WAVE: the per-wave enemy gear model (JS `xc.cM` per wave; `mfb`
+    // L205855 -> `Gf` rebuilds the NEW warrior's model from its OWN items).
+    // The app resolves each wave's merged Skeleton+Weapon+Armor+Helm model
+    // and returns a pointer to STABLE storage; nullptr -> the shared base
+    // `model_`. Unset -> every wave keeps the base (legacy behaviour).
+    void set_enemy_model_provider(
+        std::function<const sf2::scene::Model*(int)> p) {
+        enemy_model_provider_ = std::move(p);
+    }
+    // JS `mfb` (L205855) `a &&` block: advance `Rk` and respawn the enemy from
+    // `pf[Rk]`, CARRYING the rounds-won counter (`this.Zb.ng=b`). The new
+    // enemy is a FRESH `wd` (`Gf`): full HP, cleared shock/kh, positioned at
+    // the enemy spawn (`this.Zb.position=this.location.B_`).
+    void spawn_next_enemy_wave();
+    // `Rk` (the current wave index) / `pf.length` / the current warrior's raw
+    // `WarriorPower` / the current warrior's resolved `FirstName` — read-only
+    // probe accessors (the multi-wave evidence).
+    int enemy_wave_index() const { return battle_.enemy_wave; }
+    int enemy_wave_count() const {
+        return static_cast<int>(battle_.enemy_waves.size());
+    }
+    int enemy_warrior_power() const {
+        const int rk = battle_.enemy_wave;
+        if (rk < 0 || rk >= static_cast<int>(battle_.enemy_waves.size())) return 0;
+        return battle_.enemy_waves[static_cast<std::size_t>(rk)].warrior_power;
+    }
+    std::string enemy_wave_name() const {
+        const int rk = battle_.enemy_wave;
+        if (rk < 0 || rk >= static_cast<int>(battle_.enemy_waves.size())) {
+            return enemy_.name;
+        }
+        return battle_.enemy_waves[static_cast<std::size_t>(rk)].first_name;
+    }
+    bool multi_wave() const { return battle_.multi_wave; }
     // [dojo lesson] The PLAYER fighter's animation START since the last drain
     // (JS `Te.x3` L508 -> `Gc.Pf` L671: the model's `Pf` event the lesson
     // handlers `Bo`/`Do`/`Eo` listen on, sf2 L1121/L1123/L1125). `name` is the
@@ -1806,6 +1888,12 @@ private:
     // [FIX mode enemy model] See `set_pending_enemy_model`: consumed (and
     // cleared) by `apply_mode_setup` when it rebuilds the mode enemy.
     const sf2::scene::Model* pending_enemy_model_ = nullptr;
+    // MULTI-WAVE: the per-wave enemy gear model provider (see
+    // `set_enemy_model_provider`) + the pending spawn flag (set by
+    // `apply_round_result`'s series-advance branch, consumed by
+    // `banner_expire`'s `next_round` -> `spawn_next_enemy_wave`).
+    std::function<const sf2::scene::Model*(int)> enemy_model_provider_;
+    bool wave_advance_pending_ = false;
     const std::map<std::string, sf2::scene::MoveDef>* moves_ = nullptr;
     // JS `Vm` per interval per side (`bp`/`Rja`/`JU`/`KU`, L396), driven by
     // the `ERuleDamageFactor` rules: `bn.clear` (L436, via `du.mxa` L457799)
