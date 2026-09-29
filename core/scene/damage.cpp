@@ -889,14 +889,23 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
     float c = rule.present ? rule.player_rating : 0.0f;            // `eVa`
     float d = rule.present ? rule.enemy_rating : 0.0f;              // `yUa`
     const float e = rule.present ? rule.rating_correction : 0.0f;   // `jVa`
+    // The JS `c==0&&(c=b.W3);c<0&&(c=a.JBa(b,h));d==0&&(d=b.C_);
+    // d<0&&(d=b.JBa(a,k))` (L728750) are FOUR INDEPENDENT `&&` statements:
+    // when the rule leaves `c`/`d` at 0, `b.W3`/`b.C_` (the Warrior-XML
+    // PlayerRating/EnemyRating, default -1) are read and, if STILL negative,
+    // `JBa` recomputes them. Folding the second test into an `else if` skipped
+    // `JBa` whenever the attribute map lacked the override (the common case),
+    // collapsing the ratio to `(-1)/(-1) = 1.0` independent of gear.
     if (c == 0.0f) {
         c = b.player_rating;  // `c==0 -> b.W3`
-    } else if (c < 0.0f) {
+    }
+    if (c < 0.0f) {
         c = warrior_rating(a, b, side1_attrs, fp);  // `c<0 -> a.JBa(b,h)`
     }
     if (d == 0.0f) {
         d = b.enemy_rating;  // `d==0 -> b.C_`
-    } else if (d < 0.0f) {
+    }
+    if (d < 0.0f) {
         d = warrior_rating(b, a, side2_attrs, fp);  // `d<0 -> b.JBa(a,k)`
     }
     // `t=b.clone(); x=a.clone(); t.Bua(k); x.Bua(h); t.attributes.get(n,q);
