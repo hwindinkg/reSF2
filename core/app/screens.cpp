@@ -2571,6 +2571,14 @@ int za_nav_hit(double px, double py) {
 // other four push their `kZaNav` screen unless it is already showing.
 bool za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
     if (hit < 0 || hit >= kZaNavCount) return false;
+    // `za.YA(!1)` (`Bo`/`Do`/`Eo`, L1121-1125): the `za.LW` blocker discards
+    // every column tap while the lesson holds it.
+    if (app.quest_engine().nav_locked()) {
+        std::fprintf(stdout, "[za] nav %s REJECTED (za.YA nav blocker)\n",
+                     kZaNav[hit].scene);
+        std::fflush(stdout);
+        return false;
+    }
     // `db.aa` L1839: the block discards every control but the armed `tk` one.
     QuestEngine& q = app.quest_engine();
     const std::string nav_id = kZaNav[hit].scene;
@@ -2673,6 +2681,11 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
         }
         za_nav_settle(st, st.uJ ? p : 1.0f - p);
     }
+    // `za.YA(!1)` (`Bo`/`Do`/`Eo`, L1121-1125): `this.LW.R(!0)` shows the nav
+    // column's own touch blocker, which swallows EVERY column tap (the `МЕНЮ`
+    // header + the five `Le` buttons) for the whole move/punchbag/double-sweep
+    // lesson; `Cm` (`YA(!0)`) hides it. Distinct from the `Sb` overlay.
+    if (app.quest_engine().nav_locked()) return;
     // `za.zq` disciple toggle (JS L1983, `Nfb` L1981): a child of `za`, so it
     // answers taps regardless of the nav collapse. Shown only on the Dojo
     // (`v.FU` L1207 `Td.Tf==3`) while `ShowDojoDisciple > 0` (`g$a` L271).
@@ -14117,6 +14130,17 @@ void ShopScreen::update_impl(float dt) {
                 return;
             }
             if (on_confirm && p.pressed) {
+                // `Ao.Qg` (L1124): while `StoryTutorialBuyItem` holds `Sb.Xva`
+                // the armed `M8` buy plate is the ONLY control that answers;
+                // its press completes the guided step (`Sb.F().kk(!1)`).
+                if (!app().quest_engine().control_allowed("ShopBuy")) {
+                    std::fprintf(stdout,
+                                 "[quest] shop buy REJECTED (Sb.Xva target=%s)\n",
+                                 app().quest_engine().lock_target().c_str());
+                    std::fflush(stdout);
+                    return;
+                }
+                app().quest_engine().complete_guided("ShopBuy");
                 // `Pa.iwa` L1228 head + `ZYa` L2251 (`p.o.xa.$o(b,!0)`):
                 // deduct, grant + equip, save. A shortfall (`v.Bv(a,2)`) keeps
                 // the panel open so the player can back out or earn gold.

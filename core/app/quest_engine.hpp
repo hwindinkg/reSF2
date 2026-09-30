@@ -446,6 +446,10 @@ struct QuestSideEffects {
     // `Ro.S` (L1114 `Wait ControlsLock="1"`, quests.xml L1641/L1653): block for
     // the wait's duration AND disable the back button (`Za.Hb.enabled=!1`).
     bool wait_controls_lock = false;
+    // `Bo.S`/`Do.S`/`Eo.S` (L1121/L1123/L1125): `za.instance.YA(!1)` — show the
+    // `za.LW` nav-column touch blocker for the move/punchbag/double-sweep
+    // lesson. `Cm` (`resume_tutorial_gate`) hides it (`YA(!0)`).
+    bool nav_lock = false;
     // `eo` L1117 (`Nn`� `sxa()`): `MenuBtnFlashing` collapses the `za` scroll
     // (`za.instance.sxa()` -> `scroll.collapse(0)`, L2001) before it flashes.
     bool collapse_nav = false;
@@ -964,6 +968,14 @@ public:
     void lock_controls(const std::string& target);
     // `Jo.S`/`Nn.Qg`/`eo.XHa`: `Sb.F().kk(!1)`.
     void unlock_controls();
+    // --- `za.YA` nav-column block (`Bo`/`Do`/`Eo` move lessons, L1121-1125) ---
+    // `Bo.S`/`Do.S`/`Eo.S` run `za.instance.YA(!1)` (`this.hra=a;
+    // this.LW.R(!a)`) — the `za.LW` touch blocker over the nav column — and
+    // `Cm` runs `YA(!0)` to hide it. This is a SEPARATE blocker from the `Sb`
+    // overlay: it swallows the WHOLE column (the `МЕНЮ` header + the five `Le`
+    // buttons), so the player cannot leave the lesson's scene.
+    bool nav_locked() const { return nav_locked_; }
+    void unlock_nav() { nav_locked_ = false; }
     // The player used the guided control: JS `g1()` -> `Qg`/`XHa` (unblock +
     // `sa()`). True when `id` was the armed target.
     bool complete_guided(const std::string& id);
@@ -1306,6 +1318,8 @@ private:
     std::size_t guided_actions_ = 0;  // `Qg`/`XHa` completions (test hook)
     // `Ro` (L1114) `Wait ControlsLock`: frames left until `stop()` unblocks.
     int wait_lock_frames_ = 0;
+    // `za.YA(!1)` (Bo/Do/Eo move lessons): the nav-column blocker is shown.
+    bool nav_locked_ = false;
     std::size_t scene_actions_ = 0;          // executed `ChangeScene` count
     std::size_t shop_actions_ = 0;           // executed `OpenShop` count
     std::size_t shop_refresh_actions_ = 0;   // executed `UpdateShopItems` count

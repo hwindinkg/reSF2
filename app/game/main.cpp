@@ -1536,6 +1536,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --quest-action-probe: fire the shipped ToggleItems/Discount actions
     // through the engine path and log the save/price before/after.
     bool quest_action_probe = false;
+    // --quest-lock-probe: fire the shipped StoryTutorial lock/unlock actions
+    // (`Co`/`Fo`/`Bo`/`Do`/`Eo`/`Ao`) through the engine path and read the
+    // resulting lock target / profile tab (JS `Sb.kk` L2316 + `za.YA`).
+    bool quest_lock_probe = false;
     bool dialog_verify = false;     // --dialog-verify: headless dialog harness
     bool observe_dialogs = false;   // --observe-dialogs: keep the queue observable
     // --tutorial-real-verify: boot the REAL path (NO `fresh_tutorial` arm, NO
@@ -1711,6 +1715,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             settings_profile_shop_probe = true;
         } else if (arg == "--quest-action-probe") {
             quest_action_probe = true;
+        } else if (arg == "--quest-lock-probe") {
+            quest_lock_probe = true;
         } else if (arg == "--quest-verify-buy") {
             quest_verify = true;
             quest_verify_buy = true;
@@ -4199,6 +4205,120 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
               "Map: StoryMapStage executes (Ya.rF empty stub)");
         const bool all = checks == passed;
         std::fprintf(stdout, "[changetab] RESULT %d/%d -> %s\n", passed, checks,
+                     all ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return all ? 0 : 1;
+    } else if (quest_lock_probe) {
+        // --- `--quest-lock-probe`: the StoryTutorial lock/unlock, JS-exact ----
+        // Fires the SHIPPED `StoryTutorialShowBlock` (`Fo` L1126) / `LearnPerk`
+        // (`Co` L1127) / `DoubleSweep` (`Bo` L1121) / `BuyItem` (`Ao` L1124)
+        // actions through the engine's own parse path (`run_action_probe`) and
+        // reads the resulting `Sb.kk` lock target, the profile tab and the
+        // `za.YA` nav blocker BEFORE/AFTER. Hidden + RULE 0 watchdog.
+        glfwHideWindow(app.renderer().window());
+        int checks = 0, passed = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (ok) ++passed;
+            std::fprintf(stdout, "[lockprobe] %-52s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        sf2::app::QuestEngine& q = app.quest_engine();
+        const auto seed_step = [&](const char* step) {
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                w.set_story_step(step);
+                app.save().save(w);
+            } catch (const std::exception&) {
+            }
+        };
+        const auto fire = [&](const char* tag) {
+            sf2::app::QuestAction act;
+            act.tag = tag;
+            sf2::app::QuestJournal j;
+            q.run_action_probe(app, {act}, j);
+            app.run_one_frame();
+        };
+        // --- `Fo` ShowBlock: the "view a move" step. The JS selects the Moves
+        //     tab (`rF(1, <first v4 move>)`) and locks (`Sb.kk(!0)`). --------
+        seed_step("SHOW_BLOCK");
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        app.run_one_frame();
+        auto* prof = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        const bool fo_before_locked = q.controls_locked();
+        const int fo_before_tab = prof != nullptr ? prof->tab() : -1;
+        fire("StoryTutorialShowBlock");
+        const bool fo_locked = q.controls_locked();
+        const std::string fo_target = q.lock_target();
+        const int fo_tab = prof != nullptr ? prof->tab() : -1;
+        const bool fo_tabs_blocked = !q.control_allowed("ProfileTab0") &&
+                                     !q.control_allowed("ProfileTab1") &&
+                                     !q.control_allowed("ProfileTab2") &&
+                                     !q.control_allowed("ProfileTab3");
+        const bool fo_move_ok = q.control_allowed("ProfileMove");
+        // The move playback end (`Ad.kg` -> `oHa` -> `Cxa` -> `Sb.kk(!1)`).
+        q.on_lesson_anim(app, std::string(), std::string(), /*end=*/true);
+        const bool fo_unlocked = !q.controls_locked();
+        std::fprintf(stdout,
+                     "[lockprobe] Fo BEFORE locked=%d tab=%d | AFTER locked=%d target=%s "
+                     "tab=%d tabs_blocked=%d move_ok=%d unlocked=%d\n",
+                     fo_before_locked ? 1 : 0, fo_before_tab, fo_locked ? 1 : 0,
+                     fo_target.c_str(), fo_tab, fo_tabs_blocked ? 1 : 0,
+                     fo_move_ok ? 1 : 0, fo_unlocked ? 1 : 0);
+        std::fflush(stdout);
+        check(!fo_before_locked && fo_before_tab == 0,
+              "Fo BEFORE: unlocked, tab 0 (Perks)");
+        check(fo_locked && fo_target == "ProfileMove",
+              "Fo: Sb.kk(!0) target=ProfileMove (the armed move)");
+        check(fo_tab == 1, "Fo: rF(1,..) selects the Moves tab");
+        check(fo_tabs_blocked && fo_move_ok,
+              "Fo: sub-tab strip blocked, the armed move allowed");
+        check(fo_unlocked, "Fo Cxa: Sb.kk(!1) on the move playback end");
+        // --- `Co` LearnPerk: `rF(0,"PERK_DOUBLE_SWEEP")` + lock. -----------
+        app.screens().pop();
+        app.run_one_frame();
+        seed_step("LEARN_PERK");
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        app.run_one_frame();
+        prof = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        fire("StoryTutorialLearnPerk");
+        const bool co_locked = q.controls_locked();
+        const std::string co_target = q.lock_target();
+        const int co_tab = prof != nullptr ? prof->tab() : -1;
+        const bool co_tabs_blocked = !q.control_allowed("ProfileTab0") &&
+                                     !q.control_allowed("ProfileTab1");
+        const bool co_perk_ok = q.control_allowed("ProfilePerk");
+        std::fprintf(stdout,
+                     "[lockprobe] Co locked=%d target=%s tab=%d tabs_blocked=%d "
+                     "perk_ok=%d\n",
+                     co_locked ? 1 : 0, co_target.c_str(), co_tab,
+                     co_tabs_blocked ? 1 : 0, co_perk_ok ? 1 : 0);
+        std::fflush(stdout);
+        check(co_locked && co_target == "ProfilePerk" && co_tab == 0,
+              "Co: Sb.kk(!0) target=ProfilePerk + Perks tab");
+        check(co_tabs_blocked && co_perk_ok,
+              "Co: sub-tab strip blocked, the armed perk allowed");
+        q.unlock_controls();
+        // --- `Bo` DoubleSweep: `za.instance.YA(!1)` nav blocker. ------------
+        app.screens().pop();
+        app.run_one_frame();
+        seed_step("SHOW_DOUBLE_SWEEP");
+        const bool bo_before = q.nav_locked();
+        fire("StoryTutorialDoubleSweep");
+        const bool bo_locked = q.nav_locked();
+        // `Cm` via the lesson timeout -> `za.instance.YA(!0)`.
+        q.tutorial_gate_tick(app, 30.0f);
+        const bool bo_unlocked = !q.nav_locked();
+        std::fprintf(stdout,
+                     "[lockprobe] Bo BEFORE nav_locked=%d | AFTER nav_locked=%d "
+                     "resumed_unlocked=%d\n",
+                     bo_before ? 1 : 0, bo_locked ? 1 : 0, bo_unlocked ? 1 : 0);
+        std::fflush(stdout);
+        check(!bo_before && bo_locked, "Bo: za.YA(!1) blocks the nav column");
+        check(bo_unlocked, "Bo Cm: za.YA(!0) clears the nav blocker");
+        const bool all = checks == passed;
+        std::fprintf(stdout, "[lockprobe] RESULT %d/%d -> %s\n", passed, checks,
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();

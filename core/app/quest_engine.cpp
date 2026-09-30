@@ -3612,6 +3612,29 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // story-tutorial scene hooks (`Oa.ska`, fight move hooks) the
             // shell drives itself; record-only.
             fx.minigames.push_back(t + " (needs fight hooks)");
+            // Each tutorial action ALSO arms its own lock (the JS `S`, cited
+            // per class below) — the port mirrors the lock/unlock JS-exact:
+            //   `Co` (LearnPerk, L1127): `Sb.F().kk(!0)` + `vb.get().rF(0,
+            //     "PERK_DOUBLE_SWEEP")` — the Perks tab is selected + armed.
+            //   `Fo` (ShowBlock, L1126): `Sb.F().kk(!0)` + `vb.get().rF(1,
+            //     <first v4 move>)` — the Moves tab is selected + armed; the
+            //     "view a move" step's needed tab.
+            //   `Bo`/`Do`/`Eo` (Move/Punchbag/DoubleSweep, L1121/L1123/L1125):
+            //     `za.instance.YA(!1)` — the whole nav column is blocked.
+            //   `Ao` (BuyItem, L1124): `Sb.F().kk(!0)` + the shop buy plate
+            //     `M8.tk=!0` armed.
+            if (t == "StoryTutorialLearnPerk") {
+                fx.lock_targets.push_back("ProfilePerk");
+                fx.tab_selects.push_back(QuestTabSelect{"Perks", "", 10, 7});
+            } else if (t == "StoryTutorialShowBlock") {
+                fx.lock_targets.push_back("ProfileMove");
+                fx.tab_selects.push_back(QuestTabSelect{"Moves", "", 11, 7});
+            } else if (t == "StoryTutorialBuyItem") {
+                fx.lock_targets.push_back("ShopBuy");
+            } else if (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag" ||
+                       t == "StoryTutorialDoubleSweep") {
+                fx.nav_lock = true;
+            }
             // The two lessons `StoryTutorialWelcome` rides on (`Do`/`Eo`, the
             // xml L30/L35 actions BETWEEN the three dialogs) SERIALIZE the
             // chain: the JS arms `Re(Cm, TutorialStepTimeout)` and `Cm` ->
@@ -4442,6 +4465,7 @@ void QuestEngine::enqueue_effects(App& app, const QuestSideEffects& fx,
     for (const std::string& t : fx.lock_targets) lock_controls(t);
     if (fx.block_all) lock_controls(std::string());
     if (fx.wait_controls_lock) lock_controls(std::string());
+    if (fx.nav_lock) nav_locked_ = true;  // `za.YA(!1)` (Bo/Do/Eo)
     if (fx.unblock) unlock_controls();
     if (fx.collapse_nav) collapse_nav_pending_ = true;
     // `Po` `UpdateShopItems` (L570290): `Oa.get().Imb()` on the live shop.
@@ -4506,6 +4530,14 @@ void QuestEngine::resume_run(App& app, PendingRun& run) {
 bool QuestEngine::resume_tutorial_gate(App& app) {
     TutorialGate gate = std::move(tutorial_gate_);
     tutorial_gate_ = TutorialGate{};  // cleared first: the tail may re-park
+    // The lesson's own unlock (`Cm`): `Bo`/`Do`/`Eo` (L1121/L1123/L1125) run
+    // `za.instance.YA(!0)` (hide the nav blocker); `Fo` `Cxa` (L1126) runs
+    // `Sb.F().kk(!1)` (clear the input overlay). Both precede the tail resume.
+    if (gate.beat == 4) {
+        unlock_controls();
+    } else {
+        unlock_nav();
+    }
     QuestSideEffects fx;
     ActionRest rest =
         run_actions(app, gate.rest, gate.journal, fx, gate.locals, gate.quest, 0);
