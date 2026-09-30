@@ -12284,15 +12284,43 @@ void FightScreen::render_impl(App& app) {
                     unsigned int fgl = 0;
                     const bool have_frame = app.get_atlas_frame(
                         kCalloutFrame[ct], &fr, &ftw, &fth, &fgl);
+                    // JS `R.Cb` (@827848) `d.x=a.fa.x*c; d.y=a.fa.y*c` with
+                    // `c = R.Eca.ij`, and `af.CLa` (@763738) `this.ij = 1/a.scale`
+                    // where `a.scale` = the atlas JSON `meta.scale` (parsed
+                    // @872235 `new Jq(meta.size.w, meta.size.h, parseFloat(
+                    // meta.scale))`). So a frame's DRAWN size is
+                    // `sourceSize * (1/meta.scale)`. `res/fight/callouts.json`
+                    // (the callout atlas, id 1310) ships `meta.scale = 0.7`
+                    // (the only UI atlas with a scale != 1 besides items/proxy
+                    // 0.2) -> every plate is drawn 1/0.7 = 1.4286x its
+                    // sourceSize. The port used sourceSize verbatim, so all six
+                    // plates were 1.4286x too small.
+                    constexpr float kCalloutAtlasInvScale = 1.0f / 0.7f;
                     const float nat_w =
                         (fr.source_w > 0 ? static_cast<float>(fr.source_w)
-                                         : static_cast<float>(fr.w)) * hud_c;
+                                         : static_cast<float>(fr.w)) *
+                        hud_c * kCalloutAtlasInvScale;
                     const float nat_h =
                         (fr.source_h > 0 ? static_cast<float>(fr.source_h)
-                                         : static_cast<float>(fr.h)) * hud_c;
+                                         : static_cast<float>(fr.h)) *
+                        hud_c * kCalloutAtlasInvScale;
                     if (have_frame) {
-                        try_draw_atlas_button(app, kCalloutFrame[ct], ex, ey, nat_w,
-                                              nat_h, 1.0f);
+                        // JS `Hx.init` (@1055662) `var b=this.image;
+                        // b.C(b.ya-this.image.fa.x)` — the image node (no
+                        // `Ga()`, so its anchor is the LEFT/TOP edge) is shifted
+                        // LEFT by its own drawn width, so the plate's RIGHT and
+                        // TOP edge sit on the element node origin that
+                        // `Ix.move` places at `Pp + (y_-Pp)*b`. The port drew
+                        // the plate CENTRED on `ex`/`ey`, i.e. half a
+                        // plate-width further toward that side's edge: the
+                        // player's plate (victim = the `je`/right panel) looked
+                        // like it sat on the opponent's side and the enemy's
+                        // (the `Id`/left panel) sat half a width inward, near
+                        // the screen centre — the reported mirror. Re-anchor to
+                        // the JS right/top edge.
+                        try_draw_atlas_button(app, kCalloutFrame[ct],
+                                              ex - nat_w * 0.5f, ey + nat_h * 0.5f,
+                                              nat_w, nat_h, 1.0f);
                     }
                     // `Hx.init`: the label node exists for every type, but
                     // only the combo (`f1a`) and hot_ground (`t1a`) paths call
