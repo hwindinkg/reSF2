@@ -17503,19 +17503,16 @@ void EquipmentScreen::render_impl(App& app) {
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     // Collapsed on arrival (oracle `profile_tab*` shows the `МЕНО` header).
     draw_za_chrome(app, kScreenProfile);
-    // The BACK button (top-left) is drawn AFTER the `za` chrome so the chrome's
-    // full-width topPanel (`odb` L1975, height min(H*.13,100)) no longer
-    // occludes it. NOTE: the JS Profile `vb` (L2189-2201) is a tabbed screen
-    // (`cs` tabs only) with no BACK node - this is a native navigation
-    // affordance kept because the headless loop uses the equipment->dojo back
-    // leg (`EquipmentScreen::update_impl`), so the JS-decided "remove" option
-    // would break the loop. It uses the misc `Arrow` frame (`y.sRa`); the flat
-    // plate is only a genuine atlas-miss fallback -> OPEN (no JS art).
-    if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
-        draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
-        draw_ui_label(app, 64.0f - 44.0f + 6.0f, 40.0f - 10.0f, 88.0f - 12.0f, 20.0f,
-                          "BACK", 0.7f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    }
+    // NO BACK node. JS `vb` (L2189-2201) is a tabbed screen (`cs` tabs only)
+    // and the misc `Arrow` frame (`y.sRa="Arrow"`, L1267875) is referenced ONLY
+    // by `he` (the `MenuBtnFlashing` hint arrow, L1191092) — never by the
+    // Profile. The port used to draw a native BACK `Arrow` at (64,40) here,
+    // i.e. the quest-hint art reused as a back button: that is the reported
+    // "up-arrow on the left side of the Profile screen" (an invention; the
+    // oracle `profile_tab*` has zero art in that region). REMOVED to match the
+    // JS. The invisible (64,40) hit rect stays in
+    // `EquipmentScreen::update_impl` for the headless loop's equipment->dojo
+    // leg (a native affordance with no JS art, like the map/shop back rects).
     // D3: `Wb` is a GLOBAL overlay — the Profile screen shows + blocks on a
     // queued dialog (`Wb.Xob` L927 appends to the ACTIVE screen's content).
     draw_quest_modal(app, ren, app.screens().top() == this);
