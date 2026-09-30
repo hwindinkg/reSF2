@@ -267,7 +267,17 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         app.quest_engine().dismiss_dialog(app);  // D1: resume any parked chain
         return false;
     }
-    if (!app.pointer().pressed) return true;
+    // `Ib` (`Ib.aa` L1905 / `Ib.Qhb` L1907): the Notification BAR is
+    // fire-and-forget on its own `ma.Jg().Mr.cf` child — it NEVER consumes the
+    // scene's raycast (`BlockRaycast` only gates its dim `Uz`, L1907). The JS
+    // `He.S` L1050 posts the bar and continues (`this.sa()`), so the Dojo/Map/
+    // Shop beneath keep stepping: the player can walk/hit WHILE the tutorial
+    // bar is up. Returning `true` here (the old behaviour) froze the Dojo's
+    // `FightNone` controller for the whole `ReadTime` (the reported "first
+    // walking dialogs: I just stood still" and "blocked for several seconds
+    // before I could hit the bag").
+    const bool bar_only = dialog_kind(d->type) == DialogKind::kIbBar;
+    if (!app.pointer().pressed) return !bar_only;
     if (d->type == "Notification") {
         std::fprintf(stdout, "[quest] notification advanced: %s\n", d->title.c_str());
         std::fflush(stdout);
@@ -2831,6 +2841,41 @@ void draw_flash_tint(sf2::render::Renderer& ren, float cx, float cy, float w, fl
     ren.draw_triangles(verts, 6, 1.0f, 0.88f, 0.35f, 0.20f + 0.45f * p);
 }
 
+// `db.aa` (L1849): the `db`/`Le` flashing overlay's alpha. `bt` is advanced
+// ONLY while the flash is visible (`this.aA&&(...)`): rise `bt += 600*dt` to the
+// 250 cap, then fall `bt -= 10` PER FRAME to 0, then rise again. At the fixed
+// 60 Hz step (`dt=1/60`) `600*dt == 10`, so both legs are 10/call — a ~25-call
+// (0.42 s) half-period, NOT the old 2 s sine. Alpha is `bt/255` (max ~0.98).
+float ui_flash_alpha() {
+    static float bt = 0.0f;
+    static bool rising = false;  // `db.Qga` (ctor `!1`)
+    if (rising) {
+        bt += 10.0f;  // `bt += 600*a`
+        if (bt >= 250.0f) {
+            bt = 250.0f;
+            rising = false;
+        }
+    } else {
+        bt -= 10.0f;  // `bt -= 10` per frame
+        if (bt <= 0.0f) {
+            bt = 0.0f;
+            rising = true;
+        }
+    }
+    return bt / 255.0f;  // `Tk.wa(this.bt/255)`
+}
+
+// `Le` ctor (L1848): `this.Wm(null, y.BRa)` — every nav `Le` builds its flashing
+// overlay from the misc frame `y.BRa="Highlight_menu"` (sourceSize 250x250),
+// a child of the button node (so scaled by the column's `d`), centred by `Wm`'s
+// `Ga()` and shown by `Vg(!0)` (`eo.dia` L1119). This is the JS highlight the
+// old flat `draw_flash_tint` rect replaced.
+constexpr float kHighlightMenuSource = 250.0f;  // Highlight_menu sourceSize
+void draw_highlight_menu(App& app, float cx, float cy, float size) {
+    // `fill=false` -> aspect-correct fit of the 250x250 source into (size,size).
+    try_draw_atlas_button(app, "Highlight_menu", cx, cy, size, size, ui_flash_alpha());
+}
+
 // `he` — the `MenuBtnFlashing` hint arrow (`eo.N3a` L1117 -> `he.show(a.target)`,
 // `he` ctor: `this.Oy=R.$(E.get(260), y.sRa, this.node)`; `y.sRa="Arrow"`).
 // `he.aa`: `this.Oy.la(min(W,H)*0.1/fa.x)` scales the arrow to
@@ -3093,7 +3138,12 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         // `Arrow` hint above that button. The row pulse below therefore no
         // longer gates the collapsed header flash.
         if (!app.quest_engine().nav_flash().empty()) {
-            draw_flash_tint(ren, hx + hw * 0.5f, hy + hh * 0.5f, hw, hh);
+            // `eo.N3a` (L1117) ARMS the collapsed MENU button (`scroll.button
+            // .tk=!0`) and shows the `he` hint arrow — it does NOT flash it
+            // (`Vg(!0)`/`Tk.R(aA)` is only set by `dia` on the named ROW once
+            // the column expands, `u3` L1119). The collapsed header therefore
+            // carries the ARROW alone; the old flat tint here was the reported
+            // wrong outline.
             // The `he` target is the collapsed MENU button (header rect `hx,hy,hw,hh`),
             // so its BOTTOM is `hy + hh` (`a.W`, L2315).
             draw_nav_hint_arrow(app, hx + hw * 0.5f, hy + hh);
@@ -3169,7 +3219,11 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         // quest asked the player to use (drawn OVER the art). Draw-only; the
         // tap still navigates normally.
         if (row_flash) {
-            draw_flash_tint(ren, nav_cx, cy_i, lay.nav_btn, lay.nav_btn);
+            // `eo.dia` (L1119): `Cs.Vg(!0)` shows the named row's flashing
+            // overlay — the misc frame `Highlight_menu` (`Le` ctor
+            // `Wm(null,y.BRa)` L1848), a child of the button node (scale `d`),
+            // centred and alpha-pulsed by `db.aa` (L1849).
+            draw_highlight_menu(app, nav_cx, cy_i, kHighlightMenuSource * lay.nav_scale);
         }
     }
     // `gk`'s title rail (`Zh`: `y.goa`/`y.pSa` = roll_end/roll_center, L1872/
