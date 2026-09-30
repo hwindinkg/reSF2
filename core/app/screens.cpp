@@ -7187,7 +7187,7 @@ void DojoScreen::render_impl(App& app) {
         // effective arena_w). Capped to a few frames to show settling.
         if (g_dojo_cam_probe) {
             static int probe_n = 0;
-            if (probe_n < 4) {
+            if (probe_n < 24) {
                 float lamp_x = 0.0f, lamp_factor = 0.0f, lamp_ls = 0.0f, lamp_sx = 0.0f;
                 for (const auto& L : assets.dojo.layers()) {
                     for (const auto& sp : L->sprites) {
@@ -7229,11 +7229,76 @@ void DojoScreen::render_impl(App& app) {
                     "oracle_x=%.1f delta_px=%.2f\n",
                     probe_n, lamp_x, lamp_factor, lamp_ls, lamp_sx, io_eff,
                     oracle_lamp_x, lamp_sx - oracle_lamp_x);
+                // [dojo-cam-probe] bag vs holder: their layer index/factor and
+                // projected screen x through the SAME hub_cam. If they share a
+                // factor the separation is constant across the pan.
+                float holder_x = 0.0f, holder_f = -1.0f, holder_ls = 0.0f,
+                      holder_sx = 0.0f;
+                int holder_li = -1;
+                {
+                    int li = 0;
+                    for (const auto& L : assets.dojo.layers()) {
+                        for (const auto& sp : L->sprites) {
+                            if (sp && sp->texture_name == "dojo_punch_bag_holder") {
+                                holder_x = sp->transform.x;
+                                holder_f = L->factor;
+                                holder_li = li;
+                                holder_ls = (L->type == 2 || L->scaling)
+                                                ? hub_cam.layer_zoom
+                                                : 1.0f;
+                                holder_sx = hub_cam.world_to_screen_x(
+                                    holder_x * holder_ls, holder_f);
+                            }
+                        }
+                        ++li;
+                    }
+                }
+                float bag_top_x = 0.0f, bag_top_sx = 0.0f, bag_piv_x = 0.0f,
+                      bag_piv_sx = 0.0f, bag_worldx = 0.0f;
+                if (dojo_fight_ != nullptr) {
+                    const sf2::scene::Fighter& ef =
+                        dojo_fight_->enemy().fighter;
+                    const std::vector<float>& pp = ef.positions();
+                    bag_worldx = ef.world_x();
+                    const int i12 = ef.model().bone_by_name("Node12");
+                    const int ip = ef.model().bone_by_name("NPivot");
+                    if (i12 >= 0 &&
+                        pp.size() > static_cast<std::size_t>(i12) * 2 + 1) {
+                        bag_top_x = pp[static_cast<std::size_t>(i12) * 2];
+                        bag_top_sx = hub_cam.world_to_screen_x(
+                            bag_top_x - assets.dojo.arena_width() * 0.5f, 1.0f);
+                    }
+                    if (ip >= 0 &&
+                        pp.size() > static_cast<std::size_t>(ip) * 2 + 1) {
+                        bag_piv_x = pp[static_cast<std::size_t>(ip) * 2];
+                        bag_piv_sx = hub_cam.world_to_screen_x(
+                            bag_piv_x - assets.dojo.arena_width() * 0.5f, 1.0f);
+                    }
+                }
+                std::fprintf(
+                    stdout,
+                    "[dojobag] n=%d holder_li=%d holder_x=%.3f holder_f=%.3f "
+                    "holder_sx=%.4f | bag_worldx=%.3f top_x=%.3f top_sx=%.4f "
+                    "piv_x=%.3f piv_sx=%.4f | gap_top=%.4f gap_piv=%.4f\n",
+                    probe_n, holder_li, holder_x, holder_f, holder_sx, bag_worldx,
+                    bag_top_x, bag_top_sx, bag_piv_x, bag_piv_sx,
+                    bag_top_sx - holder_sx, bag_piv_sx - holder_sx);
                 std::fflush(stdout);
                 ++probe_n;
             }
         }
-        assets.dojo.render_layers(ren, hub_cam, 0, assets.dojo.layers().size());
+        // JS `Ut.UWa` L832: the location layers append in XML order and the
+        // fighters live INSIDE the ModelsViewer (Type=2) layer, so every
+        // layer AFTER it (dojo layer 9 = holder / floor / walls, layer 10 =
+        // pixel_1) draws OVER the fighters. Draw the background layers here;
+        // the foreground layers are drawn after the figures below.
+        const std::size_t hub_fighter_layer = assets.dojo.fighter_layer();
+        const std::size_t hub_layer_count = assets.dojo.layers().size();
+        assets.dojo.render_layers(
+            ren, hub_cam, 0,
+            hub_fighter_layer == sf2::scene::LocationScene::npos
+                ? hub_layer_count
+                : hub_fighter_layer);
     } else {
         const float verts[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(verts, 6, 0.12f, 0.12f, 0.16f, 1.0f);
@@ -7302,6 +7367,17 @@ void DojoScreen::render_impl(App& app) {
             // model scale stays 1). Enemy first (z=-.001), then the player.
             draw_dojo_figure(ren, hub_cam, hub_enemy, 1.0f, container_x, cont_y);
             draw_dojo_figure(ren, hub_cam, hub_player, 1.0f, container_x, cont_y);
+            // JS `Ut.UWa` L832 foreground pass: the layers AFTER the
+            // ModelsViewer draw OVER the fighters (dojo holder / floor /
+            // walls / pixel_1). The `arrow` marker (`Cu`) still draws last.
+            {
+                const std::size_t fl = app.fight_assets().dojo.fighter_layer();
+                if (fl != sf2::scene::LocationScene::npos) {
+                    app.fight_assets().dojo.render_layers(
+                        ren, hub_cam, fl + 1,
+                        app.fight_assets().dojo.layers().size());
+                }
+            }
             // JS `Ut.V0a` (L831) + `Ut.kyb` (L825): the flashing `arrow`
             // marker (atlas `E.get(268)` = the controller atlas, frame
             // `y.OQa` = "arrow") is a child of the location `go` node,
