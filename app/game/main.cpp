@@ -1624,6 +1624,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // union fix on a shipped two-interval pair (default FansSuperSlash).
     bool area_probe = false;  // --area-probe: RandomArea/Darkness rule probe
     bool d3_probe = false;
+    // [probe, authorised] `--wall-probe`: force the `<Position Object="Wall">`
+    // moves (WallJump_100 / HunterFly_150 / WaspFly_150) and a throw near the
+    // right wall, dumping the rendered root x + pose x-extent per frame — the
+    // "stretched across the arena / teleported to the opposite end" repro.
+    bool wall_probe = false;
     std::string d3_probe_move = "FansSuperSlash";
     int d3_probe_frame = 36;
     float d3_probe_dist = 500.0f;  // enemy x offset from the player
@@ -2131,6 +2136,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             area_probe = true;
         } else if (arg == "--d3-probe") {
             d3_probe = true;
+        } else if (arg == "--wall-probe") {
+            wall_probe = true;
         } else if (arg == "--d3-probe-move" && i + 1 < argc) {
             d3_probe_move = argv[++i];
         } else if (arg == "--d3-probe-frame" && i + 1 < argc) {
@@ -6741,6 +6748,86 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                                         : (-290.0f + (ph - 100) * 10.0f);
             ctl.debug_place_fighters(px, 900.0f);
             ctl.update(1.0f / 60.0f);
+        }
+        app.shutdown();
+        return 0;
+    } else if (wall_probe) {
+        // [probe, authorised] `--wall-probe`: force the `<Align><Position
+        // Object="Wall" Part="Back">` moves on the player at the right wall
+        // (the `Te.Gub` L559 `e=yu/zu` branch) and dump the rendered root x +
+        // the pose x-extent per frame. No OS input, no window (driver_mode),
+        // watchdog armed.
+        if (!app.has_fight_assets()) {
+            std::fprintf(stderr, "[wallprobe] fight assets not loaded\n");
+            app.shutdown();
+            return 1;
+        }
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::BattleParams battle;
+        battle.name = "Training";
+        battle.location = "dojo";
+        battle.rounds = 2;
+        battle.round_time = 99;
+        battle.max_hp = 100;
+        battle.player_spawn_x = 690.0f;
+        battle.player_spawn_y = -93.0f;
+        battle.enemy_spawn_x = 973.0f;
+        battle.enemy_spawn_y = -110.0f;
+        const std::vector<sf2::scene::OwnedItem> owned = loadout_owned("Fists");
+        sf2::scene::FightController ctl;
+        std::mt19937 rng(0x5F2);
+        auto roll01 = [&rng]() {
+            return static_cast<float>(rng()) / static_cast<float>(rng.max());
+        };
+        const sf2::scene::TacticDef* tactic = nullptr;
+        const auto tit = fa.tactic_defs.find("Standard");
+        if (tit != fa.tactic_defs.end()) tactic = &tit->second;
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.tactics_sets,
+                       tactic, "Player", "Enemy", battle.player_spawn_x,
+                       battle.player_spawn_y, battle.enemy_spawn_x,
+                       battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
+                       roll01, owned, sf2::scene::PerkSetup(), nullptr, nullptr);
+        ctl.release_intro();
+        {
+            int pguard = 0;
+            while (pguard < 20000 && ctl.phase() != 2) {
+                ctl.update(1.0f / 60.0f);
+                ++pguard;
+            }
+        }
+        ctl.set_bounds(80.0f, 1880.0f, 0.0f);  // the dojo walls (`yu`/`zu`)
+        std::fprintf(stdout, "[wallprobe] phase=%d walls=[%.0f,%.0f]\n",
+                     ctl.phase(), 80.0f, 1880.0f);
+        std::fflush(stdout);
+        const char* kMoves[3] = {"WallJump_100", "HunterFly_150", "WaspFly_150"};
+        for (int mi = 0; mi < 3; ++mi) {
+            ctl.debug_place_fighters(1800.0f, 1740.0f);
+            ctl.update(1.0f / 60.0f);
+            const float x0 = ctl.player().fighter.world_x();
+            const bool started = ctl.debug_force_player_move(kMoves[mi]);
+            std::fprintf(stdout, "[wallprobe] force %-14s started=%d x0=%.1f\n",
+                         kMoves[mi], started ? 1 : 0, static_cast<double>(x0));
+            float mn = 1e9f, mx = -1e9f, spanmax = 0.0f;
+            for (int f = 0; f < 40; ++f) {
+                ctl.update(1.0f / 60.0f);
+                const float wx = ctl.player().fighter.world_x();
+                const float sp = ctl.player().fighter.debug_bone_span_x();
+                if (wx < mn) mn = wx;
+                if (wx > mx) mx = wx;
+                if (sp > spanmax) spanmax = sp;
+                if (f < 12 || (f % 8) == 0) {
+                    const auto* cm = ctl.player().fighter.current_move();
+                    std::fprintf(stdout,
+                                 "[wallprobe]   f=%2d mv=%-14s wx=%.1f span=%.1f\n",
+                                 f, cm != nullptr ? cm->name.c_str() : "-",
+                                 static_cast<double>(wx), static_cast<double>(sp));
+                }
+            }
+            std::fprintf(stdout,
+                         "[wallprobe] %-14s wx min=%.1f max=%.1f span_max=%.1f\n",
+                         kMoves[mi], static_cast<double>(mn),
+                         static_cast<double>(mx), static_cast<double>(spanmax));
+            std::fflush(stdout);
         }
         app.shutdown();
         return 0;

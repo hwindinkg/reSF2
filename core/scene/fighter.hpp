@@ -604,6 +604,27 @@ public:
         if (world_x_ < min_x) world_x_ = min_x;
         if (world_x_ > max_x) world_x_ = max_x;
     }
+    // JS `Te.yu`/`Te.zu` (set by `zLa(a,b,..)` L279707, reached from
+    // `pMa`/`qMa` L212992: `qMa(v.tFa, v.NKa, ..)` where `v.tFa = location.NU`
+    // = the `<Root Wall>` and `v.NKa = location.width - location.NU`). They are
+    // the ARENA WALLS, distinct from the ragdoll `Al.NO/MO` clamp. Consumed by
+    // `Te.Gub`'s `EObjectWall` align (L558/559) and `Te.Iub`'s repulsion.
+    void set_arena_walls(float min_x, float max_x) {
+        arena_wall_min_ = min_x;
+        arena_wall_max_ = max_x;
+    }
+    // [probe, authorised] Max x-extent of the rendered pose (`pos_`) — the
+    // "stretched across the arena" metric for `--wall-probe`.
+    float debug_bone_span_x() const {
+        if (pos_.size() < 2) return 0.0f;
+        float lo = pos_[0], hi = pos_[0];
+        for (std::size_t i = 1; i * 2 < pos_.size(); ++i) {
+            const float v = pos_[i * 2];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        return hi - lo;
+    }
     // JS `sI` (L491/L498/L511): the number of landed hits this fighter has
     // TAKEN (`Bb.ep = (sI==0)` then `sI++`). `ca.Cgb` L396 gates the
     // Punchbag's forced reaction on `a.model.sI == v.Qxa`
@@ -996,6 +1017,17 @@ private:
     float ragdoll_wall_min_ = 0.0f;
     float ragdoll_wall_max_ = 0.0f;
     float ragdoll_floor_y_ = 0.0f;
+    // JS `Te.yu`/`Te.zu`: the ARENA walls (see `set_arena_walls`). Used by the
+    // `EObjectWall` align (`Gub` L558/559) and `Iub`'s repulsion.
+    float arena_wall_min_ = 0.0f;
+    float arena_wall_max_ = 0.0f;
+    // JS `Te.jc` buffer shift from `Te.Iub` (wall repulsion): per play-buffer
+    // slot x offset subtracted at read time (`b.data[d++].x -= f`). Sized to
+    // the buffer (`2 + clip_len - FirstFrame`) and reset at every clip start.
+    std::vector<float> wall_shift_;
+    // JS `Te.Hla` (`this.Hla = f = ...`): the last repulsion amount, read by a
+    // parent's `Iub` when `AlignOnParentWallCollision` (`Te.F3.Hla`).
+    float wall_rep_last_ = 0.0f;
     // `this.bQa` = `xd.bAa` (per-location `FrictionForce`, char 241113).
     float ragdoll_friction_ = kFrictionForce;
     std::set<std::string> active_intervals_;
@@ -1043,6 +1075,11 @@ private:
 
     void rebuild_holds();
     void compute_align(const MoveDef& move);
+    // JS `Te.Iub` (L~285930): the per-frame wall-repulsion clip shift. Reads
+    // the pivot node's buffered x at slot `playhead_+2` and, when the move is
+    // not `NoWallRepulsion`, subtracts the wall overflow from every later
+    // buffer slot (`b.data[d++].x -= f`). No-op while no clip plays.
+    void wall_repulsion_step();
     // JS `Dl.NQ` (L575) over the `Wf.b3` pair list (`Dl.v5a` L580): the mirror
     // partner bone of `i` (`_1` <-> `_2`), or -1 when `i` is unpaired.
     int mirror_partner(int i) const;

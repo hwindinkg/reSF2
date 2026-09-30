@@ -1023,6 +1023,17 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         def.no_interp = data::xml_attr_bool(move, "NoInterpolationFrames", false);
         def.no_animation = data::xml_attr_bool(move, "NoAnimation", false);  // `Rha`
         def.physics = data::xml_attr_bool(move, "Physics", false);  // `MS` (L362442)
+        // JS `l.bha` (L362257): `NoWallRepulsion != null && (bha = ka(..))`,
+        // then `WallRepulsion != null && (bha = !ka(..))` (the latter wins).
+        if (move.attribute("NoWallRepulsion")) {
+            def.no_wall_repulsion = data::xml_attr_bool(move, "NoWallRepulsion", false);
+        }
+        if (move.attribute("WallRepulsion")) {
+            def.no_wall_repulsion = !data::xml_attr_bool(move, "WallRepulsion", false);
+        }
+        // JS `l.iva` (L362664): `AlignOnParentWallCollision`.
+        def.align_on_parent_wall =
+            data::xml_attr_bool(move, "AlignOnParentWallCollision", false);
         def.end_frame = data::xml_attr_int(move, "EndFrame", 0);
         def.priority = data::xml_attr_int(move, "Priority", 0);
         def.style_factor = data::xml_attr_float(move, "StyleFactor", 1.0f);  // `RNa`

@@ -550,6 +550,18 @@ struct MoveDef {
     // ordinary playing clip (`Nd.nk` stays false). 14 shipped moves carry
     // `Physics="1"` (PhysicalFall/PhysicalGroundHit/RootHit is NOT one).
     bool physics = false;
+    // JS `l.bha` (L362257/L362348): `NoWallRepulsion != null && (bha = ka(..))`,
+    // then `WallRepulsion != null && (bha = !ka(..))`. Consumed ONLY by
+    // `Te.Iub` (the per-frame wall-repulsion clip shift): `if(!this.Ua.bha||a)`
+    // — with `bha` set the clip buffer is NOT clamped to the arena walls.
+    // 163 shipped moves carry it (all `WallHit*`, `WallJump*`, `WaspFly*`,
+    // `HunterFly*`, every `Throw*`, and the magic/projectile starts).
+    bool no_wall_repulsion = false;
+    // JS `l.iva` (L362664): `u.ka(k.attributes.get("AlignOnParentWallCollision"))`
+    // — `Te.Iub`'s `a` flag: with a parent controller (`F3`) the clip is
+    // shifted by the PARENT's last wall-repulsion amount instead of the wall.
+    // 4 shipped moves carry it.
+    bool align_on_parent_wall = false;
     int end_frame = 0;   // EndFrame attr, else 0 (JS `jc.Lj`)
     int priority = 0;
     float style_factor = 1.0f;  // `RNa` (StyleFactor attr, default 1.0)

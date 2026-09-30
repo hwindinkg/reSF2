@@ -1767,6 +1767,10 @@ void FightController::set_bounds(float wall, float wall_max, float floor_y) {
     wall_min_ = wall;
     wall_max_ = wall_max;
     floor_y_ = floor_y;
+    // JS `qMa(v.tFa, v.NKa, ..)` L212992: the fighter's `yu`/`zu` (the arena
+    // walls the `EObjectWall` align and `Iub` repulsion read).
+    player_.fighter.set_arena_walls(wall_min_, wall_max_);
+    enemy_.fighter.set_arena_walls(wall_min_, wall_max_);
     camera_.wall = wall;
     camera_.floor = floor_y;  // the visible floor line (the camera anchor)
     camera_.arena_w = wall_min_ + wall_max_;  // the RAW location width (JS Lb.width)
@@ -5544,6 +5548,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // the dojo into the void (the enemy AI previously wandered to x=1244,
     // past the right wall at 900, and stood on the black background).
     me.fighter.clamp_x(wall_min_, wall_max_);
+    // JS `qMa(v.tFa, v.NKa, ..)` L212992 (per fight) + `nzb` L198516 (per
+    // frame): the fighter's arena walls `yu`/`zu`, read by the `EObjectWall`
+    // align and `Iub`. Re-asserted every frame so every path has them.
+    me.fighter.set_arena_walls(wall_min_, wall_max_);
 
     // [ragdoll probe] Per-frame world position while the `Al` ragdoll latch
     // is active — the reproduction for "the hit reaction must not snap back".

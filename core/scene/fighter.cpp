@@ -1163,6 +1163,10 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // JS `Te.Skb` (L551) runs `Gub()` (align, L557-559) right after loading
     // the clip (and after `Peb`) and before the first `ia()` sample.
     compute_align(move);
+    // JS `Te.Skb` builds a FRESH buffer (`jc`), so `Iub`'s per-slot shift and
+    // its last amount start at zero every move.
+    wall_shift_.clear();
+    wall_rep_last_ = 0.0f;
 
     // [FIX root motion — JS `Skb` L551-552] Seed the authored root-motion
     // state exactly as the JS controller does when a move starts:
@@ -1636,6 +1640,11 @@ void Fighter::advance_step() {
         return;
     }
 
+    // JS `Te.ia` L278104: `this.Iub()` runs BEFORE `eda()` (the pose apply) and
+    // before `Xh++`, i.e. at the same pre-increment `playhead_` the sampler
+    // reads this step. Clamps the clip buffer to the arena walls.
+    wall_repulsion_step();
+
     // Subframes per clip-frame: (XJ+1)*HD with HD=1 (JS `Gka` +
     // `eda`: `mo += Tx`, `Tx = (Ua.XJ+1)`). MidFrames=2 -> 3.
     const int sub = std::max(1, (current_move_->mid_frames + 1) * 1);
@@ -1714,6 +1723,8 @@ void Fighter::advance_step() {
         root_active_ = false;
         root_dm_x_ = root_av_x_ = 0.0f;
         j8_x_ = 0.0f;
+        wall_shift_.clear();
+        wall_rep_last_ = 0.0f;
         render_offset_ = 0.0f;
         render_offset_y_ = 0.0f;
         render_offset_valid_ = true;
@@ -2063,8 +2074,17 @@ void Fighter::compute_align(const MoveDef& move) {
             dz = fb[u].z;
         }
     }
-    // ve == 2 (EObjectAnimation) -> d = 0. ve == 3 (EObjectWall) needs the
-    // scene wall bounds `yu`/`zu` (not owned by Fighter) — OPEN, d stays 0.
+    // ve == 2 (EObjectAnimation) -> d = 0. ve == 3 (EObjectWall) -> the arena
+    // wall (JS `Gub` L558): `d.x=0,d.y=0,d.z=0,
+    // d.x=this.hd()==1==(a.CK=="Back")?-this.yu:-this.zu` where `CK` is the
+    // PIVOT Part and `yu`/`zu` = the arena walls.
+    if (ve == 3) {
+        const bool back = (al.pivot_part == "Back");
+        const bool facing_right = (clip_mirror_ > 0);  // `hd()==1`
+        dx = (facing_right == back) ? -arena_wall_min_ : -arena_wall_max_;
+        dy = 0.0f;
+        dz = 0.0f;
+    }
 
     // e/f/g = the Position object's position (JS `Gub` L559), in solver
     // (clip) space: `currentNode.ma` / `L7a(i).ma` are the posed positions.
@@ -2105,7 +2125,19 @@ void Fighter::compute_align(const MoveDef& move) {
         ey = c->fk_y_;
         ez = c->fk_z_;
     }
-    // jk == 3 (EObjectWall) needs the wall bounds — OPEN, e stays 0.
+    // jk == 3 (EObjectWall) -> the arena wall (JS `Gub` L559):
+    //   `case "EObjectWall": g=f=0, e=this.hd()==1==(a.cja=="Back")?this.yu:this.zu`
+    // where `cja` is the POSITION Part and `yu`/`zu` = the arena walls
+    // (`Te.zLa` L279707 <- `qMa(v.tFa,v.NKa,..)` L212992). The shipped Wall
+    // aligns all use `Part="Back"`, so the clip is anchored to the wall
+    // BEHIND the fighter.
+    if (jk == 3) {
+        const bool back = (al.pos_part == "Back");
+        const bool facing_right = (clip_mirror_ > 0);  // `hd()==1`
+        ex = (facing_right == back) ? arena_wall_min_ : arena_wall_max_;
+        ey = 0.0f;
+        ez = 0.0f;
+    }
     ex += f * al.shift_x;  // JS `e += this.hd()*a.dja`
     ey += al.shift_y;      // JS `f += a.eja`
 
@@ -2142,6 +2174,79 @@ void Fighter::compute_align(const MoveDef& move) {
     align_x_ = al.axis_x ? (ex - dx) : al.shift_x;
     align_y_ = al.axis_y ? (ey - dy) : al.shift_y;
     align_z_ = al.axis_z ? (ez - dz) : 0.0f;
+}
+
+// JS `Te.Iub` (L285930; called from `ia` L278104 as `this.Iub()`):
+//   Iub(){ var a=!1, b=0;
+//     this.F3!=null&&this.Ua.iva&&(b=this.F3.Hla,a=!0);
+//     var c=this.Xh+2;
+//     if(c>this.jc.size-1) this.Hla=0;
+//     else{ var d=this.Hra, e=this.hta,
+//       f=this.jc.Kh(c).data[this.model.Fe()!=null?this.model.Fe().id
+//                                            :this.model.Va.all[0].id].x;
+//       if(!this.Ua.bha||a){
+//         if(a) f=b;
+//         else if(this.Hla=f=f<this.yu+d?f-(this.yu+d):f>this.zu-e?f-(this.zu-e):0,
+//                 f==0) return;
+//         a=c;
+//         for(c=this.jc.size<c+2?this.jc.size:c+2; a<c;)
+//           for(b=this.jc.Kh(a++), d=0,e=b.size; d<e;) b.data[d++].x-=f } } }
+//
+// The clip buffer's pivot x is clamped to `[yu+Hra, zu-hta]`; the overflow is
+// subtracted from every later slot. `bha` = NoWallRepulsion (skips the clamp);
+// `iva` = AlignOnParentWallCollision (uses the parent's `Hla`). The native has
+// no parent controller, so the `iva` branch never activates.
+void Fighter::wall_repulsion_step() {
+    if (current_move_ == nullptr || current_clip_ == nullptr) return;
+    const int clip_len = static_cast<int>(current_clip_->frames.size());
+    if (clip_len <= 0) return;
+    const int ff = std::max(0, current_move_->first_frame);
+    const int size = clip_len - ff + 2;  // `jc.J$a()`
+    if (size <= 0) return;
+    if (wall_shift_.size() != static_cast<std::size_t>(size)) {
+        wall_shift_.assign(static_cast<std::size_t>(size), 0.0f);
+    }
+    const int c = playhead_ + 2;  // JS `this.Xh+2`
+    if (c > size - 1) {
+        wall_rep_last_ = 0.0f;
+        return;
+    }
+    if (current_move_->no_wall_repulsion) return;  // `this.Ua.bha`
+    // The JS `jc.Kh(c).data[..].x` is a WORLD-space buffer value: `Gub`'s
+    // `Gla(Fk.x,..)` shifted the buffer by `Fk = e - d` = world - clip. The
+    // native buffer (`align_x_`) is CLIP-LOCAL, so add `render_offset_` (the
+    // world offset the placement adds) to compare against the world walls.
+    // A degenerate arena (walls never set, `yu == zu == 0`) would invert the
+    // range — skip it (`qMa` always sets them before the first `ia`).
+    if (arena_wall_max_ <= arena_wall_min_) return;
+    const int pivot = model_.bone_by_name(fighter_pivot_bone());
+    if (pivot < 0) return;
+    // Buffer x at slot `c` = `mneg*clip[frame].x + align_x_ - wall_shift_[c]`.
+    const int f = std::max(0, std::min(ff + c - 2, clip_len - 1));
+    const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
+    const std::size_t nclip = std::min(fb.size(), model_.bones.size());
+    int src_i = mirror_swap_src(pivot, nclip);
+    if (src_i < 0) src_i = pivot;
+    const std::size_t src = static_cast<std::size_t>(src_i);
+    if (src >= fb.size()) return;
+    const float mneg = (clip_mirror_ < 0) ? -1.0f : 1.0f;
+    const float fx = mneg * fb[src].x + align_x_ + render_offset_ -
+                     wall_shift_[static_cast<std::size_t>(c)];
+    // `nzb` L198516: `Hra`/`hta` by facing — `a?30:100` / `a?100:30` with
+    // `a = da.hd()>0`. (`qMa`'s initial 100/30 is overwritten every frame.)
+    const bool facing_right = (clip_mirror_ > 0);
+    const float hra = facing_right ? 30.0f : 100.0f;
+    const float hta = facing_right ? 100.0f : 30.0f;
+    const float lo = arena_wall_min_ + hra;   // `this.yu+d`
+    const float hi = arena_wall_max_ - hta;   // `this.zu-e`
+    float shift = 0.0f;
+    if (fx < lo) shift = fx - lo;
+    else if (fx > hi) shift = fx - hi;
+    wall_rep_last_ = shift;  // `this.Hla = f`
+    if (shift == 0.0f) return;
+    for (int s = c; s < size; ++s) {
+        wall_shift_[static_cast<std::size_t>(s)] += shift;  // `x -= f`
+    }
 }
 
 // JS `Te.Skb` L550-551: builds the two play-buffer slots prepended before the
@@ -2321,7 +2426,13 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // prepend). Applying them here — instead of to the interpolated `px`
         // afterwards — is what the JS does: `wu`/`rp` blend buffer slots, so
         // the prepend contribution must NOT carry the align.
-        ox = mneg * fb[src].x + align_x_;
+        // `wall_shift_` is `Te.Iub`'s per-slot repulsion (`b.data[d++].x -= f`),
+        // applied to the same clip-frame slots.
+        float wshift = 0.0f;
+        if (interp && static_cast<std::size_t>(abs_slot) < wall_shift_.size()) {
+            wshift = wall_shift_[static_cast<std::size_t>(abs_slot)];
+        }
+        ox = mneg * fb[src].x + align_x_ - wshift;
         oy = fb[src].y + align_y_;
         oz = fb[src].z + align_z_;
         return true;
