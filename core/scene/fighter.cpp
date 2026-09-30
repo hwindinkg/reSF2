@@ -1474,26 +1474,36 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
 // (tactic weights at reaction time are not ported — documented OPEN), so the
 // port starts the uniformly picked move directly. `rng` is the injected
 // `Math.random` analog (`FightController::math_random01`), never `Da.pg`.
-std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
+std::string Fighter::try_react(FightContext& ctx,
                                const std::function<float()>& rng) {
     // JS `Gc.DK` tail (L674): record which branch the pick ran (`MS ? jJa :
     // Nsb`) so `apply_hit` starts the ragdoll only for `MS` (Physics).
     react_physics_ = false;
-    // Build the candidate list: moves with a Hit event (JS `b` = the
-    // candidate reactions), split by the Fall preference (`Ub`/MS proxy).
+    // JS `Gc.EZa` (L676-677): the candidate set is the fighter's moves
+    // carrying a `<Hit>` event (`Su.dea(6)`), each tested by
+    //   `!Gc.Kbb(f,e[d]) && Gc.OGa(a.model,b,g.Ob) && Gc.iEa(g,Ek[d],a)`
+    // and then by the move's OWN `<Conditions>` (`f.Yz(b,null,g)`).
+    // `OGa`'s `<Hit Player>` selector is always the default "Me" on shipped
+    // `<Hit>` events (0 occurrences of `<Hit Player=...>` in moves.xml), and
+    // `Kbb` only dedups — so the two real gates are `iEa` (`Nm.compare`, the
+    // hit-name match) and `Yz` (the conditions).
     std::vector<const MoveDef*> cands;
     for (const MoveDef* m : hb_) {
         if (m == nullptr || !m->has_event("Hit")) continue;
         // A hit reaction is the `Recoil|...|Hit` family. The Titan boss's
         // `TitanBlock` (`moves.xml` Template="Block|Hit", Priority 720, no
-        // <Locks> - universal, so it sits in EVERY fighter's list) would
-        // otherwise win the max-`priority` partition for BOTH fighters and
-        // play `titan_block.bytes` - a clip authored for the Titan skeleton -
-        // on a humanoid mesh (corrupted pose, no visible reaction). A block
-        // is never a hit reaction, so the `Block` tag is excluded here.
+        // <Locks> - universal, so it sits in EVERY fighter's list) carries
+        // `<Hit Name="High"/>`-style events; the JS admits it only under
+        // `MOD_TITAN` + a live Block interval (its `<Conditions>`), so a
+        // humanoid never picks it. A block is never a hit reaction.
         if (m->template_tags.count("Block") != 0) continue;
-        const bool is_fall = m->name.find("Fall") != std::string::npos;
-        if (prefer_fall != is_fall) continue;
+        // JS `Gc.iEa(g, this.Ek[d], a)` -> `Nm.compare(a)` (L767): the
+        // reaction's `<Hit>` event name must equal the attacker's hit name
+        // (`a.UC` = `Ul.B8a`, the attack interval's `<Hit Name>`). Without
+        // this gate every reaction admitted every hit, so `RootHit`
+        // (Priority 700, `<Hit Name="RootHit"/>`) won the max-priority
+        // partition of every normal High/Middle hit.
+        if (!m->hit_event_matches(ctx.last_hit_animation)) continue;
         // JS `Gc.EZa` (L676-677): `f.Yz(b,null,g)` — the candidate's OWN
         // `<Conditions>` MUST pass before it enters `Gc.DK`'s priority
         // partition. This is what makes the dojo bag pick `PhysicalDummy`
@@ -1504,11 +1514,7 @@ std::string Fighter::try_react(FightContext& ctx, bool prefer_fall,
         if (!react_conditions_pass(*m, ctx)) continue;
         cands.push_back(m);
     }
-    if (cands.empty() && prefer_fall) {
-        // The shock knockdown had no *Fall* candidate: fall back to the
-        // non-Fall reaction set (the JS `g`-empty path).
-        return try_react(ctx, false, rng);
-    }
+    if (cands.empty()) return "";  // nothing admitted by the two gates
     // `Aua` (L343447): keep only the max-`priority` group.
     std::vector<const MoveDef*> top;
     for (const MoveDef* m : cands) {

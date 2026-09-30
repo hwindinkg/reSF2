@@ -5082,7 +5082,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // JS `ca.Cgb` (L394-397): `b.block || (model.hT(5), Dga, ...)` — a
     // landed UNBLOCKED hit destroys the target's Block intervals and picks
     // a new reaction move via `Gc.DK` (d-set first-match:
-    // `Fighter::try_react`; shock prefers *Fall* reactions).
+    // `Fighter::try_react`; the candidate set is gated by the `<Hit>` event
+    // name match (`Nm.compare`) + the move's `<Conditions>`, so a shock
+    // reaches the `*HitFall` reactions through their `<Hit Type="Shock"/>`
+    // conditions, not through a name heuristic).
     // Strike-flag counters for the prize Fh (JS `Sf.strike` flags d/e/h:
     // first-hit -> `cvb`/`p1a` (c6++), shock -> `yvb`/`P1a` (e6++); blocked
     // hits take the `UYa` path and count nothing).
@@ -5098,12 +5101,21 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         fill_ctx_geometry(rctx, def, atk);
         rctx.health_ratio = def.max_hp > 0.0f ? def.hp / def.max_hp : 0.0f;
         rctx.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
+        // JS `sm.he` reads `a.IL` (the landed-hit record): `has_last_hit`
+        // arms every `<Hit>` condition and `last_hit_animation` carries the
+        // attacker's hit name (`a.IL.model.Vb.UC` = `Ul.B8a`), which the
+        // `*HitFall` reactions' `<Hit Name="High" Type="Shock"/>` conditions
+        // test. Before this the reaction context left `has_last_hit` false,
+        // so every `<Hit>` condition was base-FALSE and the `prefer_fall`
+        // name heuristic had to stand in for it.
+        rctx.has_last_hit = true;
+        rctx.last_hit_animation = iv.hit_name_at(frame);  // JS `Vb.UC`
         rctx.candidate_moves = {};
         // JS `Gc.DK` (L343452): `f[uf.sja(f.length)]` — the reaction pick is
         // a UNIFORM `Math.random` draw (`uf.sja` L57426), NOT `Da.pg`. The
         // port routes it through the pinned `math_random01()` so it never
         // perturbs the shared fight/AI stream.
-        const std::string reaction = def.fighter.try_react(rctx, rec.shock);
+        const std::string reaction = def.fighter.try_react(rctx);
         if (!reaction.empty()) {
             // JS `Gc.DK` tail (L674) — the reaction branches on the picked
             // animation's `MS` (the `Physics` attr, L362442):
@@ -5260,9 +5272,14 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         fill_ctx_geometry(ev, atk, def);
         ev.health_ratio = atk.max_hp > 0.0f ? atk.hp / atk.max_hp : 0.0f;
         // JS `sm.he` reads `a.IL` (the hit event data): `se` -> "Critical",
-        // `Ub` -> "Shock". `has_last_hit` arms the `<Hit>` conditions.
+        // `Ub` -> "Shock". `has_last_hit` arms the `<Hit>` conditions and
+        // `last_hit_animation` is the attacker's hit name (`a.IL.model.Vb.UC`
+        // = `Ul.B8a`) — the global CriticalEffect/BlockEffect/HitEffect rows
+        // gate on `<Hit Name="TornadoHit" Not="1"/>`, so a TornadoHit must
+        // resolve its own name here.
         ev.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
         ev.has_last_hit = true;
+        ev.last_hit_animation = iv.hit_name_at(frame);  // JS `Vb.UC`
         // `CZa(7)` reads the attacker's move; `move` IS the attacker's move.
         std::vector<const sf2::scene::MoveAction*> strike_acts;
         for (const sf2::scene::MoveAction& a : move.actions) {

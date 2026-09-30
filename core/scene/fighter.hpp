@@ -259,19 +259,17 @@ public:
     // Returns the started move's name, or "".
     std::string try_select_move(sf2::scene::FightContext& ctx,
                                 const std::string& event = std::string());
-    // Hit-reaction pick (JS `Gc.DK` L673-674, d-set first-match): starts the
-    // first priority-ordered `hb` move carrying a `Hit` event whose tactics
-    // conditions pass (54 such moves in moves.xml: HighHit/MiddleHit/...,
-    // PhysicalFall/...). `prefer_fall` (shock knockdown, `Ub`) tries
-    // *Fall*-named reactions first. The JS `DK` tail branches on the picked
-    // animation's `MS` (the `Physics` attr, L362442): `MS ? jJa : Nsb`
-    // (L674) — `last_react_physics()` reports which branch this pick ran.
-    // The JS `DK` picks the top-`priority` group
-    // and then `f[uf.sja(len)]` (uniform, `Math.random`); `rng` is the
-    // injected `Math.random` analog (never `Da.pg`). The `Pkb` weighted
-    // roulette at reaction time stays OPEN (no tactic weights available).
-    // Returns the name or "".
-    std::string try_react(sf2::scene::FightContext& ctx, bool prefer_fall,
+    // Hit-reaction pick (JS `Gc.DK` L673-674 + `Gc.EZa` L676-677): the
+    // fighter's moves carrying a `<Hit>` event (`Su.dea(6)`) whose
+    // `<Hit>`-event name matches the attacker's hit name (`Nm.compare`,
+    // L767) and whose `<Conditions>` pass (`f.Yz`, L677); `Gc.DK` then keeps
+    // the max-`priority` group and picks uniformly (`f[uf.sja]`). The JS `DK`
+    // tail branches on the picked animation's `MS` (the `Physics` attr,
+    // L362442): `MS ? jJa : Nsb` (L674) — `last_react_physics()` reports
+    // which branch this pick ran. `rng` is the injected `Math.random` analog
+    // (never `Da.pg`). The `Pkb` weighted roulette at reaction time stays
+    // OPEN (no tactic weights available). Returns the name or "".
+    std::string try_react(sf2::scene::FightContext& ctx,
                           const std::function<float()>& rng = {});
 
     // Starts `move` if its conditions pass: sets current_move, move_frame=0,

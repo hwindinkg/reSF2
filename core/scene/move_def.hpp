@@ -627,9 +627,29 @@ struct MoveDef {
     // input path (JS `Gc.Vkb` L671 -> `Gc.EZa` L676) only considers moves
     // whose Events contain "KeyPressed".
     std::set<std::string> events;
+    // JS `kz` `<Hit>` event (`Nm`, L767) `Name` attr (`tb.Ki`): the reaction
+    // moves' `<Events><Hit Name="High"/></Events>` list. `Gc.EZa`'s
+    // `iEa` -> `Nm.compare` (L767) requires `Ki == trigger.UC` (the attacker's
+    // hit name from `Ul.B8a`), so a reaction only matches a hit of the SAME
+    // name. This is what keeps `RootHit` (Priority 700,
+    // `<Hit Name="RootHit"/>`) out of a normal High/Middle reaction. An empty
+    // `Name` (`<Hit />`, e.g. PhysicalFall) matches any hit (`Ki==""`).
+    std::vector<std::string> hit_event_names;
 
     bool has_event(const std::string& name) const {
         return events.find(name) != events.end();
+    }
+
+    // JS `Nm.compare(a)` (L767): does ANY of the move's `<Hit>` events admit
+    // the attacker's hit name `uc`? `super.compare` (the type-6 match) is
+    // already implied by `has_event("Hit")`; `a.data` is the attacker's live
+    // Attack interval (never null on the reaction path), so the name test is
+    // the gate: `Ki=="" || Ki==UC`.
+    bool hit_event_matches(const std::string& uc) const {
+        for (const std::string& n : hit_event_names) {
+            if (n.empty() || n == uc) return true;
+        }
+        return false;
     }
 };
 

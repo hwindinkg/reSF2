@@ -1109,6 +1109,14 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
             if (!list) return;
             for (pugi::xml_node ev : list.children()) {
                 def.events.insert(ev.name());
+                // JS `tb.init` (L763): `this.Ki = a.attributes.get("Name")`.
+                // `Gc.EZa`'s `iEa` -> `Nm.compare` (L767) compares it to the
+                // attacker's hit name (`UC`); the port kept only the node name
+                // before, so every reaction matched every hit.
+                if (std::string(ev.name()) == "Hit") {
+                    const char* n = ev.attribute("Name").value();
+                    def.hit_event_names.push_back(n != nullptr ? n : "");
+                }
             }
         };
         merge_events(move.child("Events"));
