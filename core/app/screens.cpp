@@ -4943,15 +4943,18 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         if (!warriors) return out;
         // The Nth `<Warrior>` of the launched `<Fight>` (JS `Da.Xs`): the
         // multi-wave pipeline (`vJa` L619534 -> `pf`) resolves EVERY warrior;
-        // index 0 keeps the historical first-warrior behaviour.
+        // index 0 keeps the historical first-warrior behaviour. A NEGATIVE
+        // `warrior_index` selects the LAST `<Warrior>` — JS `dl.Gz`
+        // (char 729006: `Gz(a,b){let c=0,d=b.length;0<d&&(c=this.A8a(a,b[d-1]))}`)
+        // rates the enemy against `b[b.length-1]`, the last resolved warrior
+        // (`v.EQ(a.Xs)`), not the first.
         pugi::xml_node w;
         {
             int wi = 0;
             for (const pugi::xml_node wc : warriors.children("Warrior")) {
-                if (wi++ == warrior_index) {
-                    w = wc;
-                    break;
-                }
+                if (warrior_index >= 0 && wi++ != warrior_index) continue;
+                w = wc;
+                if (warrior_index >= 0) break;
             }
         }
         if (!w) return out;
@@ -8598,7 +8601,11 @@ std::vector<sf2::scene::PerkModel> enemy_rating_perks(
 float map_battle_rating(App& app, const std::string& battle_name,
                         const std::string& zone, int fight_index) {
     try {
-        const BattleWarriorInfo bw = battle_warrior(battle_name, zone, fight_index);
+        // JS `dl.Gz` (char 729006) -> `v.EQ(a.Xs)` then `A8a(a, b[b.length-1])`:
+        // the rating uses the LAST resolved `<Warrior>` of the launched
+        // `<Fight>` (the boss of a multi-warrior fight), NOT the first.
+        const BattleWarriorInfo bw =
+            battle_warrior(battle_name, zone, fight_index, -1);
         if (bw.attrs.empty()) return kMapDefaultRatingRatio;
         const auto fattr = [&bw](const char* k, float dflt) {
             const auto it = bw.attrs.find(k);
@@ -9975,9 +9982,15 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                 mode_groups_ = groups;
                 mode_active_ = true;
                 mode_series_ = sf2::scene::ModeSeries();
+                // The launched `<Fight>` ordinal (`map_fight_index` = recorded
+                // wins) — JS `vJa` L619534 resolves `v.EQ(a.Xs)` of the
+                // SELECTED fight (`dl` is the ladder row the map is on), so the
+                // mode series cursor starts there, not always at 0.
+                mode_series_.fight_index = pending_fight_index;
             }
             sf2::scene::ModeSetup setup;
-            if (mode_active_ && resolve_mode_setup(0, 0, setup)) {
+            if (mode_active_ &&
+                resolve_mode_setup(mode_series_.fight_index, 0, setup)) {
                 fight_->apply_mode_setup(setup);
                 std::fprintf(stdout,
                              "[mode] %s setup: rounds=%d time=%d recovery=%.3f "
@@ -11264,7 +11277,38 @@ void FightScreen::update_impl(float dt) {
         // `apply_mode_setup` (or, on the terminal win, granted at Results via
         // `D0(Rk)` L728049). No `results_pushed_` here: the advance resets
         // `battle_over_`, so the next fight's end is handled too.
-        if (mode_active_ && player_won &&
+        // JS `Onb` L209199 gates the in-battle advance on TWO terms:
+        //   `a = nB.ng >= round.eL`  (the winner reached the rounds-to-win)
+        //   `b = nB.qb && this.Rk < this.pf.length-1`  (the winner is the
+        //        player AND the LAUNCHED `<Fight>` still has warriors left —
+        //        `pf = v.EQ(a.Xs)`, the resolved warriors of that ONE fight)
+        // The `a && b` branch calls `mfb` (`Rk++` / `Zb = pf[Rk]`), i.e. it
+        // advances to the NEXT `<Warrior>` of the SAME `<Fight>` — never to
+        // the next `<Fight>` of a ladder. A tournament `<Fight>` ships exactly
+        // ONE `<Warrior>` (stages.xml ZONE_1 `Tournament` fights 1..24), so
+        // `pf.length-1 == 0` and `Rk < 0` is false: a tournament win takes the
+        // `a -> bea(nB)` branch — the fight ENDS (results) and the map's
+        // `map_fight_index` (recorded wins) launches the next opponent. The
+        // old unconditional `advance_series` chained the whole ladder in one
+        // battle (the reported "monkey win -> next opponent as a new round").
+        bool mode_next_wave = false;
+        if (mode_active_) {
+            const int fi = mode_series_.fight_index;
+            if (mode_battle_.type == "SURVIVAL") {
+                if (!mode_battle_.fights.empty()) {
+                    const int total =
+                        sf2::scene::survival_waves(mode_battle_.fights[0]);
+                    mode_next_wave = mode_series_.wave + 1 < total;
+                }
+            } else if (fi >= 0 &&
+                       fi < static_cast<int>(mode_battle_.fights.size())) {
+                // `pf.length > 1` — a multi-`<Warrior>` fight (boss finals,
+                // INTERMISSION, C3) still advances in-battle.
+                mode_next_wave =
+                    mode_battle_.fights[fi].warriors.size() > 1;
+            }
+        }
+        if (mode_active_ && player_won && mode_next_wave &&
             sf2::scene::advance_series(mode_battle_, mode_series_, true)) {
             sf2::scene::ModeSetup next;
             if (resolve_mode_setup(mode_series_.fight_index, mode_series_.wave,
