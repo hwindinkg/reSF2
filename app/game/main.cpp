@@ -1592,6 +1592,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // lines and the `[fight] summary` decide whether the JS would let the
     // player win or the port mis-resolves the loss.
     bool boss_loss_probe = false;
+    // `--force-loss` (companion to `--boss-loss-probe`): KO the player right
+    // after the intro so the run ends in a deterministic DEFEAT — the
+    // observation harness for the JS `v.kD` LOSS grant (`D0(PU)`).
+    bool force_loss = false;
     bool enemy_move_probe = false;
     // --wave-probe: boot a MULTI-WAVE boss fight (default BOSS_LYNX/ZONE_1
     // Fight 6, Rounds=3, 3 warriors) and KO each wave in turn, logging the
@@ -2121,6 +2125,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             tactic_override = argv[++i];
         } else if (arg == "--boss-loss-probe") {
             boss_loss_probe = true;
+        } else if (arg == "--force-loss") {
+            force_loss = true;
         } else if (arg == "--area-probe") {
             area_probe = true;
         } else if (arg == "--d3-probe") {
@@ -2192,6 +2198,20 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 t.c_str(), static_cast<long long>(money),
                 static_cast<long long>(exp), static_cast<long long>(bonus),
                 static_cast<long long>(pbase), static_cast<long long>(pb_used));
+            // JS `v.kD` (L622187) `f.pwa(b.D0(c),...)` on a LOSS: `c = PU`
+            // (no `++c`), `PU = wi.length-2` at setup -> the SECOND-TO-LAST
+            // `<Reward>` (the participation row). The SAME `dmb`/`emb`
+            // (L93552) grant runs on the loss, so this is what the player
+            // receives after a defeat.
+            std::int64_t lmoney = 0, lexp = 0, lbonus = 0, lpbase = 0;
+            sf2::app::battle_rewards_probe(b, z, fi < 0 ? 0 : fi, 1, lmoney, lexp,
+                                           lbonus, lpbase, /*row_from_end=*/1);
+            std::printf(
+                "[reward-probe] %s LOSS row (D0(PU)) -> money=%lld exp=%lld "
+                "bonus=%lld prizeBase=%lld\n",
+                t.c_str(), static_cast<long long>(lmoney),
+                static_cast<long long>(lexp), static_cast<long long>(lbonus),
+                static_cast<long long>(lpbase));
             std::fflush(stdout);
             return 0;
         } else if (arg == "--windowed") {
@@ -7362,6 +7382,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             glfwPollEvents();
             app.run_one_frame();
             ++guard;
+        }
+        if (force_loss) {
+            // [probe] KO the player deterministically (no OS input): the
+            // per-frame round-end check turns this into the DEFEAT path and
+            // the Results grant.
+            fs->probe_set_hp(0.0f, 1.0f);
+            std::fprintf(stdout, "[bossloss] forced LOSS: player hp=0\n");
+            std::fflush(stdout);
         }
         int drive_frames = 0;
         for (int f = 0; f < 40000; ++f) {

@@ -203,10 +203,13 @@ private:
 // `bonus` = the merged `Uo` (Bonus) and `prize_base` = the merged `ph`
 // (PrizeBase; JS default -1) of the same row. External bridge over the
 // internal `battle_rewards` (see screens.cpp).
+// `row_from_end` selects the JS `D0(c)` grant row: 0 = the LAST `<Reward>`
+// (the WIN row, `c = PU+1`), 1 = the SECOND-TO-LAST (the LOSS participation
+// row, `c = PU`; `PU = wi.length-2`).
 void battle_rewards_probe(const std::string& battle_name, const std::string& zone_name,
                           int fight_index, int level, std::int64_t& out_money,
                           std::int64_t& out_exp, std::int64_t& out_bonus,
-                          std::int64_t& out_prize_base);
+                          std::int64_t& out_prize_base, int row_from_end = 0);
 
 // One boss-intro roster entry (JS `jk.init` L2062 iterates the `lD` boss
 // battle list: `g.Hf` = the warrior portrait, `g.$s` = its name).

@@ -4523,7 +4523,7 @@ static std::int64_t reward_field(const pugi::xml_node& node, int level,
 void battle_rewards(const std::string& battle_name, const std::string& zone_name,
                     int fight_index, int level, std::int64_t& out_money,
                     std::int64_t& out_exp, std::int64_t& out_bonus,
-                    std::int64_t& out_prize_base) {
+                    std::int64_t& out_prize_base, int row_from_end = 0) {
     out_money = 0;
     out_exp = 0;
     out_bonus = 0;
@@ -4578,9 +4578,20 @@ void battle_rewards(const std::string& battle_name, const std::string& zone_name
         if (!fight) return;
         const pugi::xml_node rewards = fight.child("Rewards");
         if (!rewards) return;
-        pugi::xml_node last;  // `wi[wi.length-1]`
-        for (const pugi::xml_node r : rewards.children("Reward")) last = r;
-        if (!last) return;
+        // JS `D0(c)` (L728049) selects the grant row: `c = PU` (LOSS) /
+        // `PU+1` (WIN) for a single-fighter battle. `PU = wi.length-2` is set
+        // at battle setup (L624088/L1086069), so the WIN row is the LAST
+        // `<Reward>` and the LOSS row is the SECOND-TO-LAST (clamped to the
+        // first) — the participation row (`<Reward Money="0" Exp="20"
+        // PrizeBase="2000"/>` in the shipped ZONE_5+ battles; Ambush1400's
+        // rows are all `Money="400" Exp="10"`). `row_from_end` = 0 -> last,
+        // 1 -> second-to-last.
+        std::vector<pugi::xml_node> rows;
+        for (const pugi::xml_node r : rewards.children("Reward")) rows.push_back(r);
+        if (rows.empty()) return;
+        const std::size_t back = static_cast<std::size_t>(row_from_end);
+        const std::size_t idx = rows.size() > back ? rows.size() - 1 - back : 0;
+        pugi::xml_node last = rows[idx];
         out_money = reward_field(last, level, "Money");
         out_exp = reward_field(last, level, "Exp");
         out_bonus = reward_field(last, level, "Bonus");
@@ -5336,9 +5347,9 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
 void battle_rewards_probe(const std::string& battle_name, const std::string& zone_name,
                           int fight_index, int level, std::int64_t& out_money,
                           std::int64_t& out_exp, std::int64_t& out_bonus,
-                          std::int64_t& out_prize_base) {
+                          std::int64_t& out_prize_base, int row_from_end) {
     battle_rewards(battle_name, zone_name, fight_index, level, out_money, out_exp,
-                   out_bonus, out_prize_base);
+                   out_bonus, out_prize_base, row_from_end);
 }
 
 // JS `Oa.f5` (L2286-2288): the shop tab lists are the `it.Lia` type
@@ -11086,6 +11097,30 @@ void FightScreen::update_impl(float dt) {
             pb.reward_bonus = fight_->mode_reward().bonus;
             pb.reward_prize_base = fight_->mode_reward().prize_base;
         }
+        // JS `v.kD` (L622187): the grant row is `b.D0(c)` with `c = PU`
+        // (`f.zd()` false -> no `++c`) on a LOSS. `PU = wi.length-2` at
+        // battle setup, so the LOSS row is the SECOND-TO-LAST `<Reward>` —
+        // the participation row (the launch cached the LAST/win row). The
+        // SAME `dmb`/`emb` grant then runs on the loss.
+        if (!player_won) {
+            int loss_level = 1;  // JS `p.o.bb()` (the `tt.bm` level arg)
+            try {
+                loss_level = app().save().load().level;
+            } catch (const std::exception&) {
+            }
+            battle_rewards(pb.battle_name, pb.zone, pending_fight_ordinal(app()),
+                           loss_level, pb.reward_money, pb.reward_exp,
+                           pb.reward_bonus, pb.reward_prize_base,
+                           /*row_from_end=*/1);
+            std::fprintf(stdout,
+                         "[fight] LOSS reward row (D0(PU)) -> money=%lld exp=%lld "
+                         "bonus=%lld prizeBase=%lld\n",
+                         static_cast<long long>(pb.reward_money),
+                         static_cast<long long>(pb.reward_exp),
+                         static_cast<long long>(pb.reward_bonus),
+                         static_cast<long long>(pb.reward_prize_base));
+            std::fflush(stdout);
+        }
         // Quest FightEnd (JS `ha.RA("FightEnd")`): records the triple for
         // later ChangeTab evaluations and fires quests listening for it
         // (tutorial chain: none — ChangeTab rows read the triple instead).
@@ -11143,7 +11178,9 @@ void FightScreen::update_impl(float dt) {
             pb.prize_style_coins = prize.coins_style;
             pb.prize_style_level = prize.style_value;
             pb.prize_shock_coins = prize.coins_shock;
-            if (player_won) pb.reward_money = prize.coins_total;
+            // JS `hj.Tb = oc.m6` (`N5a`, L636553) for BOTH outcomes: the grant
+            // total is the row money PLUS the per-category style coins.
+            pb.reward_money = prize.coins_total;
         }
         // JS `v.kD` (L622187) -> `dmb`/`emb` (L93552): the reward is granted
         // AT THE FIGHT END (with `p.o.save()`), before the results dialog is
@@ -12356,27 +12393,33 @@ void apply_fight_reward(App& app) {
         return;
     }
     bool leveled_up = false;
-    if (player_won) {
-        // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money),
-        // Exp -> `Pa.Iab` -> `p.o.Jab` (XP).
+    // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money), Exp ->
+    // `Pa.Iab` -> `p.o.Jab` (XP + the `OLa` level-up), Bonus -> `Ewa(Uo,3)`
+    // (`p.o.vl(p.o.fd+c,3,false)`; `pb.prize_gems` carries `hj.Uo` =
+    // `oc.mOa` = `oc.OY`). The SAME grant runs on a LOSS: `v.kD` (L622187)
+    // calls `dmb(f)` inside `if(!l)` and `l = b==null||e==-1` is FALSE for a
+    // normal loss (only a SURRENDER, `e=-1`, skips it). The loss's `f.hj` is
+    // the participation row (`D0(PU)`), so its `Tb`/`Uo`/`exp` are granted
+    // too (often Money=0 but Exp>0 for the shipped ZONE_5+ battles, and
+    // Money=400 Exp=10 for ZONE_1's Ambush1400).
+    {
         const std::int64_t before = w.money;
         w.money += money_reward;
         w.experience += static_cast<int>(exp_reward);
-        // JS `emb` (L93552) `c>0 && p.Ewa(c,3)` -> `p.o.vl(p.o.fd+c,3,false)`:
-        // the reward row's `Uo` (Bonus) is added to the profile Bonus balance
-        // (`p.o.fd`) and written as `Bonus`. `pb.prize_gems` carries
-        // `hj.Uo` = `oc.mOa` = `oc.OY` = that same `Uo` (the old code added 0).
         const std::int64_t bonus_grant = pb.prize_gems;
         if (bonus_grant > 0) w.bonus += bonus_grant;
         std::fprintf(stdout,
-                     "[result] WIN reward money=%lld exp=%lld bonus=%lld "
+                     "[result] %s reward money=%lld exp=%lld bonus=%lld "
                      "(money %lld -> %lld, bonus -> %lld)\n",
+                     player_won ? "WIN" : "LOSS",
                      static_cast<long long>(money_reward),
                      static_cast<long long>(exp_reward),
                      static_cast<long long>(bonus_grant),
                      static_cast<long long>(before),
                      static_cast<long long>(w.money),
                      static_cast<long long>(w.bonus));
+    }
+    if (player_won) {
         // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2).
         {
             w.battle_unlock(pb.zone, pb.battle_name);
@@ -12389,17 +12432,6 @@ void apply_fight_reward(App& app) {
             std::fprintf(stdout,
                          "[result] fight record: %s wins=%d level=%d\n",
                          ids.c_str(), fr.wins, fr.level);
-        }
-        // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds.
-        while (w.level < 50) {
-            const int need = ResultsScreen::exp_for_level(w.level);
-            if (w.experience < need) break;
-            w.experience -= need;
-            w.level++;
-            w.power += 2;
-            leveled_up = true;  // `Psb` -> MaximumLevel counter delta
-            std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n",
-                         w.level, w.power);
         }
     } else {
         // JS `Dxa` L111216 (loss): a loss with NO record creates none.
@@ -12414,7 +12446,19 @@ void apply_fight_reward(App& app) {
                          "[result] fight record: %s losses=%d level=%d\n",
                          ids.c_str(), fr->losses, fr->level);
         }
-        std::fprintf(stdout, "[result] LOSS (no reward)\n");
+    }
+    // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds. Runs on
+    // BOTH outcomes — `emb`'s exp grant is `Iab` -> `Jab` -> `OLa`, the ONE
+    // exp path, so a loss's participation exp can level the player up too.
+    while (w.level < 50) {
+        const int need = ResultsScreen::exp_for_level(w.level);
+        if (w.experience < need) break;
+        w.experience -= need;
+        w.level++;
+        w.power += 2;
+        leveled_up = true;  // `Psb` -> MaximumLevel counter delta
+        std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n",
+                     w.level, w.power);
     }
     // JS `fe.COa(...)` -> `p.o.yi.ika()` (L216008/L217754/L620909) + `v.Cpb`:
     // flush the session counter deltas into `<Counters>` and auto-unlock the
