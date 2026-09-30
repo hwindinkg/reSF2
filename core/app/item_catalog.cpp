@@ -434,6 +434,7 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         // JS `pL` L322: `lock` = `PackLabel` (the GroupID fallback never occurs
         // in the shipped list.xml — 378 `PackLabel`, 0 `GroupID`).
         if (item.attribute("PackLabel")) ci.pack_label = item.attribute("PackLabel").value();
+        if (item.attribute("Labels")) ci.labels = item.attribute("Labels").value();
         if (item.attribute("Model")) ci.model = item.attribute("Model").value();
         if (item.attribute("Image")) ci.image = item.attribute("Image").value();
         ci.price = item.attribute("Price") ? item.attribute("Price").as_llong() : 0;
@@ -465,6 +466,8 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         ci.add_percent = sf2::data::xml_attr_int(item, "AddPercent", 0);
         ci.consumable_product =
             attr_bool_str(item.attribute("ConsumableProduct").value());
+        // JS `this.S5 = u.ka(a.attributes.get("SingleTimeBuy"))` (L164197).
+        ci.single_time_buy = attr_bool_str(item.attribute("SingleTimeBuy").value());
         // JS item ctor L164: `Hp` = `RealPrice` with its leading currency char
         // stripped (`J.substr(this.xr,1,null)`, first space token), else
         // `RealPriceConst`. `ICa()` (L169073) = `kc(this.Hp) > 1E-10` gates the
@@ -598,6 +601,31 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
                     ci.offer_conditions.push_back(std::move(cond));
                 }
             }
+        }
+        // JS `kt.create` L176873 (the `it.PUa.create` gate `Lia` runs per
+        // `<Items>` child): `rcb` drops a row whose non-empty `Labels` list
+        // lacks "PAID" (`kt.mUa`), and `qcb` drops `Type="Free"` (`I.Bu`).
+        // Both return null -> the row never enters `p.items.Xm`. The port
+        // previously kept every `<Item>`, so `Unlimited_Energy`
+        // (Type="Consumable", Labels="CHINAF2P") leaked into the RUBY tab.
+        {
+            bool labels_ok = true;
+            if (!ci.labels.empty()) {
+                labels_ok = false;
+                std::size_t p = 0;
+                for (;;) {
+                    const std::size_t q = ci.labels.find('|', p);
+                    const std::string tok =
+                        ci.labels.substr(p, q == std::string::npos ? q : q - p);
+                    if (tok == "PAID") {  // `a.includes(this.mUa)`
+                        labels_ok = true;
+                        break;
+                    }
+                    if (q == std::string::npos) break;
+                    p = q + 1;
+                }
+            }
+            if (!labels_ok || ci.type == "Free") continue;
         }
         out.push_back(std::move(ci));
     }

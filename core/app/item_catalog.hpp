@@ -98,6 +98,12 @@ struct CatalogItem {
     // (`Io` L1107 -> `p.items.Jrb`/`hnb` L167) equips/unequips every item whose
     // `lock` matches the resolved Label.
     std::string pack_label;
+    // JS `kt.rcb` L176873 (the `PUa.create` gate): the raw `Labels` attr. A
+    // NON-empty `|`-split list must contain "PAID" (`kt.mUa`) or the row is
+    // dropped BEFORE it ever enters `p.items.Xm` (no bucket, no `$b` match).
+    // Shipped: 1 row (`Unlimited_Energy`, Type="Consumable",
+    // Labels="CHINAF2P") is filtered out by this gate.
+    std::string labels;
     std::string model;      // Model ("mdl_weapon_knives", "" when none)
     std::string image;      // Image (the shop card art ref)
     // Price (gold; the JS `jp()` uses `mi` when no price attr — the shipped
@@ -139,6 +145,11 @@ struct CatalogItem {
     bool shop_hide = false; // ShopHide="1" (not offered in the shop)
     bool hidden = false;    // Hidden="1"
     bool paid = false;      // PaidItem="Paid"/"SuperPaid" (premium-only)
+    // JS `this.S5 = u.ka(SingleTimeBuy)` (L164197). `Scb()` L167xxx =
+    // `S5 ? p.o.xa.Qj(name)!=null : false` — a SingleTimeBuy row the player
+    // already owns is dropped from the shop list (`v.Uv` L626906). Shipped: 2
+    // rows (`Unlimited_Energy`), both unreachable in the tabs.
+    bool single_time_buy = false;
     // Raw `PaidItem` attr (`D3`, ctor default "None") — `?Purchase[x].PaidItem`
     // returns this string (`IJa` L980).
     std::string paid_item = "None";

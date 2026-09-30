@@ -5361,7 +5361,12 @@ void battle_rewards_probe(const std::string& battle_name, const std::string& zon
 // `item_catalog.cpp::shop_items`, which dropped Ranged/Magic and the
 // non-gold premium rows entirely (human report: "the SHOP does not show all
 // items"; the Ranged/Magic tabs rendered empty).
-std::vector<CatalogItem> shop_visible_items(const std::vector<CatalogItem>& all) {
+// The FULL catalog (all items incl. the ShopHide/Hidden base items). Defined
+// after `load_catalog`; declared here so the live `Uv` filter can reuse it.
+std::vector<CatalogItem> load_full_catalog(App& app);
+
+std::vector<CatalogItem> shop_visible_items(const std::vector<CatalogItem>& all,
+                                            const WarriorSave& w) {
     std::vector<CatalogItem> out;
     out.reserve(all.size());
     for (const CatalogItem& ci : all) {
@@ -5376,6 +5381,21 @@ std::vector<CatalogItem> shop_visible_items(const std::vector<CatalogItem>& all)
             continue;
         }
         if (ci.shop_hide || ci.hidden) continue;  // `!isActive || li()`
+        // JS `v.Uv` L626906 also drops `p.o.Tga(d.lock)` and `d.Scb()`:
+        //   `Tga(a)` L129783 = `a!="" ? !Uga(a) : false` — a NON-empty
+        //   `PackLabel` (item `lock`) not yet unlocked (`vq` -> `R$.add`)
+        //   hides the row (the fresh save has an empty `R$`);
+        //   `Scb()` L167xxx = `S5 ? p.o.xa.Qj(name)!=null : false`.
+        if (!ci.pack_label.empty() && !w.shop_lock_contains(ci.pack_label)) {
+            continue;
+        }
+        if (ci.single_time_buy) {
+            bool owned = false;
+            for (const WarriorSave::OwnedItem& oi : w.items) {
+                if (oi.name == ci.name) { owned = true; break; }
+            }
+            if (owned) continue;
+        }
         out.push_back(ci);
     }
     return out;
@@ -5383,26 +5403,15 @@ std::vector<CatalogItem> shop_visible_items(const std::vector<CatalogItem>& all)
 
 // The shared catalog (loaded once, cached).
 std::vector<CatalogItem> load_catalog(App& app) {
-    static std::vector<CatalogItem> cached;
-    static bool loaded = false;
-    if (!loaded) {
-        loaded = true;
-        try {
-            const std::string path = "reference/extracted/xml/res/list.xml";
-            std::ifstream in(path, std::ios::binary);
-            if (in) {
-                std::vector<char> data((std::istreambuf_iterator<char>(in)),
-                                       std::istreambuf_iterator<char>());
-                const std::vector<CatalogItem> all =
-                    parse_item_catalog(std::string(data.begin(), data.end()));
-                cached = shop_visible_items(all);
-            }
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "item catalog load failed: %s\n", e.what());
-        }
+    // `Oa.jAa` L2297 rebuilds the `v.Uv`-filtered lists on every shop open
+    // (the `R$` locks change as packs unlock), so the lock/owned gates must be
+    // applied LIVE — not cached.
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
     }
-    (void)app;
-    return cached;
+    return shop_visible_items(load_full_catalog(app), w);
 }
 
 // The FULL catalog (all items incl. the ShopHide/Hidden base items).
@@ -5479,8 +5488,9 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
     }
     int level = 1;
     std::vector<std::string> equipped;
+    WarriorSave w;
     try {
-        const WarriorSave w = app.save().load();
+        w = app.save().load();
         level = w.level > 0 ? w.level : 1;
         equipped = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
         for (const auto& oi : w.items) {
@@ -5492,6 +5502,46 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
     // carries WeaponDamage/BodyDefense/HeadDefense/UnarmedDamage/MagicDamage;
     // other names have no item row in this build).
     const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    // JS `m7a` L413101: sum the equipped items' `attributes` maps. The
+    // equipped object is `Xv(row)` (`tZa` L171351) — the owned tier's
+    // `<Upgrade>` attribute overrides applied ONTO the catalog item's map.
+    // The port previously summed the BASE fields only, so an upgraded weapon
+    // contributed its tier-1 damage.
+    static std::vector<UpgradeTemplate> upg_templates;
+    static bool upg_loaded = false;
+    if (!upg_loaded) {
+        upg_loaded = true;
+        try {
+            const std::string path = "reference/extracted/xml/res/list.xml";
+            std::ifstream in(path, std::ios::binary);
+            if (in) {
+                std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+                upg_templates =
+                    parse_upgrade_list(std::string(data.begin(), data.end()));
+            }
+        } catch (const std::exception&) {
+        }
+    }
+    std::map<std::string, std::map<std::string, int>> eff_by_item;
+    const auto effective = [&](const CatalogItem& ci)
+        -> const std::map<std::string, int>& {
+        const auto hit = eff_by_item.find(ci.name);
+        if (hit != eff_by_item.end()) return hit->second;
+        std::map<std::string, int> eff = ci.attributes;
+        int tier = ci.upgrade_level;  // `zf.Ce` else the item's `Tg`
+        for (const WarriorSave::OwnedItem& oi : w.items) {
+            if (oi.name == ci.name) { tier = oi.upgrade_level; break; }
+        }
+        if (tier != 0) {
+            const ItemUpgradeState st =
+                resolve_item_upgrade(ci, upg_templates, tier, level);
+            if (st.has_current) {  // `tZa`: row overrides win
+                for (const auto& kv : st.current.attributes) eff[kv.first] = kv.second;
+            }
+        }
+        return eff_by_item.emplace(ci.name, std::move(eff)).first->second;
+    };
     for (const auto& ap : starting) {
         const std::string& name = ap.first;
         float bonus = 0.0f;
@@ -5499,11 +5549,9 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
             if (iname.empty()) continue;
             for (const CatalogItem& ci : catalog) {
                 if (ci.name != iname) continue;
-                if (name == "WeaponDamage") bonus += ci.weapon_damage;
-                else if (name == "UnarmedDamage") bonus += ci.unarmed_damage;
-                else if (name == "BodyDefense") bonus += ci.body_defense;
-                else if (name == "HeadDefense") bonus += ci.head_defense;
-                else if (name == "MagicDamage") bonus += ci.magic_damage;
+                const std::map<std::string, int>& e = effective(ci);
+                const auto it = e.find(name);
+                if (it != e.end()) bonus += static_cast<float>(it->second);
                 break;
             }
         }
@@ -18849,6 +18897,16 @@ int run_shell_probe(App& app) {
     // shipped `ConsumableProduct` + `AddPercent` + `SubType="Bonus"` row draws
     // `pieces/FreeGems_red` (`I.$F`). Same rule the cell draw uses.
     {
+        // The RUBY-tab `SubType="Bonus"` rows carry donate `PackLabel`s; JS
+        // `v.Uv` L626906 hides any row whose lock is not in `p.o.R$`, so
+        // unlock them (`vq` -> `R$.add`) to make the badge row `Uv`-visible.
+        {
+            WarriorSave w = app.save().load();
+            for (const CatalogItem& it : load_full_catalog(app)) {
+                if (!it.pack_label.empty()) w.shop_lock_add(it.pack_label);
+            }
+            app.save().save(w);
+        }
         const std::vector<CatalogItem> cat = load_catalog(app);
         const std::vector<std::size_t> ruby = shop_tab_rows(cat, 5);
         std::string found;
