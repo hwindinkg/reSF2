@@ -503,32 +503,43 @@ void AiController::filter_by_v1(std::vector<AiCandidate>& cands,
 // JS `Md.jL` (L640) + `iCa` (L640): the weighted roulette over the tactic's
 // AnimationWeights. Returns the chosen candidate index, or -1 when no
 // weight matches.
+//
+// `iCa(a,b)` (L640) tests the `<AnimationWeights>` key `f` via `a.$k(f)`
+// (L698): `return this.name!=a?this.d2(a):!0` with `d2(a)` scanning `xl`.
+// `xl` (L689/L711 `ava`/L722 `lh.nd`) is the animation's NAME **plus every
+// `<Template>` name in its chain — so a tactic keyed on an animation GROUP
+// (`ForwardStep`/`BackStep`, the templates of `StepForward`/`StepBack`) still
+// matches. The old test compared the key to the candidate's bare move name
+// only, so both `StepForward`/`StepBack` fell through to the unnamed
+// `<Animation Base="100" Limit="1000"/>` default → equal weights → the
+// 50/50 step oscillation (never closing the gap). Now the key is matched
+// against the resolved move's name + `template_tags` + `anim_names`.
 int AiController::pick(const std::vector<AiCandidate>& cands) const {
     if (tactic_ == nullptr || cands.empty()) return -1;
-    float sum = 0.0f;
-    for (const AiCandidate& c : cands) {
-        const std::string& anim = c.animation;
-        float w = 0.0f;
+    auto weight_of = [&](const std::string& anim) -> float {
         for (const auto& kv : tactic_->anim_weights) {
-            if (kv.first.empty() || kv.first == anim) {
-                w = weight_curve_eval(kv.second, feat_, &anim);
-                break;
+            bool match = kv.first.empty() || kv.first == anim;
+            if (!match && moves_ != nullptr) {
+                for (const MoveDef* m : resolve_candidate(anim, *moves_)) {
+                    if (m->name == kv.first ||
+                        m->template_tags.count(kv.first) > 0 ||
+                        std::find(m->anim_names.begin(), m->anim_names.end(),
+                                  kv.first) != m->anim_names.end()) {
+                        match = true;
+                        break;
+                    }
+                }
             }
+            if (match) return weight_curve_eval(kv.second, feat_, &anim);
         }
-        sum += w;
-    }
+        return 0.0f;
+    };
+    float sum = 0.0f;
+    for (const AiCandidate& c : cands) sum += weight_of(c.animation);
     if (sum <= 0.0f) return -1;
     float r = roll01() * sum;
     for (std::size_t i = 0; i < cands.size(); ++i) {
-        const std::string& anim = cands[i].animation;
-        float w = 0.0f;
-        for (const auto& kv : tactic_->anim_weights) {
-            if (kv.first.empty() || kv.first == anim) {
-                w = weight_curve_eval(kv.second, feat_, &anim);
-                break;
-            }
-        }
-        r -= w;
+        r -= weight_of(cands[i].animation);
         if (r < 0.0f) return static_cast<int>(i);
     }
     return static_cast<int>(cands.size()) - 1;
