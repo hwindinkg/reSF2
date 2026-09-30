@@ -97,11 +97,23 @@ public:
     // (`ta.WT`'s saver). `lb.WT`/`lb.VT` (L1276) persist via `p.TJ.save()`.
     void set_sfx_muted(bool muted);
     bool sfx_muted() const { return sfx_muted_; }
+    // JS `L.K.$f.uF(0)` / `uF(1)` — the pause dialog `Dr` (L2065-2067): its ctor
+    // `uF(0)` ducks the MUSIC bus for the dialog's lifetime; `Dr.B()` (L2067) and
+    // `Dr.resume()` (L2067) restore `uF(1)`. Modelled as a SECOND gain term
+    // composed with the mute flag, so the persisted `<Music>@Mute` stays truthful
+    // (JS `uF(1)` in `Dr.B` writes the raw gain node and would clobber an explicit
+    // mute — an artifact of sharing one gain node, not replicated).
+    void set_music_ducked(bool ducked);
+    bool music_ducked() const { return music_ducked_; }
     // The bus gains JS `ta.VT`/`ta.WT` write (1 or 0). Exposed so the headless
     // gates prove the two source buses are INDEPENDENT: muting SFX must not
     // touch the music bus (JS routes them to separate `uF`/`cMa` gains, L1240811).
     float sfx_bus_gain() const { return sfx_muted_ ? 0.0f : 1.0f; }
-    float music_bus_gain() const { return music_muted_ ? 0.0f : 1.0f; }
+    // JS `uF`: 0 while the pause `Dr` dialog is open (its ctor) OR the music bus
+    // is muted (`ta.ZD`); 1 otherwise. Both write the same JS gain node.
+    float music_bus_gain() const {
+        return (music_muted_ || music_ducked_) ? 0.0f : 1.0f;
+    }
     // The miniaudio engine MASTER volume (1.0 = untouched), or -1 while no
     // device runs. JS keeps a master bus (`s0`, type 5, L1240812) that neither
     // `ta.VT` nor `ta.WT` touches; a source-bus mute must leave the master at 1.
@@ -133,8 +145,9 @@ private:
     Impl* impl_ = nullptr;  // owns the miniaudio state (hpp stays header-light)
     bool enabled_ = false;
     bool music_guard_ = false;  // JS `lb.rJ` (L1276).
-    bool music_muted_ = false;  // JS `ta.$D` (L1264), `lb.Mz()` (L1276).
-    bool sfx_muted_ = false;    // JS `ta.ZD` (L1264), `lb.Lz()` (L1276).
+    bool music_muted_ = false;  // JS `ta.ZD` (L1264), `lb.Lz()` (L1276) = MUSIC.
+    bool sfx_muted_ = false;    // JS `ta.$D` (L1264), `lb.Mz()` (L1276) = SOUND.
+    bool music_ducked_ = false;  // JS `L.K.$f.uF(0)` — the pause `Dr` dialog (L2065).
     std::uint64_t played_total_ = 0;
     std::uint64_t suppressed_total_ = 0;  // JS `Ss.pxb` suppressed plays
 };

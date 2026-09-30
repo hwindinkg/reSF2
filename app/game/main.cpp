@@ -5354,6 +5354,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 app.inject_click(640.0, 117.0);  // HUD pause icon (`Jn`)
                 tick(8);
                 check(fs->pause_dialog_open(), "pause HUD icon opens the `Dr` dialog");
+                // JS `Dr` ctor (L2065) `L.K.$f.uF(0)`: opening the dialog ducks
+                // the MUSIC bus (the track keeps its position; `resume`/`B`
+                // restore `uF(1)`, L2067).
+                check(au.music_bus_gain() == 0.0f && au.music_ducked(),
+                      "pause ducks the MUSIC bus (Dr ctor uF(0))");
                 const bool m0 = au.music_muted();
                 const bool s0 = au.sfx_muted();
                 app.inject_click(561.25, 396.0);  // Music row (`tp`)
@@ -5372,6 +5377,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             }
             app.screens().pop();
             tick(4);
+            // JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: destroying the pause dialog
+            // (here, its owning screen) restores the MUSIC bus.
+            check(!au.music_ducked(), "leaving the fight unducks the MUSIC bus");
         }
         // (6) SHOP `M8` price plate -> `Ne.ZYa` L2251 / `Pa.iwa` L1228: the
         // UNOWNED press runs the confirm/buy flow. `Pa.iwa` L1228 picks the

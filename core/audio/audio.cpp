@@ -548,7 +548,7 @@ void AudioEngine::play_music(const std::string& track, bool loop) {
     }
     impl_->music_ok = true;
     impl_->music_current = track;
-    ma_sound_set_volume(&impl_->music, music_muted_ ? 0.0f : kMusicVolume);
+    ma_sound_set_volume(&impl_->music, music_bus_gain() * kMusicVolume);
     ma_sound_set_looping(&impl_->music, loop ? MA_TRUE : MA_FALSE);
     ma_sound_start(&impl_->music);
     log_latency(impl_->engine, impl_->engine_ok, "music", track, &impl_->music);
@@ -570,9 +570,23 @@ void AudioEngine::play_music_once(const std::string& track, bool loop) {
 void AudioEngine::set_music_muted(bool muted) {
     music_muted_ = muted;
     if (impl_ != nullptr && impl_->music_ok) {
-        ma_sound_set_volume(&impl_->music, muted ? 0.0f : kMusicVolume);
+        ma_sound_set_volume(&impl_->music, music_bus_gain() * kMusicVolume);
     }
     std::fprintf(stdout, "[music] mute %s\n", muted ? "ON" : "OFF");
+    std::fflush(stdout);
+}
+
+// JS `L.K.$f.uF(0)` / `uF(1)` (L2065-2067): the pause dialog `Dr` writes the
+// MUSIC bus gain directly — `0` in its ctor (dialog open) and `1` in `B()`/
+// `resume()` (dialog closed). The track keeps its position (a bus mute, never a
+// `ta.Zla()` stop), so resuming the round restores the still-running battle
+// track. Composed with `music_muted_` (see `music_bus_gain`).
+void AudioEngine::set_music_ducked(bool ducked) {
+    music_ducked_ = ducked;
+    if (impl_ != nullptr && impl_->music_ok) {
+        ma_sound_set_volume(&impl_->music, music_bus_gain() * kMusicVolume);
+    }
+    std::fprintf(stdout, "[music] duck %s\n", ducked ? "ON" : "OFF");
     std::fflush(stdout);
 }
 

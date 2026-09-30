@@ -551,6 +551,11 @@ public:
                 std::int64_t reward_exp,
                 const std::vector<sf2::scene::OwnedItem>& owned);
 
+    // JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: the pause `Dr` dialog lives for the
+    // screen's lifetime, so destroying the screen restores the MUSIC bus (the
+    // port's `paused_` mirrors the dialog's existence — see `set_paused`).
+    ~FightScreen() override;
+
     ScreenId id() const override { return kScreenFight; }
 
     void update_impl(float dt) override;
@@ -757,6 +762,12 @@ public:
     void enable_pose_dump(const std::string& path, int frames);
 
 private:
+    // JS `Dr` (the pause dialog, L2065-2067): its ctor `L.K.$f.uF(0)` ducks the
+    // MUSIC bus and `B()`/`resume()` `uF(1)` restore it. `Ar.Aia`/`Ar.tZ`
+    // (L2018) create/destroy the dialog, which is exactly the port's `paused_`
+    // flag, so every pause toggle goes through here.
+    void set_paused(bool p);
+
     std::string battle_name_;
     std::string location_;
     std::int64_t reward_money_ = 0;

@@ -10054,6 +10054,30 @@ int FightScreen::debug_action_for_code(int js_code) {
     }
 }
 
+// JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: the pause dialog is a child of the fight
+// screen (`Ar.Aia` L2018 appends it, `Ar.tZ` L2018 destroys it), so the screen
+// teardown restores the MUSIC bus if the dialog was still open.
+FightScreen::~FightScreen() {
+    if (paused_) {
+        sf2::audio::AudioEngine::instance().set_music_ducked(false);
+    }
+}
+
+// JS `Dr` (the pause dialog, L2065-2067). `Dr`'s ctor runs `L.K.$f.uF(0)`
+// (mute the MUSIC bus) and `B()`/`resume()` run `uF(1)` (restore). The dialog
+// is created by `Ar.Aia` (L2018, on `ai.Qg(0)` L410) and destroyed by `Ar.tZ`
+// (L2018, on `ai.Qg(2)` L410 / the quit confirm `Vwb`), which is exactly the
+// `paused_` flag — every transition funnels through here.
+void FightScreen::set_paused(bool p) {
+    if (p == paused_) return;
+    paused_ = p;
+    // JS `Dr` ctor (L2065-2066): the dialog reads the LIVE mute state when it
+    // opens (`this.tp=a(lb.Lz()?y.Mna:y.Nna)`), so a mute set in Settings shows
+    // the right icon the moment the pause opens.
+    if (p) music_off_ = sf2::audio::AudioEngine::instance().music_muted();
+    sf2::audio::AudioEngine::instance().set_music_ducked(p);
+}
+
 void FightScreen::on_key(int glfw_key, bool down) {
     // Every key edge resets the reported key_type: an unbound key, the Esc
     last_input_key_type_ = 0;
@@ -10071,7 +10095,7 @@ void FightScreen::on_key(int glfw_key, bool down) {
     // headless drivers inject the disc click, never keys.
     if (aliases && down && glfw_key == 256) {
         if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
-            paused_ = !paused_;
+            set_paused(!paused_);
             sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[fight] pause %s (Esc)\n", paused_ ? "ON" : "OFF");
             std::fflush(stdout);
@@ -10202,7 +10226,7 @@ void FightScreen::on_debug_key(int js_code, bool ctrl, bool down) {
     // (`b.pb.pga=!b.pb.pga`, the fight pause flag), routed to `paused_`.
     if (action == 22) {
         if (fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over()) {
-            paused_ = !paused_;
+            set_paused(!paused_);
             std::fprintf(stdout, "[fight] debug key Ctrl+0 -> pause %s\n",
                          paused_ ? "ON" : "OFF");
             std::fflush(stdout);
@@ -10905,17 +10929,17 @@ void FightScreen::update_impl(float dt) {
             if (pause_hit(kPauseDlgPlayX, kPauseDlgRowY, kPauseDlgToggleS,
                           kPauseDlgToggleS)) {
                 // `play` frame = resume (PAUSE_STATIC §3 `tZ`).
-                paused_ = false;
+                set_paused(false);
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause OFF (resume, Dr.play)\n");
                 std::fflush(stdout);
             } else if (pause_hit(kPauseDlgMusicX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
-                // `Dr.Sla` (L2066-2067): `this.Sla.Db?(lb.WT(!lb.Mz()), ...)`
-                // -> `ta.WT(a)` L1264 `L.K.$f.cMa(a?0:1)` = the music BUS
-                // volume, so the track keeps playing (muted) and unmute
-                // resumes it. The old port stopped the sound and could not
-                // restart it (`music_track()` reads "" after a stop).
+                // `Dr.tp` (L2066-2067): `this.tp.Db?(lb.VT(!lb.Lz()), ...)`
+                // -> `ta.VT(a)` L1264 `L.K.$f.uF(a?0:1)` = the MUSIC BUS volume
+                // (`ta.ZD`, read back by `lb.Lz()`), so the track keeps playing
+                // (muted) and unmute resumes it. The old port stopped the sound
+                // and could not restart it (`music_track()` reads "" after a stop).
                 music_off_ = !music_off_;
                 sf2::audio::AudioEngine::instance().set_music_muted(music_off_);
                 persist_bus_mutes(app());  // JS `lb.WT` L1276: `p.TJ.save()`
@@ -10927,9 +10951,9 @@ void FightScreen::update_impl(float dt) {
                                  kPauseDlgToggleS)) {
                 // `PauseSound_on/off` (display only — no runtime SFX mute API;
                 // see the stream report).
-                // `Dr.tp` (L2066-2067): `this.tp.Db?(lb.VT(!lb.Lz()), ...)`
-                // -> `ta.VT(a)` L1264 `L.K.$f.uF(a?0:1)` = the master SFX BUS
-                // volume (`ta.ZD`, read back by `lb.Lz()`). Was a no-op log
+                // `Dr.Sla` (L2066-2067): `this.Sla.Db?(lb.WT(!lb.Mz()), ...)`
+                // -> `ta.WT(a)` L1264 `L.K.$f.cMa(a?0:1)` = the SOUND/SFX BUS
+                // volume (`ta.$D`, read back by `lb.Mz()`). Was a no-op log
                 // ("no runtime SFX mute API").
                 sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
                 au.set_sfx_muted(!au.sfx_muted());
@@ -10945,7 +10969,7 @@ void FightScreen::update_impl(float dt) {
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
                 std::fprintf(stdout, "[fight] pause QUIT (Dr.home -> caller)\n");
                 std::fflush(stdout);
-                paused_ = false;
+                set_paused(false);
                 // JS `ai.B()` teardown (L384): leaving the fight restores the
                 // MENU track (`lb.OS()`). Popping here reveals the already-built
                 // Map, whose ctor `play_music_once("menu")` never re-runs, so
@@ -10961,7 +10985,7 @@ void FightScreen::update_impl(float dt) {
     if (live) {
         const App::PointerState& p = app().pointer();
         if (p.pressed && pause_hit(kPauseIx, kPauseIy, kPauseIw, kPauseIh)) {
-            paused_ = true;
+            set_paused(true);
             sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[fight] pause ON (HUD icon -> Dr)\n");
             std::fflush(stdout);
@@ -12147,8 +12171,10 @@ void FightScreen::render_impl(App& app) {
               kPauseDlgTitleH, "PAUSED");
         frame(music_off_ ? "PauseMusic_off" : "PauseMusic_on", kPauseDlgMusicX,
               kPauseDlgRowY, kPauseDlgToggleS, kPauseDlgToggleS, "MUSIC");
-        frame("PauseSound_on", kPauseDlgSoundX, kPauseDlgRowY, kPauseDlgToggleS,
-              kPauseDlgToggleS, "SOUND");
+        frame(sf2::audio::AudioEngine::instance().sfx_muted() ? "PauseSound_off"
+                                                              : "PauseSound_on",
+              kPauseDlgSoundX, kPauseDlgRowY, kPauseDlgToggleS, kPauseDlgToggleS,
+              "SOUND");
         frame("play", kPauseDlgPlayX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "RESUME");
         frame("home", kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
