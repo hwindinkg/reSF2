@@ -4252,6 +4252,9 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 }
                 n.zone = z.name;
                 n.location = battle.attribute("Location").value();
+                // JS `Lc.jla(Description)` (offset ~99092) — the info panel's
+                // locked/Fake `mk(a.description)` key (L2103).
+                n.description = battle.attribute("Description").value();
                 const float x = sf2::data::xml_attr_float(battle, "X", 0.0f);
                 const float y = sf2::data::xml_attr_float(battle, "Y", 0.0f);
                 // Per-node art suffix (JS L205: Icon attr, default "training";
@@ -7405,12 +7408,35 @@ void MapScreen::recompute_node_states(const WarriorSave& w) {
             const WarriorSave::BattleRecord* rec = w.find_battle(n.zone, n.name);
             const bool has_rec = rec != nullptr;
             const bool hidden = has_rec && rec->hidden;
+            // JS `hl.c$a` (offset ~141063): `this.D9!=-1 ? this.l$a()<=0 : !1`
+            // with `l$a(){return this.D9-p.Dc}` (~141307) — an EndTime-bearing
+            // battle record expires once the game clock `p.Dc` reaches
+            // `EndTime`. `hl.li` (~141003) `this.d9?!0:this.c$a()` is the
+            // `li()` consumed by `Qr.lla` (~1078261)
+            // `X(this.hs.isActive && !this.FG)`.
+            const bool expired =
+                has_rec && rec->end_time != -1 &&
+                static_cast<double>(rec->end_time) <= WarriorSave::live_clock();
             n.active = has_rec;                 // `WDa` (JS L256)
-            n.visible = n.active && !hidden;    // `Qr.lla` (JS L2094)
+            n.visible = n.active && !hidden && !expired;  // `Qr.lla` (JS L2094)
             // `Qr` (L2092) `let b=a.tt()` = the `<Battle>` record's `Locked`
             // (`Lc.tt()` L1406 -> `hl.tt` L278). The button then picks
             // `BattleBtnLock/locked_<icon>` over `BattleBtnBase/base_<icon>`.
             n.locked = has_rec && rec->locked;
+            // [expiry evidence] the JS `hl.c$a` verdict for an EndTime-bearing
+            // record: `l$a()=this.D9-p.Dc` (offset ~141307), `c$a()=this.D9!=-1
+            // ? this.l$a()<=0 : !1` (~141063), `li()=this.d9?!0:this.c$a()`
+            // (~141003), consumed by `Qr.lla` (~1078261)
+            // `X(this.hs.isActive && !this.FG)`.
+            if (has_rec && rec->has_end_time) {
+                std::fprintf(stdout,
+                             "[map] expiry %s|%s EndTime=%d p.Dc=%.0f "
+                             "js_expired=%d visible=%d\n",
+                             n.zone.c_str(), n.name.c_str(), rec->end_time,
+                             WarriorSave::live_clock(), expired ? 1 : 0,
+                             n.visible ? 1 : 0);
+                std::fflush(stdout);
+            }
             // `Xr` pip lit state (L2133-2136): the pip count is the rendered
             // `<Fight>` count, minus the last for boss families (`Xr` ctor
             // L2134 `a.type!="FightBosses"&&...||--d`). Pip `k` is lit when
@@ -8188,7 +8214,12 @@ void MapScreen::update_impl(float dt) {
         static_cast<std::size_t>(hover_) < zones_[zone_sel_].nodes.size()) {
         const Node& n = zones_[zone_sel_].nodes[static_cast<std::size_t>(hover_)];
         const MapFightButtonRect fb = map_fight_button_rect(map_metrics());
-        if (n.visible && p.x >= fb.cx - fb.w * 0.5f && p.x <= fb.cx + fb.w * 0.5f &&
+        // The `tj` FIGHT plate is drawn ONLY for the `Sr`/`Whb` body (the
+        // `mk` LOCKED/Fake branch never calls `Cyb`, L2103/L2161) — a locked
+        // record / `FightFake` node has NO fight trigger.
+        const bool has_fight_btn = !n.locked && n.type != "FAKE";
+        if (n.visible && has_fight_btn &&
+            p.x >= fb.cx - fb.w * 0.5f && p.x <= fb.cx + fb.w * 0.5f &&
             p.y >= fb.cy - fb.h * 0.5f && p.y <= fb.cy + fb.h * 0.5f) {
             // `Nn` (L1114) non-ignored `ClickButton Target=
             // "InfoBattle.FightButton"`: while the quest armed this plate the
@@ -8730,6 +8761,45 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     const float body_y = cy + f;
     const float body_w = cw - 2.0f * d;
     const float body_h = ch - f;
+    // `Rr` (L2103) — the LOCKED/Fake DESCRIPTION panel. `mk` replaces the
+    // whole body (`Ah`); the `else` chain (`Sr`/`Whb`) is the fight body and
+    // the ONLY path that shows the `tj` FIGHT button (`Whb` -> `Cyb`). So a
+    // locked record / `FightFake` node renders title+preview+description and
+    // NOTHING else (no `Xr` pips, no `Wc` difficulty, no gold, no FIGHT):
+    //   `d=a.ob; if(d!=null&&d.tt()||a.type=="FightFake")
+    //        c(new mk(a.description));
+    //    else if(b!=null&&b.locked) c(new mk(b.GD()));`
+    // `node->locked` == `a.ob.tt()` / `b.locked` (the record's Locked attr);
+    // the JS type string `FightFake` is the XML `Type="FAKE"`.
+    // `mk` (L2103) layout: `Lu.ua(body_w*.16)`, `Lu.D(body_w*.1)`,
+    // `Lu.Fa(body_w, body_h-2*body_w*.1)`, multiline (`rd(!0)`, `Kc(.65)`),
+    // centred (`Ia(2)`), color `Z.sc` (0.184/0.145/0.106).
+    const bool desc_panel = node->locked || node->type == "FAKE";
+    {
+        static std::string last_key;
+        const std::string key = node->name + "|" + (desc_panel ? "mk" : "body");
+        if (key != last_key) {
+            last_key = key;
+            std::fprintf(stdout,
+                         "[map] info panel %s type=%s locked=%d desc=%s text='%s' "
+                         "branch=%s\n",
+                         node->name.c_str(), node->type.c_str(), node->locked ? 1 : 0,
+                         node->description.c_str(),
+                         loc(app, node->description, node->description).c_str(),
+                         desc_panel ? "mk" : "body");
+            std::fflush(stdout);
+        }
+    }
+    if (desc_panel) {
+        const float desc_h = body_h - 2.0f * body_w * 0.1f;
+        if (desc_h > 0.0f && !node->description.empty()) {
+            draw_ui_wrapped(app, body_x, body_y + body_w * 0.1f, body_w, desc_h,
+                            loc(app, node->description, node->description),
+                            body_w * 0.16f / 100.0f, UiAlign::Center, 0.184f, 0.145f,
+                            0.106f, /*line_factor=*/0.65f);
+        }
+        return;
+    }
     // --- `Xr` status pips (L2133-2136, `pk.ba` L2161 `aUa.ba(a, b*.3)`) ---
     const float xr_h = body_h * 0.3f;
     const float pip_label_h = body_w * 0.16f;  // `Xr.ba` `c = a*.16`

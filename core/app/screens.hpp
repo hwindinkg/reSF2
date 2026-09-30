@@ -415,6 +415,12 @@ public:
                                // <stem>.img`, L2105/L2111)
         std::string zone;      // the stages.xml Zone Name (JS `st`)
         std::string location;  // the Battle Location (JS fight backdrop)
+        // stages.xml `<Battle Description>` (JS `Lc.Sb`, the player-roster
+        // parse `e=b.attributes.get("Description"); a.jla(e!=null?e:"")`,
+        // offset ~99092). The `Rr` info panel's LOCKED/Fake branch renders
+        // `mk(a.description)` (JS L2103) — a localization KEY (`Y.na`), e.g.
+        // `battleLockedBoss2` = "Defeat Lynx to unlock this Act".
+        std::string description;
         int fight_count = 0;   // <Fight> count (JS `Lc.Kz().length`, L2134):
                                // the `Xr` status pip count is this - 1 for
                                // boss types (`Xr` ctor L2134)
