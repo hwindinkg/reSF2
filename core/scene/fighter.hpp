@@ -322,8 +322,21 @@ public:
     // by `this.lb==null` and no shipped fighter model carries a scale attr, so
     // `HD()` (char 251101) is 1 for shipped data. The timescale channel and
     // the gravity model scale are therefore kept SEPARATE here (`model_hd_`).
-    void set_time_scale(float s) { time_scale_ = s; scale_acc_ = 0.0f; }
+    // [FIX slow-mo re-set — JS `ePa` `@285802`] The JS `ePa(a){this.Tx=a;
+    // this.sG=1/this.Tx}` sets the timescale and keeps NO reset-on-set
+    // accumulator (`mo` is the JS subframe counter, reset only by `Gka` at a
+    // clip-frame boundary, never by a timescale change). Resetting
+    // `scale_acc_` here discarded the fractional subframe remainder whenever
+    // the SlowModel `KT` channel re-fired, so a per-frame re-set froze the
+    // clip (`acc` pinned at the fraction, `steps=0`, no advance).
+    void set_time_scale(float s) { time_scale_ = s; ++ts_set_calls_; }
     float time_scale() const { return time_scale_; }
+    // [probe, authorised] `SF2_TIMESCALE_PROBE=1`: the fractional subframe
+    // accumulator (`scale_acc_`) and the lifetime count of `set_time_scale`
+    // calls. The JS `ePa` (`@285802`) sets `Tx` with NO accumulator reset;
+    // this exposes whether the port's reset is hit every frame.
+    float scale_acc() const { return scale_acc_; }
+    int ts_set_calls() const { return ts_set_calls_; }
     // JS `this.oa.model.HD()` (`Ita`), used by `Al.O9a` (char 296359):
     // `xd.fDa/(HD()*HD())`. 1.0 for every shipped fighter (no model Scale
     // attr; the JS `KT`->`NMa` writer does not fire on shipped data), so the
@@ -987,6 +1000,7 @@ private:
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float model_hd_ = 1.0f;    // JS `KT`->`NMa` model scale (`HD()`, `Al.O9a`)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator
+    int ts_set_calls_ = 0;     // [probe] lifetime `set_time_scale` calls
     // JS `wd.xpa` (`y5`): false while the finishing-blow disable holds.
     bool action_disabled_ = false;
     // JS `1/v.on()` (the global timescale divisor `de.ia` feeds the animator).

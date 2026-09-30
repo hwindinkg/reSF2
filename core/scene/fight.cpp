@@ -5742,6 +5742,15 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     }
 
     const std::string prev_move = me.last_move;
+    // [probe, authorised] `SF2_TIMESCALE_FORCE=<speed>`: drive the ENEMY's
+    // `set_time_scale` EVERY frame (the SlowModel / mod-timescale `KT`
+    // channel) to exercise the re-set path shipped data only hits on cast/
+    // revert. Used to measure the `scale_acc_` reset the JS `ePa`
+    // (`@285802`) does NOT have.
+    if (const char* tf = std::getenv("SF2_TIMESCALE_FORCE")) {
+        const float v = static_cast<float>(std::atof(tf));
+        if (v > 0.0f && !me.is_player) me.fighter.set_time_scale(v);
+    }
     me.fighter.advance(dt);
     me.last_move = me.fighter.current_move() ? me.fighter.current_move()->name : "";
     // [dojo lesson] JS `Te.x3` (L508) fires the model's `Pf` (L671) with the
@@ -6032,6 +6041,42 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     ++me.moves_started;
                 }
             }
+        }
+    }
+
+    // [probe, authorised] `SF2_TIMESCALE_PROBE=1`: per-sim-frame animation
+    // state of THIS fighter — the timescale channels (`time_scale_` =
+    // SlowModel `KT` channel, `anim_rate_` = global `1/v.on()`), the
+    // fractional subframe accumulator (`scale_acc_`) and the continuous clip
+    // position. `sets` is the `set_time_scale` call count this frame: the JS
+    // `ePa` (`@285802`) sets `Tx` with NO accumulator reset, so a per-frame
+    // `sets>0` would freeze the fractional ramp (the reported jerk).
+    if (std::getenv("SF2_TIMESCALE_PROBE") != nullptr) {
+        static float tsp_prev[2] = {0.0f, 0.0f};
+        static int tsp_calls_prev[2] = {0, 0};
+        static bool tsp_init[2] = {false, false};
+        const int si = me.is_player ? 0 : 1;
+        const float t = me.fighter.anim_time();
+        const float d = tsp_init[si] ? t - tsp_prev[si] : 0.0f;
+        tsp_init[si] = true;
+        tsp_prev[si] = t;
+        const int calls = me.fighter.ts_set_calls();
+        const int dc = calls - tsp_calls_prev[si];
+        tsp_calls_prev[si] = calls;
+        // Only the frames that carry a NON-default timescale channel or a
+        // `set_time_scale` call are interesting — keeps the trace bounded.
+        if (dc != 0 || me.fighter.time_scale() != 1.0f ||
+            me.fighter.anim_rate() != 1.0f || me.fighter.scale_acc() != 0.0f) {
+            std::fprintf(stdout,
+                         "[tsp] F%d %s ts=%.4f ar=%.5f acc=%.5f sub=%d sf=%d "
+                         "t=%.5f dt=%.5f sets=%d\n",
+                         frame_, me.is_player ? "P" : "E",
+                         static_cast<double>(me.fighter.time_scale()),
+                         static_cast<double>(me.fighter.anim_rate()),
+                         static_cast<double>(me.fighter.scale_acc()),
+                         me.fighter.sub(), me.fighter.subframe(),
+                         static_cast<double>(t), static_cast<double>(d), dc);
+            std::fflush(stdout);
         }
     }
 
