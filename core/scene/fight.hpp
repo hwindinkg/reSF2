@@ -2030,6 +2030,15 @@ private:
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
+    // JS `Onb` (L411) `h9` / `Ewb` (L404): a plain next-round holds phase 3
+    // (the scene VISIBLE) until the end-stance animation ends (`kg` L387 ->
+    // `h4a` -> `Ewb` -> `h9`), so the loser plays its KO/knockdown animation
+    // BEFORE the round hides the arena and advances. While true, phase 3
+    // advances the fighters' clips and watches for the clip end.
+    bool end_stance_pending_ = false;
+    // The round result of the round that just ended (used to pick the K.O.
+    // plate art when the deferred `end_stance_pending_` raises it).
+    round_result last_round_result_ = round_result::ko;
     // --- the banner machine (JS class `Cr` L2022-2027) --------------------
     // `Cr.Sc` is a SECONDS countdown and `Cr.wU` the arm flag:
     //   `fu(a){this.Sc=a;this.X(!0);this.wU=!0;...}` (L2026)

@@ -2997,6 +2997,18 @@ void FightController::enter_start_stance() {
     // = location.B_` (L381) and the boss advance `this.Zb.position =
     // location.B_` (`mfb`, L405) — which is exactly what `teleport` does (it
     // absorbs the delta into `render_offset_` so the anchor STICKS).
+    // [FIX round-change clip reset — JS `ZK`/`wd.reset`] JS `Onb` (L411)
+    // runs `ZK()` at the round boundary, and `ZK` (L206859) does
+    // `c.L4()` (L253420) = `wd.reset()` (L253291) + `oL(parameters.position)`:
+    // `this.da.reset()` (L279127) clears the animator (`Ua=null`, `Xh=Mq=0`)
+    // and `oL` re-seats the fighter at its spawn. The port never ran this, so
+    // the PREVIOUS round's move survived into phase 1: the fighter kept
+    // advancing it (root motion included, undoing the spawn teleport) and the
+    // intro stance only started after it ended, from the stale animator
+    // state. Clearing the clip here (the `da.reset` analogue) lets the intro
+    // auto-play (`StanceLeft/Right`) start fresh this round.
+    player_.fighter.clear_move();
+    enemy_.fighter.clear_move();
     player_.fighter.teleport(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.teleport(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     sample_idle(player_);
@@ -3009,6 +3021,7 @@ void FightController::enter_start_stance() {
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
     start_buffer_filled_ = false;  // fresh round, empty round-start buffer
     round_wait_ = false;   // the break plate expired -> the round is running
+    end_stance_pending_ = false;  // phase 3 gate consumed (fresh round)
     // JS `FNa` (L409): `this.Ta.XF(!0); this.xF(1)`. The JS re-shows the
     // scene at the START of `FNa` because its round-reset reposition (`Z2`)
     // already ran while hidden; the port performs that reposition HERE (the
@@ -3281,9 +3294,19 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // Results screen render on black. It stays hidden through `ZK()`/`NA()`/
     // `Z2()` (the round-reset reposition) until `FNa` (L409) re-shows it, so
     // the reset never draws a visible teleport. The HUD keeps drawing.
-    if (!a_end || series_advance) {
+    // JS `Onb` (L411) hides the 3-D view (`this.Ta.XF(!1)`) ONLY in the
+    // round-transition branches, and only AFTER the end-stance animation has
+    // finished (`kg` L387 -> `h4a` -> `Ewb` -> `h9` -> `Onb`). A plain next
+    // round (`!a_end && !series_advance`) must therefore stay VISIBLE here so
+    // the loser can play its KO/knockdown animation; the hide + plate move to
+    // the phase-3 end-stance gate below. The wave advance (`series_advance`,
+    // JS `mfb` L205745) keeps the immediate hide it had.
+    if (series_advance) {
         set_scene_visible(false);
     }
+    // Stash the round result so the deferred plate (phase-3 end-stance end)
+    // can pick the same art.
+    last_round_result_ = result;
 
     // JS `ca.Pf` (L196360): the round-END result plate, `fu(1.166)`. The
     // winner's round-end reason `Iq` picks the art:
@@ -3299,7 +3322,7 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // `ZK(); NA(); Z2()`), so `banner_action::next_round` runs `NA` + `Z2` on
     // the plate's expiry. A BATTLE-ENDING round with NO waves left raises no
     // plate here: `end_battle` raises the result plate with the same hold.
-    if (!a_end || series_advance) {
+    if (series_advance) {
         banner_kind result_plate = banner_kind::ko;
         const char* plate_name = "K.O.";
         if (result == round_result::timeout_win) {
@@ -3331,6 +3354,15 @@ void FightController::apply_round_result(round_result result, const FightFighter
             // next round can advance the wave again.
             wave_advance_pending_ = spawn_wave;
             if (!c_multi) player_.rounds_won = 0;  // JS `this.kc.ng=0`
+        } else {
+            // JS `Onb` (L411) plain next-round: do NOT hide the arena or
+            // raise the plate yet. The round advances only after the
+            // end-stance animation ends (`kg` L387 `eu==3` -> `h4a` ->
+            // `Ewb` L404 `h9` -> `Onb` `Ta.XF(!1); ZK(); NA(); Z2()`).
+            // Phase 3 keeps the scene VISIBLE and advances the fighters so
+            // the loser plays its KO/knockdown animation first; the
+            // end-stance gate in `update` then hides + raises the K.O. plate.
+            end_stance_pending_ = true;
         }
         // The result plate holds the break; its expiry runs `NA()` + `Z2()`
         // through `banner_expire` (`banner_action::next_round`). There is no
@@ -3393,6 +3425,7 @@ void FightController::end_battle(const FightFighter& winner) {
     round_.running = false;
     round_live_ = false;
     round_wait_ = false;
+    end_stance_pending_ = false;
     // JS `tl.fB` (L844) / `ca.kD`: the effect containers drain at the battle
     // end (`fB()` -> `Gq.fB()`/`Hq.fB()`).
     magic_fx_.clear();
@@ -6559,11 +6592,47 @@ void FightController::update(float dt) {
             break;
         }
         case fight_phase::end_stance: {
-            // The EndStance hold: the KO/timeout banner shows for a moment
-            // (JS `Pf` plays the end animation, then the HUD advances).
+            // JS `ca.Hnb` (L389) runs each fighter's `wd.ia` in EVERY phase
+            // (`X1`), so the KO/knockdown reaction keeps advancing through
+            // the EndStance. No AI (`de.ia`/`Anb` is `Je==2` only) and no
+            // hit pass (`kh` latched by `E3a`). The clips therefore play out
+            // exactly as the JS EndStance.
             ++end_stance_frames_;
-            // The next round (or the battle end) is handled by
-            // apply_round_result — nothing to do here.
+            bool stance_ended = false;
+            for (FightFighter* f : {&player_, &enemy_}) {
+                if (f->fighter.current_move() == nullptr) stance_ended = true;
+                f->fighter.advance(dt);
+                // JS `Te.lS` (L553) -> `wd.kg` (L387) `eu==3 && animEnded`
+                // -> `h4a` (`JJ=!0`). The ended move is the clip-end edge.
+                if (f->fighter.take_ended_move() != nullptr) stance_ended = true;
+            }
+            rebuild_body(player_, enemy_);
+            rebuild_body(enemy_, player_);
+            // JS `Onb` (L411): `JJ && !xJ -> Ewb()` (L404, `h9=!0`), then the
+            // next frame `h9 -> Ta.XF(!1); ZK(); NA(); Z2()`. The port runs
+            // that chain HERE (the end-stance gate): hide the arena + raise
+            // the K.O. result plate; its expiry (`banner_expire`
+            // `next_round`) runs `NA` + `Z2` (the ROUND plate). This is the
+            // DELAY that lets the loser finish its KO/knockdown animation
+            // before the round changes.
+            if (end_stance_pending_ && stance_ended) {
+                end_stance_pending_ = false;
+                set_scene_visible(false);  // JS `Ta.XF(!1)`
+                banner_kind result_plate = banner_kind::ko;
+                const char* plate_name = "K.O.";
+                if (last_round_result_ == round_result::timeout_win) {
+                    result_plate = banner_kind::timesup;
+                    plate_name = "TIMESUP";
+                } else if (last_round_result_ == round_result::ringout) {
+                    result_plate = banner_kind::ringout;
+                    plate_name = "RINGOUT";
+                }
+                banner_show(result_plate, kJsBannerHoldSeconds,
+                            banner_action::next_round, false);
+                std::fprintf(stdout, "[fight] banner: %s (F%d)\n", plate_name,
+                             frame_);
+                std::fflush(stdout);
+            }
             break;
         }
     }
