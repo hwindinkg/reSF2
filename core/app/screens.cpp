@@ -13009,6 +13009,20 @@ void ResultsScreen::update_impl(float dt) {
         sf2::audio::AudioEngine::instance().play_music_once("menu");
         mgr.pop();
         mgr.pop();
+        // JS `v.qxa` (L621993) `a.type!="FightPVP"&&wa.F().mp(5)` -> `mp`
+        // (L529765) `fLa()` -> `Zd.load(5)`: the results OK NAVIGATES to the
+        // Map, which REBUILDS it (`Ya.bKa` L1096408 `this.ue.clear();
+        // this.ue.sY()`). The port reveals the Map instance that sat beneath
+        // the fight, whose node/active/pip state was cached by
+        // `recompute_node_states` at construction. Without re-reading the
+        // save the just-written `<Fights><Fight IDS="ZONE_1|Tournament|N"
+        // CompletedCount="1">` win record never lights its pip until a map
+        // re-entry — the reported "tournament wins are not counted" (the
+        // boss ladder only appeared counted because its win triggers story
+        // navigation, a Dojo round-trip that builds a fresh Map).
+        if (auto* map = dynamic_cast<MapScreen*>(mgr.top())) {
+            map->refresh_nodes();  // JS `bKa` L1096408
+        }
     }
 }
 
