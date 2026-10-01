@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "xml_doc.hpp"
+#include "scene/damage.hpp"
 
 namespace sf2::app {
 
@@ -55,9 +56,12 @@ namespace {
 // `internal_settings.xml` `<BarScales>` — the `v.Ova` `Mv` table (JS L604556;
 // `Mv.parse` reads Name/Type/Power/Min + the `<AttributeLimits>`/`<ItemLimits>`
 // rows via `Nv.kBa` L659xxx). Each row is `{LevelMultiplier, Shift, LeftLimit,
-// RightLimit, Level[]}` (`Ew`, defaults -1/-1/-1/-1/empty). `v.BP`
-// (`<DamageDoublingRange Value="10"/>`) is the `Exp` formula divisor.
-constexpr float kDamageDoublingRange = 10.0f;
+// RightLimit, Level[]}` (`Ew`, defaults -1/-1/-1/-1/empty). `v.BP` (the `Exp`
+// formula divisor) is `v.BP=u.H(a.A("DamageDoublingRange").attributes.get(
+// "Value"))` (L593016), already parsed into
+// `FightParams::damage_doubling_range` by `load_fight_params_from_settings`
+// (damage.cpp); `shop_attribute_bar_fill` reads it from there instead of the
+// previous local `10.0f`.
 
 const std::vector<ShopBarScale>& shop_bar_scales() {
     static const std::vector<ShopBarScale> kScales = {
@@ -399,7 +403,8 @@ float shop_attribute_bar_fill(const char* bar_scale, int value, int player_level
     float c;
     if (type == "Exp") {
         c = std::pow(2.0f,
-                     (static_cast<float>(value) - baseline) * power / kDamageDoublingRange);
+                     (static_cast<float>(value) - baseline) * power /
+                         sf2::scene::fight_params().damage_doubling_range);
     } else if (type == "Linear") {
         c = std::pow(static_cast<float>(value) / baseline, power);
     } else {

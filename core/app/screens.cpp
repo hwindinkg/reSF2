@@ -941,10 +941,49 @@ SettingsLayout settings_layout() {
 // NOT ported: segment stripes (`b_`, `mO = L5`) and the `Jc.TU` gradient —
 // they need per-fighter segment state from the fight sim (forbidden files
 // this stream); noted in the stream report.
-// Minimum bar show while alive (JS `Jj.jha` from the LifeBarMin config — the
-// exact tuned value is not in the spec excerpts, so this is an
-// approximation flagged for Stream verification).
-constexpr float kLifeBarMinShow = 0.03f;
+// `internal_settings.xml` UI values the JS reads at boot. `ge.parse`
+// (`a.A("GUI").A("Basic")`, JS L594267) stores `<ArrowFlashingFrames Value>` as
+// `ge.gba=u.I(...,120)` (L655186) — the flashing-arrow sine period `kyb` reads
+// (`this.$O>ge.gba&&(this.$O=0); ... Math.sin(Math.PI/ge.gba*this.$O)`, L420537).
+// `Jj.parse` (`a.A("GUI").A("Fight")`, L594330) stores `<LifeBarMin Value>` as
+// `Jj.jha=u.H(...)` (L655682) — the `Br.d6a` minimum HP-bar show while alive
+// (`a>0&&a<Jj.jha&&(a=Jj.jha)`, L1037978). Both shipped (120 / 0.01). The port
+// previously hardcoded 120 in three draw sites and an admitted 0.03
+// approximation for the bar floor; read them from the shipped file.
+float internal_ui_setting(const char* group, const char* child, float fallback) {
+    static std::map<std::string, float> cache;
+    const std::string key = std::string(group) + "/" + child;
+    const auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    float value = fallback;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                         std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            const pugi::xml_node g =
+                root ? root.child("GUI").child(group) : pugi::xml_node();
+            const pugi::xml_node n = g ? g.child(child) : pugi::xml_node();
+            if (n && n.attribute("Value")) value = n.attribute("Value").as_float(fallback);
+        }
+    } catch (const std::exception&) {
+    }
+    cache[key] = value;
+    return value;
+}
+float arrow_flashing_frames() {  // `ge.gba`
+    static const float v = internal_ui_setting("Basic", "ArrowFlashingFrames", 120.0f);
+    return v;
+}
+float life_bar_min_show() {  // `Jj.jha`
+    static const float v = internal_ui_setting("Fight", "LifeBarMin", 0.01f);
+    return v;
+}
+
 
 struct HudBarDecay {
     float shown() const { return shown_; }
@@ -953,7 +992,7 @@ struct HudBarDecay {
     void retarget(float target) {
         // JS `gCa` clamp + `d6a` min-show.
         target = std::clamp(target, 0.0f, 1.0f);
-        if (target > 0.0f && target < kLifeBarMinShow) target = kLifeBarMinShow;
+        if (target > 0.0f && target < life_bar_min_show()) target = life_bar_min_show();
         if (target < shown_to_ - 0.0005f) {
             // Damage: instant drops over 10 frames, leak trails over 30.
             shown_step_ = (target - shown_) / 10.0f;
@@ -7524,7 +7563,7 @@ void DojoScreen::render_impl(App& app) {
                     const float nat_h = afr.source_h > 0
                                             ? static_cast<float>(afr.source_h)
                                             : static_cast<float>(afr.h);
-                    constexpr float kArrowFlashingFrames = 120.0f;  // `ge.gba` L1278
+                    const float kArrowFlashingFrames = arrow_flashing_frames();  // `ge.gba`
                     static int arrow_phase = 0;                      // JS `Ut.$O`
                     const float alpha =
                         0.5f + 0.5f * std::sin(3.14159265358979323846f /
@@ -11725,7 +11764,7 @@ void FightScreen::render_impl(App& app) {
     {
         constexpr float kPi = 3.14159265358979323846f;
         // JS `ge.gba` = params `ArrowFlashingFrames` (L1278), default 120.
-        constexpr float kArrowFlashingFrames = 120.0f;
+        const float kArrowFlashingFrames = arrow_flashing_frames();
 
         // JS `Hyb` (L825): the one-shot `fight/fx` (asset 1306) hit overlay
         // `this.lo` (`Ut.s1a` L831-832). `C(a.x)`/`D(a.y)` place it at the hit
@@ -11795,7 +11834,7 @@ void FightScreen::render_impl(App& app) {
         unsigned int agl = 0;
         if (app.get_atlas_frame("arrow", &afr, &atw, &ath, &agl)) {
             constexpr float kPi = 3.14159265358979323846f;
-            constexpr float kArrowFlashingFrames = 120.0f;  // `ge.gba` L1278
+            const float kArrowFlashingFrames = arrow_flashing_frames();  // `ge.gba` L1278
             // `2*F9 = Lb.height/2 - Lb.ct` = the `tl` container y translate the
             // fighters' `project()` already carries as `cont_y`, so the marker's
             // drop from the container origin is `2*F9*Bj + 10` (the arena floor
