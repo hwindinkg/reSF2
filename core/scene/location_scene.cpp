@@ -552,16 +552,23 @@ void update_effect(SpriteAnim& a, float dt) {
         advance_timeline(a.rot, dt);
         a.sprite->transform.rotation = timeline_value(a.rot) + a.rot_start;
     }
-    // JS ReappearX/Y `Zwa` (L1140): wrap and `vOa(!0,!1)` if either fired.
+    // JS ReappearX/Y `Zwa` (L1140): `b=new ja(this.JM); d=new ja(this.KM);
+    // if(this.qX.Zwa(a,b)||this.rX.Zwa(c,d)) this.JM=b.G, this.KM=d.G,
+    // this.vOa(!0,!1)`. `Zwa` wraps an absolute coordinate to the far edge
+    // (`a>max ? min-max+a : max-min+a`), and the `||` SHORT-CIRCUITS: when X
+    // fires, Y is not evaluated (so only one axis wraps per tick). The port's
+    // `acc_x` is `JM - base_x` (the XML X is the initial `JM`), so the wrapped
+    // accumulator is `delta + (x - base_x)`.
     bool triggered = false;
     if (a.reappear_x && (x > a.re_x_max || x < a.re_x_min)) {
-        a.acc_x = x > a.re_x_max ? a.re_x_min - a.re_x_max + x
-                                 : a.re_x_max - a.re_x_min + x;
+        a.acc_x = (x > a.re_x_max ? a.re_x_min - a.re_x_max
+                                  : a.re_x_max - a.re_x_min) +
+                  (x - a.base_x);
         triggered = true;
-    }
-    if (a.reappear_y && (y > a.re_y_max || y < a.re_y_min)) {
-        a.acc_y = y > a.re_y_max ? a.re_y_min - a.re_y_max + y
-                                 : a.re_y_max - a.re_y_min + y;
+    } else if (a.reappear_y && (y > a.re_y_max || y < a.re_y_min)) {
+        a.acc_y = (y > a.re_y_max ? a.re_y_min - a.re_y_max
+                                  : a.re_y_max - a.re_y_min) +
+                  (y - a.base_y);
         triggered = true;
     }
     if (triggered) {

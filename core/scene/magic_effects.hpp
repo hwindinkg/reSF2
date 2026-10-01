@@ -129,7 +129,7 @@ struct MagicInstance {
     int iterations_left = 1;  // JS `ni.iterations` (>0 finite; -1 = loop)
     bool playing = true;      // JS `ni.LJ`
     float accum = 0.0f;       // JS `ni.Qe` — frame-time accumulator (seconds)
-    float age = 0.0f;         // ticks lived (for the end-fade)
+    float age = 0.0f;         // ticks lived (diagnostic; JS has no age field)
     // JS `bv.model` — the emitting model, the second half of the effect
     // identity used by `LNa`/`Gwb` (`b == f.model`). 0/1 = the native fight
     // sides (player/enemy); -1 = unbound (legacy spawn).
@@ -260,8 +260,9 @@ public:
         foreground_.clear();
     }
 
-    // Frame fade for one instance: 1.0 through most of life, ramping out
-    // over the last 8 ticks for one-shots (the `uub` fade in JS terms).
+    // Effect alpha for one instance. The JS has NO effect fade: the container
+    // node alpha is never written by `cv.lwb`/`cv.WL`, so this is always 1.0.
+    // Kept as a call site so the renderer keeps one alpha source.
     float alpha_for(const MagicInstance& in) const;
 
     // Current atlas frame name for one instance ("" when the desc has no

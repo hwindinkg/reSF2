@@ -12,8 +12,6 @@ namespace sf2::scene {
 
 namespace {
 
-constexpr float kEndFadeTicks = 8.0f;  // one-shot fade-out tail (ticks)
-
 // Builds a `ni` frame run from the `fight/fx` atlas naming convention:
 // `<prefix>/<prefix>_<i>` for i in [1, count] (e.g. "hit_blade/hit_blade_7").
 std::vector<std::string> fx_frames(const char* prefix, int count) {
@@ -197,8 +195,9 @@ void MagicEffects::add_default_descs() {
     trail.on_background = false;
     trail.ticks_per_frame = 1.0f;
     trail.size = 18.0f;
-    trail.color = 0x66CCFFu;  // cold magic tint (native extension)
-    trail.vy = -0.4f;         // rises while alive (native drift extension)
+    // NO tint and NO drift: the JS descriptor (`Yl` L729-730) has no colour
+    // and `cv.lwb`/`bv.update` never move an effect (see `alpha_for`). The
+    // earlier `color=0x66CCFF` / `vy=-0.4` were port-only inventions.
 
     descs_.push_back(flash);
     descs_.push_back(trail);
@@ -386,11 +385,15 @@ void MagicEffects::update(float timescale, const EffectAnchor* owners,
                 in.facing = fsign;
             }
             in.age += 1.0f;
-            in.x += in.vx / ts;
-            in.y += in.vy / ts;
+            // JS `bv.update` (L834) NEVER drifts an effect: a non-follow
+            // (`P1` false) instance is only created once (`cv.lwb`) and stays
+            // at its spawn anchor; a follow one is re-anchored every tick
+            // from `effect.position.nt(model.Fc)`. There is no `vx`/`vy`
+            // integration anywhere, so none is done here.
             if (d.frames.empty()) {
-                // Timeless tint pulse without frames: lives off the end-fade.
-                if (in.age >= kEndFadeTicks * 2.0f) continue;  // dead — dropped
+                // No `ni` frames: `animate.ia` is a no-op and `LJ` stays true,
+                // so the instance lives until an explicit `stop` (JS `LNa`
+                // only removes on `!LJ` / a null follow model).
             } else {
                 const int n = static_cast<int>(d.frames.size());
                 const float tpf = d.ticks_per_frame > 0.0f ? d.ticks_per_frame : 1.0f;
@@ -448,7 +451,12 @@ float MagicEffects::scale_y_for(const MagicInstance& in) const {
 }
 
 float MagicEffects::rotation_for(const MagicInstance& in) const {
-    return descs_[in.desc].start_rotation;  // JS `Vla` (`a.rotate()`)
+    // JS `bv.rotate()` (@424997): `b = this.effect.Vla * this.model.hd()` —
+    // the start rotation is scaled by the owner's FACING sign, then written
+    // into the container matrix. The caller passes this straight to the
+    // sprite's `rotation` (degrees), so the sign belongs here.
+    const float vla = descs_[in.desc].start_rotation;  // JS `Vla` (`a.rotate()`)
+    return in.facing < 0 ? -vla : vla;
 }
 
 bool MagicEffects::source_size_for(const MagicInstance& in) const {
@@ -461,12 +469,16 @@ bool MagicEffects::background_for(const MagicInstance& in) const {
 }
 
 float MagicEffects::alpha_for(const MagicInstance& in) const {
-    const float life = life_for(in);
-    if (life < 0.0f) return 1.0f;  // loopers hold full alpha until stop()
-    const float left = life - in.age;
-    if (left <= 0.0f) return 0.0f;
-    if (left >= kEndFadeTicks) return 1.0f;
-    return left / kEndFadeTicks;
+    // JS has NO effect fade. The magic sprite is a plain `dd` container whose
+    // node alpha is never written: `cv.lwb` (@426779) sets only the container
+    // transform (`translate`/`scale`/`rotate`) and `cv.WL` removes a finished
+    // one-shot by `!animate.LJ` — it never ramps alpha. (`uub`, cited by an
+    // earlier note, is `uub(a){this.L_().NL=a}` @830536: it sets the run
+    // TIME-SCALE, not a fade.) The sprite therefore holds alpha 1 for its
+    // whole life; only the Transparency modifier (`EO`) writes `wa()`, and
+    // that is a location-layer feature, not this container.
+    (void)in;
+    return 1.0f;
 }
 
 std::string MagicEffects::frame_for(const MagicInstance& in) const {
