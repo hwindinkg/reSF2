@@ -68,7 +68,9 @@ struct WarriorSave {
     std::string magic = "NoMagic";
     std::string tutorial = "MOVE";
     std::string tactic = "Player";
-    std::string current_zone = "ZONE_1";
+    // `b=a.attributes.get("CurrentZone");this.ro=b!=null?b:""` (char 125603):
+    // default "". The seed ships "ZONE_1"; absent -> "" like the JS.
+    std::string current_zone;
     // JS `p.o.qC` (world ctor L247): `u.ka(a.attributes.get("ShowUpgrades"),
     // false)` on the WARRIOR node — a save attribute (`users_default.xml`
     // ships "0"). Gates the shop upgrade plates (`k9 && p.o.qC`, L2255).
