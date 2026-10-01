@@ -60,6 +60,12 @@ struct WarriorSave {
     int experience = 0;
     // `this.dk=u.I(a.attributes.get("Power"))` (X+x): default 0.
     int power = 0;
+    // `this.$N=u.I(a.attributes.get("PowerSyncTime"))` (JS L125109): the
+    // energy-regeneration sync clock in SECONDS. `u.I(x,b=0)` -> 0 for an
+    // absent/NaN attr. Written by `F5(a){this.$N=a;this.hL("PowerSyncTime",a)}`
+    // (L128868); -1 marks "full" (`q5` L134438 `b==this.wr&&(this.F5(-1),...)`).
+    // Read by the regen tick `Zma` (L134483) and the `aPa` timer (L138972).
+    int power_sync_time = 0;
     std::string skeleton = "Skeleton";
     std::string armor = "Body";
     std::string helm = "Head";

@@ -1204,6 +1204,9 @@ void App::update_fixed(float dt) {
     // `L.K.time += a` that `Hb.now()` adds (`Hb.getTime()` L... = `ed.getDate(
     // N$+(L.K.time-baa))`). `quest_now()`/`?Fight.TimeLeft`/`Timer` all read it.
     WarriorSave::live_clock() += static_cast<double>(dt);
+    // JS `Hb.Oh` listener `xx()` (L100049): `this.Zma(p.Dc)` — the energy
+    // regeneration tick (`p.o.dk` toward `v.$Ca()`, one unit per `v.YE`).
+    sf2::app::tick_energy(*this);
     screens_->update(dt);
     // Quest live actions: resume deferred `Wait` runs + perform the queued
     // scene/shop navigation. Runs AFTER the screen update so a `mp` push never

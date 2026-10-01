@@ -1522,6 +1522,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // Timer EndTime attr, Currencies/Resistances) + the SF2User/`.sf2`
     // envelope (encode/decode/import). No OS input, no sim.
     bool save_fields_probe_mode = false;
+    // --energy-regen-probe: the JS `Zma`/`aPa` energy chain (`v.$Ca` cap,
+    // `v.YE` interval, `$N` sync time) over a simulated clock. No OS input.
+    bool energy_regen_probe_mode = false;
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
@@ -1771,6 +1774,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // JS-exact save field + envelope round-trip (dispatched after the
             // RULE 0 watchdog install; no OS input, no sim).
             save_fields_probe_mode = true;
+        } else if (arg == "--energy-regen-probe") {
+            // The energy-regeneration model (JS `Zma` L134483 / `aPa` L138972)
+            // walked over a simulated clock (dispatched after the watchdog).
+            energy_regen_probe_mode = true;
         } else if (arg == "--mode-probe") {
             // Mode series advance + reward proof (JS `Onb` L209117 win
             // handler -> `mfb` L205744 `Rk++`/`Zb=pf[Rk]` -> `D0(i)`
@@ -2447,8 +2454,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // `Bonus`/`Power` are ABSENT from this synthetic `<Warrior>`; the
             // JS reads them with default 0 (`vl(xb("Bonus",0),0)`,
             // `u.I("Power")`). `ID`/`Level` are present.
-            defaults_ok = w.bonus == 0 && w.power == 0 && w.id == 1 &&
-                          w.level == 1;
+            defaults_ok = w.bonus == 0 && w.power == 0 && w.power_sync_time == 0 &&
+                          w.id == 1 && w.level == 1;
             read_ok = w.bonus == 0 && w.power == 0 && w.fights.size() == 1 &&
                       w.fights[0].name == "ZONE_1|BOSS_LYNX|" &&
                       w.fights[0].id == 7 && w.fights[0].wins == 3 &&
@@ -2496,7 +2503,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                        w2.battle_records[0].end_time == 99 &&
                        w2.battle_records[0].fight &&
                        w2.timers.count("Delivery") == 1 &&
-                       w2.timers["Delivery"] == 123456;
+                       w2.timers["Delivery"] == 123456 &&
+                       w2.power_sync_time == 0;
             // Envelope: the `SF2User` storage form (no `SF2` prefix) decodes
             // byte-exactly; the `.sf2` framed export imports users+packs+flags.
             const std::string stored = SaveSystem::envelope_encode_users(xml);
@@ -2518,6 +2526,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      env_ok ? "PASS" : "FAIL", sf2_ok ? "PASS" : "FAIL",
                      detail.c_str(), ok ? "PASS" : "FAIL");
         std::fflush(stdout);
+        return ok ? 0 : 1;
+    }
+
+    // `--energy-regen-probe`: walk the JS energy chain over a simulated clock.
+    // JS: `v.$Ca()` = `<Power Max="5">` (cap), `v.YE` = `<Power TimeMax="600">`
+    // (regen interval, seconds), `p.o.dk` = save `Power`, `p.o.$N` = save
+    // `PowerSyncTime`. `Zma` L134483 + `aPa` L138972 (screens.cpp). No OS input.
+    if (energy_regen_probe_mode) {
+        const bool ok = sf2::app::energy_regen_probe();
         return ok ? 0 : 1;
     }
 

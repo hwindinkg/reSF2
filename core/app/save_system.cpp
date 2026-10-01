@@ -132,6 +132,8 @@ WarriorSave SaveSystem::load() {
     out.level = sf2::data::xml_attr_int(warrior, "Level", 0);       // `u.I(attr)`
     out.experience = sf2::data::xml_attr_int(warrior, "Experience", 0);
     out.power = sf2::data::xml_attr_int(warrior, "Power", 0);       // `u.I(attr)`
+    // `this.$N=u.I(a.attributes.get("PowerSyncTime"))` (L125109), default 0.
+    out.power_sync_time = sf2::data::xml_attr_int(warrior, "PowerSyncTime", 0);
     if (warrior.attribute("Skeleton")) out.skeleton = warrior.attribute("Skeleton").value();
     if (warrior.attribute("Armor")) out.armor = warrior.attribute("Armor").value();
     if (warrior.attribute("Helm")) out.helm = warrior.attribute("Helm").value();
@@ -595,6 +597,9 @@ void SaveSystem::save(const WarriorSave& w) {
     warrior.attribute("Level").set_value(w.level);
     warrior.attribute("Experience").set_value(w.experience);
     warrior.attribute("Power").set_value(w.power);
+    // `F5(a){this.$N=a;this.hL("PowerSyncTime",a)}` (L128868) via `Cr` ->
+    // `this.ga.set(a,b); this.save()` (L78838).
+    warrior.attribute("PowerSyncTime").set_value(w.power_sync_time);
     warrior.attribute("Armor").set_value(w.armor.c_str());
     warrior.attribute("Helm").set_value(w.helm.c_str());
     warrior.attribute("Weapon").set_value(w.weapon.c_str());

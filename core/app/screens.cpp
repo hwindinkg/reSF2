@@ -2858,6 +2858,83 @@ int energy_max() {
     return cached;
 }
 
+// `v.YE=a.A("Power")!=null?u.I(a.A("Power").attributes.get("TimeMax"),600):600`
+// (L593279-593280). Mirror of `energy_max()` above: the shipped
+// `<Power Max="5" TimeMax="600"/>` yields 600 (the port previously read only
+// `Max`, so the regen interval was unread). `u.I(x,b=600)` -> 600 when `<Power>`
+// is absent or `TimeMax` is absent/NaN.
+int energy_time_max() {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    cached = 600;  // `u.I(...,600)` when `<Power>` is absent.
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                         std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                const pugi::xml_node power = root.child("Power");
+                cached = power ? (power.attribute("TimeMax")
+                                      ? power.attribute("TimeMax").as_int(600)
+                                      : 600)
+                               : 600;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return cached;
+}
+
+// JS `Zma(a)` (L134483):
+//   let b=this.dk;
+//   if(b<this.wr){
+//     if(this.$N==-1)this.F5(a);
+//     else{ let c=a-this.$N, d=c/this.YE|0;
+//           this.$N>a&&this.F5(a);
+//           d>0&&(this.F5(a-c%this.YE),this.q5(b+d)) }
+//     this.aPa(a) }
+// `q5(a)` (L134431): clamp to `wr`, write `Power`, and on reaching the cap set
+// `$N=-1` (`F5(-1)`) so the next spend restarts the clock. `F5(a)` (L128868):
+// `$N=a; hL("PowerSyncTime",a)`. `c/YE|0` is JS trunc toward zero (`c>=0`
+// here, so integer division matches).
+void regen_energy(WarriorSave& w, int now) {
+    const int max = energy_max();
+    const int interval = energy_time_max();
+    const int b = w.power;
+    if (b >= max) return;  // `if(b<this.wr)` — full: no tick
+    if (w.power_sync_time == -1) {
+        w.power_sync_time = now;  // `this.F5(a)`
+    } else {
+        const int c = now - w.power_sync_time;
+        const int d = interval > 0 ? c / interval : 0;  // `c/this.YE|0`
+        if (w.power_sync_time > now) w.power_sync_time = now;  // `$N>a&&F5(a)`
+        if (d > 0) {
+            // `this.F5(a-c%this.YE)` — keep the sub-interval remainder.
+            w.power_sync_time = now - (interval > 0 ? c % interval : 0);
+            int v = b + d;
+            if (v > max) v = max;  // `q5`: `a=a>b?b:a`
+            if (v != w.power) {
+                w.power = v;  // `this.nF("Power",b)`
+                if (w.power == max && max != 0) {
+                    w.power_sync_time = -1;  // `this.F5(-1)`
+                }
+            }
+        }
+    }
+}
+
+// `aPa(a){this.e4=this.dk==this.wr?-1:this.YE-(a-this.$N)}` (L138972).
+int energy_refill_seconds(const WarriorSave& w, int now) {
+    const int max = energy_max();
+    const int interval = energy_time_max();
+    if (w.power == max) return -1;  // `this.dk==this.wr?-1`
+    return interval - (now - w.power_sync_time);
+}
+
 // `Nn`/`MenuBtnFlashing` highlight (`UseFlashing="1"`, tutorial_quests.xml
 // L156/L361): a draw-side pulse clock (one tick per rendered frame — the
 // flash has no gameplay time source), 2 s sine.
@@ -12814,7 +12891,9 @@ void apply_fight_reward(App& app) {
         if (w.experience < need) break;
         w.experience -= need;
         w.level++;
-        w.power += 2;
+        // JS `OLa` (L128307) only writes `Level` + `Experience` — it never
+        // touches `Power` (the ONE `nF("Power",..)` writer is `q5` L134382).
+        // The port used to add `w.power += 2` here (an invention).
         leveled_up = true;  // `Psb` -> MaximumLevel counter delta
         std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n",
                      w.level, w.power);
@@ -19545,6 +19624,62 @@ int run_shell_probe(App& app) {
                  fails);
     std::fflush(stdout);
     return fails;
+}
+
+// JS `Hb.Oh` listener `xx()` (L100049): `p.Dc=Math.round(Hb.instance.getTime());
+// this.jzb(p.Dc); this.Zma(p.Dc);`. `Hb.aa` (L1209295) fires `Hb.Oh.Z()` at
+// most once per real second, so the port ticks on the integer game second and
+// persists the save only when `Zma`/`F5` changed `Power`/`PowerSyncTime`.
+void tick_energy(App& app) {
+    static int last_sec = 0;
+    static bool seeded = false;
+    const int now = static_cast<int>(std::llround(WarriorSave::live_clock()));
+    if (seeded && now == last_sec) return;
+    seeded = true;
+    last_sec = now;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return;
+    }
+    const int before_power = w.power;
+    const int before_sync = w.power_sync_time;
+    regen_energy(w, now);  // `this.Zma(p.Dc)`
+    if (w.power != before_power || w.power_sync_time != before_sync) {
+        try {
+            app.save().save(w);  // `nF`/`hL` -> `Cr` -> `this.save()`
+        } catch (const std::exception&) {
+        }
+    }
+}
+
+// `--energy-regen-probe`: the `Zma`/`aPa` trajectory over a simulated clock.
+bool energy_regen_probe() {
+    const int max = energy_max();
+    const int interval = energy_time_max();
+    std::fprintf(stdout,
+                 "[energy] config: Max=%d TimeMax=%d "
+                 "(internal_settings.xml <Power Max=\"5\" TimeMax=\"600\"/>, "
+                 "JS L593279)\n",
+                 max, interval);
+    WarriorSave w;
+    w.power = 0;               // `p.o.dk=u.I("Power")`
+    w.power_sync_time = 1000;  // `p.o.$N=u.I("PowerSyncTime")`
+    std::fprintf(stdout,
+                 "[energy] BEFORE (no regen model): power stays %d, no timer\n",
+                 w.power);
+    std::fprintf(stdout, "[energy] AFTER (Zma/aPa): t power timer(s)\n");
+    for (int t = 1000; t <= 1000 + interval * 6; t += 100) {
+        regen_energy(w, t);
+        std::fprintf(stdout, "[energy]   t=%d power=%d timer=%d\n", t, w.power,
+                     energy_refill_seconds(w, t));
+    }
+    const bool ok = max == 5 && interval == 600 && w.power == 5 &&
+                    energy_refill_seconds(w, 1000 + interval * 6) == -1;
+    std::fprintf(stdout, "[energy] RESULT %s\n", ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return ok;
 }
 
 } // namespace sf2::app

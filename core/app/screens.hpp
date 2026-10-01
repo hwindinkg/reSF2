@@ -1596,6 +1596,16 @@ bool shop_open_at(App& app, const std::string& tab, const std::string& item);
 // not the current screen, matching `a!=null && a.Imb()`.
 bool shop_refresh_items(App& app);
 
+// --- energy regeneration (`p.o` / `Zma` L134483) -----------------------------
+// `v.$Ca()` = `<Power Max>` (cap) and `v.YE` = `<Power TimeMax>` (regen
+// interval s) are read in screens.cpp (`energy_max`/`energy_time_max`).
+// The clock listener `xx()` (L100049 `this.Zma(p.Dc)`): fires ~once per real
+// second, applies the regen to the save and persists on change.
+void tick_energy(App& app);
+// `--energy-regen-probe`: walk `Zma`/`aPa` over a simulated clock and print
+// the power/timer trajectory. Returns true when the model reaches the cap.
+bool energy_regen_probe();
+
 // --- quest dialog (He) display/dispatch contracts (screens.cpp) -------------
 // The action-plate frame for a `<Button Color>` (`He.lea` L1063 ->
 // `nz.hi` L1840): Red->"btnDark", Green->"btnGreen", White/Beige->"btnWhite",
