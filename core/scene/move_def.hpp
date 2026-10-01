@@ -627,27 +627,45 @@ struct MoveDef {
     // input path (JS `Gc.Vkb` L671 -> `Gc.EZa` L676) only considers moves
     // whose Events contain "KeyPressed".
     std::set<std::string> events;
-    // JS `kz` `<Hit>` event (`Nm`, L767) `Name` attr (`tb.Ki`): the reaction
-    // moves' `<Events><Hit Name="High"/></Events>` list. `Gc.EZa`'s
-    // `iEa` -> `Nm.compare` (L767) requires `Ki == trigger.UC` (the attacker's
-    // hit name from `Ul.B8a`), so a reaction only matches a hit of the SAME
-    // name. This is what keeps `RootHit` (Priority 700,
-    // `<Hit Name="RootHit"/>`) out of a normal High/Middle reaction. An empty
-    // `Name` (`<Hit />`, e.g. PhysicalFall) matches any hit (`Ki==""`).
-    std::vector<std::string> hit_event_names;
+    // JS `kz` `<Hit>` EVENT (`Nm`, L768) — one per `<Events><Hit .../>` node,
+    // carrying the three attrs `tb.init` (L763) reads:
+    //   `Ki` = Name, `zC` = Type, `cb` = Not.
+    // `Gc.EZa`'s `iEa` -> `Nm.compare` (L768) tests every such event against
+    // the trigger; the port kept only the Name before, so it ignored the
+    // `Type="Critical|Shock"` gate and INVERTED `<Hit Not="1"/>`.
+    struct HitEventDef {
+        std::string name;   // `tb.Ki`  (Name attr)
+        std::string type;   // `tb.zC`  (Type attr: "", "Critical", "Shock")
+        bool not_ = false;  // `tb.cb`  (Not attr)
+    };
+    std::vector<HitEventDef> hit_events;
 
     bool has_event(const std::string& name) const {
         return events.find(name) != events.end();
     }
 
-    // JS `Nm.compare(a)` (L767): does ANY of the move's `<Hit>` events admit
-    // the attacker's hit name `uc`? `super.compare` (the type-6 match) is
-    // already implied by `has_event("Hit")`; `a.data` is the attacker's live
-    // Attack interval (never null on the reaction path), so the name test is
-    // the gate: `Ki=="" || Ki==UC`.
-    bool hit_event_matches(const std::string& uc) const {
-        for (const std::string& n : hit_event_names) {
-            if (n.empty() || n == uc) return true;
+    // JS `Nm.compare(a)` (L768) VERBATIM:
+    //   compare(a){
+    //     if(!super.compare(a))return!1;          // type 6 == type 6
+    //     var b=!1; let c=a.model.Bb, d=this.zC;
+    //     if(d==null||d==""||this.zC=="Critical"&&c.se||this.zC=="Shock"&&c.Ub)
+    //       b=this.Ki, b=b==null||b==""||a.data==null||this.Ki==a.UC;
+    //     return this.cb?!b:b }
+    // `super.compare` is implied by the caller's `has_event("Hit")`. `c.se` /
+    // `c.Ub` are the trigger's live critical/shock flags; `a.data` is the
+    // trigger's Attack interval (non-null on the reaction path). Returns true
+    // when ANY of the move's `<Hit>` events admits the trigger.
+    bool hit_event_matches(const std::string& uc, bool hit_critical,
+                           bool hit_shock, bool has_data) const {
+        for (const HitEventDef& h : hit_events) {
+            bool b = false;
+            const std::string& d = h.type;
+            if (d.empty() || (d == "Critical" && hit_critical) ||
+                (d == "Shock" && hit_shock)) {
+                b = h.name.empty() || !has_data || h.name == uc;
+            }
+            if (h.not_) b = !b;  // `this.cb ? !b : b`
+            if (b) return true;
         }
         return false;
     }

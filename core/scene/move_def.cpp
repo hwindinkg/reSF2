@@ -1114,8 +1114,14 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                 // attacker's hit name (`UC`); the port kept only the node name
                 // before, so every reaction matched every hit.
                 if (std::string(ev.name()) == "Hit") {
+                    // JS `tb.init` (L763): `Ki=Name`, `zC=Type`, `cb=Not`.
+                    MoveDef::HitEventDef h;
                     const char* n = ev.attribute("Name").value();
-                    def.hit_event_names.push_back(n != nullptr ? n : "");
+                    h.name = n != nullptr ? n : "";
+                    const char* t = ev.attribute("Type").value();
+                    h.type = t != nullptr ? t : "";
+                    h.not_ = data::xml_attr_bool(ev, "Not", false);
+                    def.hit_events.push_back(std::move(h));
                 }
             }
         };

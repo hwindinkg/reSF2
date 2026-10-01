@@ -1497,13 +1497,16 @@ std::string Fighter::try_react(FightContext& ctx,
         // `MOD_TITAN` + a live Block interval (its `<Conditions>`), so a
         // humanoid never picks it. A block is never a hit reaction.
         if (m->template_tags.count("Block") != 0) continue;
-        // JS `Gc.iEa(g, this.Ek[d], a)` -> `Nm.compare(a)` (L767): the
-        // reaction's `<Hit>` event name must equal the attacker's hit name
-        // (`a.UC` = `Ul.B8a`, the attack interval's `<Hit Name>`). Without
-        // this gate every reaction admitted every hit, so `RootHit`
-        // (Priority 700, `<Hit Name="RootHit"/>`) won the max-priority
-        // partition of every normal High/Middle hit.
-        if (!m->hit_event_matches(ctx.last_hit_animation)) continue;
+        // JS `Gc.iEa(g, this.Ek[d], a)` -> `Nm.compare(a)` (L768): the
+        // reaction's `<Hit>` EVENT must admit the trigger — the full
+        // predicate is `Type` (empty / Critical / Shock) AND `Name` AND
+        // `Not`. The old port tested only the Name, so it ignored
+        // `<Hit Type="Critical"/>` (matched every hit) and INVERTED
+        // `<Hit Name="TornadoHit" Not="1"/>` (matched only TornadoHit).
+        if (!m->hit_event_matches(ctx.last_hit_animation, ctx.last_hit_critical,
+                                  ctx.last_hit_shock, ctx.has_last_hit)) {
+            continue;
+        }
         // JS `Gc.EZa` (L676-677): `f.Yz(b,null,g)` — the candidate's OWN
         // `<Conditions>` MUST pass before it enters `Gc.DK`'s priority
         // partition. This is what makes the dojo bag pick `PhysicalDummy`

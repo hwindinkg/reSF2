@@ -204,6 +204,13 @@ struct FightContext {
     std::string last_hit_type;      // "Critical"/"Shock"/"" — matches by name
     std::string last_hit_animation; // hit animation name
     bool has_last_hit = false;
+    // JS `sm.he` / `Nm.compare` read `a.IL.se` (critical) and `a.IL.Ub`
+    // (shock) as SEPARATE booleans — a hit can be both. The old single
+    // `last_hit_type` string collapsed them (a Critical+Shock hit matched
+    // only "Critical"), so `<Hit Type="Shock"/>` reactions/conditions were
+    // missed on a crit-shock.
+    bool last_hit_critical = false;  // `a.IL.se`
+    bool last_hit_shock = false;     // `a.IL.Ub`
 
     // Helpers.
     bool interval_active(const std::string& name, int type = 0,

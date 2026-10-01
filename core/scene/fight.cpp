@@ -4805,7 +4805,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     sf2::scene::IntervalDamage idmg;
     idmg.base_damage = iv.damage;
     idmg.no_critical = iv.no_critical;
-    idmg.hit_body_part = iv.hit_name_at(frame);  // JS `Ul.B8a(e.M0())`
+    // JS `Ul.B8a(e.M0())` — the ATTACKER's clip frame (`e.M0()`), not the
+    // fight frame passed in as `frame`. The two agree only for the first
+    // 5 frames; from then on `hit_name_at(frame_)` returned "".
+    idmg.hit_body_part = iv.hit_name_at(atk.fighter.move_frame());
     // JS `wd.bCa(a,...)` receives `a.SZ` (EVERY sub-`<Damage>`) and `a.KP`
     // (EVERY `<Defense>`), plus `e.da.Ua.QX` for `c2a`. The old code pushed
     // only the FIRST sub-`<Damage>` (`iv.damage_type`) and stuffed the
@@ -5109,7 +5112,16 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // so every `<Hit>` condition was base-FALSE and the `prefer_fall`
         // name heuristic had to stand in for it.
         rctx.has_last_hit = true;
-        rctx.last_hit_animation = iv.hit_name_at(frame);  // JS `Vb.UC`
+        rctx.last_hit_critical = hit_critical;  // `a.IL.se`
+        rctx.last_hit_shock = rec.shock;        // `a.IL.Ub`
+        // JS `Ul.B8a(e.M0())` resolves the ATTACKER's hit name from the
+        // ATTACKER's clip frame (`e.M0()`), NOT the fight frame. The old
+        // `iv.hit_name_at(frame)` was handed `frame_` (the fight frame, e.g.
+        // 370) while the Attack interval window is clip frames 4..5, so it
+        // returned "" and EVERY named reaction (`<Hit Name="High"/>`) failed
+        // the `Nm.compare` gate — only the empty-named `<Hit/>` (PhysicalFall
+        // etc.) still matched. That is the "no hit reaction" regression.
+        rctx.last_hit_animation = iv.hit_name_at(atk.fighter.move_frame());
         rctx.candidate_moves = {};
         // JS `Gc.DK` (L343452): `f[uf.sja(f.length)]` — the reaction pick is
         // a UNIFORM `Math.random` draw (`uf.sja` L57426), NOT `Da.pg`. The
@@ -5133,8 +5145,11 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             // starts.
             const bool knockdown = def.fighter.last_react_physics();  // MS
             if (knockdown) {
-                def.fighter.ragdoll_start(reaction, wall_min_, wall_max_,
-                                          floor_y_);
+                // JS `Al.P6a` (L582) pins the ragdoll body with a HARD
+                // `a.y=0` — the floor is the world origin, NOT the location's
+                // `<Root Floor>` (the camera `tl` anchor, dojo 80). Passing
+                // `floor_y_` sank the whole ragdoll 80 units under the map.
+                def.fighter.ragdoll_start(reaction, wall_min_, wall_max_, 0.0f);
                 std::fprintf(stdout, "[ragdoll] F%d %s START '%s' (nk=1)\n",
                              frame, def.name.c_str(), reaction.c_str());
             } else {
@@ -5279,7 +5294,11 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // resolve its own name here.
         ev.last_hit_type = hit_critical ? "Critical" : (rec.shock ? "Shock" : "");
         ev.has_last_hit = true;
-        ev.last_hit_animation = iv.hit_name_at(frame);  // JS `Vb.UC`
+        ev.last_hit_critical = hit_critical;  // `a.IL.se`
+        ev.last_hit_shock = rec.shock;        // `a.IL.Ub`
+        // JS `Vb.UC` = `Ul.B8a(e.M0())` — the attacker's clip frame, not the
+        // fight frame (see the reaction-context note above).
+        ev.last_hit_animation = iv.hit_name_at(atk.fighter.move_frame());
         // `CZa(7)` reads the attacker's move; `move` IS the attacker's move.
         std::vector<const sf2::scene::MoveAction*> strike_acts;
         for (const sf2::scene::MoveAction& a : move.actions) {

@@ -557,14 +557,29 @@ bool eval_boss_ability_state(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `sm.he`: Hit — last-hit Type/Name match.
+// JS `sm.he` (L380440) VERBATIM:
+//   he(a){
+//     if(a.IL==null||a.IL.model==null)return!1;
+//     var b=!1; let c=this.naa;
+//     if(c==null||c==""||this.naa=="Critical"&&a.IL.se||this.naa=="Shock"&&a.IL.Ub)
+//       a=a.IL.model.Vb.UC,
+//       b=this.Ba, b=b==null||b==""||a==null||a==""||this.Ba==a;
+//     return this.cb?!b:b }
+// `this.naa` = the condition Type, `this.Ba` = the condition Name,
+// `a.IL.se`/`a.IL.Ub` = the trigger's SEPARATE critical/shock flags, and
+// `a.IL.model.Vb.UC` = the attacker's hit name (`Ul.B8a`). `cb` is applied by
+// the caller (`conditions.cpp` dispatch `not_`), so it is not repeated here.
 bool eval_hit(const Cond& c, const FightContext& ctx) {
     if (!ctx.has_last_hit) return false;
-    bool ok = false;
-    if (c.subtype.empty() || c.subtype == ctx.last_hit_type) {
-        if (c.name.empty() || c.name == ctx.last_hit_animation) ok = true;
+    bool b = false;
+    const std::string& t = c.subtype;  // `this.naa`
+    if (t.empty() || (t == "Critical" && ctx.last_hit_critical) ||
+        (t == "Shock" && ctx.last_hit_shock)) {
+        const std::string& n = c.name;             // `this.Ba`
+        const std::string& uc = ctx.last_hit_animation;  // `Vb.UC`
+        b = n.empty() || uc.empty() || n == uc;
     }
-    return ok;
+    return b;
 }
 
 // JS `ym.he`: ModelExists — a model with the given name exists on the field.
