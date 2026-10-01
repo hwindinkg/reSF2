@@ -5141,6 +5141,18 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         def.fighter.clear_block();
         if (rec.first_hit) ++prize_fh_.c6;
         if (rec.shock) ++prize_fh_.e6;
+    }
+    // JS `ca.Cgb` (L394-397): the reaction event `this.Bg.Ih(6,a)` (and
+    // `Ih(7,a)`) is pushed UNCONDITIONALLY at the end of the handler. The
+    // `b.block` flag only gates the block-INTERVAL clear (`b.block ||
+    // (a.model.hT(5), this.Dga=!0)`), the HUD `Gzb`, the `Jma` animation
+    // weights and the `ZAa` particles — NOT the reaction. So a BLOCKED hit
+    // still picks a reaction via `Gc.DK`; the shipped Block reactions
+    // (`HighBlock`/`MiddleBlock`/`SweepBlock`/`OverheadBlock`, Priority 520)
+    // admit themselves through their own `<Conditions>`
+    // (`<CurrentInterval Type="Block"/>`). The old port ran `try_react` only
+    // inside `!hit_blocked`, so a block never reacted.
+    {
         sf2::scene::FightContext rctx;
         rctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         rctx.stage = sf2::scene::round_stage::fight;
@@ -5643,14 +5655,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // align and `Iub`. Re-asserted every frame so every path has them.
     me.fighter.set_arena_walls(wall_min_, wall_max_);
 
-    // [ragdoll probe] Per-frame world position while the `Al` ragdoll latch
-    // is active — the reproduction for "the hit reaction must not snap back".
-    if (me.fighter.ragdoll_active()) {
-        std::fprintf(stdout, "[rdx] F%d %s x=%.2f y=%.2f fc=%d\n", frame(),
-                     me.name.c_str(), me.fighter.world_x(),
-                     me.fighter.world_y(), me.fighter.ragdoll_frame_count());
-        std::fflush(stdout);
-    }
+    // [perf] The old `[rdx]` per-frame `fprintf`+`fflush` here ran on EVERY
+    // frame the `Al` ragdoll latch was active (75 lines per boss-probe run).
+    // A per-frame flush of stdout is a write syscall per frame — on a console
+    // it costs ~1 ms/frame and is the reported "ОЧЕНЬ СИЛЬНО ЛАГАЕТ" during a
+    // ragdoll. The world position is already exposed by `world_x()`/
+    // `world_y()`/`ragdoll_frame_count()` for the probes; the log is removed.
 
     // [FIX Phase 4b — manual control] The PLAYER's key input FIRST: when
     // the fighter is a manual (non-AI, non-auto-attack) fighter, the

@@ -920,6 +920,30 @@ private:
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
+    // [perf] Solver index caches (built once per model). The JS `Al.jE`/`Qja`
+    // hold DIRECT node references, so its per-frame solve never resolves a
+    // name. The old port called `Model::bone_by_name`
+    // (`std::unordered_map<std::string,int>`) twice per edge per iteration and
+    // `macro_children.find(name)` per macro per frame — hundreds of string
+    // hashes EVERY frame during a ragdoll, plus a fresh `visiting` vector and
+    // a `std::function` heap allocation. These caches remove all of it while
+    // keeping the solve O(bones·iterations) and value-identical.
+    // `edge_bone_idx_[i]` = the resolved (i1,i2) of `model_.edges[i]`.
+    std::vector<std::pair<int, int>> edge_bone_idx_;
+    // Per-bone macro children, indexed directly by bone index (empty unless
+    // the bone is a MacroNode).
+    struct MacroChildIdx {
+        bool present = false;
+        std::vector<int> child;
+        std::vector<float> weight;
+    };
+    std::vector<MacroChildIdx> macro_child_idx_;
+    // Reused recursion scratch for the macro re-derivation (was a fresh
+    // `std::vector<std::uint8_t> visiting(n,0)` allocated every frame).
+    std::vector<std::uint8_t> macro_visiting_;
+    // Build `edge_bone_idx_`/`macro_child_idx_` for the current model (no-op
+    // when already current).
+    void ensure_solver_caches();
     // [probe, authorised] per-hit drawn-pose evidence (arm_strike_move_probe).
     bool strike_probe_pending_ = false;
     std::vector<float> strike_probe_pose_;

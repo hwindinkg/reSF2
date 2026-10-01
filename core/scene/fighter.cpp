@@ -1490,13 +1490,24 @@ std::string Fighter::try_react(FightContext& ctx,
     std::vector<const MoveDef*> cands;
     for (const MoveDef* m : hb_) {
         if (m == nullptr || !m->has_event("Hit")) continue;
-        // A hit reaction is the `Recoil|...|Hit` family. The Titan boss's
-        // `TitanBlock` (`moves.xml` Template="Block|Hit", Priority 720, no
-        // <Locks> - universal, so it sits in EVERY fighter's list) carries
-        // `<Hit Name="High"/>`-style events; the JS admits it only under
-        // `MOD_TITAN` + a live Block interval (its `<Conditions>`), so a
-        // humanoid never picks it. A block is never a hit reaction.
-        if (m->template_tags.count("Block") != 0) continue;
+        // JS `Gc.EZa` (L676-677) applies NO template filter: the candidate set
+        // is every move whose `<Hit>` event passes `Gc.iEa`/`Nm.compare`
+        // (`iEa` -> `g.compare(a)`) AND whose own `<Conditions>` pass
+        // `f.Yz(b,null,g)`. The shipped Block reactions ARE candidates:
+        // `HighBlock`/`MiddleBlock`/`SweepBlock`/`OverheadBlock`/`*BlockHeavy`
+        // (`Template="Block|NotTitan|Hit"`, Priority 520) carry
+        // `<Hit Name="High"/>`-style events and gate themselves on
+        //   `<CurrentInterval Type="Block"/>` + `<ModExists Name="MOD_TITAN"
+        //   Not="1"/>` + `<CurrentAnimation Name="Physical" Not="1"/>` +
+        //   `<CurrentInterval Name="TitanUnhittable" Not="1"/>`
+        // so a defender in a live Block interval picks the block reaction.
+        // `TitanBlock` (`Template="Block|Hit"`, Priority 720) is excluded by
+        // its OWN `<Conditions>` (`<ModExists Name="MOD_TITAN"/>` REQUIRED,
+        // false for every humanoid AND for the non-Titan boss) — NOT by a
+        // template-tag skip. The old `template_tags.count("Block")` exclusion
+        // also dropped the humanoid block reactions, so a BLOCKED hit never
+        // animated (the reported "at blocks the animation definitely does not
+        // change").
         // JS `Gc.iEa(g, this.Ek[d], a)` -> `Nm.compare(a)` (L768): the
         // reaction's `<Hit>` EVENT must admit the trigger — the full
         // predicate is `Type` (empty / Critical / Shock) AND `Name` AND
@@ -2418,6 +2429,39 @@ void Fighter::build_prepend(const MoveDef& move) {
     }
 }
 
+// [perf] Build the per-model solver index caches (the JS `Al` holds DIRECT
+// node references, so its per-frame `jE`/`Qja` never resolves a name; the
+// port previously re-hashed strings every frame).
+void Fighter::ensure_solver_caches() {
+    const std::size_t n = model_.bones.size();
+    if (edge_bone_idx_.size() != model_.edges.size()) {
+        edge_bone_idx_.clear();
+        edge_bone_idx_.reserve(model_.edges.size());
+        for (const EdgeDef& e : model_.edges) {
+            edge_bone_idx_.emplace_back(model_.bone_by_name(e.end1),
+                                        model_.bone_by_name(e.end2));
+        }
+    }
+    if (macro_child_idx_.size() != n) {
+        macro_child_idx_.assign(n, MacroChildIdx{});
+        for (const auto& kv : model_.macro_children) {
+            const int mi = model_.bone_by_name(kv.first);
+            if (mi < 0 || static_cast<std::size_t>(mi) >= n) continue;
+            MacroChildIdx& mc = macro_child_idx_[static_cast<std::size_t>(mi)];
+            mc.present = true;
+            mc.child.clear();
+            mc.weight.clear();
+            for (std::size_t c = 0; c < kv.second.child_names.size(); ++c) {
+                mc.child.push_back(model_.bone_by_name(kv.second.child_names[c]));
+                mc.weight.push_back(c < kv.second.weights.size()
+                                        ? kv.second.weights[c]
+                                        : 0.0f);
+            }
+        }
+    }
+    if (macro_visiting_.size() != n) macro_visiting_.assign(n, 0);
+}
+
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      float y, int mirror_sign, bool interp, int first_frame,
                      int playhead, float sub_frac) {
@@ -2633,6 +2677,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     //    calls — one step per call matches the game's 60 Hz cadence.
     const std::size_t n3 = n * 3;
     if (solver_init_ && sol_ma_.size() == n3) {
+        ensure_solver_caches();  // [perf] build the index caches once
         // [F9] The per-sample COM translation that used to live here is
         // REMOVED. The JS solver space is inherently continuous: compute_align
         // (JS Te.Gub/Gla, L557-560/L550) re-expresses each new clip into the
@@ -2707,11 +2752,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             return nk_ || jy || (shock_latch_ && b.shock);
         };
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
-        int wall_hits = 0;             // `[wall]` probe (JS `Al.fha` calls)
         for (int it = 0; it < kEdgeIters; ++it) {
-            for (const EdgeDef& e : model_.edges) {
-                const int bi1 = model_.bone_by_name(e.end1);
-                const int bi2 = model_.bone_by_name(e.end2);
+            for (std::size_t ei = 0; ei < model_.edges.size(); ++ei) {
+                const EdgeDef& e = model_.edges[ei];
+                // [perf] Cached endpoint indices (JS `Al.jE` holds direct node
+                // refs). The old per-frame `model_.bone_by_name(e.end1/end2)`
+                // string hashes were the solver's dominant cost.
+                const int bi1 = edge_bone_idx_[ei].first;
+                const int bi2 = edge_bone_idx_[ei].second;
                 if (bi1 < 0 || bi2 < 0) continue;
                 const std::size_t i1 = static_cast<std::size_t>(bi1);
                 const std::size_t i2 = static_cast<std::size_t>(bi2);
@@ -2741,19 +2789,17 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                     for (int k = 0; k < 2; ++k) {
                         if (!cax[k]) continue;
                         const std::size_t u = idx[k] * 3;
-                        const float dx = sf2::scene::fha_body(
+                        // JS `Al.fha` (L582): the ground/wall response mutates
+                        // `ma` in place. Its returned delta fed the old `[wall]`
+                        // log only — REMOVED: it printed on EVERY frame the body
+                        // touched the floor (1030 lines per boss-probe run) and
+                        // its `fflush` was a per-frame write syscall (the
+                        // reported ragdoll lag). The mutation itself is kept.
+                        (void)sf2::scene::fha_body(
                             sol_ma_[u], sol_ma_[u + 1], sol_ma_[u + 2],
                             sol_mf_[u], sol_mf_[u + 2], bones[idx[k]].collisible,
                             ragdoll_wall_min_, ragdoll_wall_max_,
                             ragdoll_friction_, ragdoll_floor_y_);
-                        if (dx != 0.0f) {
-                            ++wall_hits;
-                            std::fprintf(
-                                stdout,
-                                "[wall] F%d node=%s x %.2f -> %.2f (d=%.2f)\n",
-                                frame, bones[idx[k]].name.c_str(),
-                                sol_ma_[u] - dx, sol_ma_[u], dx);
-                        }
                     }
                 }
                 const std::size_t u1 = i1 * 3;
@@ -2792,27 +2838,31 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // is authored inside the arena). The port's world y is down-positive
         // (the model parse negates the XML Y), so `Al.P6a`'s `a.y = 0` is
         // `y = floor`.
-        if (solver_world_ && wall_hits > 0) std::fflush(stdout);
         // (d) Qja/seb: macros re-derived from the solved children.
-        std::vector<std::uint8_t> visiting(n, 0);
-        std::function<void(std::size_t)> compute_macro = [&](std::size_t idx) {
+        // [perf] Reused scratch + a non-allocating recursive lambda (the old
+        // code allocated a fresh `visiting` vector AND a `std::function` every
+        // frame). The macro children are cached by bone INDEX
+        // (`macro_child_idx_`), so no per-frame `macro_children.find(name)` /
+        // `bone_by_name(child)` string hashes.
+        std::vector<std::uint8_t>& visiting = macro_visiting_;
+        std::fill(visiting.begin(), visiting.end(), 0);
+        auto compute_macro = [&](auto&& self, std::size_t idx) -> void {
             if (visiting[idx]) {
                 return;  // cycle guard
             }
             visiting[idx] = 1;
-            const auto it2 = model_.macro_children.find(bones[idx].name);
-            if (it2 != model_.macro_children.end()) {
-                const MacroChildren& mc = it2->second;
+            const MacroChildIdx& mc = macro_child_idx_[idx];
+            if (mc.present) {
                 float ax = 0.0f, ay = 0.0f, az = 0.0f;
-                for (std::size_t c = 0; c < mc.child_names.size(); ++c) {
-                    const int ci = model_.bone_by_name(mc.child_names[c]);
+                for (std::size_t c = 0; c < mc.child.size(); ++c) {
+                    const int ci = mc.child[c];
                     if (ci < 0) continue;
                     const std::size_t u = static_cast<std::size_t>(ci);
                     if (u >= n) continue;
                     if (bones[u].is_macro && u >= nclip) {
-                        compute_macro(u);
+                        self(self, u);
                     }
-                    const float w = c < mc.weights.size() ? mc.weights[c] : 0.0f;
+                    const float w = mc.weight[c];
                     ax += sol_ma_[u * 3] * w;
                     ay += sol_ma_[u * 3 + 1] * w;
                     az += sol_ma_[u * 3 + 2] * w;
@@ -2828,7 +2878,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         };
         for (std::size_t i = nclip; i < n; ++i) {
             if (bones[i].is_macro) {
-                compute_macro(i);
+                compute_macro(compute_macro, i);
             }
         }
         // The solved pose becomes this frame's positions.
