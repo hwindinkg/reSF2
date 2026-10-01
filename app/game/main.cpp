@@ -2439,11 +2439,17 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             o.write(xml.data(), static_cast<std::streamsize>(xml.size()));
         }
         bool read_ok = false, write_ok = false, env_ok = false, sf2_ok = false;
+        bool defaults_ok = false;
         std::string detail;
         try {
             sf2::app::SaveSystem ss(tmp_path, tmp_path);
             sf2::app::WarriorSave w = ss.load();
-            read_ok = w.fights.size() == 1 &&
+            // `Bonus`/`Power` are ABSENT from this synthetic `<Warrior>`; the
+            // JS reads them with default 0 (`vl(xb("Bonus",0),0)`,
+            // `u.I("Power")`). `ID`/`Level` are present.
+            defaults_ok = w.bonus == 0 && w.power == 0 && w.id == 1 &&
+                          w.level == 1;
+            read_ok = w.bonus == 0 && w.power == 0 && w.fights.size() == 1 &&
                       w.fights[0].name == "ZONE_1|BOSS_LYNX|" &&
                       w.fights[0].id == 7 && w.fights[0].wins == 3 &&
                       w.fights[0].has_random_group_seed &&
@@ -2465,6 +2471,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                       w.resistances.count("Resistance_2") == 1 &&
                       w.resistances["Resistance_2"] == 5;
             ss.save(w);
+            // The port must NOT write an invented `<Warrior GameClock>`: the
+            // JS re-derives `p.Dc` from `Date.now()` and never persists it.
+            {
+                std::ifstream in(tmp_path, std::ios::binary);
+                const std::string saved((std::istreambuf_iterator<char>(in)),
+                                        std::istreambuf_iterator<char>());
+                defaults_ok = defaults_ok &&
+                              saved.find("GameClock") == std::string::npos;
+            }
             sf2::app::WarriorSave w2 = ss.load();
             write_ok = w2.fights.size() == 1 && w2.fights[0].id == 7 &&
                        w2.fights[0].wins == 3 &&
@@ -2494,11 +2509,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         } catch (const std::exception& e) {
             detail = e.what();
         }
-        const bool ok = read_ok && write_ok && env_ok && sf2_ok;
+        const bool ok = read_ok && write_ok && env_ok && sf2_ok && defaults_ok;
         std::fprintf(stdout,
-                     "[save-fields] read=%s write=%s SF2User-envelope=%s "
+                     "[save-fields] read=%s write=%s defaults=%s SF2User-envelope=%s "
                      ".sf2=%s %s\n[save-fields] RESULT %s\n",
                      read_ok ? "PASS" : "FAIL", write_ok ? "PASS" : "FAIL",
+                     defaults_ok ? "PASS" : "FAIL",
                      env_ok ? "PASS" : "FAIL", sf2_ok ? "PASS" : "FAIL",
                      detail.c_str(), ok ? "PASS" : "FAIL");
         std::fflush(stdout);
@@ -3552,10 +3568,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             const sf2::app::WarriorSave chk = app.save().load();
             std::fprintf(stdout,
                          "[qquery] seeded: battles=%zu records=%zu hasSurvival=%d "
-                         "gameClock=%lld\n",
+                         "liveClock=%lld\n",
                          chk.battles.size(), chk.battle_records.size(),
                          chk.has_battle("Survival") ? 1 : 0,
-                         static_cast<long long>(chk.game_clock));
+                         static_cast<long long>(sf2::app::WarriorSave::live_clock()));
             {
                 const sf2::app::QuestJournal aj;
                 const char* const fe[] = {

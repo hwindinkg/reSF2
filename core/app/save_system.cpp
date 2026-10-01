@@ -123,15 +123,15 @@ WarriorSave SaveSystem::load() {
     }
 
     WarriorSave out;
-    out.id = sf2::data::xml_attr_int(warrior, "ID", 1);
+    out.id = sf2::data::xml_attr_int(warrior, "ID", 0);  // `u.I(attr,0)`
     if (warrior.attribute("FirstName")) out.first_name = warrior.attribute("FirstName").value();
     out.money = warrior.attribute("Money") ? warrior.attribute("Money").as_llong() : 0;
-    out.bonus = warrior.attribute("Bonus") ? warrior.attribute("Bonus").as_llong() : 50;
+    out.bonus = warrior.attribute("Bonus") ? warrior.attribute("Bonus").as_llong() : 0;  // `xb(..,0)`
     out.strength = sf2::data::xml_attr_int(warrior, "Strength", 3);
     out.stamina = sf2::data::xml_attr_int(warrior, "Stamina", 3);
-    out.level = sf2::data::xml_attr_int(warrior, "Level", 1);
+    out.level = sf2::data::xml_attr_int(warrior, "Level", 0);       // `u.I(attr)`
     out.experience = sf2::data::xml_attr_int(warrior, "Experience", 0);
-    out.power = sf2::data::xml_attr_int(warrior, "Power", 5);
+    out.power = sf2::data::xml_attr_int(warrior, "Power", 0);       // `u.I(attr)`
     if (warrior.attribute("Skeleton")) out.skeleton = warrior.attribute("Skeleton").value();
     if (warrior.attribute("Armor")) out.armor = warrior.attribute("Armor").value();
     if (warrior.attribute("Helm")) out.helm = warrior.attribute("Helm").value();
@@ -142,13 +142,8 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
     out.show_upgrades = sf2::data::xml_attr_bool(warrior, "ShowUpgrades", false);
-    // `p.Dc` snapshot (see `live_clock`); absent in the shipped seed -> 0.
-    if (warrior.attribute("GameClock")) {
-        try {
-            out.game_clock = std::stoll(warrior.attribute("GameClock").value());
-        } catch (const std::exception&) {
-        }
-    }
+    // NOTE: there is no `GameClock` save attribute in the JS (the clock is
+    // derived from `Date.now()` each boot, see `live_clock`). Nothing to read.
 
     // Bus mutes (JS `sc.ckb` L113759): `<CurrentUser><Sounds>/<Sound|Music>@Mute`.
     // where `a` is the CurrentUser node (`sc.Ju`, `Aa.save(sc.Ju.parent)`).
@@ -503,13 +498,12 @@ WarriorSave SaveSystem::load() {
     }
 
     // Seed the live `p.Dc` on the FIRST load only (a later `load` must not
-    // rewind the tick-advanced clock). `game_clock` resumes the persisted
-    // absolute domain; a fresh/template save with none starts at real epoch
-    // (`Hb.khb` L... re-syncs `N$=ed.rfa()` on boot).
+    // rewind the tick-advanced clock). The JS RE-DERIVES `p.Dc` from
+    // `Date.now()` every boot (`Hb.khb` L2351 -> `N$=ed.rfa()` with
+    // `ed.axb=0`); it is never persisted. So seed from the wall clock — a
+    // fresh/template save and a resumed save both start at real epoch.
     if (WarriorSave::live_clock() <= 0.0) {
-        WarriorSave::live_clock() = out.game_clock > 0
-            ? static_cast<double>(out.game_clock)
-            : static_cast<double>(WarriorSave::wall_now());
+        WarriorSave::live_clock() = static_cast<double>(WarriorSave::wall_now());
     }
     return out;
 }
@@ -728,15 +722,9 @@ void SaveSystem::save(const WarriorSave& w) {
         mf.set_value(w.map_focus.c_str());
     }
 
-    // `p.Dc` snapshot (`live_clock`): always stamp the LIVE clock so the saved
-    // absolute domain tracks the tick (`game_clock` is the `p.Dc` value the
-    // next boot resumes from).
-    {
-        pugi::xml_attribute gc = warrior.attribute("GameClock");
-        if (!gc) gc = warrior.append_attribute("GameClock");
-        gc.set_value(static_cast<long long>(
-            std::llround(WarriorSave::live_clock())));
-    }
+    // NOTE: the JS does NOT persist the game clock — there is no `GameClock`
+    // save attribute; `p.Dc` is re-derived from `Date.now()` on every boot.
+    // Nothing is written here.
 
     // Battles (`iF`): replace the <Battle Name> children.
     {

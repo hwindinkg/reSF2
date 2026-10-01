@@ -33,7 +33,10 @@ namespace sf2::app {
 // The player's progression fields the shell needs (a trimmed projection of
 // the full `<Warrior>` element — the JS `p.o` user state).
 struct WarriorSave {
-    int id = 1;
+    // `<Warrior ID>` — the save-slot selector (JS L199: `a==u.I(
+    // f.attributes.get("ID"))`, `u.I` default 0). The profile `xf` does not
+    // read it; the port carries it as a native-only field.
+    int id = 0;
     std::string first_name = "NAME_SHADOW";
     // `p.o.Tb` (gold). JS numbers are float64 and the shipped item/upgrade
     // prices reach 1.9e13, so a 32-bit int (2.147e9) cannot represent them.
@@ -41,13 +44,22 @@ struct WarriorSave {
     std::int64_t money = 0;
     // `p.o.fd` (the Ruby/Bonus balance). The fight reward's `Uo` is granted
     // here (`Ewa(Uo,3)` -> `vl(fd+Uo,3)`); int64 to match the JS number and
-    // the int64 reward flow.
-    std::int64_t bonus = 50;
+    // the int64 reward flow. JS default 0: `this.vl(xb(a.attributes.get(
+    // "Bonus"),0),0)` (X+x) — `xb(x,b)` returns `b` (0) for an absent/NaN attr.
+    std::int64_t bonus = 0;
+    // JS does NOT read `<Warrior Strength>`/`<Warrior Stamina>` at all: the
+    // `ur` attribute loop reads only `v.eo.attributes` (internal_settings.xml
+    // `<Attributes>`: HeadDefense/BodyDefense/... — no Strength/Stamina), and
+    // no `"Strength"` string exists in the JS. These are vestigial template
+    // attributes; the port round-trips them as native pass-through fields.
     int strength = 3;
     int stamina = 3;
-    int level = 1;
+    // `this.xL(u.I(a.attributes.get("Level")))` (X+x): `u.I(x,b=0)` returns 0
+    // for an absent/NaN attr.
+    int level = 0;
     int experience = 0;
-    int power = 5;
+    // `this.dk=u.I(a.attributes.get("Power"))` (X+x): default 0.
+    int power = 0;
     std::string skeleton = "Skeleton";
     std::string armor = "Body";
     std::string helm = "Head";
@@ -441,21 +453,21 @@ struct BattleRecord {
     // Current wall-clock epoch seconds (Cla(now) analog).
     static std::int64_t wall_now();
 
-    // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, L178): the game clock in
-    // SECONDS — an ABSOLUTE epoch clock, NOT a per-process zero. `Hb.getTime()`
-    // = `Math.trunc(now().getTime()/1E3)` with `now()` = `ed.getDate(N$+
-    // (L.K.time-baa))`, `N$` = `ed.rfa()` = `Math.round(ed.axb+
-    // Date.now()/1E3)` and `ed.axb=0`. Every persisted deadline the quest tree
-    // reads is absolute `p.Dc` seconds — the fight record's `TimeLeft` attr
-    // (`Gs`, `?Fight.TimeLeft`/`Timestamp`) and the `Ct` timer `EndTime`
-    // (`Nv`) — so a 0-based per-process clock can never reach them. The port
-    // persists the clock here and resumes it on load.
-    std::int64_t game_clock = 0;  // `p.Dc` snapshot written by `save`
+    // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, char 89801): the game
+    // clock in SECONDS — an ABSOLUTE epoch clock, NOT a per-process zero.
+    // `Hb.getTime()` (char 1209570) = `Math.trunc(now().getTime()/1E3)` with
+    // `now()` = `ed.getDate(N$+(L.K.time-baa))`; `N$` = `ed.rfa()` =
+    // `Math.round(ed.axb+Date.now()/1E3)` with `ed.axb=0` — i.e.
+    // `p.Dc` is RE-DERIVED FROM `Date.now()` on every boot; it is NOT a save
+    // field (no `GameClock` string exists anywhere in the JS). Every persisted
+    // deadline the quest tree reads is absolute `p.Dc` seconds — the fight
+    // record's `TimeLeft` attr (`Gs`, `?Fight.TimeLeft`/`Timestamp`) and the
+    // `Ct` timer `EndTime` (`Nv`). The port seeds the live clock from the wall
+    // clock on the first load (`ed.rfa()`) and never persists it.
 
     // The live `p.Dc` (JS `Hb.instance.getTime()`). Seeded on the first
-    // `SaveSystem::load` (from `game_clock` when present, else `wall_now()`),
-    // advanced by the app tick (`L.K.time`), and stamped back into
-    // `game_clock` by `SaveSystem::save`. `quest_now()` returns it.
+    // `SaveSystem::load` from `wall_now()` (`ed.rfa()`), advanced by the app
+    // tick (`L.K.time`). `quest_now()` returns it.
     static double& live_clock();
 
     // Currencies (JS `pG`, L126965/L139448). `xf.Jia` (L139448) reads the
