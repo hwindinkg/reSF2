@@ -55,11 +55,14 @@ public:
             return;
         }
         // JS `Rd.Ut` (L2098): `lb.GMa(1); ta.Zla(); lb.rJ=!1; lb.OS("act",!1)`.
-        // `GMa(1)` = `$f.uF(1)` restores the SFX bus; `ta.Zla()` stops the
-        // current track; the guard `lb.rJ` is CLEARED; and the act track is
+        // `lb.GMa(a)` = `$f.uF(a)` (L1277) writes the MUSIC bus gain (`uF` is
+        // the `nBa()` node the `tR`/music voices route to, L1240813) — NOT the
+        // SFX bus (`cMa`/`ta.$D`). `GMa(1)` restores unity on the music bus the
+        // step-0 fade (`lb.GMa(1-a)`) had lowered; `ta.Zla()` stops the current
+        // track; the guard `lb.rJ` is CLEARED; and the act track is
         // NON-looping (`Ut`'s second arg `!1`).
         sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
-        au.set_sfx_muted(false);  // lb.GMa(1)
+        au.set_music_ducked(false);  // lb.GMa(1) = $f.uF(1) (MUSIC bus)
         au.stop_music();          // ta.Zla()
         au.reset_music_guard();   // lb.rJ = !1
         au.play_music("act", false);
@@ -168,12 +171,14 @@ private:
         if (!done_) {
             done_ = true;
             step_ = 8;
-            // JS `Rd.end` (L2096): `ta.ZD||(lb.rJ=!1, lb.OS())` — when the SFX
-            // bus is not muted, clear the play-once guard and resume the MENU
-            // track (loop). The old port only stopped, leaving the shell
-            // silent after a cutscene.
+            // JS `Rd.end` (L2096): `ta.ZD||(lb.rJ=!1, lb.OS())`. `ta.ZD` is the
+            // MUSIC mute (`ta.VT` L1264 writes `ta.ZD`; `lb.Lz()` L1276 reads
+            // it) — so when MUSIC is NOT muted, clear the play-once guard and
+            // resume the MENU track (loop). It is NOT the SFX mute (`ta.$D`,
+            // `lb.Mz()`). The old port only stopped, leaving the shell silent
+            // after a cutscene.
             sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
-            if (!au.sfx_muted()) {
+            if (!au.music_muted()) {
                 au.reset_music_guard();
                 au.play_music_once("menu");
             }
