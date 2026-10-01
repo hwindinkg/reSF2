@@ -12140,24 +12140,53 @@ void FightScreen::render_impl(App& app) {
     // over 8 rows), which a rotation (variable-width cross-section) would not
     // produce — confirming the skew read. The container anchor is `lk.kva`
     // (L2028): player `130+330-tan25*43`, enemy `-(130+330)+tan25*43`
-    // (panel-local, scaled `la(c)`); the captured pip-0 left edges (player
-    // 535, enemy 722) are that scaled anchor.
+    // (panel-local, scaled `la(c)`); the pip-0 LEFT edge is that anchor minus
+    // one pip width `e` (player) / exactly the anchor (enemy).
     //
     // All lengths scale by the `Sf.layout` panel scale `hud_c` (JS `la(c)`).
+    // Every length is JS-exact, panel-local * `la(c)`:
+    //   `lk.bMa` (L2028) `Sh.uL(165)` (the `Fr`/`Mx` plate) at `Sh.C(130)` and
+    //   `S4.C(130+330-tan25*43)` via `kva(330)`;
+    //   `Fr.Qp` (`Mx`) background `uL(165)` / `Pb(43)` / `BL(25*(type==0?-1:1))`;
+    //   `Er` ctor pip width `e = n6==2?40:32`, `Pb(43)`, `BL(25*(type==0?-1:1))`,
+    //   pip i local x = S4 − e − (i−1)*1.5e (player) / S4 + (i−1)*1.5e (enemy).
+    // The plate/pips hang at panel-local y 0 (no `D` on `Sh`/`S4`), i.e. `panel_y`.
+    // `B6` frames: undone pips are `y.UU` = HealthBar_Empty, done are `y.LQa` =
+    // Round_Done — NOT `Round_Undone` (never referenced for the pips).
     constexpr float kPipTan25 = 0.46630765815499860f;  // tan(25 deg) — JS `BL`
-    constexpr float kPipY = 116.4f;
-    constexpr float kBaseW = 84.0f;    // `Mx` base `uL(165)` (captured-fit)
-    constexpr float kBaseH = 24.8f;    // `Pb(43)` (captured-fit)
+    const float plate_y = panel_y;                          // panel-local y = 0
+    const float base_w = 165.0f * hud_c;                    // `Sh.uL(165)`
+    const float base_h = 43.0f * hud_c;                     // `Pb(43)`
+    const float kva_off = 130.0f + 330.0f - kPipTan25 * 43.0f;  // `kva(330)`, =439.9488
+    const float base_x_player = panel_player_x + 130.0f * hud_c;  // `Sh.C(130)`
+    const float base_x_enemy = panel_enemy_x - 295.0f * hud_c;    // `Sh.C(-295)`
+    const float pip_anchor_player = panel_player_x + kva_off * hud_c;  // `S4`
+    const float pip_anchor_enemy = panel_enemy_x - kva_off * hud_c;    // `S4`
     const int rounds_total = fight_->round().length;
     const float pip_e = (rounds_total == 2 ? 40.0f : 32.0f) * hud_c;  // JS `e`
     const float pip_h = 43.0f * hud_c;                                // JS `Pb(43)`
     const float pip_pitch = pip_e * 1.5f;                             // JS `e+f`
-    // The axis-aligned `Mx` base strip (no `BL` in the JS — `Fr.Qp` only
-    // `uL(165)`); rides the bar's OUTER end at the captured x.
-    auto draw_base = [&](const char* frame, float x, float w) {
-        if (app.draw_atlas_rect(frame, x, kPipY, w, kBaseH, 1.0f)) return;
-        float dv[12] = {x, kPipY, x + w, kPipY, x, kPipY + kBaseH,
-                        x + w, kPipY, x + w, kPipY + kBaseH, x, kPipY + kBaseH};
+    // The `Mx` base strip: `uL(165)` x `Pb(43)`, `BL(25*(type==0?-1:1))` — the
+    // same shear as the pips (JS `Mx.init` calls `BL` on the background).
+    auto draw_base = [&](const char* frame, float x, float w, float skew_tan) {
+        const float yc = plate_y + base_h * 0.5f;
+        float xy[8] = {x, plate_y, x + w, plate_y, x, plate_y + base_h,
+                       x + w, plate_y + base_h};
+        for (int c = 0; c < 4; ++c) xy[c * 2] += skew_tan * (xy[c * 2 + 1] - yc);
+        sf2::data::atlas_frame fr;
+        int tw = 0, th = 0;
+        unsigned int gl = 0;
+        if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && tw > 0 && th > 0) {
+            const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
+            const float u1 = static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+            const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
+            const float v1 = static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
+            const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+            ren.draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+            return;
+        }
+        const float dv[12] = {xy[0], xy[1], xy[2], xy[3], xy[4], xy[5],
+                              xy[2], xy[3], xy[6], xy[7], xy[4], xy[5]};
         ren.draw_triangles(dv, 6, 0.19f, 0.10f, 0.08f, 1.0f);
     };
     // One skewed pip: `h.xc(e); h.BL(25*c); h.Pb(43)` — a textured quad whose
@@ -12166,9 +12195,9 @@ void FightScreen::render_impl(App& app) {
         sf2::data::atlas_frame fr;
         int tw = 0, th = 0;
         unsigned int gl = 0;
-        const float yc = kPipY + pip_h * 0.5f;
-        float xy[8] = {x, kPipY, x + pip_e, kPipY, x, kPipY + pip_h,
-                       x + pip_e, kPipY + pip_h};
+        const float yc = plate_y + pip_h * 0.5f;
+        float xy[8] = {x, plate_y, x + pip_e, plate_y, x, plate_y + pip_h,
+                       x + pip_e, plate_y + pip_h};
         for (int c = 0; c < 4; ++c) xy[c * 2] += skew_tan * (xy[c * 2 + 1] - yc);
         if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && tw > 0 && th > 0) {
             const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
@@ -12187,15 +12216,17 @@ void FightScreen::render_impl(App& app) {
                               xy[2], xy[3], xy[6], xy[7], xy[4], xy[5]};
         ren.draw_triangles(dv, 6, r, g, b, 1.0f);
     };
-    draw_base("HealthBar_Empty", 388.0f, kBaseW);  // player `Mx` base
-    draw_base("HealthBar_Empty", 807.0f, kBaseW);  // enemy `Mx` base
+    draw_base("HealthBar_Empty", base_x_player, base_w, -kPipTan25);  // player `Mx`
+    draw_base("HealthBar_Empty", base_x_enemy, base_w, +kPipTan25);   // enemy `Mx`
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
         const bool e_done = i < fight_->enemy().rounds_won;
         const float off = static_cast<float>(i) * pip_pitch;
         // Player skew is `BL(25*(-1))` -> -25 deg; enemy `BL(25*(+1))`.
-        draw_pip(p_done ? "Round_Done" : "Round_Undone", 535.0f - off, p_done, -kPipTan25);
-        draw_pip(e_done ? "Round_Done" : "Round_Undone", 722.0f + off, e_done, +kPipTan25);
+        draw_pip(p_done ? "Round_Done" : "HealthBar_Empty", pip_anchor_player - pip_e - off,
+                 p_done, -kPipTan25);
+        draw_pip(e_done ? "Round_Done" : "HealthBar_Empty", pip_anchor_enemy + off, e_done,
+                 +kPipTan25);
     }
 
     // --- Combo counter (JS `Gr` g="40E" / `Hx` g="40D" / `Ix` g="410"): the
