@@ -211,6 +211,12 @@ struct FightParams {
     int shock_loosening_delay = 12;     // `LooseningDelay.Frames` (MFa)
     float shock_crit_base = 0.0001f;    // `CriticalHitChance.Base`
     float shock_head_base = 0.0001f;    // `HeadHitChance.Base`
+    // `hw.parse` (L1194): `hya`/`oDa` — the `<CriticalHitChance Attribute>` /
+    // `<HeadHitChance Attribute>` NAMES the `R8a` shock decider reads off the
+    // ATTACKER's parameters (`d.attributes.get(v.Ub.hya,e)`). Data-driven, the
+    // same shape as the Magic rows above; the shipped file resolves both.
+    std::string shock_crit_attr = "ShockCriticalHitChance";  // `hya`
+    std::string shock_head_attr = "ShockHeadHitChance";      // `oDa`
     // `v.Qxa` (L1157): `<CounterPunches Value="50"/>` — the Punchbag hit
     // cadence `ca.Cgb` L396 tests against the defender's landed-hit counter
     // (`a.model.sI != v.Qxa`). Data-driven: `u.I(...,2)` is the JS fallback
@@ -265,6 +271,20 @@ struct FightParams {
     std::string magic_damage_attr = "MagicDamageRecharge";
     float magic_damage_base = 0.0001f;
 
+    // `v.hF` (JS `gw` g="269" L611558, parsed by `v.hF.parse(a.A("RewardsPrize"))`
+    // L593733): internal_settings `<RewardsPrize>` — the prize-base fallback and
+    // the per-category bonus factors `ca.Sua` (L636104) passes to `Fh.lXa`. The
+    // port previously hardcoded the shipped values (0.003 / 5 / 2 / 1 / 3 /
+    // {0,3,6,9,12,15}); they are read from the XML here instead.
+    double prize_default_base_factor = 0.003;  // `xya` (DefaultPrizeBaseFactor)
+    float prize_perfect = 5.0f;        // `$Ia` (Perfect)
+    float prize_first_strike = 2.0f;   // `ep`  (FirstStrike)
+    float prize_combo_count = 1.0f;    // `Ui`  (ComboCount)
+    float prize_shock = 3.0f;          // `Ub`  (Shock)
+    // `pk` (`gw.fkb` L611558): the `<Styles>` row values in document order
+    // (Turtle, Hard, Brutal, Agressive, Crazy, Fantastic).
+    std::vector<float> prize_styles = {0.0f, 3.0f, 6.0f, 9.0f, 12.0f, 15.0f};
+
     // `v.wDa` = internal_settings.xml `<HitEffects>` (JS `Vv` g="2AC",
     // parsed L1158 by `v.wDa.parse(a.A("HitEffects"))`). The shipped file
     // carries exactly three rows in document order: CriticalHit, HeadHit,
@@ -284,6 +304,12 @@ struct FightParams {
     float aspect_antilimit = 0.0f;       // `tva` (Antilimit)
     float aspect_doubling_range = 0.0f;  // `cda` (DoublingRange)
     float aspect_limit = 0.0f;           // `lha` (Limit)
+
+    // `v.LC` (JS `Ov` g="25A" L605559, `v.LC.parse(a.A("Camera"))` L593864):
+    // internal_settings `<Camera><CameraSettings ... MaxWidthDelta="50"/>`. The
+    // `Ut.Al` panorama clamp reads `v.LC.oGa` (L421356). Data-driven (the port
+    // previously used a compile-time 50); the shipped file resolves to 50.
+    float camera_max_width_delta = 50.0f;  // `oGa` (MaxWidthDelta)
 
     // The process-wide instance (JS `v` statics), populated at boot from
     // internal_settings.xml by `load_fight_params_from_settings`.

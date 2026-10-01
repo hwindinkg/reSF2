@@ -146,7 +146,9 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     // MaxWidthDelta="50">` attr (Ult.H default 0; the shipped file carries
     // 50 — see `internal_settings.xml`). The previous `0.0f` under-clamped
     // by 25*Bj world px per side.
-    const float d_io = (cam.arena_w - kMaxWidthDelta) * 0.5f * cam.zoom_layer - n_c * 0.5f;
+    const float max_width_delta =
+        sf2::scene::FightParams::defaults().camera_max_width_delta;
+    const float d_io = (cam.arena_w - max_width_delta) * 0.5f * cam.zoom_layer - n_c * 0.5f;
     const float center = cam.arena_w * 0.5f;
     cam.center_x = cam.go_x_ < center - d_io   ? center - d_io
                 : cam.go_x_ > center + d_io ? center + d_io

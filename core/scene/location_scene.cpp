@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "atlas.hpp"
+#include "scene/damage.hpp"  // FightParams::camera_max_width_delta (JS `v.LC.oGa`)
 #include "scene/sprite.hpp"
 #include "texture.hpp"
 #include "xml_doc.hpp"
@@ -1158,8 +1159,10 @@ void LocationScene::default_camera(sf2::render::Camera& camera, float view_w,
     // d = +457), so this is inert at the captured states but stops the hub
     // over-panning for off-center focuses / edge spawns.
     {
+        const float max_width_delta =
+            sf2::scene::FightParams::defaults().camera_max_width_delta;
         const float d_io =
-            (arena_w_ - kMaxWidthDelta) * layer_zoom * 0.5f - n_c * 0.5f;
+            (arena_w_ - max_width_delta) * layer_zoom * 0.5f - n_c * 0.5f;
         if (camera.arena_center_x < -d_io) {
             camera.arena_center_x = -d_io;
         } else if (camera.arena_center_x > d_io) {

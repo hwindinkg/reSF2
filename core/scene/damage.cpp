@@ -233,8 +233,36 @@ void parse_shock(const pugi::xml_node n, FightParams& v) {
         v.shock_loosening_delay = n.child("LooseningDelay").attribute("Frames").as_int();
     const pugi::xml_node chc = n.child("CriticalHitChance");
     if (chc.attribute("Base")) v.shock_crit_base = chc.attribute("Base").as_float();
+    // `this.hya = CriticalHitChance.Attribute` (L1194 `b!=null?b:""`).
+    if (const char* a = chc.attribute("Attribute").value(); a != nullptr && *a != '\0')
+        v.shock_crit_attr = a;
     const pugi::xml_node hhc = n.child("HeadHitChance");
     if (hhc.attribute("Base")) v.shock_head_base = hhc.attribute("Base").as_float();
+    // `this.oDa = HeadHitChance.Attribute`.
+    if (const char* a = hhc.attribute("Attribute").value(); a != nullptr && *a != '\0')
+        v.shock_head_attr = a;
+}
+
+// JS `gw.parse` (L611558) — the `<RewardsPrize>` block (`v.hF`).
+void parse_rewards_prize(const pugi::xml_node n, FightParams& v) {
+    if (!n) return;
+    v.prize_default_base_factor =
+        n.child("DefaultPrizeBaseFactor").attribute("Value").as_double(
+            v.prize_default_base_factor);
+    v.prize_perfect = n.child("Perfect").attribute("Value").as_float(v.prize_perfect);
+    v.prize_first_strike =
+        n.child("FirstStrike").attribute("Value").as_float(v.prize_first_strike);
+    v.prize_combo_count =
+        n.child("ComboCount").attribute("Value").as_float(v.prize_combo_count);
+    v.prize_shock = n.child("Shock").attribute("Value").as_float(v.prize_shock);
+    // `gw.fkb` (L611558): the `<Styles>` rows in document order.
+    if (const pugi::xml_node styles = n.child("Styles")) {
+        std::vector<float> vals;
+        for (const pugi::xml_node st : styles.children()) {
+            vals.push_back(st.attribute("Value").as_float());
+        }
+        if (!vals.empty()) v.prize_styles = std::move(vals);
+    }
 }
 
 // JS `Yv` (`v.jA`, `<Magic>`, L1158) — the three recharge rows.
@@ -376,6 +404,13 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     parse_shock(root.child("Shock"), v);
     // `v.jA` (L1158) = `<Magic>`.
     parse_magic(root.child("Magic"), v);
+    // `v.hF` (L593733) = `<RewardsPrize>`.
+    parse_rewards_prize(root.child("RewardsPrize"), v);
+    // `v.LC` (L593864) = `<Camera><CameraSettings .../>` -> `oGa`.
+    if (const pugi::xml_node cs = root.child("Camera").child("CameraSettings")) {
+        if (cs.attribute("MaxWidthDelta"))
+            v.camera_max_width_delta = cs.attribute("MaxWidthDelta").as_float();
+    }
     // `v.wDa` (L1158) = `<HitEffects>`: every `<HitEffect Type PauseTime
     // EffectTime AmplitudeX FrequencyX AmplitudeY FrequencyY/>` (JS `em`
     // L660438 `parse`). Document order is load-bearing: `ZAa` returns the

@@ -2578,7 +2578,9 @@ void FightController::rules_apply_round_effects() {
     // `<Resistances>`); the port has no save-resistance table -> 0. With
     // `g=0` every shipped `<Resistance>` (none in stages.xml) would scale.
     float c = 1.0f, d = 1.0f;
-    const float lT = 500.0f;  // JS `v.lT` ResistanceDoublingRange (A2)
+    // JS `v.lT` = `<ResistanceDoublingRange Value>` (internal_settings.xml;
+    // `du.m_a` L902-903 reads the process-global, NOT a literal).
+    const float lT = sf2::scene::FightParams::defaults().resistance_doubling_range;
     for (const FightRule& r : rules_) {
         if (!r.active || r.kind != FightRuleKind::resistance) continue;
         const float h = r.resist_value;
@@ -4922,10 +4924,12 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             def.shock, def.shock.weapon_ws ? 0.0f : b, gfp.shock_threshold);
         // JS `R8a` (L531): `a=v.Ub.iya; d.attributes.get(v.Ub.hya,e); a*=e.G`
         // — MULTIPLY (an absent attr makes the chance 0), not the old `+`.
+        // JS `R8a` (L531): `v.Ub.hya`/`v.Ub.oDa` are the ATTRIBUTE NAMES parsed
+        // from `<Shock><CriticalHitChance/HeadHitChance Attribute>`.
         const float crit_term =
-            gfp.shock_crit_base * atk.params.attr("ShockCriticalHitChance");
+            gfp.shock_crit_base * atk.params.attr(gfp.shock_crit_attr);
         const float head_term =
-            gfp.shock_head_base * atk.params.attr("ShockHeadHitChance");
+            gfp.shock_head_base * atk.params.attr(gfp.shock_head_attr);
         // The two `r8a` draws come from `uf.RJa()` = `Math.random`, NOT the
         // shared `Da.pg` crit/AI stream (`draw01()`).
         const bool ub = sf2::scene::r8a_decide(
@@ -5521,17 +5525,26 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
     // `ceil(money * xya)` with `xya` = `<DefaultPrizeBaseFactor Value="0.003">`.
     // The old code passed the MONEY as the prize base, which inflated every
     // `ceil(prizeBase * factor)` term (P3/ep/Ui/DZ/Ub) by ~333x.
-    const double xya = 0.003;  // internal_settings DefaultPrizeBaseFactor
+    // JS `v.hF.xya` = `<RewardsPrize><DefaultPrizeBaseFactor Value>`.
+    const sf2::scene::FightParams& fp = sf2::scene::FightParams::defaults();
+    const double xya = fp.prize_default_base_factor;
     const double prize_base =
         prize_base_in > 0 ? static_cast<double>(prize_base_in)
                           : std::ceil(static_cast<double>(money) * xya);
     // Exact `Fh.lXa` (L1058250): `(prizeBase, coins, bonus, Ia, epF, UiF,
-    // UbF, pk)`; Ia/epF/UiF/UbF = 5/2/1/3; pk = EAa order; kq = 0
+    // UbF, pk)`; Ia/epF/UiF/UbF = `v.hF.$Ia/ep/Ui/Ub` (Perfect/FirstStrike/
+    // ComboCount/Shock); pk = `v.hF.pk` (Styles document order); kq = 0
     // (DenominationDigits absent in seed).
-    static const double kPk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};
+    double pk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};
+    for (std::size_t i = 0; i < fp.prize_styles.size() && i < 6; ++i) {
+        pk[i] = static_cast<double>(fp.prize_styles[i]);
+    }
     PrizeKx kx;
     fh_lxa(kx, prize_fh_, prize_base, static_cast<double>(money),
-           static_cast<double>(bonus), 5.0, 2.0, 1.0, 3.0, kPk, 0);
+           static_cast<double>(bonus), static_cast<double>(fp.prize_perfect),
+           static_cast<double>(fp.prize_first_strike),
+           static_cast<double>(fp.prize_combo_count),
+           static_cast<double>(fp.prize_shock), pk, 0);
     p.coins_total = static_cast<std::int64_t>(kx.m6);
     p.coins_bonus = p.coins_total - static_cast<std::int64_t>(prize_vk(prize_base, 0));
     p.gems_bonus = static_cast<std::int64_t>(kx.mOa);  // `mOa` = `OY` = bonus
