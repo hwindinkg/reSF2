@@ -272,6 +272,22 @@ public:
     std::string try_react(sf2::scene::FightContext& ctx,
                           const std::function<float()>& rng = {});
 
+    // Per-frame auto-move pick (JS `Gc.ia` L671 -> `Gnb` L672 -> `Rwa`/`EZa`
+    // L676 -> `dxa`/`DK` L673-674) for the `<Events><EveryFrame/></Events>`
+    // event (`Gc.nr` L672 `Ih(14)`). The JS fires one type-14 event per
+    // fighter per frame (`wd.ia` L499 `this.nr.Z(this.Vb)`); `Gc.EZa` collects
+    // the fighter's `EveryFrame` moves whose `<Conditions>` pass, `Gc.DK`
+    // keeps the max-`priority` non-`Rha` group and picks uniformly
+    // (`f[uf.sja(f.length)]`, L674), then starts it on the `MS` branch
+    // (`e.animation.MS ? jJa : Nsb`). This is the knockdown recovery chain:
+    // `PhysicalFall -> PhysicalGroundHit -> PhysicalLying -> Standup`, where
+    // the final non-physics `Standup` (`GetUp|AfterPhysics`, FileName
+    // standup.bytes) stops the ragdoll (`wd.Bnb` L507 `Nd.stop()`) and starts
+    // the getup clip. Returns the started move's name or "". `wall_min`/
+    // `wall_max` are the ragdoll solver bounds for a physics pick.
+    std::string try_every_frame_move(sf2::scene::FightContext& ctx,
+                                     float wall_min, float wall_max);
+
     // Starts `move` if its conditions pass: sets current_move, move_frame=0,
     // loads the clip (FileName -> anim_archive clip), sets facing toward the
     // enemy, arms the move's intervals (JS `Te.Skb` L550 + `jc.c7a` L691).

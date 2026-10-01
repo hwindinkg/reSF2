@@ -5276,11 +5276,17 @@ std::vector<sf2::scene::OwnedItem> owned_items(App& app) {
     push(w.weapon);
     push(w.armor);
     push(w.helm);
-    // JS `p.o.xa`: every owned inventory row with a positive count.
-    for (const auto& oi : w.items) {
-        if (oi.count <= 0) continue;
-        push(oi.name);
-    }
+    // [FIX wrong intro stance] JS `ra.Hza` (L684) tests the move `<Locks>`
+    // against `a.parameters.jt()` — `jt()` (L808) pushes ONLY the EQUIPPED
+    // slots (`this.Of`/`Hd`/`ig`/`Mg`/`hg`/`Lg`), NEVER the inventory
+    // (`p.o.xa`). Including every owned inventory row made an off-weapon
+    // stance move (`ClawsStartStance-Left`, `<Locks><Operator Type="Or">
+    // <Item Type="Weapon" SubType="Claws"/>...`) pass its lock whenever the
+    // player merely OWNED a claws weapon, so it entered `hb_` and — at
+    // Priority 12 > the Fists stance's 10 — won the intro pick: the reported
+    // "intro plays the claws, not the equipped weapon". Equipped-only is the
+    // JS-exact item set for every lock test (`ra.Hza` L684, `Ae.Ti` L724,
+    // `ra.Z6a` L684 all read `jt()`).
     // The fighter always owns a Skeleton (the Skeleton lock passes for every
     // move — `users_default` has Skeleton="Skeleton") and a weapon; a save
     // with an empty slot still fights unarmed.

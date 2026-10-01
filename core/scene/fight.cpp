@@ -5762,8 +5762,53 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             if (ctx.anims_enemy.empty()) ctx.anims_enemy.push_back(idle_name);
             fill_ctx_geometry(ctx, me, foe);
             ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
-            me.fighter.ai_start_move(*idle_move, ctx);
+            if (me.fighter.ai_start_move(*idle_move, ctx)) {
+                std::fprintf(stdout, "[stance] F%d %s intro=%d move=%s\n",
+                             frame_, me.name.c_str(), intro ? 1 : 0,
+                             idle_name.c_str());
+                std::fflush(stdout);
+            }
             if (intro) me.intro_played_round = round_.number;  // [FIX intro double-play]
+        }
+    }
+
+    // [FIX knockdown recovery — JS `Gc.ia` L671 -> `Gnb` L672 -> `dxa`/`DK`
+    // L673-674] The per-frame `<Events><EveryFrame/></Events>` auto-move pick
+    // (`Gc.nr` L672 `Ih(14,..)`, fired by `wd.ia` L499 `this.nr.Z(this.Vb)`).
+    // This is the knockdown recovery chain (`PhysicalFall` ->
+    // `PhysicalGroundHit` -> `PhysicalLying` -> `Standup`) that returns a
+    // ragdolled fighter to its stance: the final `Standup`
+    // (`GetUp|AfterPhysics`, FileName standup.bytes) is non-physics, so
+    // `Te.Skb` -> `wd.Bnb` (L507 `this.Nd.nk && this.Nd.stop()`) stops the
+    // ragdoll and starts the getup clip. Without it a ragdolled fighter
+    // stayed down forever (the reported "he never gets up"). Runs for BOTH
+    // sides every fight frame (as in the JS); an ordinary idle/attacking
+    // fighter has no passing candidate — every recovery move gates on
+    // `<CurrentAnimation Name="Physical..."/>`.
+    if (phase_ == fight_phase::fight || phase_ == fight_phase::start_stance) {
+        sf2::scene::FightContext ectx;
+        ectx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+        ectx.stage = static_cast<sf2::scene::round_stage>(phase_);
+        ectx.qb = me.is_player;
+        ectx.anims_me = anim_names_of(me.fighter);
+        ectx.anims_enemy = anim_names_of(foe.fighter);
+        for (const std::string& n : foe.fighter.active_intervals()) {
+            ectx.intervals_enemy.push_back({n, foe.fighter.interval_type(n), true});
+        }
+        fill_ctx_geometry(ectx, me, foe);
+        ectx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+        // JS `Cm.he` reads `Al.frameCount` (the ragdoll physics frame) — the
+        // `PhysicsFrameNumber` fallback in the recovery chain.
+        ectx.physics_frame = me.fighter.ragdoll_frame_count();
+        const std::string every =
+            me.fighter.try_every_frame_move(ectx, wall_min_, wall_max_);
+        if (!every.empty()) {
+            ++me.moves_started;
+            me.last_decision = "every:" + every;
+            std::fprintf(stdout, "[every] F%d %s -> %s nk=%d\n", frame_,
+                         me.name.c_str(), every.c_str(),
+                         me.fighter.ragdoll_active() ? 1 : 0);
+            std::fflush(stdout);
         }
     }
 

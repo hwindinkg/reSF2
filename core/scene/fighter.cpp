@@ -1553,7 +1553,83 @@ std::string Fighter::try_react(FightContext& ctx,
     return "";
 }
 
-// JS `Te.ia` (L547-548): each 60 Hz update advances `Xh` (playback frame)
+// Per-frame `EveryFrame` auto-move pick (JS `Gc.ia` L671 -> `Gnb` L672 ->
+// `Rwa`/`EZa` L676 -> `dxa`/`DK` L673-674). One type-14 event is fired per
+// fighter per frame (`wd.ia` L499 `this.nr.Z(this.Vb)` -> `Gc.nr` L672
+// `Ih(14, ...)`); `Rwa` (L676) walks the fighter's moves for that event
+// (`d.Su.dea(14)`) and `EZa` (L676-677) admits one only when
+// `f.Yz(b,null,g)` — its own `<Conditions>` — passes. `DK(a,b,c)` is then
+// called with `c` undefined (false): the `d` list (`c||!h.eb||h.animation.Rha
+// ||d.push(h)`) stays EMPTY because `!h.eb` short-circuits for an `EveryFrame`
+// event (`eb` is undefined -> falsy), so the else branch runs:
+// `e = f[uf.sja(f.length)]` (uniform max-`priority` non-`Rha` pick), then
+// `e.animation.MS ? a.jJa(e.animation,e.R1)
+//                : Gc.Nsb(a, this.Ek[e.index], e.animation, e.sign)`.
+// `jJa` starts the ragdoll (physics); `Nsb` starts an ordinary clip. This is
+// the knockdown recovery chain the port lacked:
+//   `PhysicalFall` (physics) -> `PhysicalGroundHit` (physics, EveryFrame)
+//   -> `PhysicalLying` (physics, EveryFrame) -> `Standup` (non-physics,
+//   `GetUp|AfterPhysics`, FileName standup.bytes) which stops the ragdoll
+//   (`wd.Bnb` L507 `this.Nd.nk && this.Nd.stop()`) and plays the getup clip.
+// Without it a ragdolled fighter stayed down forever (the reported "he never
+// gets up").
+std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
+                                          float wall_max) {
+    // `Gc.EZa` (L676-677): candidates = the fighter's moves carrying an
+    // `<EveryFrame/>` event whose own `<Conditions>` pass. `Rwa` walks the
+    // per-fighter move list in `ra.Lk` document order (`hb_`).
+    std::vector<const MoveDef*> passing;
+    for (const MoveDef* m : hb_) {
+        if (m == nullptr || !m->has_event("EveryFrame")) continue;
+        // `f.Yz(b,null,g)` with `gm` false (`vm.he` L749 true for Keys).
+        if (!react_conditions_pass(*m, ctx)) continue;
+        passing.push_back(m);
+    }
+    if (passing.empty()) return "";
+    // `Aua` (L673): keep only the max-`priority` group of the non-`Rha` list
+    // (`ap>=bp && (ap>bp && b.length=0, b.push(a))`). The `Rha` group (`g`)
+    // only parks a name in `wd.P9` (`wd.Ukb` L506) — no clip starts.
+    std::vector<const MoveDef*> f;
+    for (const MoveDef* m : passing) {
+        if (m->no_animation) continue;  // `g` (parked, no clip)
+        const int ap = m->priority;
+        const int bp = f.empty() ? 0 : f.front()->priority;
+        if (ap >= bp) {
+            if (ap > bp) f.clear();
+            f.push_back(m);
+        }
+    }
+    if (f.empty()) return "";
+    // `e = f[uf.sja(f.length)]` (L674): uniform `Math.random` draw. `|f|<=1`
+    // needs no draw (`floor(r*1)==0`), so the pick is value-exact.
+    std::size_t idx = 0;
+    if (f.size() > 1 && math_random_) {
+        float r = math_random_();
+        if (r < 0.0f) r = 0.0f;
+        if (r >= 1.0f) r = 0.9999999f;
+        idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
+        if (idx >= f.size()) idx = f.size() - 1;
+    }
+    // `e.animation.MS ? a.jJa(...) : Gc.Nsb(...)` (L674). Both end at
+    // `Te.Skb`; the physics branch additionally starts the `Al` ragdoll
+    // (`wd.Lwb` L511 -> `Nd.start`). Fall through the remaining candidates if
+    // a re-test fails so the pick never stalls.
+    for (std::size_t k = 0; k < f.size(); ++k) {
+        const MoveDef* m = f[(idx + k) % f.size()];
+        if (ai_start_move(*m, ctx)) {
+            const bool physics = m->physics;  // JS `e.animation.MS`
+            react_physics_ = physics;
+            if (physics) {
+                // JS `Al.P6a` (L582) pins with a HARD `a.y=0`; the floor is
+                // the world origin (see `apply_hit`).
+                ragdoll_start(m->name, wall_min, wall_max, 0.0f);
+            }
+            return m->name;
+        }
+    }
+    return "";
+}
+
 // and `fG` (physics frame); when `Xh+2 >= clipLen` the clip ends (`KNa()`
 // + lS -> EStopAnimationEvent) and the fighter returns to idle.
 // JS `vp` (L562-563) -> `rrb` (L552) -> `jc.c7a` (L691) recomputes the

@@ -7132,7 +7132,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         //    ONLY while the boss is outside its stance idle (a real window);
         //    between windows it leaves the player idle, which is what lets
         //    the boss's `$E` QuickAttack slots fire at all.
-        const int kLogFrames = 150;
+        const int kLogFrames = 340;
         int react_at = -1;
         int react_started = 0;
         std::string react_move;
