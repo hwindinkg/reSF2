@@ -645,18 +645,24 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
         out.min = data::xml_attr_float(node, "Min", 0.0f);
         out.max = data::xml_attr_float(node, "Max", 0.0f);
         if (pugi::xml_node from = node.child("From")) {
+            out.from_player_set = from.attribute("Player") != nullptr;
             out.from_player = from.attribute("Player")
                 ? (std::strcmp(from.attribute("Player").value(), "Enemy") == 0 ? 2 : 1)
                 : 1;
             out.from_obj = from.attribute("Object") ? from.attribute("Object").value() : "Pivot";
             out.from_part = from.attribute("Part") ? from.attribute("Part").value() : "";
+            out.from_prev = from.attribute("Frame") &&
+                            std::strcmp(from.attribute("Frame").value(), "Previous") == 0;
         }
         if (pugi::xml_node to = node.child("To")) {
+            out.to_player_set = to.attribute("Player") != nullptr;
             out.to_player = to.attribute("Player")
                 ? (std::strcmp(to.attribute("Player").value(), "Enemy") == 0 ? 2 : 1)
                 : 2;
             out.to_obj = to.attribute("Object") ? to.attribute("Object").value() : "Pivot";
             out.to_part = to.attribute("Part") ? to.attribute("Part").value() : "";
+            out.to_prev = to.attribute("Frame") &&
+                          std::strcmp(to.attribute("Frame").value(), "Previous") == 0;
         }
     } else if (out.type == "Keys") {
         // JS `vm`: child <Key Type=.. PressType=../> — Tap/Hold/Release.

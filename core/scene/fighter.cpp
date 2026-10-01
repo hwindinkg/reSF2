@@ -1655,6 +1655,10 @@ void Fighter::advance(float dt) {
     // advance() are what the caller dispatches (JS `Te.Lwa` L563-564 runs
     // inside `Te.ia`, i.e. once per frame advance).
     frame_actions_.clear();
+    // JS node `mf` (the previous solver frame's `ma`): snapshot the current
+    // pose BEFORE this frame re-samples it, so `Distance ... Frame="Previous"`
+    // COM/node refs read last frame's position.
+    prev_pos_ = pos_;
     // Knockback decay is the JS `Vc.sk` (@405734) Verlet VELOCITY carry
     // (the shared `verlet_step`), arrested by the `Al.jE` `bFa` relax and the
     // `fha`/`P6a` ground friction. The former `kb_` pool + `decay_knockback`

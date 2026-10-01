@@ -4404,6 +4404,47 @@ void FightController::fill_ctx_geometry(FightContext& ctx, const FightFighter& m
     ctx.raid_enemy = foe.raid_bullets;
     ctx.charge_me = me.charge;
     ctx.charge_enemy = foe.charge;
+    // JS `ee.nt(a)` (L786): resolve a Distance From/To object ref to its
+    // world (x, y). `Object` codes (`sa.xs` L360400): Nodes=1, Pivot=2,
+    // Wall=3, Floor=4, MapCenter=5, COM=6. `Floor` is `new H(this.ix,
+    // -this.jx,0,1)` (ShiftX/Y default 0 -> the world origin); `COM` is the
+    // mass centroid (`Pg.Eu.ma`/`mf` -> `com_*`/`com_prev_*`); `Nodes` reads
+    // the posed node. This makes the getup chain's `From Object="COM"
+    // Frame="Previous" To Object="COM"` JS-exact instead of collapsing to the
+    // Me->Enemy root gap.
+    {
+        const float me_dir = ctx.direction;
+        const float foe_dir = ctx.enemy_direction;
+        const float wmin = wall_min_;
+        const float wmax = wall_max_;
+        ctx.ref_pos = [&me, &foe, me_dir, foe_dir, wmin, wmax](
+                          const std::string& obj, const std::string& part,
+                          int player, bool prev, float& x, float& y) -> bool {
+            const FightFighter& f = (player == 2) ? foe : me;
+            if (obj == "COM") {
+                x = prev ? f.fighter.com_prev_x() : f.fighter.com_x();
+                y = prev ? f.fighter.com_prev_y() : f.fighter.com_y();
+                return true;
+            }
+            if (obj == "Floor") { x = 0.0f; y = 0.0f; return true; }
+            if (obj == "Wall") {
+                const float facing = (player == 2) ? foe_dir : me_dir;
+                const bool back = (part == "Back");
+                x = ((facing > 0.0f) == back) ? wmin : wmax;
+                y = 0.0f;
+                return true;
+            }
+            if (obj == "Nodes") {
+                return f.fighter.node_world_xy(part, prev, x, y);
+            }
+            if (obj == "Pivot") {
+                x = f.fighter.world_x();
+                y = f.fighter.world_y();
+                return true;
+            }
+            return false;  // MapCenter/unknown -> root-gap fallback
+        };
+    }
 }
 
 void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_type press) {

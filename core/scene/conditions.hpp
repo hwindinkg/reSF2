@@ -144,6 +144,16 @@ struct FightContext {
     float dist_x = 0.0f;   // signed X delta (`To - From` = enemy - me)
     float dist_y = 0.0f;   // Y delta
     float dist_3d = 0.0f;  // Euclidean 2D distance (JS qm case 2)
+    // JS `ee.nt(a)` (L786): resolve a Distance From/To object ref to its world
+    // (x, y) — `Object` = Nodes/Pivot/Wall/Floor/MapCenter/COM, `part` = the
+    // node name for Nodes, `player` 1=Me/2=Enemy, `frame_prev` = the `Frame`
+    // attr (`mf` = previous frame). When set, `eval_distance` computes the
+    // delta from the two refs JS-exact (case 0 `(to.x-from.x)*Wl`, case 1
+    // `from.y-to.y` via `bfa = -y`, case 2 the 2D norm). When unset (probes/
+    // demos that only fill the roots) it falls back to `dist_x`/`dist_y`.
+    std::function<bool(const std::string& obj, const std::string& part,
+                       int player, bool frame_prev, float& x, float& y)>
+        ref_pos;
     // The two fighter roots, kept separately so `Object="Wall"` Distance refs
     // can resolve their non-wall end (`ee.nt` L786). `dist_x == enemy_x - me_x`.
     float me_x = 0.0f;     // this fighter's world X (`Me/...` refs)

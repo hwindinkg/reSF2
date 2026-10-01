@@ -68,6 +68,15 @@ struct Cond {
     int from_player = 1, to_player = 2;  // Me, Enemy
     std::string from_obj = "Pivot", to_obj = "Pivot";  // Nodes/Pivot/Wall/Floor/MapCenter/COM
     std::string from_part, to_part;      // Part attr for Object="Nodes"
+    // JS `ee.Ij` (L399945): `Frame` attr — "Previous" -> the ref reads the
+    // node's `mf` (previous solver frame) instead of `ma` (current). The
+    // getup chain gates on `Distance ... From COM Frame="Previous" To COM`.
+    bool from_prev = false, to_prev = false;
+    // Whether the `Player` attribute was present. JS `Nd.ol` maps an ABSENT
+    // Player to "Null" (0), which `ee.cfa`/`CBa` treat exactly like `Me`.
+    // The parser's `to_player` default (2 = Enemy) is a convenience for the
+    // legacy root-gap path; COM/Floor refs must use `Me` when absent.
+    bool from_player_set = false, to_player_set = false;
     std::string keys;    // Keys: comma-joined "<Type>:<PressType>" list
     // Children (Operator And/Or only).
     std::vector<Cond> children;

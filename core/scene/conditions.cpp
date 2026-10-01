@@ -347,17 +347,55 @@ float ref_x(const Cond& c, bool to_end, const FightContext& ctx) {
 
 bool eval_distance(const Cond& c, const FightContext& ctx) {
     float b = 0.0f;
-    switch (c.axis) {
-        case 0:
-            if (c.from_obj == "Wall" || c.to_obj == "Wall") {
-                b = (ref_x(c, /*to_end=*/true, ctx) -
-                     ref_x(c, /*to_end=*/false, ctx)) * ctx.direction;
-            } else {
-                b = ctx.dist_x * ctx.direction;
+    // JS `ee.nt` (L786) resolves each end; `qm.he` (L744) then computes the
+    // per-axis delta. The port previously collapsed every non-`Wall` ref to
+    // the Me->Enemy root gap (`dist_x`) and left `dist_y` at 0, so the getup
+    // chain (`From Object="COM" Frame="Previous" To Object="COM"`) always saw
+    // 0 and fired on ragdoll frame ~17 instead of the JS settle/`Min="180"`.
+    float fx = 0.0f, fy = 0.0f, tx = 0.0f, ty = 0.0f;
+    bool have_refs = false;
+    // Only the per-fighter COM/Floor refs are resolved JS-exact here; every
+    // other object (Nodes/Pivot/Wall) keeps the legacy root-gap path so no
+    // unrelated move gate shifts. JS `ee.Ij`: an ABSENT `Player` -> "Null"
+    // (0) == `Me`, so a Player-less `To` must read the OWNER, not the enemy.
+    const bool com_floor =
+        c.from_obj == "COM" || c.to_obj == "COM" || c.from_obj == "Floor" ||
+        c.to_obj == "Floor";
+    if (ctx.ref_pos && com_floor) {
+        const int fp = c.from_player_set ? c.from_player : 1;
+        const int tp = c.to_player_set ? c.to_player : 1;
+        have_refs =
+            ctx.ref_pos(c.from_obj, c.from_part, fp, c.from_prev, fx, fy) &&
+            ctx.ref_pos(c.to_obj, c.to_part, tp, c.to_prev, tx, ty);
+    }
+    if (have_refs) {
+        switch (c.axis) {
+            case 0:  // `b=this.GK.OQ(a)-this.FK.OQ(a); b*=a.Wl`
+                b = (tx - fx) * ctx.direction;
+                break;
+            case 1:  // `b=this.GK.bfa(a)-this.FK.bfa(a)`; `bfa = -y`
+                b = fy - ty;
+                break;
+            default: {  // `b=this.GK.nt(a); c=this.FK.nt(a); ... sqrt`
+                const float dx = fx - tx;
+                const float dy = fy - ty;
+                b = std::sqrt(dx * dx + dy * dy);
+                break;
             }
-            break;
-        case 1: b = ctx.dist_y; break;
-        default: b = ctx.dist_3d; break;
+        }
+    } else {
+        switch (c.axis) {
+            case 0:
+                if (c.from_obj == "Wall" || c.to_obj == "Wall") {
+                    b = (ref_x(c, /*to_end=*/true, ctx) -
+                         ref_x(c, /*to_end=*/false, ctx)) * ctx.direction;
+                } else {
+                    b = ctx.dist_x * ctx.direction;
+                }
+                break;
+            case 1: b = ctx.dist_y; break;
+            default: b = ctx.dist_3d; break;
+        }
     }
 return (!c.has_min || c.min <= b) && (!c.has_max || b <= c.max);
 }

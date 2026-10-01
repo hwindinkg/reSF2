@@ -625,6 +625,24 @@ public:
     // to the render anchor when the merged model carries no mass.
     float com_x() const { return com_axis(0); }
     float com_y() const { return com_axis(1); }
+    // JS `ee.nt` case 6 (`Pg.Eu` = the `_CenterOfMass_` node, L401300): its
+    // `ma`/`mf` — the CURRENT and PREVIOUS solver-frame world position.
+    // `prev_pos_` is snapshotted at the top of `advance()` (the JS node `mf`
+    // carries the previous frame's `ma`). `Distance ... Frame="Previous"`
+    // refs read these (`Standup`/`PhysicalLying` getup gates).
+    float com_prev_x() const { return com_axis_in(prev_pos_, 0); }
+    float com_prev_y() const { return com_axis_in(prev_pos_, 1); }
+    // JS `ee.nt` case 1 (`MQ(a).ma/mf`, L786): the posed world (x,y) of a
+    // named node, current (`pos_`) or previous frame (`prev_pos_`).
+    bool node_world_xy(const std::string& name, bool prev, float& x,
+                       float& y) const {
+        const int i = model_.bone_by_name(name);
+        const std::vector<float>& p = prev ? prev_pos_ : pos_;
+        if (i < 0 || p.size() < static_cast<std::size_t>(i) * 2 + 2) return false;
+        x = p[static_cast<std::size_t>(i) * 2];
+        y = p[static_cast<std::size_t>(i) * 2 + 1];
+        return true;
+    }
     // Clamps the fighter's world x to [min_x, max_x] (the arena walls).
     // Called each frame by the fight controller after the root-motion walk.
     void clamp_x(float min_x, float max_x) {
@@ -833,6 +851,9 @@ public:
 private:
     Model model_;
     std::vector<float> pos_;  // per-bone [x, y] after sampling (world space)
+    // The previous frame's `pos_` (JS node `mf`). Snapshotted at the top of
+    // `advance()`; the `Distance ... Frame="Previous"` refs read it.
+    std::vector<float> prev_pos_;
     float color_r_ = 1.0f;
     float color_g_ = 1.0f;
     float color_b_ = 1.0f;
@@ -1129,8 +1150,14 @@ private:
     // render anchor when `pos_` is not sampled yet or no listed bone carries
     // mass.
     float com_axis(int axis) const {
+        return com_axis_in(pos_, axis);
+    }
+    // Shared body: mass-weighted centroid of the posed body in `p` (JS
+    // `Dl.v6` L577 `Eu.ma = Σ L0()[i].ma·weight / VR`). Used for both the
+    // current (`pos_`) and previous (`prev_pos_`, the `mf` ref) frames.
+    float com_axis_in(const std::vector<float>& p, int axis) const {
         const std::size_t n = model_.bones.size();
-        if (pos_.size() < n * 2) {
+        if (p.size() < n * 2) {
             return axis == 0 ? world_x_ : world_y_;
         }
         // [F4] JS `Dl.v6` L577 averages `L0()`: `Va.bca` — the resolved
@@ -1144,8 +1171,8 @@ private:
             if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
             const float w = model_.bones[static_cast<std::size_t>(idx)].mass;
             if (w <= 0.0f) return;
-            acc += pos_[static_cast<std::size_t>(idx) * 2 +
-                        static_cast<std::size_t>(axis)] *
+            acc += p[static_cast<std::size_t>(idx) * 2 +
+                     static_cast<std::size_t>(axis)] *
                    w;
             wsum += w;
         };
