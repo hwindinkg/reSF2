@@ -17830,6 +17830,15 @@ bool credits_consume(App& app) {
     return true;
 }
 
+// `Na.cd(13742453)` (L1855/L1857-1858): every `xh`/`zx` text node
+// (`credits` title, the `$ja` name / `V2` value rows, `CreditsFamilies`) uses
+// the SAME colour — `Na.cd(a)` (L742717) = `((a>>16&255)/255,(a>>8&255)/255,
+// (a&255)/255)`, 13742453 = 0xD1B175 = (209,177,117). The port's invented
+// salmon (0.83,0.66,0.68) was not in the JS.
+constexpr float kCreditsTextR = 0.8196078431372549f;
+constexpr float kCreditsTextG = 0.6941176470588235f;
+constexpr float kCreditsTextB = 0.4588235294117647f;
+
 void credits_draw(App& app, sf2::render::Renderer& ren) {
     if (!g_credits_open) return;
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
@@ -17837,19 +17846,20 @@ void credits_draw(App& app, sf2::render::Renderer& ren) {
     // `a.Fa(1E3,120); a.C(-500); a.ua(120); a.V(Y.na("credits"))` (L1855).
     float y = 120.0f - g_credits_scroll;
     draw_ui_label(app, kViewW * 0.5f - 500.0f, y - 60.0f, 1000.0f, 120.0f,
-                  loc(app, "credits", "CREDITS"), 1.0f, UiAlign::Center, 0.83f, 0.66f, 0.68f);
+                  loc(app, "credits", "CREDITS"), 1.0f, UiAlign::Center, kCreditsTextR,
+                  kCreditsTextG, kCreditsTextB);
     y += 220.0f;  // `a=220` (L1855)
     for (const CreditsRow& r : g_credits_rows) {
         // `$ja=c(Name,60)` at `C(-520)`, `V2=c(value,50)` at `C(20)` (L1857-1858).
-        draw_ui_label(app, 60.0f, y, 500.0f, 60.0f, r.name, 0.9f, UiAlign::Left, 0.83f, 0.66f,
-                      0.68f);
+        draw_ui_label(app, 60.0f, y, 500.0f, 60.0f, r.name, 0.9f, UiAlign::Left, kCreditsTextR,
+                      kCreditsTextG, kCreditsTextB);
         draw_ui_wrapped(app, 620.0f, y, kViewW - 680.0f, 50.0f, r.value, 0.9f, UiAlign::Left,
-                        0.83f, 0.66f, 0.68f);
+                        kCreditsTextR, kCreditsTextG, kCreditsTextB);
         y += 90.0f + 60.0f;  // `a += d.height + 90` (L1855)
     }
     draw_ui_label(app, kViewW * 0.5f - 500.0f, y, 1000.0f, 120.0f,
-                  loc(app, "CreditsFamilies", "CREDITS"), 1.0f, UiAlign::Center, 0.83f, 0.66f,
-                  0.68f);
+                  loc(app, "CreditsFamilies", "CREDITS"), 1.0f, UiAlign::Center, kCreditsTextR,
+                  kCreditsTextG, kCreditsTextB);
 }
 
 SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {

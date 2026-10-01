@@ -1403,8 +1403,10 @@ void App::draw_boot_splash() {
         }
         // `tr.info` (L1867-1868): font `E.Na()` = `E.get(264,16)` =
         // `ui/font{lang}` (the port's menu font), colour `Na.cd(13743222)` =
-        // (209,182,118), centred at `pE.ra + pE.qa()*.75` (node-local, scaled
-        // by the parent node). The whole node scale applies.
+        // (209,180,118) (`Na.cd(a)` = `((a>>16&255)/255,(a>>8&255)/255,
+        // (a&255)/255)` L742717; 13743222 = 0xD1B476), centred at
+        // `pE.ra + pE.qa()*.75` (node-local, scaled by the parent node). The
+        // whole node scale applies.
         if (menu_font_ != nullptr && font_tex_ != 0) {
             const std::string text = "Loading 100%";
             const float info_cy = node_cy + (-a_off + logo_sh * 0.75f) * node_scale;
@@ -1413,7 +1415,7 @@ void App::draw_boot_splash() {
             const float th = sf2::data::measure_text_height_utf8(*menu_font_, text, scale);
             draw_text_with_font(*menu_font_, font_tex_, node_cx - tw * 0.5f,
                                 info_cy - th * 0.5f, text, scale, 209.0f / 255.0f,
-                                182.0f / 255.0f, 118.0f / 255.0f);
+                                180.0f / 255.0f, 118.0f / 255.0f);
         }
         return;
     }
@@ -1427,12 +1429,16 @@ void App::draw_boot_splash() {
         const int pct = boot_progress_pct();
         std::snprintf(buf, sizeof(buf), "%s %d%%", loading_word(lang_), pct);
     }
-    // `Jo` (L90): `ua(qe.qa()*.4)` centred on the scroll node.
+    // `Jo` (L90): `ua(qe.qa()*.4)` centred on the scroll node. Colour
+    // `Tk` ctor `this.Jo.La(Z.sc)` (L87, offset 43476): `Z.sc` (L1274717) =
+    // `new H(.1843137254901961,.1450980392156863,.10588235294117647,1)` — the
+    // same dark-brown UI text colour as the settings dialog, NOT white.
     const float w = measure_text(*splash_loading_font_, buf, jo_scale);
     const float lh = std::max(
         1.0f, static_cast<float>(splash_loading_font_->line_height) * jo_scale);
     draw_text_with_font(*splash_loading_font_, splash_loading_tex_, jo_cx - w * 0.5f,
-                        jo_cy - lh * 0.5f, buf, jo_scale, 1.0f, 1.0f, 1.0f);
+                        jo_cy - lh * 0.5f, buf, jo_scale, 0.1843137254901961f,
+                        0.1450980392156863f, 0.10588235294117647f);
 }
 
 void App::run_one_frame() {
