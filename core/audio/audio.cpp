@@ -406,7 +406,7 @@ void AudioEngine::latency_tick() {
     latency_tick_impl(impl_->engine, enabled_ && impl_->engine_ok);
 }
 
-void AudioEngine::play(const std::string& event) {
+void AudioEngine::play(const std::string& event, bool loop) {
     // [latency probe] poll the pending trigger so the feed point is measured
     // from the audio events themselves (no app-loop hook required).
     if (impl_ != nullptr && latency_probe_enabled()) {
@@ -471,7 +471,11 @@ void AudioEngine::play(const std::string& event) {
     }
 
     // Restart the clip (miniaudio: stop + rewind + start; thread-safe —
-    // the engine thread picks the commands up asynchronously).
+    // the engine thread picks the commands up asynchronously). `loop` is the
+    // JS `ta.ak(a, looped)` L1264 flag from `<Sound Looped="1">` (`fm.ceb`);
+    // a looped voice repeats until `stop()` (`ta.Jwb`) or the next call to
+    // this voice resets it (every non-looped caller passes false).
+    ma_sound_set_looping(sound, loop ? MA_TRUE : MA_FALSE);
     ma_sound_stop(sound);
     ma_sound_seek_to_pcm_frame(sound, 0);
     ma_sound_start(sound);

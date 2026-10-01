@@ -404,6 +404,20 @@ struct BattleRecord {
     bool disciple = false;
     bool show_dojo_disciple = false;
 
+    // The custom key map (JS `sc` ctor L225 `this.vjb(a)` ->
+    // `this.bW=a.A("InputBind"); sc.OD.Tqb(); this.bW==null ?
+    // a.appendChild("InputBind") : sc.OD.load(this.bW)`). Each `<InputBind>`
+    // child carries `Name` (the action id, `Af.oUa` key 1..14) + `Value` (the
+    // `Gz` key code). The rows OVERRIDE `Af.oUa` (`Af.load` L113300
+    // `X.Xa(rN,d); rN.set(d,c)`). Keyed action id -> key code here.
+    std::map<int, int> input_bind;
+    // The `<InputBind>` node EXISTS (`this.bW != null`). The JS ctor appends
+    // an EMPTY node when absent, so the save re-serializes it. Read-only
+    // presence flag for the round-trip; there is no remap writer in the JS
+    // (the `Af` class has only get/Tqb/load — no set), so a save only ever
+    // carries the row set a prior save/hand-edit put there.
+    bool input_bind_present = false;
+
     // Persisted bus mutes (JS `sc.Gpb` L114249 / `sc.ckb` L113759):
     // `<CurrentUser><Sounds><Sound Mute>` = `ta.$D` (SFX, `lb.Mz()`),
     // `<Music Mute>` = `ta.ZD` (music, `lb.Lz()`). "1" = muted.
@@ -628,6 +642,18 @@ struct BattleRecord {
         return false;
     }
 };
+
+// The JS `sc.OD` custom key map (`Af`, L2472 defaults; `sc.vjb` L225). The
+// `Af.oUa` default table (char 1271751) is:
+//   1:87(W) 3:68(D) 5:83(S) 7:65(A) 9:75(K) 10:76(L) 11:79(O) 12:80(P)
+//   13:74(J) 14:81(Q)
+// `input_bind_reset()` mirrors `Af.Tqb()`; `input_bind_override(a,c)` mirrors
+// the `Af.load` row (`X.Xa(rN,d); rN.set(d,c)` — a later row replaces an
+// earlier/default one); `input_bind_get(a)` mirrors `Af.get(a)` (default when
+// no override, `Af.errorCode` = -1 when the action is not in the map at all).
+void input_bind_reset();
+void input_bind_override(int action, int code);
+int input_bind_get(int action);
 
 // Loads/saves the users.xml document. Portable C++17 — the path is passed
 // in (the app layer resolves the repo-relative location).

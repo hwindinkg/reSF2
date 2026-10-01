@@ -1225,11 +1225,20 @@ constexpr GamepadBinding kGamepadBindings[] = {
 // arrows are the desktop aliases folded in only when opted in. They share the
 // slots so an alias and its JS key combine into the same diagonal.
 int keyboard_move_slot(int glfw_key, bool aliases) {
+    // The four movement actions (`Af.oUa` keys 1/3/5/7) resolved through the
+    // LIVE `sc.OD` map: the key's `Gz` code (via `js_code_for_glfw`) vs
+    // `sc.OD.get(action)`. Slot = action - 1 (0=up, 2=forward, 4=down,
+    // 6=back). Defaults (W/D/S/A) reproduce the old hardcoded WASD cases.
+    const int code = FightScreen::js_code_for_glfw(glfw_key);
+    if (code != 0) {
+        static const int kMoveActions[] = {1, 3, 5, 7};
+        for (const int a : kMoveActions) {
+            if (sf2::app::input_bind_get(a) == code) return a - 1;
+        }
+    }
+    // The arrows are the desktop aliases (NOT in `Af.oUa`); they share the
+    // slots so an alias and its JS key combine into the same diagonal.
     switch (glfw_key) {
-        case 87: return 0;  // W -> up
-        case 68: return 2;  // D -> forward
-        case 83: return 4;  // S -> down
-        case 65: return 6;  // A -> back
         case 265: return aliases ? 1 : -1;  // Up
         case 262: return aliases ? 3 : -1;  // Right
         case 264: return aliases ? 5 : -1;  // Down
@@ -10161,20 +10170,20 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
 // Esc pause and Space/Enter next-round shortcuts. Those now live behind the
 // explicit opt-in `set_desktop_key_aliases(true)` (OFF by default, see
 // `on_key`), so the DEFAULT map below is byte-for-byte `Af.oUa`.
+// JS `sc.OD.get(action)` (`Af.get` L113180) is the LIVE key map: each action's
+// `Gz` key code (defaults `Af.oUa` char 1271751, overridden by any
+// `<InputBind>` rows, `Af.load` L113300). A physical key resolves by its `Gz`
+// code (`js_code_for_glfw`) against that map. The old hardcoded switch was
+// `Af.oUa` inlined and could not honour a custom `<InputBind>`; with the
+// default map this reverse lookup is byte-identical to it.
 int FightScreen::key_type_for_glfw(int glfw_key) {
-    switch (glfw_key) {
-        case 87: return static_cast<int>(sf2::scene::key_type::up);           // W
-        case 68: return static_cast<int>(sf2::scene::key_type::forward);      // D
-        case 83: return static_cast<int>(sf2::scene::key_type::down);         // S
-        case 65: return static_cast<int>(sf2::scene::key_type::back);         // A
-        case 75: return static_cast<int>(sf2::scene::key_type::punch);        // K
-        case 76: return static_cast<int>(sf2::scene::key_type::kick);         // L
-        case 79: return static_cast<int>(sf2::scene::key_type::ranged);       // O
-        case 80: return static_cast<int>(sf2::scene::key_type::magic);        // P
-        case 74: return static_cast<int>(sf2::scene::key_type::raid_charge);  // J
-        case 81: return static_cast<int>(sf2::scene::key_type::super);        // Q
-        default: return 0;
+    const int code = js_code_for_glfw(glfw_key);
+    if (code == 0) return 0;
+    static const int kActions[] = {1, 3, 5, 7, 9, 10, 11, 12, 13, 14};
+    for (const int a : kActions) {
+        if (sf2::app::input_bind_get(a) == code) return a;
     }
+    return 0;
 }
 
 // The desktop key aliases (arrows + Space). Not part of `Af.oUa`; folded in
@@ -10201,10 +10210,14 @@ int FightScreen::js_code_for_glfw(int glfw_key) {
         case 293: return 124; case 294: return 125; case 295: return 126;
         case 296: return 127; case 297: return 128; case 298: return 129;
         case 299: return 130; case 300: return 131; case 301: return 132;
-        // Arrows: GLFW Up/Left/Right/Down 265/262/263/264 -> JS 133..136.
+        // Arrows: GLFW Up/Left/Right/Down 265/263/262/264 -> JS 133..136.
+        // GLFW_KEY_LEFT==263, GLFW_KEY_RIGHT==262 (the JS `Gz` L24 order is
+        // `a("ArrowUp",133);a("ArrowLeft",134);a("ArrowRight",135);
+        // a("ArrowDown",136)`, char 11217). The pre-fix table had 262->134 /
+        // 263->135 — LEFT and RIGHT INVERTED.
         case 265: return 133;  // ArrowUp
-        case 262: return 134;  // ArrowLeft
-        case 263: return 135;  // ArrowRight
+        case 263: return 134;  // ArrowLeft
+        case 262: return 135;  // ArrowRight
         case 264: return 136;  // ArrowDown
         // Numpad: GLFW KP_0..9 320..329 -> JS EKeyNumpad0..9 137..146.
         case 320: return 137; case 321: return 138; case 322: return 139;

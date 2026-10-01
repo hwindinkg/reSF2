@@ -880,7 +880,7 @@ void FightController::dispatch_move_actions(
                          owner.name.c_str(), why, act->kind.c_str(), act->name.c_str(),
                          stem != nullptr ? stem : "<none>");
             std::fflush(stdout);
-            if (stem != nullptr) sf2::audio::AudioEngine::instance().play(act->name);
+            if (stem != nullptr) sf2::audio::AudioEngine::instance().play(act->name, act->looped);
             continue;
         }
         // RandomSound — JS `am.ab()` L733: `b == 0 ? null : a[uf.sja(b)]`,

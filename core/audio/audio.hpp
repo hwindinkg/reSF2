@@ -61,7 +61,11 @@ public:
     // Fire-and-forget play of a named event ("hit"/"jump"/"step"/"click").
     // Never blocks, never throws. Counts EVERY call (even with the engine
     // off) so the headless log proves the integration: played("hit") > 0.
-    void play(const std::string& event);
+    // `loop` is the JS `ta.ak(name, looped)` L1264 flag (the `<Sound
+    // Looped="1">` descriptor, `fm.ceb`); a looped voice loops until a
+    // `stop(name)` (`ta.Jwb`) stops it. Defaults to the one-shot path every
+    // UI/combat caller uses.
+    void play(const std::string& event, bool loop = false);
 
     // Stops every live voice of a named event — JS `ta.Jwb(a)` (L1264):
     // `a=ta.WBa(a); a!=null && L.K.$f.stop(a)`. The name resolves through

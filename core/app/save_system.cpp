@@ -21,6 +21,38 @@
 
 namespace sf2::app {
 
+// The live `sc.OD` override map: action id -> `Gz` key code. `input_bind_get`
+// returns the `Af.oUa` default for any action with no override, so an empty
+// map is byte-for-byte the shipped default table (see the header cite).
+namespace {
+std::map<int, int> g_input_bind;
+}  // namespace
+
+void input_bind_reset() { g_input_bind.clear(); }  // `Af.Tqb()` (L113188)
+
+void input_bind_override(int action, int code) {  // `Af.load` row (L113300)
+    g_input_bind[action] = code;
+}
+
+int input_bind_get(int action) {  // `Af.get` (L113180)
+    const auto it = g_input_bind.find(action);
+    if (it != g_input_bind.end()) return it->second;
+    // `Af.oUa` (char 1271751): the ten shipped defaults.
+    switch (action) {
+        case 1: return 87;   // W
+        case 3: return 68;   // D
+        case 5: return 83;   // S
+        case 7: return 65;   // A
+        case 9: return 75;   // K
+        case 10: return 76;  // L
+        case 11: return 79;  // O
+        case 12: return 80;  // P
+        case 13: return 74;  // J
+        case 14: return 81;  // Q
+        default: return -1;  // `Af.errorCode`
+    }
+}
+
 namespace {
 
 std::string read_file_text(const std::string& path) {
@@ -130,6 +162,31 @@ WarriorSave SaveSystem::load() {
         // The persisted language (JS `Aa.load().st().attributes.get("Language")`
         // off 0x7d0b; `st()` = the first child = `<CurrentUser>`). Absent -> "".
         if (cu.attribute("Language")) out.language = cu.attribute("Language").value();
+
+        // `<InputBind>` custom key map (JS `sc.vjb` L225: `this.bW=
+        // a.A("InputBind"); sc.OD.Tqb(); this.bW==null ? a.appendChild(
+        // "InputBind") : sc.OD.load(this.bW)`). `Tqb` re-seeds `Af.oUa`; each
+        // `<... Name="action" Value="code">` row overrides it (`Af.load`
+        // L113300). `Name` defaults -1 (skip), `Value` to `Af.errorCode` (-1).
+        sf2::app::input_bind_reset();  // `Af.Tqb()` (L113188)
+        out.input_bind.clear();
+        if (pugi::xml_node ib = cu.child("InputBind")) {
+            out.input_bind_present = true;
+            for (pugi::xml_node row : ib.children()) {
+                const pugi::xml_attribute n = row.attribute("Name");
+                if (!n) continue;
+                int action = -1;
+                try {
+                    action = std::stoi(n.value());
+                } catch (const std::exception&) {
+                    continue;
+                }
+                if (action == -1) continue;  // `u.I(attr,-1)` miss
+                const int code = sf2::data::xml_attr_int(row, "Value", -1);
+                out.input_bind[action] = code;             // `rN.set(d,c)`
+                sf2::app::input_bind_override(action, code);  // `Af.load`
+            }
+        }
     }
 
     // The owned items (JS `$g.parse` reads the Warrior <Items> children).
@@ -579,6 +636,13 @@ void SaveSystem::save(const WarriorSave& w) {
             if (!la) la = cu.append_attribute("Language");
             la.set_value(w.language.c_str());
         }
+
+        // `<InputBind>` (JS `sc.vjb` L225): the `sc` ctor ALWAYS materializes
+        // the node (`this.bW==null ? a.appendChild("InputBind")`), so `Aa.save`
+        // re-serializes it. There is no JS remap writer (`Af` carries only
+        // get/Tqb/load), so any existing rows are preserved and an absent node
+        // becomes empty here.
+        if (!cu.child("InputBind")) cu.append_child("InputBind");
     }
 
     // The owned items (JS `$g` + `Aa.save`): replace the <Items> children.
