@@ -3296,48 +3296,17 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // the reset never draws a visible teleport. The HUD keeps drawing.
     // JS `Onb` (L411) hides the 3-D view (`this.Ta.XF(!1)`) ONLY in the
     // round-transition branches, and only AFTER the end-stance animation has
-    // finished (`kg` L387 -> `h4a` -> `Ewb` -> `h9` -> `Onb`). A plain next
-    // round (`!a_end && !series_advance`) must therefore stay VISIBLE here so
-    // the loser can play its KO/knockdown animation; the hide + plate move to
-    // the phase-3 end-stance gate below. The wave advance (`series_advance`,
-    // JS `mfb` L205745) keeps the immediate hide it had.
-    if (series_advance) {
-        set_scene_visible(false);
-    }
-    // Stash the round result so the deferred plate (phase-3 end-stance end)
-    // can pick the same art.
+    // finished (`kg` L387 -> `h4a` -> `Ewb` -> `h9` -> `Onb`). EVERY
+    // transition — a plain next round AND a wave advance (`mfb`) — must
+    // therefore stay VISIBLE here so the loser can play its KO/knockdown
+    // animation; the hide + plate move to the phase-3 end-stance gate below.
+    // Stash the round result so the deferred plate can pick the same art.
     last_round_result_ = result;
 
-    // JS `ca.Pf` (L196360): the round-END result plate, `fu(1.166)`. The
-    // winner's round-end reason `Iq` picks the art:
-    //   case 2 -> `yca`/`xca` (label_win / label_lose);
-    //   case 3 -> `uca` (timesup); case 4 -> `rca` (ringout);
-    //   default -> `GZ` (perfect / great).
-    // The port's `round_result` maps ko (default / `Onb` KO) -> `ko`,
-    // timeout_win (`Onb` L412 `ey=3`) -> `timesup`, ringout (`BT` L392
-    // `ey=4`) -> `ringout`. `GZ`/`uca`/`rca` have no `ca.vhb` (L410) case,
-    // so their expiry does NOT dispatch in the JS; the port uses the plate as
-    // the end-stance hold (the JS advances the round only when the end-stance
-    // animation finishes: `kg` L387 `h4a` -> `Ewb` L404 `h9` -> `Onb` L411
-    // `ZK(); NA(); Z2()`), so `banner_action::next_round` runs `NA` + `Z2` on
-    // the plate's expiry. A BATTLE-ENDING round with NO waves left raises no
-    // plate here: `end_battle` raises the result plate with the same hold.
-    if (series_advance) {
-        banner_kind result_plate = banner_kind::ko;
-        const char* plate_name = "K.O.";
-        if (result == round_result::timeout_win) {
-            result_plate = banner_kind::timesup;
-            plate_name = "TIMESUP";
-        } else if (result == round_result::ringout) {
-            result_plate = banner_kind::ringout;
-            plate_name = "RINGOUT";
-        }
-        banner_show(result_plate, kJsBannerHoldSeconds,
-                    banner_action::next_round, false);
-        std::fprintf(stdout, "[fight] banner: %s (F%d)\n", plate_name, frame_);
-        std::fflush(stdout);
-    }
-
+    // The result plate is raised by the end-stance gate in `update`
+    // (`end_stance_pending_`), after the loser's KO/knockdown animation.
+    // A BATTLE-ENDING round with NO waves left raises no plate here:
+    // `end_battle` raises the result plate with the same hold.
     enter_end_stance();
     history_.push_back(oc);
 
@@ -3354,16 +3323,14 @@ void FightController::apply_round_result(round_result result, const FightFighter
             // next round can advance the wave again.
             wave_advance_pending_ = spawn_wave;
             if (!c_multi) player_.rounds_won = 0;  // JS `this.kc.ng=0`
-        } else {
-            // JS `Onb` (L411) plain next-round: do NOT hide the arena or
-            // raise the plate yet. The round advances only after the
-            // end-stance animation ends (`kg` L387 `eu==3` -> `h4a` ->
-            // `Ewb` L404 `h9` -> `Onb` `Ta.XF(!1); ZK(); NA(); Z2()`).
-            // Phase 3 keeps the scene VISIBLE and advances the fighters so
-            // the loser plays its KO/knockdown animation first; the
-            // end-stance gate in `update` then hides + raises the K.O. plate.
-            end_stance_pending_ = true;
         }
+        // JS `Onb` (L411): do NOT hide the arena or raise the plate yet. The
+        // round advances only after the end-stance animation ends (`kg` L387
+        // `eu==3` -> `h4a` -> `Ewb` L404 `h9` -> `Onb` `Ta.XF(!1); ZK();
+        // NA(); Z2()`). Phase 3 keeps the scene VISIBLE and advances the
+        // fighters so the loser plays its KO/knockdown animation first; the
+        // end-stance gate in `update` then hides + raises the result plate.
+        end_stance_pending_ = true;
         // The result plate holds the break; its expiry runs `NA()` + `Z2()`
         // through `banner_expire` (`banner_action::next_round`). There is no
         // host "Next" button in the JS: the round-break plate raised by `Z2`
