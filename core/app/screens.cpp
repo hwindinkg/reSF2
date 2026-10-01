@@ -7693,32 +7693,16 @@ void DojoScreen::render_impl(App& app) {
         // (PORT_AUDIT_UI §2.1). Replaces the invented draw_dojo_hud_bar
         // (its hard-coded coords are PORT_AUDIT_UI §3 item 5).
         draw_za_chrome(app, kScreenDojo);
-        // Sensei hint panel (`Ib` L1905-1912 - quest_panel.hpp derives the
-        // ambient tutorial line). EXCLUSIVITY (single source of truth): the
-        // quest modal dims/blocks input; the ambient hint and the modal never
-        // co-draw (same-step mutual exclusivity), so skip while a modal is up.
-        // Replaces the flat 780x64 quad + the invented procedural ring
-        // (PORT_AUDIT_UI 2.9). `Ib` shows OK only with a button text; the
-        // ambient banner has none (`show_ok=false`).
-        const bool modal_up = quest_modal_top(app) != nullptr;
-        // The ambient `Ib` hint is suppressed in fresh-tutorial mode: the
-        // beats are the tutorial (above) and the post-tutorial hub is clean
-        // (the oracle dojo_hub has no banner).
-        if (!modal_up && !app.fresh_tutorial()) {
-            const QuestStep qs = quest_step_for_state(
-                app.res_root(),
-                quest_state_for(tutorial_, story_step_, training_won_, level_, map_focus_,
-                                battles_, {}));
-            // `Ib.Sr()` L1908: exactly ONE label = the joined lines, and the
-            // portrait is the resolved `Image` (the ambient tutorial line uses
-            // the sensei disc, `E.get(12)`) — there is NO speaker row.
-            std::string ambient = qs.line1;
-            if (!qs.line2.empty()) {
-                if (!ambient.empty()) ambient.push_back('\n');
-                ambient += qs.line2;
-            }
-            draw_ib_hint(app, ren, "character_sensei", ambient, /*show_ok=*/false);
-        }
+        // Sensei hint panel: REMOVED (invention). The JS `Ib` bar (L1905-1912)
+        // is shown ONLY while a `Notification` is queued (`Ib.Qhb` L1907 posts
+        // it; `Ib.aa` L1905 counts `ReadTime` down and `OZa` L1908 collapses
+        // it) — the queued Notification is drawn by `draw_quest_modal` below.
+        // The old ambient panel re-derived a banner from `quest_step_for_state`
+        // on EVERY frame with no dialog up, so the sensei line stayed on the
+        // Dojo forever (`tutorial_dojo_new_move` / `tutorial_return_map` …) and
+        // the second wrapped line was clipped by the 170*c label box (the
+        // reported stuck + truncated side dialog). The oracle `dojo_hub` has
+        // no banner (the comment that added it already noted this).
     }
     // The JS hub carries no entry-button row: the Dojo 4-up row, the gear
     // and the disciple chrome were native inventions (PORT_AUDIT_UI
@@ -11089,7 +11073,7 @@ constexpr float kPauseDlgPlayX = 876.25f;
 // dialog can never forfeit it. Idempotent on `PendingBattle::reward_applied`.
 // Declared here for the battle-end handoff; defined after the ResultsScreen
 // (it needs `ResultsScreen::exp_for_level`).
-void apply_fight_reward(App& app);
+bool apply_fight_reward(App& app);
 
 // JS `Gr.addElement` + `Hx.init` (L2051/L2048). Creates the `Gr.Gu` element
 // for an incoming `CalloutSignal`: `count = Gr.Qq(type)` (type 4 =
@@ -11502,24 +11486,12 @@ void FightScreen::update_impl(float dt) {
                          static_cast<long long>(pb.reward_prize_base));
             std::fflush(stdout);
         }
-        // Quest FightEnd (JS `ha.RA("FightEnd")`): records the triple for
-        // later ChangeTab evaluations and fires quests listening for it
-        // (tutorial chain: none — ChangeTab rows read the triple instead).
-        // The subsequent push(Results) fires ChangeTab(From=Fight).
-        {
-            QuestJournal j;
-            // JS `_$Fight` = `Bj.Nb.toString()` = the `hb` triple (L961);
-            // the port records it at launch (falls back to the bare name
-            // for triple-less boots).
-            j.fight = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
-            j.fight_result = player_won ? "Win" : "Loss";
-            try {
-                j.player_level = app().save().load().level;
-            } catch (const std::exception&) {
-            }
-            app().quest_engine().note_fight(j.fight, j.fight_result);
-            app().quest_engine().fire(app(), "FightEnd", j);
-        }
+        // Quest FightEnd (`ha.RA("FightEnd")`) is fired BELOW, AFTER
+        // `apply_fight_reward` (JS `v.kD` L622187: `dmb` grants + levels up,
+        // then `ta.t2=c?1:0`, then `RA("QUEST_EVENT_FIGHT_END")`). Firing it
+        // here (before the grant) read the PRE-level-up `?Player[].Level` and
+        // a `_$LevelUp` that was always 0 — the level-up sensei dialog
+        // (`LevelUpFirstTime`, quests.xml L826) never fired.
         std::fprintf(stdout, "[fight] BATTLE END winner=%s player_won=%d\n",
                      fight_->winner() ? fight_->winner()->name.c_str() : "(none)", player_won);
         std::fprintf(stdout,
@@ -11566,7 +11538,28 @@ void FightScreen::update_impl(float dt) {
         // JS `v.kD` (L622187) -> `dmb`/`emb` (L93552): the reward is granted
         // AT THE FIGHT END (with `p.o.save()`), before the results dialog is
         // created � so skipping/closing the dialog can never forfeit it.
-        apply_fight_reward(app());
+        const bool leveled_up = apply_fight_reward(app());
+        // JS `v.kD` L1214: AFTER the grant (`c=p.F().dmb(f)` = leveled), the
+        // journal is stamped (`a.t2=c?1:0`) and THEN the FightEnd event fires
+        // (`ha.F().RA("QUEST_EVENT_FIGHT_END")`). Firing before the grant made
+        // `_$LevelUp` always 0 and `?Player[].Level` the PRE-level-up value, so
+        // the level-up sensei dialog (`LevelUpFirstTime`, quests.xml L826) and
+        // the `snd_learn` jingle never ran.
+        {
+            QuestJournal j;
+            // JS `_$Fight` = `Bj.Nb.toString()` = the `hb` triple (L961);
+            // the port records it at launch (falls back to the bare name
+            // for triple-less boots).
+            j.fight = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
+            j.fight_result = player_won ? "Win" : "Loss";
+            j.level_up = leveled_up ? 1 : 0;  // `ta.t2` (L962)
+            try {
+                j.player_level = app().save().load().level;  // post-level-up
+            } catch (const std::exception&) {
+            }
+            app().quest_engine().note_fight(j.fight, j.fight_result);
+            app().quest_engine().fire(app(), "FightEnd", j);
+        }
         std::fflush(stdout);
         push(kScreenResults);
     }
@@ -12820,9 +12813,9 @@ static int flush_achievement_counters(App& app, WarriorSave& w,
 // `p.o.save()` -- all BEFORE the results dialog is shown, so the dialog's
 // skip/close (`kk.rxa` -> `v.qxa` L1213) never forfeits the reward.
 // Idempotent on `PendingBattle::reward_applied`.
-void apply_fight_reward(App& app) {
+bool apply_fight_reward(App& app) {
     PendingBattle& pb = app.pending_battle();
-    if (pb.reward_applied) return;
+    if (pb.reward_applied) return false;
     pb.reward_applied = true;
     const bool player_won = pb.player_won;
     const std::int64_t money_reward = pb.reward_money;
@@ -12832,7 +12825,7 @@ void apply_fight_reward(App& app) {
         w = app.save().load();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[result] save load failed: %s\n", e.what());
-        return;
+        return false;
     }
     bool leveled_up = false;
     // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money), Exp ->
@@ -12926,6 +12919,7 @@ void apply_fight_reward(App& app) {
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[result] save failed: %s\n", e.what());
     }
+    return leveled_up;
 }
 
 // JS `Lr`/`Or`/`Pr` reveal timeline (L2057-2081). `ed(a)` is a DURATION in

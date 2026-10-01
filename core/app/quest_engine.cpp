@@ -22,6 +22,7 @@
 #include "app/lang_table.hpp"
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
+#include "audio/audio.hpp"
 #include "xml_doc.hpp"
 
 namespace sf2::app {
@@ -2706,6 +2707,18 @@ QuestEngine::ActionRest QuestEngine::run_actions(
     for (std::size_t i = 0; i < acts.size(); ++i) {
         const QuestAction& a = acts[i];
         const std::string& t = a.tag;
+        // JS base action `S.S(a)` (L482988): EVERY action plays its `Sound`
+        // attribute before its own body — `let b=this.Tla; b!=null&&b!=""&&
+        // ta.ak(this.Tla)`. `<Activate ActionID="DiscountRoll"
+        // Sound="snd_learn" />` (quests.xml L837/L877) is the level-up jingle;
+        // the port used to drop it (no `Sound` handling anywhere), so the
+        // level-up had no sound even once the quest fired.
+        {
+            const std::string snd = attr_or(a.attrs, "Sound");
+            if (!snd.empty()) {
+                sf2::audio::AudioEngine::instance().play(snd);
+            }
+        }
         if (t == "If") {
             // `co.S` (L1038): the If's own `<Conditions>` against the live
             // journal/save; an UNKNOWN operand takes the Else branch.
