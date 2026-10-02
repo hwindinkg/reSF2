@@ -418,7 +418,22 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     FightContext ctx;
     ctx.roll01 = [this]() { return roll01(); };  // owned stream or override
     ctx.stage = round_stage::fight;
-    ctx.anims_me = {st.my_anim};
+    // JS `Gc.zT` (L347516): `Ae.XH` (the `lg.vQ` slot-1 list a
+    // `<CurrentAnimation Name=...>` reads) = the CURRENT move's `xl`
+    // (`d=c.Sj(); d!=null&&(a.G=d.xl)`), i.e. the move name PLUS its
+    // `<Template>` chain — NOT the bare move name. `V1` only overwrites
+    // `xK`/`Wl`/`YH`, never `XH`, so the current move's full `xl` is what the
+    // candidate's own `<CurrentAnimation>` guards see. Passing the bare name
+    // made `StepForward`'s restart guard `Not(SelfUninterrupt && CurrentAnimation
+    // Name="Step")` read `"Step"` against `["StepForward"]` -> FALSE, so the
+    // guard was OFF and the tabular AI re-selected `StepForward` every few
+    // frames (the reported enemy jitter). `MoveDef::anim_names` is exactly
+    // `xl` (name + transitive Template names, move_def.cpp L1094).
+    if (st.current_move != nullptr) {
+        ctx.anims_me = st.current_move->anim_names;
+    } else {
+        ctx.anims_me = {st.my_anim};
+    }
     ctx.anims_enemy = {st.enemy_anim};
     ctx.dist_x = st.enemy_x - st.my_x;
     ctx.me_x = st.my_x;
