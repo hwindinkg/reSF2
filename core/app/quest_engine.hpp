@@ -640,6 +640,38 @@ struct QuestSideEffects {
     // for a zero `Aspect` (`oma`) and re-applies (`VO` -> `mY`). The port
     // derives item perks live (no stale zero aspects) -> record only.
     bool fix_paid_zero_aspects = false;
+    // --- the remaining declared-but-unimplemented quest actions (this wave) --
+    // `mo` (`ESendStrangerStats` g="202", class L561483): `parse` = base (no
+    // attr read; the shipped `Difficulty`/`Result`/`Store` are ignored) and
+    // `S(a){debugger;super.S(a);this.sa()}` — a web stub. Record only.
+    std::vector<std::string> stranger_stats;
+    // `uo` (`EShowAd` g="206", class L562822): `parse(a){debugger;
+    // super.parse(a)}` but `S(){debugger}` OVERRIDES the base — it applies no
+    // Lock, plays no Sound, runs no children and never calls `sa()`. The
+    // resolved `Type` is recorded (the port advances; see run_actions).
+    std::vector<std::string> show_ads;
+    // `Mo` (`EUpdatePacksData` g="212", class L569843): `S(a){debugger;
+    // super.S(a);this.sa()}` — a web stub. Record only.
+    std::vector<std::string> update_packs_data;
+    // `Oo` (`EUpdateShop` g="214", class L570119): `S(a){debugger;super.S(a);
+    // a=Oa.get();a!=null&&(a.refresh(),a.y6());this.sa()}` — refresh the LIVE
+    // shop; applied via `shop_refresh_pending_` like `UpdateShopItems`.
+    std::vector<std::string> update_shop;
+    // `Qo` (`EValidatePacks` g="217", class L570603): `S(a){super.S(a);
+    // we.F().LU(new pg(!0));this.sa()}` — `we.LU` (L481332) reconciles the
+    // loaded pack list against the native pack manager; the port has no pack
+    // manager -> record only.
+    std::vector<std::string> validate_packs;
+    // The names `Nz.hi` (L488166) declares but `Fe.S0a` (L484148) has NO case
+    // for: `Fe.Us` (L484038) substitutes `Fe.Wxa()` = `qa.Ya(S,[])`, the bare
+    // base action `S` (L482959). `S.S(a)` (L482988) applies Lock/Sound, sets
+    // `ta` and (the base has no `.u`) calls `sa()`; it does NOT run children.
+    // Shipped quest tags: ShowDebugLine (test_quests.xml), FacebookAPICall/
+    // SetFBIndicator (facebook.xml), GiveGift/SetFightWin/
+    // SetRaidInfoTutorialStep (test_quests.xml), RaidIndicateRaidBtn
+    // (zone_7/story.xml), ConnectToRaids (quests.xml), ClickHint/
+    // SceneMenuScroll (tutorial_quests.xml). One entry per executed tag.
+    std::vector<std::string> inert_actions;
 };
 
 // One live map button (`hg`, JS L2176-2177): an entry of the `Vb` manager's

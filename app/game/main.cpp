@@ -5598,6 +5598,116 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             check(fx.fix_paid_zero_aspects && !unknown_has("FixPaidZeroAspects"),
                   "FixPaidZeroAspects -> recorded (port derives perks live)");
         }
+        // === NEW WAVE 2: the remaining declared-but-unimplemented actions ====
+        // `Fe.S0a` (L484148) has NO `E`-case for these; `Fe.Us` (L484038)
+        // substitutes the bare base action `S` (L482959). Each must be
+        // recorded KNOWN-INERT (`fx.inert_actions`) and NOT in `fx.unknown`.
+        {
+            const auto inert_has = [&](const char* tag) -> bool {
+                for (const std::string& s :
+                     app.quest_engine().last_probe_effects().inert_actions) {
+                    if (s == tag) return true;
+                }
+                return false;
+            };
+            for (const char* tag :
+                 {"ShowDebugLine", "FacebookAPICall", "SetFBIndicator",
+                  "GiveGift", "SetFightWin", "SetRaidInfoTutorialStep",
+                  "RaidIndicateRaidBtn", "ConnectToRaids", "ClickHint",
+                  "SceneMenuScroll"}) {
+                fire_action(tag, {});
+                std::fprintf(stdout,
+                             "[qa] INERTBASE %-22s inert=%d unknown=%d\n", tag,
+                             inert_has(tag) ? 1 : 0, unknown_has(tag) ? 1 : 0);
+                std::fflush(stdout);
+                check(inert_has(tag) && !unknown_has(tag),
+                      (std::string(tag) +
+                       " -> known-inert (Fe.Wxa base S; Sound+sa, no children)")
+                          .c_str());
+            }
+        }
+        // `mo` ESendStrangerStats (L561483): `S(a){debugger;super.S(a);
+        // this.sa()}` — web stub; `parse` reads no attr. Record only.
+        {
+            fire_action("SendStrangerStats",
+                        {{"Difficulty", "_StrangerDifficulty"},
+                         {"Result", "_StrangerResult"},
+                         {"Store", "_StrangerStore"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout,
+                         "[qa] SENDSTRANGERSTATS rec=%zu unknown=%d\n",
+                         fx.stranger_stats.size(),
+                         unknown_has("SendStrangerStats") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.stranger_stats.size() == 1 &&
+                      !unknown_has("SendStrangerStats"),
+                  "SendStrangerStats -> recorded (mo web stub; super.S + sa)");
+        }
+        // `uo` EShowAd (L562822): `S(){debugger}` overrides the base — no
+        // Lock/Sound/children/sa. Record the resolved `Type`.
+        {
+            fire_action("ShowAd", {{"Type", "Interstitial"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec =
+                fx.show_ads.size() == 1 && fx.show_ads[0] == "Interstitial";
+            std::fprintf(stdout, "[qa] SHOWAD %s unknown=%d\n",
+                         fx.show_ads.empty() ? "(none)" : fx.show_ads[0].c_str(),
+                         unknown_has("ShowAd") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("ShowAd"),
+                  "ShowAd -> recorded Type (uo web stub S(){debugger})");
+        }
+        // `Mo` EUpdatePacksData (L569843): `S(a){debugger;super.S(a);
+        // this.sa()}` — web stub. Record only.
+        {
+            fire_action("UpdatePacksData", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout,
+                         "[qa] UPDATEPACKSDATA rec=%zu unknown=%d\n",
+                         fx.update_packs_data.size(),
+                         unknown_has("UpdatePacksData") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.update_packs_data.size() == 1 &&
+                      !unknown_has("UpdatePacksData"),
+                  "UpdatePacksData -> recorded (Mo web stub; super.S + sa)");
+        }
+        // `Oo` EUpdateShop (L570119): `a=Oa.get();a!=null&&(a.refresh(),
+        // a.y6())` — no-op without a live shop, refresh with it.
+        {
+            const std::size_t rf0 = app.quest_engine().shop_refresh_actions();
+            fire_action("UpdateShop", {});  // no live shop -> record only
+            const std::size_t rec0 =
+                app.quest_engine().last_probe_effects().update_shop.size();
+            const std::size_t rf_noshop = app.quest_engine().shop_refresh_actions();
+            app.screens().push(
+                sf2::app::make_screen(app.screens(), sf2::app::kScreenShop));
+            app.run_one_frame();
+            fire_action("UpdateShop", {});  // live shop -> refresh + y6
+            const std::size_t rf_shop = app.quest_engine().shop_refresh_actions();
+            std::fprintf(stdout,
+                         "[qa] UPDATESHOP rec=%zu refresh %zu->(no-shop "
+                         "%zu)->(shop %zu) unknown=%d\n",
+                         rec0, rf0, rf_noshop, rf_shop,
+                         unknown_has("UpdateShop") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec0 == 1 && !unknown_has("UpdateShop") && rf_noshop == rf0 &&
+                      rf_shop == rf0 + 1,
+                  "UpdateShop -> recorded + live-shop refresh (Oo refresh/y6)");
+            app.screens().pop();
+            app.run_one_frame();
+        }
+        // `Qo` EValidatePacks (L570603): `we.F().LU(new pg(!0))` reconciles the
+        // native pack manager; no port pack manager -> record only.
+        {
+            fire_action("ValidatePacks", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout, "[qa] VALIDATEPACKS rec=%zu unknown=%d\n",
+                         fx.validate_packs.size(),
+                         unknown_has("ValidatePacks") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.validate_packs.size() == 1 && !unknown_has("ValidatePacks"),
+                  "ValidatePacks -> recorded (we.LU native pack manager absent)");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

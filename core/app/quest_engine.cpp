@@ -3279,12 +3279,14 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // flash lands once the player expands it.
             fx.collapse_nav = true;
         } else if (t == "ClickHint" || t == "SceneMenuScroll") {
-            // `Nz.hi` (L487253) matches both names, so `Fe.Ij` builds
-            // `"E"+name`; `Fe.S0a` (L487290) has NO `EClickHint`/
+            // `Nz.hi` (L488166) matches both names, so `Fe.Ij` builds
+            // `"E"+name`; `Fe.S0a` (L484148) has NO `EClickHint`/
             // `ESceneMenuScroll` case -> `default:a=null` -> `Fe.Wxa()` = the
-            // base `S` (L485232), whose `S(a)` only applies `Lock`/`Sound`
-            // and resumes the serialized tail — it renders NOTHING. The port
-            // matches: silent no-op. (Neither tag occurs in any shipped XML.)
+            // base `S` (L482959), whose `S(a)` (L482988) only applies
+            // `Lock`/`Sound` and advances (`sa()`) — it renders NOTHING. The
+            // port matches: record as KNOWN-INERT (the shipped uses are
+            // tutorial_quests.xml L338/L339, inside the tutorial chain).
+            fx.inert_actions.push_back(t);
         } else if (t == "BlockTouches") {
             // `Cn.S` (L1115, factory `case "EBlockTouches"`; `Nz.hi` matches
             // the bare name minimally): `Sb.F().kk(!0)` with NO armed target �
@@ -4648,6 +4650,59 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
                 return sub;
             }
+        } else if (t == "SendStrangerStats") {
+            // `mo` (`ESendStrangerStats` g="202", class L561483):
+            // `parse(a){super.parse(a)}` reads only Lock/Sound; `S(a){debugger;
+            // super.S(a);this.sa()}`. The `debugger` web stub is inert, so the
+            // JS-observable effect is the base Sound/Lock + the chain advance
+            // (`sa()`). `Difficulty`/`Result`/`Store` (quests.xml L242/L256)
+            // are never read -> record only.
+            fx.stranger_stats.push_back("SendStrangerStats");
+        } else if (t == "ShowAd") {
+            // `uo` (`EShowAd` g="206", class L562822): `parse(a){debugger;
+            // super.parse(a)}` and `S(){debugger}` — the web stub OVERRIDES the
+            // base entirely, so it applies NO Lock, plays NO Sound, runs NO
+            // children and does NOT call `sa()` (the ad bridge is absent on
+            // web; a `sa()`-less `S` would STALL the quest chain). JS-observable
+            // effect: none. The port records the resolved `Type` and advances
+            // (the documented async->sync contract; a real stall would wedge
+            // the serialized chain).
+            fx.show_ads.push_back(quest_var(app, locals, attr_or(a.attrs, "Type")));
+        } else if (t == "UpdatePacksData") {
+            // `Mo` (`EUpdatePacksData` g="212", class L569843):
+            // `S(a){debugger;super.S(a);this.sa()}` — web stub + advance
+            // (packs.xml L162). Record only.
+            fx.update_packs_data.push_back("UpdatePacksData");
+        } else if (t == "UpdateShop") {
+            // `Oo` (`EUpdateShop` g="214", class L570119): `S(a){debugger;
+            // super.S(a);a=Oa.get();a!=null&&(a.refresh(),a.y6());this.sa()}` —
+            // refresh the LIVE shop (`Oa.get()`; `refresh` + `y6`).
+            // promotions_from_first_session.xml L55. Applied in
+            // `enqueue_effects` via `shop_refresh_pending_`, like
+            // `UpdateShopItems` (`Imb`).
+            fx.update_shop.push_back("UpdateShop");
+        } else if (t == "ValidatePacks") {
+            // `Qo` (`EValidatePacks` g="217", class L570603):
+            // `S(a){super.S(a);we.F().LU(new pg(!0));this.sa()}` — `LU`
+            // (L481332) diffs the loaded pack list against the native pack
+            // manager and may `L.K.reload()`; the port has no pack manager ->
+            // record only.
+            fx.validate_packs.push_back("ValidatePacks");
+        } else if (t == "ShowDebugLine" || t == "FacebookAPICall" ||
+                   t == "SetFBIndicator" || t == "GiveGift" ||
+                   t == "SetFightWin" || t == "SetRaidInfoTutorialStep" ||
+                   t == "RaidIndicateRaidBtn" || t == "ConnectToRaids") {
+            // `Nz.hi` (L488166) declares these names but `Fe.S0a` (L484148)
+            // has NO `E`-case: `Fe.Us` (L484038) substitutes `Fe.Wxa()` =
+            // `qa.Ya(S,[])`, the bare base action `S` (L482959). `S.S(a)`
+            // (L482988) applies Lock/Sound, sets `ta` and (the base has no
+            // `.u`) calls `sa()`; it does NOT run children — so
+            // `ConnectToRaids`'s `<Success>`/`<Error>` and `FacebookAPICall`'s
+            // branches never run on web, and `SetFightWin`/`GiveGift` write
+            // NOTHING (declared-but-unimplemented in the web bundle). The port
+            // already plays Sound at the top of the loop; record the tag as
+            // KNOWN-INERT (never `fx.unknown`).
+            fx.inert_actions.push_back(t);
         } else {
             fx.unknown.push_back(t);
         }
@@ -5094,8 +5149,12 @@ void QuestEngine::enqueue_effects(App& app, const QuestSideEffects& fx,
     if (fx.nav_lock) nav_locked_ = true;  // `za.YA(!1)` (Bo/Do/Eo)
     if (fx.unblock) unlock_controls();
     if (fx.collapse_nav) collapse_nav_pending_ = true;
-    // `Po` `UpdateShopItems` (L570290): `Oa.get().Imb()` on the live shop.
-    if (fx.update_shop_items) shop_refresh_pending_ = true;
+    // `Po` `UpdateShopItems` (L570290): `Oa.get().Imb()` on the live shop;
+    // `Oo` `UpdateShop` (L570119): `Oa.get().refresh()`+`y6()`. Both refresh
+    // the LIVE shop only.
+    if (fx.update_shop_items || !fx.update_shop.empty()) {
+        shop_refresh_pending_ = true;
+    }
     std::fflush(stdout);
 }
 
