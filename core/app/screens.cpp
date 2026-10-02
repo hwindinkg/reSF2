@@ -6421,14 +6421,18 @@ std::string find_idle_clip_name(
 
 // JS `Pi` idle state = `PeacefulStart` (`iz.XBa` L227616: `"PeacefulStart":4`).
 // The selector is the `<Template>` TOKEN, not `<Tactic>`: every move whose
-// `<Template>` pipe-list carries `PeacefulStart` is a candidate, and `Aua`
-// (L343447 `c>=d&&(c>d&&(b.length=0),b.push(a))`) keeps the max-`<Priority>`
-// group. For the shipped Fists fighter the winner is `FistsStartStance-Left`
-// (Priority 10, FileName `stance_1.bytes`); Knives -> `KnivesStartStance-Left`
-// (Priority 12, `knives_stance.bytes`). The old scan used the FIGHT idle
-// (`*StartStanceIdle*`, `fists1_stance_idle`), which is why the shop showed an
-// armed stance with no weapon in hand (the `stance_1` pivot also seats the
-// model at the correct height). `""` = no clip.
+// `<Template>` pipe-list carries the SHOP token `ShopPeacefulStart` is a
+// candidate (the JS state name "PeacefulStart" is the shop variant — the
+// shipped XML spells it `ShopPeacefulStart`, moves.xml `FistsStartStance-Left`),
+// and `Aua` (L343447 `c>=d&&(c>d&&(b.length=0),b.push(a))`) keeps the
+// max-`<Priority>` group. For the shipped Fists fighter the winner is
+// `FistsStartStance-Left` (Priority 10, FileName `stance_1.bytes`); Knives ->
+// `KnivesStartStance-Left` (Priority 12, `knives_stance.bytes`). The old scan
+// matched the bare token `"PeacefulStart"`, which NO shipped move carries, so
+// it always returned "" and the caller fell back to the FIGHT idle
+// (`*StartStanceIdle*`, `fists1_stance_idle`) — which is why the shop showed an
+// armed stance with no weapon in hand and the model sat slightly high (the
+// `stance_1` pivot also seats the model at the correct height). `""` = no clip.
 std::string find_peaceful_idle_clip_name(
     const std::map<std::string, sf2::scene::MoveDef>& moves,
     const std::map<std::string, sf2::data::anim_clip>& clips,
@@ -6465,7 +6469,7 @@ std::string find_peaceful_idle_clip_name(
         const sf2::scene::MoveDef& m = kv.second;
         bool peaceful = false;
         for (const std::string& t : m.template_tags) {
-            if (t == "PeacefulStart") {
+            if (t == "ShopPeacefulStart") {
                 peaceful = true;
                 break;
             }

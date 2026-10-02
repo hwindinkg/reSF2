@@ -354,14 +354,26 @@ bool eval_distance(const Cond& c, const FightContext& ctx) {
     // 0 and fired on ragdoll frame ~17 instead of the JS settle/`Min="180"`.
     float fx = 0.0f, fy = 0.0f, tx = 0.0f, ty = 0.0f;
     bool have_refs = false;
-    // Only the per-fighter COM/Floor refs are resolved JS-exact here; every
-    // other object (Nodes/Pivot/Wall) keeps the legacy root-gap path so no
-    // unrelated move gate shifts. JS `ee.Ij`: an ABSENT `Player` -> "Null"
-    // (0) == `Me`, so a Player-less `To` must read the OWNER, not the enemy.
-    const bool com_floor =
+    // JS `ee.nt` resolves EVERY object ref (`ee.cfa`/`MQ`/`j8a`/`q9a`): COM=6,
+    // Floor=4, Nodes=1, Pivot=2, Wall=3. The port's `ref_pos` implements all
+    // of them; the old gate only admitted COM/Floor, so a `Nodes` ref (the
+    // `Standup`/`StandupBack` orientation gate `<Distance Min=0 Axis="Y">
+    // <From Nodes NPivot/><To Nodes NNeck/></Distance>`) fell through to the
+    // degenerate `dist_y==0` path and passed for BOTH getup directions — the
+    // port then played `StandupBack` on a face-UP body (the reported abrupt
+    // getup). Resolve Nodes/Pivot/Wall through `ref_pos` too. JS `ee.Ij`: an
+    // ABSENT `Player` -> "Null" (0) == `Me`, so a Player-less `To` must read
+    // the OWNER, not the enemy.
+    const bool ref_objects =
         c.from_obj == "COM" || c.to_obj == "COM" || c.from_obj == "Floor" ||
-        c.to_obj == "Floor";
-    if (ctx.ref_pos && com_floor) {
+        c.to_obj == "Floor" ||
+        // The getup orientation gate resolves BOTH ends as posed NODES
+        // (`<Distance Min="0" Axis="Y"><From Object="Nodes" Part="NPivot"/>
+        // <To Object="Nodes" Part="NNeck"/></Distance>`); a Nodes-vs-Nodes ref
+        // is the only extra shape routed through `ref_pos` here so no other
+        // move gate (single-end Nodes / Pivot / Wall attack ranges) shifts.
+        (c.from_obj == "Nodes" && c.to_obj == "Nodes");
+    if (ctx.ref_pos && ref_objects) {
         const int fp = c.from_player_set ? c.from_player : 1;
         const int tp = c.to_player_set ? c.to_player : 1;
         have_refs =
