@@ -2035,6 +2035,7 @@ void Fighter::clear_move() {
     render_offset_ = 0.0f;
     render_offset_y_ = 0.0f;
     render_offset_valid_ = true;
+    preview_mode_ = false;
     align_pivot_u_ = -1;
     // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too;
     // `Te.reset` L548 also restores the ctor default `FX = 1`.
@@ -2050,7 +2051,8 @@ void Fighter::clear_move() {
 // `advance()`s exactly like the fight so the clip lasts
 // `(clipLen-FirstFrame)*(MidFrames+1)+1` 60 Hz frames — NOT one clip frame per
 // tick (the old raw `++frame` was 3x too fast for MidFrames=2).
-void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip) {
+void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
+                                 float node_x, float node_y) {
     clear_move();  // `Te.reset`/`Bnb`: drop any previous move + ragdoll
     current_move_ = &move;
     current_clip_ = &clip;
@@ -2061,6 +2063,15 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     sub_frac_ = 0.0f;  // [FIX slow-mo] JS-exact start sample (frac 0)
     last_action_frame_ = -1;  // the `cX` sentinel (first `vp` sees a change)
     ended_move_ = nullptr;
+    // [FIX Pi preview placement — JS `Pi.J9` L439 + `Pi.job` L444 -> `wd.oL`
+    // L577] The `Pi` model node sits at J9=(0,-93); `oL` shifts every node's
+    // `ma` so the render anchor lands there ONCE, and the clip then rides from
+    // it. Reproduce it: the first `sample` captures `render_offset*` from this
+    // node point instead of leaving the anchor on the clip pivot.
+    preview_mode_ = true;
+    world_x_ = node_x;
+    world_y_ = node_y;
+    render_offset_valid_ = false;
     sample_current();  // the first `Te.eda` pose
 }
 
@@ -2632,6 +2643,10 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // No `<Align>` (JS `Gla(0,0,0)` shifts nothing): hold the anchor
             // itself continuous.
             render_offset_ = world_x_ - px[anchor_u];
+            // [FIX Pi preview placement] A display-only preview (`Pi` node at
+            // J9) captures the y offset from the node too; a fight move keeps
+            // `render_offset_y_` from `start_move_impl` (the `Gla` y shift).
+            if (preview_mode_) render_offset_y_ = world_y_ - py[anchor_u];
             render_offset_valid_ = true;
         }
         world_x_ = px[anchor_u] + render_offset_ + j8_x_;

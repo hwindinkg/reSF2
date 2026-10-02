@@ -386,7 +386,16 @@ public:
     // `advance()` once per fixed step and reads `move_frame()` (JS `Te.M0()`).
     // `preview_active()` goes false when the clip ends (`Te.KNa` clears the
     // move), the `Ad.kg` animation-end.
-    void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip);
+    // `node_x`/`node_y` = the `Pi` model node placement (JS `Pi.J9 = (0,-93)`,
+    // L439, applied via `wd.oL` L577 at `Pi.job`). The JS `Pi` pins the
+    // fighter's render anchor (NPivot) at J9 ONCE (`oL` shifts every `ma`), and
+    // every later `eda` lets the clip ride from there; the port's `sample`
+    // reproduces that as `render_offset = node - clip[anchor]` captured on the
+    // first sample (`render_offset_valid_ == false`). Without this the preview
+    // was re-anchored to the clip pivot (the armor/helm try-on sank and the
+    // profile idle legs floated).
+    void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
+                            float node_x = 0.0f, float node_y = -93.0f);
     bool preview_active() const { return current_clip_ != nullptr; }
 
     // --- move-frame action dispatch (JS `Te.Lwa` L563-564) -----------------
@@ -970,6 +979,10 @@ private:
     // node's swing and drifted the intro stance ~19u off the JS.
     float render_offset_ = 0.0f;
     bool render_offset_valid_ = true;
+    // True while a display-only preview clip is seated (`start_preview_clip`):
+    // the first sample then captures the y render offset from the `Pi` node
+    // placement too. Fight moves keep the y anchor rule of `start_move_impl`.
+    bool preview_mode_ = false;
     float prev_align_pivot_world_x_ = 0.0f;  // previous frame's world x of the Part
     // [B1 FIX — vertical render anchor] The y analog of `render_offset_`.
     // The JS anchor is a POSED node: `Te.eda` (L556) writes `ma = fq[mo] + j8`

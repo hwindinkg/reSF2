@@ -6607,9 +6607,12 @@ constexpr float kDestinationModelLocalY = -93.0f;
 // source is the same player warrior + idle clip the dojo hub uses.
 void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
                      const sf2::data::anim_clip& clip, int frame);
+// Defined with the shop helpers below; used here to map a clip back to its move.
+std::string shop_clip_key(const sf2::scene::MoveDef& m);
 void draw_destination_model(App& app, sf2::render::Renderer& ren,
                             std::unique_ptr<sf2::scene::Fighter>& fighter,
-                            bool& tried, bool& ok, const sf2::data::anim_clip*& idle) {
+                            bool& tried, bool& ok, const sf2::data::anim_clip*& idle,
+                            const sf2::scene::MoveDef*& move) {
     if (!app.has_fight_assets()) return;
     if (!tried) {
         tried = true;
@@ -6620,15 +6623,36 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
                                           : assets.clips.find(idle_name);
         if (!assets.merged.bones.empty() && it != assets.clips.end() &&
             !it->second.frames.empty()) {
-            fighter = std::make_unique<sf2::scene::Fighter>();
-            fighter->set_model(assets.merged);
-            fighter->set_color(assets.dojo.root_color());
-            idle = &it->second;
-            ok = true;
+            // The idle MoveDef drives the `Te.ia` subframe pacing (MidFrames /
+            // FirstFrame) exactly like the profile avatar.
+            for (const auto& kv : assets.moves) {
+                if (shop_clip_key(kv.second) == it->first) {
+                    move = &kv.second;
+                    break;
+                }
+            }
+            if (move != nullptr) {
+                fighter = std::make_unique<sf2::scene::Fighter>();
+                fighter->set_model(assets.merged);
+                fighter->set_color(assets.dojo.root_color());
+                idle = &it->second;
+                // JS `Pi.Ex` L2301 -> `wd.wI` seats the clip at the `Pi` node
+                // J9=(0,-93) (`Pi.J9` L439 -> `Pi.job` L444 `oL`).
+                fighter->start_preview_clip(*move, *idle);
+                ok = true;
+            }
         }
     }
     if (!ok || fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
-    draw_pi_fighter(ren, *fighter, *idle, 0);
+    // JS `Pi.aa` L445 (`this.ia()`) advances the `Pi` fighter EVERY frame, so
+    // the destination idle is a LIVE loop, not a static frame-0 backdrop. On
+    // the clip end (`Te.KNa`) the JS `Pi` re-enters the idle state; restart it.
+    if (fighter->preview_active()) {
+        fighter->advance(0.0f);
+    } else if (move != nullptr) {
+        fighter->start_preview_clip(*move, *idle);
+    }
+    draw_pi_fighter(ren, *fighter, *idle, fighter->move_frame());
 }
 
 // Draws one `Pi` model at frame `frame` of `clip` (the `Pi.Jc` viewer). Shared
@@ -6637,9 +6661,17 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
 // transform (scale 1.8, translate (offset, 412), local y -93).
 void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
                      const sf2::data::anim_clip& clip, int frame) {
+    (void)clip;
+    (void)frame;
+    // The pose is the fighter's LIVE `advance()`d sample (`Te.eda` through the
+    // `(MidFrames+1)` subframe pacing), already seated at the `Pi` node J9 by
+    // `start_preview_clip`. The old extra `sample(clip, frame, ..., interp=
+    // false)` re-pinned the render anchor to the clip pivot EVERY draw (the
+    // armor/helm try-on sank, the profile idle legs floated) and ran the cloth
+    // solver a SECOND time per frame (the looping over-stretch). Draw the
+    // current pose only, exactly like `draw_dojo_figure` does for the hub.
     sf2::render::Camera cam;
     sf2::scene::LocationScene::destination_camera(cam, kViewW, kViewH);
-    fighter.sample(clip, frame, 0.0f, kDestinationModelLocalY, 1);
     draw_dojo_figure(ren, cam, fighter, kDestinationModelScale,
                      sf2::scene::LocationScene::destination_model_offset_x(kViewW, kViewH),
                      kDestinationModelY);
@@ -15587,9 +15619,15 @@ void ShopScreen::render_impl(App& app) {
         draw_pi_fighter(ren, *preview_fighter_, *preview_clip_, preview_frame_);
     } else {
         draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
-                               backdrop_fig_ok_, backdrop_idle_);
+                               backdrop_fig_ok_, backdrop_idle_, backdrop_move_);
     }
     draw_destination_dim(ren);
+    // JS `Oa.Fhb` L2300 -> `this.sab()` L2301 -> `Bcb()` L2301: a TryOn on a
+    // non-armor/helm tab (`Hg != 1 && Hg != 2`) hides the shop body
+    // (`this.bB.node.Rc(!1)`) and shows only the `Pi` model + dim overlay. The
+    // port drew the full UI over the weapon try-on (the report: "не пропадает
+    // интерфейс магазина").
+    if (preview_active_ && tab_ != 1 && tab_ != 2) return;
 
     // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width
     // bar + `Le` buttons (id 248 shop atlas `buttons/<Category>[_active]`),
@@ -17648,7 +17686,7 @@ void EquipmentScreen::render_impl(App& app) {
         draw_pi_fighter(ren, *avatar_fighter_, *avatar_clip_, avatar_frame_);
     } else {
         draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
-                               backdrop_fig_ok_, backdrop_idle_);
+                               backdrop_fig_ok_, backdrop_idle_, backdrop_move_);
     }
     draw_destination_dim(ren);
     // `qab` (L1131112): during the Show only the `Pi` avatar + bg are visible;
