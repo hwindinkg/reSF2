@@ -569,6 +569,77 @@ struct QuestSideEffects {
     // `rc.state` write) and `CheckItemsFromPurchasedOffers` (`In` L530984 ->
     // `TZa()`). One entry per executed action (`tag:detail`).
     std::vector<std::string> offer_actions;
+    // --- the previously-UNKNOWN quest actions (this wave) ------------------
+    // `ko` (`ERun` g="200", class L560588): the resolved quest names whose
+    // `<Conditions>` held (`be.compare` L518197) and whose `<Actions>` ran
+    // (`be.lF` L518318 `this.YU.S(a)`). One entry per executed Run.
+    std::vector<std::string> run_quests;
+    // `Zn` (`EGiveItemPerk` g="1F3", class L554825): `y6a` finds the named
+    // `<Perk>` in the catalog item's `kz` (port `CatalogItem::perks`) and
+    // `mY` (L646355) appends it to the owned holder's `<Enchantments>` — NO
+    // dedupe (`anb` is only on the `GivePerk ApplyTo="Item"` path). One entry
+    // per granted perk.
+    struct ItemPerkGrant {
+        std::string item;  // resolved `ItemName`
+        std::string perk;  // resolved `PerkName`
+    };
+    std::vector<ItemPerkGrant> item_perk_grants;
+    // `lo` (`ERunCallback` g="201", class L561106): `a.Uob` (L516060) invokes
+    // the native callback registry `Cv` by the resolved `Name`, passing each
+    // child `<Arg Value>` (`vd.I4a`). The port has no native callback bridge
+    // -> record only.
+    struct RunCallback {
+        std::string name;
+        std::vector<std::string> args;
+    };
+    std::vector<RunCallback> run_callbacks;
+    // `zo` (`EShowVideo` g="209", class L565119): resolved `Name`; the port
+    // has no video player -> record only (the JS `sa()` fires from `Ngb`).
+    std::vector<std::string> show_videos;
+    // `On` (`EDenomination` g="1E2", class L534501): `xtb`/`mtb` write the
+    // save's `DenominationDigits`/`CoinIcon`, then `Bya` (L137565) rescales
+    // `Tb`/`hC` by `10^(new-old)`. One entry per action.
+    struct DenominationWrite {
+        int digits = -1;   // `kq` (`u.I(DenominationDigits,-1)`)
+        std::string icon;  // `Vf` (`CoinIcon`, "MiscSprites." stripped)
+    };
+    std::vector<DenominationWrite> denominations;
+    // `Gf` (`EDeliver` g="1E1", class L534002): resolved `Item`/`Enchantment`.
+    // The JS delivers a pending shop purchase (`Pa.AYa` -> `gwa` L630684) or an
+    // enchantment (`v.x2a`); the port's shop grants instantly (no `xa.te`
+    // delivery timer) -> record only.
+    std::vector<std::string> deliveries;
+    // `th` (`EOpenUrl` g="1F9", class L557895): resolved `URL`/`ALT_URL`;
+    // `L.K.sIa` (`window.open`, L27258) has no port equivalent -> record only.
+    std::vector<std::string> open_urls;
+    // `No` (`EUpdateScene` g="213", class L569973): `wa.F().reload()` is
+    // `{debugger}` (L477770) — a shipped NO-OP; recorded for the probe.
+    std::vector<std::string> update_scenes;
+    // `vo` (`EShowCredits` g="207", class L563000): `xh.show` has no port UI
+    // -> record only (the JS `sa()` fires on dismiss).
+    std::vector<std::string> show_credits;
+    // `jo` (`EResumeQuests` g="1FF", class L560026): the branch taken
+    // ("Success"/"Error") + the resumable saved-quest count `b`. `p.o.lpb`
+    // (L134972) resumes the saved quests (native session); no port resume
+    // machinery -> record only.
+    struct ResumeQuests {
+        std::string branch;
+        int resumable = 0;
+    };
+    std::vector<ResumeQuests> resume_quests;
+    // `Un` (`EFightRestartRound` g="1ED", class L549511): resolved `PlayerLife`
+    // (empty = none) -> `ca.Ka().$K` (L204047) restarts the live fight round.
+    std::vector<std::string> fight_restart_rounds;
+    // `An` (`EApplicationRestart` g="1FD", class L559742): `p.o.save(!0)` (a
+    // forced save) — the web build does nothing else; recorded.
+    bool application_restart = false;
+    // `Qn` (`EDownloadPack`, class L547927): resolved `Pack`; the native
+    // downloader (`hd.tm.IQ`/`Mc.dXa`) has no port equivalent -> record only.
+    std::vector<std::string> download_packs;
+    // `Vn` (`EFixPaidZeroAspects` g="1EE", class L549855): scans owned items
+    // for a zero `Aspect` (`oma`) and re-applies (`VO` -> `mY`). The port
+    // derives item perks live (no stale zero aspects) -> record only.
+    bool fix_paid_zero_aspects = false;
 };
 
 // One live map button (`hg`, JS L2176-2177): an entry of the `Vb` manager's
@@ -829,6 +900,20 @@ public:
     // a synthetic `Hn` ChangeTab can be asserted without a shipped quest.
     void run_action_probe(App& app, const std::vector<QuestAction>& acts,
                           const QuestJournal& journal);
+    // The side effects of the LAST `run_action_probe` (test hook): lets the
+    // `--quest-action-probe` OBSERVE each action's recorded effect (`fx`) and
+    // prove a tag is no longer in `unknown`, not merely assert a static claim.
+    const QuestSideEffects& last_probe_effects() const {
+        return last_probe_effects_;
+    }
+    // `p.o.AG` (JS world ctor L124074 `this.AG=new Map`): the session global
+    // vars written by `SetVariable Scope="Global"` (`to.Jpb` CH1). Read by the
+    // probe to observe a `Run` sub-quest's effect.
+    const std::string& global_var(const std::string& name) const {
+        static const std::string kEmpty;
+        const auto it = global_vars_.find(name);
+        return it == global_vars_.end() ? kEmpty : it->second;
+    }
 
     // Test hook (`--quest-query-probe`): resolve ONE expression through the
     // engine's own path (`resolve_token`) against the live save/journal.
@@ -1358,6 +1443,8 @@ private:
     std::size_t foreach_matches_ = 0;        // `zj.Qh` sub-quest match count
     std::size_t fight_end_actions_ = 0;      // `Tn` (`EFightEnd`) action count
     std::size_t purchase_actions_ = 0;       // `sh` BuyItem purchase fires
+    // The side effects of the last `run_action_probe` (probe observation).
+    QuestSideEffects last_probe_effects_;
     std::string tab_owner_;                  // `Bj.DI` (ctor L1005)
     // --- `Ct` (L291) timer registry (`p.o.yl`) ---------------------------
     // `Uaa`/`H4` (L291): name -> absolute deadline `bh.Nv` in `p.Dc` seconds

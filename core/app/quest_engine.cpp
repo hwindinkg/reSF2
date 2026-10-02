@@ -4212,6 +4212,421 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 sub.rest.insert(sub.rest.end(), acts.begin() + i + 1, acts.end());
                 return sub;
             }
+        } else if (t == "Run") {
+            // `ko` (`ERun` g="200", class L560588): `parse` reads `Name` -> `Ba`.
+            // `S`: `b = ba.cg(a, this.Ba)`; `this.Sl = ha.F().AD(b)` (find the
+            // loaded quest by name); when `this.Sl != null && this.Sl.compare(a)`
+            // it subscribes and runs `this.Sl.lF(a, !1)`; else `this.He();
+            // this.sa()` (a no-op). `be.compare` (L518197) = ALL `<Conditions>`
+            // hold. `be.lF` (L518318): push the active queue, clear the quest's
+            // locals, `SC=1`, `this.YU.S(a)` (run the quest's `<Actions>`).
+            EvalCtx rn;
+            rn.journal = journal;
+            rn.iterator = iterator;
+            rn.locals = &locals;
+            rn.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                rn.story_step = w.story_step();
+                rn.level = w.level;
+                rn.save = w;
+                rn.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            std::string rname = attr_or(a.attrs, "Name");
+            if (!rname.empty() &&
+                (rname.find('?') != std::string::npos || rname[0] == '_')) {
+                std::string out = rname;
+                if (resolve_token(app, rname, rn, out)) rname = out;
+            }
+            const QuestDef* rsub = nullptr;
+            for (const QuestDef& qd : quests_) {
+                if (qd.name == rname) {
+                    rsub = &qd;
+                    break;
+                }
+            }
+            // Safety guard (the JS would recurse): a Run chain deeper than 24
+            // (the shipped max is 2: packs.xml DownloadPacksProcess ->
+            // DownloadPacksEnd) cannot be a legitimate quest nesting.
+            if (depth > 24) {
+                std::fprintf(stdout, "[quest] Run '%s' -> depth cap (no-op)\n",
+                             rname.c_str());
+                std::fflush(stdout);
+            } else if (rsub == nullptr) {
+                std::fprintf(stdout,
+                             "[quest] Run '%s' -> quest not loaded (no-op)\n",
+                             rname.c_str());
+                std::fflush(stdout);
+            } else if (!conditions_hold(app, rsub->root, rn)) {
+                std::fprintf(stdout,
+                             "[quest] Run '%s' -> conditions false (no-op)\n",
+                             rname.c_str());
+                std::fflush(stdout);
+            } else {
+                fx.run_quests.push_back(rname);
+                std::fprintf(stdout, "[quest] Run '%s' -> %zu actions\n",
+                             rname.c_str(), rsub->actions.size());
+                std::fflush(stdout);
+                ActionRest rs = run_actions(app, rsub->actions, journal, fx,
+                                            locals, rsub->name, depth + 1,
+                                            iterator);
+                if (rs.suspended) {
+                    rs.rest.insert(rs.rest.end(), acts.begin() + i + 1, acts.end());
+                    return rs;
+                }
+            }
+        } else if (t == "GiveItemPerk") {
+            // `Zn` (`EGiveItemPerk` g="1F3", class L554825): `parse` reads
+            // `ItemName` -> `DN`, `PerkName` -> `Dsa`. `S`: `b = ba.Pc(a, DN)`;
+            // `c = p.items.$b(b)` (catalog); if `c != null`: `b = p.rf(c.name)`
+            // (the owned holder, `rf` L111131 = `p.o.xa.Qj`); if `b != null`:
+            // `a = this.y6a(c, ba.Pc(a, Dsa))` — scan the catalog item's `kz`
+            // (port `CatalogItem::perks`) for `.name == PerkName`, returning a
+            // 0/1 list; if non-empty `b.mY(a, p.o.bb())` + `p.o.save()` +
+            // `sa()`. `mY` (L646355) appends each ref to the owned item's
+            // `<Enchantments>` with NO dedupe (unlike `GivePerk ApplyTo="Item"`).
+            EvalCtx ipc;
+            ipc.journal = journal;
+            ipc.iterator = iterator;
+            ipc.locals = &locals;
+            ipc.level = journal.player_level;
+            WarriorSave ipw;
+            bool ipw_ok = false;
+            try {
+                ipw = app.save().load();
+                ipc.story_step = ipw.story_step();
+                ipc.level = ipw.level;
+                ipc.save = ipw;
+                ipc.save_loaded = true;
+                ipw_ok = true;
+            } catch (const std::exception&) {
+            }
+            const auto ip_res = [&](const std::string& raw) -> std::string {
+                if (raw.empty()) return raw;
+                if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+                std::string out = raw;
+                if (!resolve_token(app, raw, ipc, out)) out = raw;
+                return out;
+            };
+            const std::string ip_item = ip_res(attr_or(a.attrs, "ItemName"));
+            const std::string ip_perk = ip_res(attr_or(a.attrs, "PerkName"));
+            const CatalogItem* ip_cat =
+                ip_item.empty() ? nullptr : catalog_find(app, ip_item);
+            bool ip_owned = false;
+            if (ip_cat != nullptr && ipw_ok) {
+                for (const WarriorSave::OwnedItem& oi : ipw.items) {
+                    if (oi.name == ip_cat->name) {
+                        ip_owned = true;
+                        break;
+                    }
+                }
+            }
+            const ItemPerkRef* ip_ref = nullptr;
+            if (ip_cat != nullptr) {
+                for (const ItemPerkRef& r : ip_cat->perks) {
+                    if (r.name == ip_perk) {
+                        ip_ref = &r;
+                        break;
+                    }
+                }
+            }
+            if (ip_cat == nullptr || !ip_owned || ip_ref == nullptr) {
+                std::fprintf(stdout,
+                             "[quest] GiveItemPerk item=%s perk=%s -> no-op "
+                             "(catalog=%d owned=%d perk=%d)\n",
+                             ip_item.c_str(), ip_perk.c_str(),
+                             ip_cat != nullptr ? 1 : 0, ip_owned ? 1 : 0,
+                             ip_ref != nullptr ? 1 : 0);
+                std::fflush(stdout);
+            } else {
+                fx.item_perk_grants.push_back({ip_cat->name, ip_ref->name});
+                std::fprintf(stdout,
+                             "[quest] GiveItemPerk item=%s perk=%s -> append "
+                             "<Enchantments><Perk> (mY)\n",
+                             ip_cat->name.c_str(), ip_ref->name.c_str());
+                std::fflush(stdout);
+            }
+        } else if (t == "RunCallback") {
+            // `lo` (`ERunCallback` g="201", class L561106): `parse` reads `Name`
+            // -> `Ba`; for EVERY child, `this.dpa.push(vd.I4a(Value ?? ""))`.
+            // `S`: `b = ba.cg(a, this.Ba); a.Uob(this.dpa, b); this.sa()`.
+            // `Uob` (L516060) invokes the callback registry `Cv` by name with
+            // the args. The port has no native callback bridge -> record only
+            // (the chain still advances, `sa()`).
+            EvalCtx cbc;
+            cbc.journal = journal;
+            cbc.iterator = iterator;
+            cbc.locals = &locals;
+            cbc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                cbc.story_step = w.story_step();
+                cbc.level = w.level;
+                cbc.save = w;
+                cbc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            std::string cbn = attr_or(a.attrs, "Name");
+            if (!cbn.empty() &&
+                (cbn.find('?') != std::string::npos || cbn[0] == '_')) {
+                std::string out = cbn;
+                if (resolve_token(app, cbn, cbc, out)) cbn = out;
+            }
+            QuestSideEffects::RunCallback rc;
+            rc.name = cbn;
+            for (const QuestAction& ch : a.children) {
+                rc.args.push_back(attr_or(ch.attrs, "Value"));
+            }
+            std::fprintf(stdout,
+                         "[quest] RunCallback %s (%zu args) -> native bridge "
+                         "absent (recorded)\n",
+                         cbn.c_str(), rc.args.size());
+            std::fflush(stdout);
+            fx.run_callbacks.push_back(std::move(rc));
+        } else if (t == "ShowVideo") {
+            // `zo` (`EShowVideo` g="209", class L565119): `parse` reads `Name`
+            // -> `gsa`. `S`: `a = "res/video/" + this.gsa`; `new Ys(G.qf(a),
+            // p.TJ.e2(a))` + a completion listener -> `Ngb` -> `C_a` ->
+            // `this.sa()`. The port has no video player -> record only (the
+            // chain advances, `sa()`).
+            const std::string sv = attr_or(a.attrs, "Name");
+            std::fprintf(stdout,
+                         "[quest] ShowVideo %s -> no video player (recorded, "
+                         "sa)\n",
+                         sv.c_str());
+            std::fflush(stdout);
+            fx.show_videos.push_back(sv);
+        } else if (t == "Denomination") {
+            // `On` (`EDenomination` g="1E2", class L534501): `parse` reads
+            // `kq = u.I(DenominationDigits, -1)` and `Vf = CoinIcon ?? ""`.
+            // `S`: `a = p.o.kq` (OLD); `p.o.xtb(kq)` (-> `nF`
+            // "DenominationDigits"); `p.o.mtb(Vf)` (strip "MiscSprites.",
+            // -> `Cr` "CoinIcon"); `this.hz(a)` -> `p.items.hz(a)` (item price
+            // propagation) + `p.o.Bya(a)` (rescale `Tb`/`hC` by `10^(kq-a)`);
+            // screen refresh; `p.o.save(!0)`; `sa()`.
+            const std::string dattr = attr_or(a.attrs, "DenominationDigits");
+            const int digits =
+                is_numeric(dattr) ? static_cast<int>(to_number(dattr)) : -1;
+            std::string icon = attr_or(a.attrs, "CoinIcon");
+            static const std::string kPrefix = "MiscSprites.";
+            if (icon.compare(0, kPrefix.size(), kPrefix) == 0) {
+                icon = icon.substr(kPrefix.size());
+            }
+            std::fprintf(stdout, "[quest] Denomination digits=%d icon=%s\n",
+                         digits, icon.c_str());
+            std::fflush(stdout);
+            fx.denominations.push_back({digits, icon});
+        } else if (t == "Deliver") {
+            // `Gf` (`EDeliver` g="1E1", class L534002): `parse` reads `Item` ->
+            // `ah`, `Enchantment` -> `u8`. `S`: `b = ba.cg(a, this.ah)`;
+            // `Gf.rEa(b)` (`b != "0"`) -> `Pa.AYa(b)` (deliver the pending
+            // purchase) + screen refresh, else `v.x2a(ba.cg(a, this.u8))`
+            // (deliver the enchantment). The port's shop grants instantly (no
+            // `p.o.xa.te` delivery timer) -> record only.
+            EvalCtx dc;
+            dc.journal = journal;
+            dc.iterator = iterator;
+            dc.locals = &locals;
+            dc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                dc.story_step = w.story_step();
+                dc.level = w.level;
+                dc.save = w;
+                dc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            const auto d_res = [&](const std::string& raw) -> std::string {
+                if (raw.empty()) return raw;
+                if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+                std::string out = raw;
+                if (!resolve_token(app, raw, dc, out)) out = raw;
+                return out;
+            };
+            const std::string ditem = d_res(attr_or(a.attrs, "Item"));
+            const std::string dench = d_res(attr_or(a.attrs, "Enchantment"));
+            const std::string dval = ditem != "0" ? ditem : dench;
+            std::fprintf(stdout,
+                         "[quest] Deliver %s -> no port delivery timer "
+                         "(recorded)\n",
+                         dval.empty() ? "(none)" : dval.c_str());
+            std::fflush(stdout);
+            fx.deliveries.push_back(dval);
+        } else if (t == "OpenUrl") {
+            // `th` (`EOpenUrl` g="1F9", class L557895): `parse` reads `URL` ->
+            // `url`, `ALT_URL` -> `Yaa`. `S` builds each via `oc`/`yb` (token
+            // substitution) and calls `L.K.sIa` (`window.open`, L27258);
+            // `ALT_URL` is delayed by `ce.Mhb`. The port has no URL opener ->
+            // record only.
+            EvalCtx uc;
+            uc.journal = journal;
+            uc.iterator = iterator;
+            uc.locals = &locals;
+            uc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                uc.story_step = w.story_step();
+                uc.level = w.level;
+                uc.save = w;
+                uc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            const auto u_res = [&](const std::string& raw) -> std::string {
+                if (raw.empty()) return raw;
+                if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+                std::string out = raw;
+                if (!resolve_token(app, raw, uc, out)) out = raw;
+                return out;
+            };
+            const std::string uurl = u_res(attr_or(a.attrs, "URL"));
+            const std::string ualt = u_res(attr_or(a.attrs, "ALT_URL"));
+            if (!uurl.empty()) fx.open_urls.push_back(uurl);
+            if (!ualt.empty()) fx.open_urls.push_back(ualt);
+            std::fprintf(stdout,
+                         "[quest] OpenUrl url=%s alt=%s -> no URL opener "
+                         "(recorded)\n",
+                         uurl.c_str(), ualt.c_str());
+            std::fflush(stdout);
+        } else if (t == "UpdateScene") {
+            // `No` (`EUpdateScene` g="213", class L569973): `S` = `super.S(a);
+            // wa.F().reload(); this.sa()`. `wa.reload` (L477770) is
+            // `reload(){debugger}` — a shipped NO-OP, so JS-exact is inert
+            // (the chain still advances). Recorded so the tag is KNOWN.
+            std::fprintf(stdout,
+                         "[quest] UpdateScene -> wa.F().reload() is a JS no-op "
+                         "(recorded)\n");
+            std::fflush(stdout);
+            fx.update_scenes.push_back("UpdateScene");
+        } else if (t == "ShowCredits") {
+            // `vo` (`EShowCredits` g="207", class L563000): `S` = `super.S(a);
+            // xh.show(this.sa)`. The port has no credits UI -> record only
+            // (the JS `sa()` fires on dismiss).
+            std::fprintf(stdout,
+                         "[quest] ShowCredits -> no credits UI (recorded, sa)\n");
+            std::fflush(stdout);
+            fx.show_credits.push_back("ShowCredits");
+        } else if (t == "ResumeQuests") {
+            // `jo` (`EResumeQuests` g="1FF", class L560026). `parse` reads the
+            // `<Success>`/`<Error>` chains. `S`: `b = 0`; for each saved quest
+            // `f` in `p.o.kF`: if `f.parameters != null && f.name != this.ZE`
+            // then `g = ha.F().AD(f.name)`; `if (g == null || !g.REa()) ++b`
+            // (`REa` = `cyb>0` = Unresumable). Success iff `b != 0` OR
+            // `Zd.Xo` not in {11,0,2,8} (`Zd.Xo = xn.iOa(current screen type)`);
+            // success -> `Cfb()`: `sa() + p.o.lpb()`; error -> `gf()`: `sa()`.
+            // `p.o.lpb` (L134972) resumes the saved quests (native session);
+            // no port resume machinery -> record only.
+            int resumable = 0;
+            try {
+                const WarriorSave w = app.save().load();
+                for (const WarriorSave::QuestState& qs : w.quests) {
+                    if (!qs.has_parameters) continue;
+                    if (qs.name == quest) continue;
+                    const QuestDef* qd = nullptr;
+                    for (const QuestDef& q : quests_) {
+                        if (q.name == qs.name) {
+                            qd = &q;
+                            break;
+                        }
+                    }
+                    if (qd == nullptr || !qd->unresumable) ++resumable;
+                }
+            } catch (const std::exception&) {
+            }
+            int sid = 11;  // `xn.iOa` default (unknown)
+            if (Screen* top = app.screens().top()) {
+                sid = static_cast<int>(top->id());
+            }
+            const bool rsuccess =
+                resumable != 0 ||
+                (sid != 11 && sid != 0 && sid != 2 && sid != 8);
+            fx.resume_quests.push_back(
+                {rsuccess ? "Success" : "Error", resumable});
+            std::fprintf(stdout,
+                         "[quest] ResumeQuests resumable=%d scene=%d -> %s\n",
+                         resumable, sid, rsuccess ? "Success" : "Error");
+            std::fflush(stdout);
+        } else if (t == "FightRestartRound") {
+            // `Un` (`EFightRestartRound` g="1ED", class L549511): `parse` reads
+            // `PlayerLife` (absent -> null). `S`: `ca.Ka() != null &&
+            // ca.Ka().$K(PlayerLife != null ? ba.Nj(a, PlayerLife) : null);
+            // this.sa()`. `$K` (L204047) restarts the live fight round. The
+            // port records the request; the fight scene consumes it.
+            EvalCtx fc;
+            fc.journal = journal;
+            fc.iterator = iterator;
+            fc.locals = &locals;
+            fc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                fc.story_step = w.story_step();
+                fc.level = w.level;
+                fc.save = w;
+                fc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            std::string life = attr_or(a.attrs, "PlayerLife");
+            if (!life.empty() &&
+                (life.find('?') != std::string::npos || life[0] == '_')) {
+                std::string out = life;
+                if (resolve_token(app, life, fc, out)) life = out;
+            }
+            std::fprintf(stdout,
+                         "[quest] FightRestartRound PlayerLife=%s -> fight "
+                         "scene request\n",
+                         life.empty() ? "(none)" : life.c_str());
+            std::fflush(stdout);
+            fx.fight_restart_rounds.push_back(life);
+        } else if (t == "ApplicationRestart") {
+            // `An` (`EApplicationRestart` g="1FD", class L559742): `S` =
+            // `p.o.save(!0); this.sa()` — a FORCED save; the web build does
+            // nothing else (the browser reload lives outside the bundle).
+            std::fprintf(stdout,
+                         "[quest] ApplicationRestart -> forced save (recorded)\n");
+            std::fflush(stdout);
+            fx.application_restart = true;
+        } else if (t == "DownloadPack") {
+            // `Qn` (`EDownloadPack`, class L547927): `parse` reads `Pack` ->
+            // `kH`. `S`: `b = ba.Pc(a, Pack); this.Ux = hd.F().tm.IQ(b)`
+            // (find the pack); `Ux == null` -> run the `<Error>` chain, else
+            // `Mc.F().dXa(Ux.name, Ux.url, ...)` (start the native download).
+            // No pack downloader in the port -> record only.
+            EvalCtx dpc;
+            dpc.journal = journal;
+            dpc.iterator = iterator;
+            dpc.locals = &locals;
+            dpc.level = journal.player_level;
+            try {
+                const WarriorSave w = app.save().load();
+                dpc.story_step = w.story_step();
+                dpc.level = w.level;
+                dpc.save = w;
+                dpc.save_loaded = true;
+            } catch (const std::exception&) {
+            }
+            std::string pack = attr_or(a.attrs, "Pack");
+            if (!pack.empty() &&
+                (pack.find('?') != std::string::npos || pack[0] == '_')) {
+                std::string out = pack;
+                if (resolve_token(app, pack, dpc, out)) pack = out;
+            }
+            std::fprintf(stdout,
+                         "[quest] DownloadPack pack=%s -> no downloader "
+                         "(recorded)\n",
+                         pack.c_str());
+            std::fflush(stdout);
+            fx.download_packs.push_back(pack);
+        } else if (t == "FixPaidZeroAspects") {
+            // `Vn` (`EFixPaidZeroAspects` g="1EE", class L549855): scan
+            // `p.o.xa.items`; for each item whose perk `oma("Aspect")` parses
+            // to 0, set the flag and `e.VO()` (`mY(this.ib.kz, p.o.bb())` —
+            // re-apply the catalog perks); if any, `p.o.save()`; `sa()`. The
+            // port derives item perks live (no stale zero aspects) -> record.
+            std::fprintf(stdout,
+                         "[quest] FixPaidZeroAspects -> port derives perks "
+                         "live (recorded)\n");
+            std::fflush(stdout);
+            fx.fix_paid_zero_aspects = true;
         } else if (t == "ResetEnchantments") {
             // `Nz.hi` (sf2.502f0946.js L488166) lists `ResetEnchantments` among
             // the KNOWN node names, so `Fe.Ij` (L484141) maps it to
@@ -4343,6 +4758,81 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                          "[quest] GivePerk item enchant %s <- %s (%zu set)\n",
                          ci->name.c_str(), eg.ench.name.c_str(),
                          eg.ench.sets.size());
+        }
+        // `Zn` `GiveItemPerk` (`S` L554825 -> `y6a` + `mY` L646355): append the
+        // named catalog `<Perk>` to the owned item's `<Enchantments>`, with NO
+        // dedupe (`anb` L647337 is only on the `GivePerk ApplyTo="Item"` path).
+        // `mY` writes `Name` + the evaluated `<Set>` attrs.
+        for (const QuestSideEffects::ItemPerkGrant& ipg : fx.item_perk_grants) {
+            if (ipg.item.empty() || ipg.perk.empty()) continue;
+            const CatalogItem* ci = catalog_find(app, ipg.item);  // `$b`
+            if (ci == nullptr) continue;
+            const ItemPerkRef* ref = nullptr;  // `y6a(c, PerkName)`
+            for (const ItemPerkRef& r : ci->perks) {
+                if (r.name == ipg.perk) {
+                    ref = &r;
+                    break;
+                }
+            }
+            if (ref == nullptr) continue;  // `y6a` empty -> no-op
+            WarriorSave::OwnedItem* owned = nullptr;  // `p.rf(c.name)`
+            for (WarriorSave::OwnedItem& it : w.items) {
+                if (it.name == ci->name) {
+                    owned = &it;
+                    break;
+                }
+            }
+            if (owned == nullptr) continue;  // holder absent -> no-op
+            WarriorSave::ItemEnchantment ench;
+            ench.name = ref->name;
+            for (const auto& kv : ref->set_num) {
+                // JS `f.set(k.key, k.value)` — a number renders without a
+                // trailing decimal point (`%g`).
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%.10g", kv.second);
+                ench.sets.push_back({kv.first, buf});
+            }
+            for (const auto& kv : ref->set_str) {
+                ench.sets.push_back({kv.first, kv.second});
+            }
+            owned->enchantments.push_back(std::move(ench));  // `mY` (no `anb`)
+            dirty = true;
+            std::fprintf(stdout,
+                         "[quest] GiveItemPerk item %s <- perk %s (%zu set)\n",
+                         ci->name.c_str(), ref->name.c_str(),
+                         owned->enchantments.back().sets.size());
+        }
+        // `On` `Denomination` (`S` L534501): `xtb`/`mtb` write the save attrs
+        // (`DenominationDigits`/`CoinIcon`), then `Bya(old)` (L137565) rescales
+        // `Tb`/`hC` by `10^(new-old)`. `hC` (PaidMoney) is not modelled -> only
+        // `money` (Tb) is rescaled. `p.items.hz` (item price propagation) has no
+        // port-side denomination model.
+        for (const QuestSideEffects::DenominationWrite& dw : fx.denominations) {
+            const int old_kq = w.denomination_digits;
+            const int new_kq = dw.digits;
+            w.denomination_digits = new_kq;
+            w.coin_icon = dw.icon;
+            if (new_kq != old_kq) {
+                // `a = Math.pow(10, this.kq - a)`; `c = Tb/a`;
+                // `if (a>1){b=trunc(Tb%a); if(b>0)++c;}` `Tb=trunc(c)`.
+                const double scale = std::pow(10.0, new_kq - old_kq);
+                if (scale > 1.0) {
+                    double c = static_cast<double>(w.money) / scale;
+                    const double rem =
+                        std::fmod(static_cast<double>(w.money), scale);
+                    if (rem > 0.0) c += 1.0;
+                    w.money = static_cast<std::int64_t>(std::trunc(c));
+                } else if (scale > 0.0 && scale < 1.0) {
+                    w.money = static_cast<std::int64_t>(
+                        std::trunc(static_cast<double>(w.money) / scale));
+                }
+            }
+            dirty = true;
+            std::fprintf(stdout,
+                         "[quest] Denomination digits %d->%d icon=%s "
+                         "money=%lld\n",
+                         old_kq, new_kq, w.coin_icon.c_str(),
+                         static_cast<long long>(w.money));
         }
         // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
         // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.
@@ -4483,6 +4973,9 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
                 w.show_dojo_disciple = on;
             }
         }
+        // `An` (`EApplicationRestart` g="1FD" L559742): `p.o.save(!0)` — the
+        // `!0` forces the save even with no other change.
+        if (fx.application_restart) dirty = true;
         if (dirty) {
             app.save().save(w);
             std::fprintf(stdout,
@@ -4920,6 +5413,7 @@ void QuestEngine::run_action_probe(App& app, const std::vector<QuestAction>& act
     std::map<std::string, std::string> locals;
     const ActionRest rest = run_actions(app, acts, journal, fx, locals, "<probe>", 0);
     (void)rest;
+    last_probe_effects_ = fx;
     apply_effects(app, fx);
     enqueue_effects(app, fx, journal, locals, "<probe>");
     tick(app);

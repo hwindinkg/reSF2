@@ -144,6 +144,10 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
     out.show_upgrades = sf2::data::xml_attr_bool(warrior, "ShowUpgrades", false);
+    // `p.o.kq`/`p.o.Vf` (JS world ctor L124074/L124...) — the Denomination
+    // save attrs (`On` -> `xtb`/`mtb`). Absent in the seed -> 0/"".
+    out.denomination_digits = warrior.attribute("DenominationDigits").as_int(0);
+    out.coin_icon = warrior.attribute("CoinIcon").as_string("");
     // NOTE: there is no `GameClock` save attribute in the JS (the clock is
     // derived from `Date.now()` each boot, see `live_clock`). Nothing to read.
 
@@ -609,6 +613,17 @@ void SaveSystem::save(const WarriorSave& w) {
     warrior.attribute("Tactic").set_value(w.tactic.c_str());
     warrior.attribute("CurrentZone").set_value(w.current_zone.c_str());
     warrior.attribute("ShowUpgrades").set_value(w.show_upgrades ? "1" : "0");
+    // `On` (`EDenomination`): `nF("DenominationDigits", kq)` + `Cr("CoinIcon")`.
+    // The seed carries neither attr, and `attribute().set_value()` on a null
+    // attribute is a no-op -> append when absent.
+    {
+        pugi::xml_attribute dd = warrior.attribute("DenominationDigits");
+        if (!dd) dd = warrior.append_attribute("DenominationDigits");
+        dd.set_value(w.denomination_digits);
+        pugi::xml_attribute ci = warrior.attribute("CoinIcon");
+        if (!ci) ci = warrior.append_attribute("CoinIcon");
+        ci.set_value(w.coin_icon.c_str());
+    }
 
     // Bus mutes (JS `sc.Gpb` L114249): `<Sounds>/<Sound|Music>@Mute` from `ta.$D`
     // (SFX bus = `sound_muted`, `lb.Mz()`) / `ta.ZD` (music bus, `lb.Lz()`).

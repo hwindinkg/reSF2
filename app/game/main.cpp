@@ -5319,6 +5319,285 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
             check(hit, "Delivery -> NotificationGeneral runs (quests.xml L443)");
         }
+        // === NEW WAVE: the previously-UNKNOWN quest actions =================
+        // Each action is fired through the engine's own parse path; its effect
+        // is OBSERVED via `last_probe_effects()` (the recorded `fx`) and the
+        // save before/after, and the tag is proved absent from `fx.unknown`.
+        const auto unknown_has = [&](const char* tag) -> bool {
+            for (const std::string& u :
+                 app.quest_engine().last_probe_effects().unknown) {
+                if (u == tag) return true;
+            }
+            return false;
+        };
+        // --- `ko` Run (`ERun` g="200" L560588) ------------------------------
+        // `Run Name="ShowErrorDialog"` (packs.xml L128, no Conditions): the
+        // sub-quest sets the global `DownloadPacksFailed=1` then queues a
+        // Dialog. Observable: the global var + the queued dialog + the name.
+        {
+            const std::string before_g =
+                app.quest_engine().global_var("DownloadPacksFailed");
+            fire_action("Run", {{"Name", "ShowErrorDialog"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const std::string after_g =
+                app.quest_engine().global_var("DownloadPacksFailed");
+            bool named = false;
+            for (const std::string& n : fx.run_quests) {
+                named = named || n == "ShowErrorDialog";
+            }
+            const bool dlg = app.quest_engine().has_dialog();
+            std::fprintf(stdout,
+                         "[qa] RUN ShowErrorDialog: run_quests=%zu named=%d "
+                         "global %s->%s dialog=%d unknown=%d\n",
+                         fx.run_quests.size(), named ? 1 : 0,
+                         before_g.empty() ? "(none)" : before_g.c_str(),
+                         after_g.c_str(), dlg ? 1 : 0,
+                         unknown_has("Run") ? 1 : 0);
+            std::fflush(stdout);
+            check(named && after_g == "1" && dlg && !unknown_has("Run"),
+                  "Run -> sub-quest conditions+actions ran (ShowErrorDialog)");
+            app.quest_engine().clear_dialogs();
+        }
+        // --- `Zn` GiveItemPerk (`EGiveItemPerk` g="1F3" L554825) -------------
+        // The shipped pairing (update_quests.xml L108): `WEAPON_LYNX_CLAWS` +
+        // `PERK_ITEM_SPECIAL_TIME_BOMB_WEAPON` (list.xml L1836). `mY` appends
+        // the catalog `<Perk>` to the owned item's `<Enchantments>`.
+        {
+            const std::string kIPItem = "WEAPON_LYNX_CLAWS";
+            const std::string kIPPerk = "PERK_ITEM_SPECIAL_TIME_BOMB_WEAPON";
+            if (app.quest_engine().catalog_has(app, kIPItem)) {
+                sf2::app::WarriorSave w = app.save().load();
+                bool have = false;
+                for (const auto& it : w.items) {
+                    if (it.name == kIPItem) have = true;
+                }
+                if (!have) {  // ensure the `p.rf(c.name)` holder exists
+                    sf2::app::WarriorSave::OwnedItem oi;
+                    oi.name = kIPItem;
+                    oi.count = 1;
+                    w.items.push_back(oi);
+                    app.save().save(w);
+                }
+                const auto ench_count = [&](const char* perk) -> int {
+                    int n = 0;
+                    try {
+                        for (const auto& it : app.save().load().items) {
+                            if (it.name != kIPItem) continue;
+                            for (const auto& e : it.enchantments) {
+                                if (e.name == perk) ++n;
+                            }
+                        }
+                    } catch (const std::exception&) {
+                    }
+                    return n;
+                };
+                const int e0 = ench_count(kIPPerk.c_str());
+                fire_action("GiveItemPerk",
+                            {{"ItemName", kIPItem.c_str()},
+                             {"PerkName", kIPPerk.c_str()}});
+                const int e1 = ench_count(kIPPerk.c_str());
+                std::fprintf(stdout,
+                             "[qa] GIVEITEMPERK %s + %s: enchant %d->%d "
+                             "unknown=%d\n",
+                             kIPItem.c_str(), kIPPerk.c_str(), e0, e1,
+                             unknown_has("GiveItemPerk") ? 1 : 0);
+                std::fflush(stdout);
+                check(e1 == e0 + 1 && !unknown_has("GiveItemPerk"),
+                      "GiveItemPerk -> catalog <Perk> appended to <Enchantments>");
+            } else {
+                std::fprintf(stdout,
+                             "[qa] GiveItemPerk probe skipped (no catalog)\n");
+            }
+        }
+        // --- `lo` RunCallback (`ERunCallback` g="201" L561106) --------------
+        {
+            sf2::app::QuestAction cb;
+            cb.tag = "RunCallback";
+            cb.attrs["Name"] = "ApplicationStartAccountLoginNotifyComplete";
+            sf2::app::QuestAction arg;
+            arg.tag = "Arg";
+            arg.attrs["Value"] = "1";
+            cb.children.push_back(arg);
+            sf2::app::QuestJournal cbj;
+            app.quest_engine().run_action_probe(app, {cb}, cbj);
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec =
+                fx.run_callbacks.size() == 1 &&
+                fx.run_callbacks[0].name ==
+                    "ApplicationStartAccountLoginNotifyComplete" &&
+                fx.run_callbacks[0].args.size() == 1 &&
+                fx.run_callbacks[0].args[0] == "1";
+            std::fprintf(stdout,
+                         "[qa] RUNCB %s args=%zu unknown=%d\n",
+                         fx.run_callbacks.empty()
+                             ? "(none)"
+                             : fx.run_callbacks[0].name.c_str(),
+                         fx.run_callbacks.empty()
+                             ? 0
+                             : fx.run_callbacks[0].args.size(),
+                         unknown_has("RunCallback") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("RunCallback"),
+                  "RunCallback -> name+args recorded (native bridge absent)");
+        }
+        // --- `zo` ShowVideo (`EShowVideo` g="209" L565119) ------------------
+        {
+            fire_action("ShowVideo", {{"Name", "shadow_gate.mp4"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec = fx.show_videos.size() == 1 &&
+                             fx.show_videos[0] == "shadow_gate.mp4";
+            std::fprintf(stdout, "[qa] SHOWVIDEO %s unknown=%d\n",
+                         fx.show_videos.empty() ? "(none)"
+                                                : fx.show_videos[0].c_str(),
+                         unknown_has("ShowVideo") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("ShowVideo"),
+                  "ShowVideo -> recorded (no video player; sa)");
+        }
+        // --- `On` Denomination (`EDenomination` g="1E2" L534501) ------------
+        {
+            const int d0 = app.save().load().denomination_digits;
+            fire_action("Denomination", {{"DenominationDigits", "4"},
+                                         {"CoinIcon", "MiscSprites.platinum"}});
+            const sf2::app::WarriorSave w = app.save().load();
+            std::fprintf(stdout,
+                         "[qa] DENOMINATION digits %d->%d icon=%s unknown=%d\n",
+                         d0, w.denomination_digits, w.coin_icon.c_str(),
+                         unknown_has("Denomination") ? 1 : 0);
+            std::fflush(stdout);
+            check(w.denomination_digits == 4 && w.coin_icon == "platinum" &&
+                      !unknown_has("Denomination"),
+                  "Denomination -> <Warrior DenominationDigits=4 "
+                  "CoinIcon=platinum>");
+        }
+        // --- `Gf` Deliver (`EDeliver` g="1E1" L534002) ----------------------
+        {
+            fire_action("Deliver", {{"Item", "WEAPON_KNIVES"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec = fx.deliveries.size() == 1 &&
+                             fx.deliveries[0] == "WEAPON_KNIVES";
+            std::fprintf(stdout, "[qa] DELIVER %s unknown=%d\n",
+                         fx.deliveries.empty() ? "(none)"
+                                               : fx.deliveries[0].c_str(),
+                         unknown_has("Deliver") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("Deliver"),
+                  "Deliver -> recorded (no port delivery timer)");
+        }
+        // --- `th` OpenUrl (`EOpenUrl` g="1F9" L557895) ----------------------
+        {
+            fire_action("OpenUrl", {{"URL", "http://example.test/x"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec = fx.open_urls.size() == 1 &&
+                             fx.open_urls[0] == "http://example.test/x";
+            std::fprintf(stdout, "[qa] OPENURL %s unknown=%d\n",
+                         fx.open_urls.empty() ? "(none)"
+                                              : fx.open_urls[0].c_str(),
+                         unknown_has("OpenUrl") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("OpenUrl"),
+                  "OpenUrl -> recorded (no URL opener)");
+        }
+        // --- `No` UpdateScene (`EUpdateScene` g="213" L569973) --------------
+        {
+            fire_action("UpdateScene", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout, "[qa] UPDATESCENE recorded=%zu unknown=%d\n",
+                         fx.update_scenes.size(),
+                         unknown_has("UpdateScene") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.update_scenes.size() == 1 && !unknown_has("UpdateScene"),
+                  "UpdateScene -> recorded (JS wa.F().reload() is a no-op)");
+        }
+        // --- `vo` ShowCredits (`EShowCredits` g="207" L563000) --------------
+        {
+            fire_action("ShowCredits", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout, "[qa] SHOWCREDITS recorded=%zu unknown=%d\n",
+                         fx.show_credits.size(),
+                         unknown_has("ShowCredits") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.show_credits.size() == 1 && !unknown_has("ShowCredits"),
+                  "ShowCredits -> recorded (no credits UI; sa)");
+        }
+        // --- `jo` ResumeQuests (`EResumeQuests` g="1FF" L560026) ------------
+        {
+            sf2::app::WarriorSave w = app.save().load();
+            sf2::app::WarriorSave::QuestState qs;
+            qs.name = "PROBE_RESUMABLE";  // not loaded -> `AD==null` -> b++
+            qs.has_parameters = true;
+            w.quests.push_back(qs);
+            app.save().save(w);
+            fire_action("ResumeQuests", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool ok = fx.resume_quests.size() == 1 &&
+                            fx.resume_quests[0].branch == "Success" &&
+                            fx.resume_quests[0].resumable >= 1;
+            std::fprintf(stdout,
+                         "[qa] RESUMEQUESTS branch=%s b=%d unknown=%d\n",
+                         fx.resume_quests.empty()
+                             ? "(none)"
+                             : fx.resume_quests[0].branch.c_str(),
+                         fx.resume_quests.empty() ? 0
+                                                  : fx.resume_quests[0].resumable,
+                         unknown_has("ResumeQuests") ? 1 : 0);
+            std::fflush(stdout);
+            check(ok && !unknown_has("ResumeQuests"),
+                  "ResumeQuests -> resumable saved quest -> Success branch");
+        }
+        // --- `Un` FightRestartRound (`EFightRestartRound` g="1ED" L549511) --
+        {
+            fire_action("FightRestartRound", {{"PlayerLife", "1"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec = fx.fight_restart_rounds.size() == 1 &&
+                             fx.fight_restart_rounds[0] == "1";
+            std::fprintf(stdout,
+                         "[qa] FIGHTRESTARTROUND life=%s unknown=%d\n",
+                         fx.fight_restart_rounds.empty()
+                             ? "(none)"
+                             : fx.fight_restart_rounds[0].c_str(),
+                         unknown_has("FightRestartRound") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("FightRestartRound"),
+                  "FightRestartRound -> PlayerLife resolved + recorded");
+        }
+        // --- `An` ApplicationRestart (`EApplicationRestart` g="1FD") --------
+        {
+            fire_action("ApplicationRestart", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout, "[qa] APPLICATIONRESTART recorded=%d unknown=%d\n",
+                         fx.application_restart ? 1 : 0,
+                         unknown_has("ApplicationRestart") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.application_restart && !unknown_has("ApplicationRestart"),
+                  "ApplicationRestart -> forced save (p.o.save(!0))");
+        }
+        // --- `Qn` DownloadPack (`EDownloadPack` L547927) --------------------
+        {
+            fire_action("DownloadPack", {{"Pack", "PACK_PROBE"}});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            const bool rec = fx.download_packs.size() == 1 &&
+                             fx.download_packs[0] == "PACK_PROBE";
+            std::fprintf(stdout, "[qa] DOWNLOADPACK %s unknown=%d\n",
+                         fx.download_packs.empty()
+                             ? "(none)"
+                             : fx.download_packs[0].c_str(),
+                         unknown_has("DownloadPack") ? 1 : 0);
+            std::fflush(stdout);
+            check(rec && !unknown_has("DownloadPack"),
+                  "DownloadPack -> recorded (no native downloader)");
+        }
+        // --- `Vn` FixPaidZeroAspects (`EFixPaidZeroAspects` g="1EE") --------
+        {
+            fire_action("FixPaidZeroAspects", {});
+            const auto& fx = app.quest_engine().last_probe_effects();
+            std::fprintf(stdout, "[qa] FIXPAIDZEROASPECTS recorded=%d unknown=%d\n",
+                         fx.fix_paid_zero_aspects ? 1 : 0,
+                         unknown_has("FixPaidZeroAspects") ? 1 : 0);
+            std::fflush(stdout);
+            check(fx.fix_paid_zero_aspects && !unknown_has("FixPaidZeroAspects"),
+                  "FixPaidZeroAspects -> recorded (port derives perks live)");
+        }
         // Restore the profile exactly as found.
         if (have_original) {
             try {

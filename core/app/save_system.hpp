@@ -85,6 +85,12 @@ struct WarriorSave {
     // `p.o.ga.set("Avatar", a)` (JS `Fn`/`Fka` -> `Cr` L78838): the player's
     // avatar name (`<Warrior Avatar="...">`). Absent in the seed -> "".
     std::string avatar;
+    // `On` (`EDenomination` g="1E2" L534501): `p.o.xtb(kq)` -> `nF`
+    // ("DenominationDigits") and `p.o.mtb(Vf)` -> `Cr` ("CoinIcon", the
+    // "MiscSprites." prefix stripped) on the WARRIOR node. `p.o.kq` ctor
+    // default 0; `CoinIcon` absent -> "".
+    int denomination_digits = 0;
+    std::string coin_icon;
     // `p.o.xLa(Name,Value)` (L133949): every raw `<SessionSettings><Name
     // Value>` row. The `disciple`/`show_dojo_disciple` bools above are derived
     // views of the `Disciple`/`ShowDojoDisciple` rows.
