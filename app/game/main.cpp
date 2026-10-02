@@ -6243,6 +6243,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             {1000, 263, true}, {1006, 263, false}, // Left -> Back (alias)
             {1090, 32, true}, {1096, 32, false},   // Space -> Punch (alias)
             {1180, 66, true}, {1186, 66, false},   // B -> unbound
+            // [item A repro] A REAL double-press (press/release across frames,
+            // not the same-frame `down;up;down` of the verify tape): K down
+            // 1300, up 1306, down 1312 -> 2 taps 12 frames apart (inside the
+            // 15-frame `zl.dX` window). The JS `2key` Punch move
+            // (`DoublePunch`, Priority 130) must beat the `1key` `HighPunch`
+            // (110). D 1400/1406/1412 -> `DoubleStepForward`.
+            {1300, 75, true}, {1306, 75, false},
+            {1312, 75, true}, {1318, 75, false},
+            {1400, 68, true}, {1406, 68, false},
+            {1412, 68, true}, {1418, 68, false},
         };
         constexpr int kTapeCount = static_cast<int>(sizeof(kTape) / sizeof(kTape[0]));
         const int last_frame = kTape[kTapeCount - 1].frame;

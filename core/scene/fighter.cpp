@@ -604,6 +604,7 @@ void Fighter::clear_block() { clear_intervals(5, ""); }
 // zero velocity.
 void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
                             float wall_max, float floor_y) {
+    const bool was_active = nk_;
     nk_ = true;
     ragdoll_frame_count_ = 0;
     ragdoll_names_.clear();
@@ -611,6 +612,22 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     ragdoll_wall_min_ = wall_min;
     ragdoll_wall_max_ = wall_max;
     ragdoll_floor_y_ = floor_y;
+    // JS `Al.start(a)` (L582) sets `nk=!0; frameCount=0; names=[...]` and then
+    // `this.oa.BKa()` -> `body.oob()` (L295232/L405618: `nh&&(jy=ura)`), which
+    // only re-arms the body's floor flag — it does NOT re-seed `ma`/`mf` or
+    // zero the Verlet velocity. The ongoing solver therefore keeps its state
+    // across the `PhysicalGroundHit`/`PhysicalLying` restarts, so the COM
+    // keeps moving and the getup gate (`<Distance ... COM Frame="Previous" To
+    // COM>` settle OR `<PhysicsFrameNumber Min="180"/>`) WAITS. The old port
+    // re-seeded `sol_mf_=sol_ma_` (zero velocity) on every physics move, which
+    // froze the COM and made the settle half pass on ragdoll frame 1 — the
+    // reported "after the knockdown the character snaps straight up with no
+    // animation" (`[every] ... -> StandupBack` one frame after
+    // `PhysicalLying`). A FIRST start (no live solver) still seeds from the
+    // current sampled pose with zero velocity.
+    if (was_active && solver_init_ && !sol_ma_.empty()) {
+        return;
+    }
     // JS `Al` ctor char 296286: `this.bQa=xd.bAa` — the per-location
     // `FrictionForce` (`Bf.init` char 241113), a process-global refreshed on
     // every location load. The solver is created when the ragdoll starts, so

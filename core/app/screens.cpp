@@ -6419,6 +6419,66 @@ std::string find_idle_clip_name(
     return "";
 }
 
+// JS `Pi` idle state = `PeacefulStart` (`iz.XBa` L227616: `"PeacefulStart":4`).
+// The selector is the `<Template>` TOKEN, not `<Tactic>`: every move whose
+// `<Template>` pipe-list carries `PeacefulStart` is a candidate, and `Aua`
+// (L343447 `c>=d&&(c>d&&(b.length=0),b.push(a))`) keeps the max-`<Priority>`
+// group. For the shipped Fists fighter the winner is `FistsStartStance-Left`
+// (Priority 10, FileName `stance_1.bytes`); Knives -> `KnivesStartStance-Left`
+// (Priority 12, `knives_stance.bytes`). The old scan used the FIGHT idle
+// (`*StartStanceIdle*`, `fists1_stance_idle`), which is why the shop showed an
+// armed stance with no weapon in hand (the `stance_1` pivot also seats the
+// model at the correct height). `""` = no clip.
+std::string find_peaceful_idle_clip_name(
+    const std::map<std::string, sf2::scene::MoveDef>& moves,
+    const std::map<std::string, sf2::data::anim_clip>& clips,
+    const std::string& weapon) {
+    auto clip_for_move = [&clips](const sf2::scene::MoveDef& m) -> std::string {
+        std::string base = m.file_name;
+        const std::string suffix = ".bytes";
+        if (base.size() > suffix.size() &&
+            base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            base = base.substr(0, base.size() - suffix.size());
+        }
+        if (base.empty()) base = m.name;
+        return clips.count(base) != 0 ? base : std::string();
+    };
+    auto norm_token = [](const std::string& s) {
+        std::string out;
+        for (char c : s) {
+            if (c >= 'A' && c <= 'Z') {
+                out.push_back(static_cast<char>(c - 'A' + 'a'));
+            } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                out.push_back(c);
+            }
+        }
+        if (out.size() > 6 && out.compare(0, 6, "weapon") == 0) out.erase(0, 6);
+        return out;
+    };
+    // The unlocked move list already isolates the equipped weapon via
+    // `TacticWeapon` (`ra.Hza` L684); the global map needs the same name prefix
+    // (else `ClownStartStance-Left`, Priority 120, wins globally). Empty save
+    // weapon -> the unarmed default, matching `find_idle_clip_name`.
+    const std::string key = norm_token(weapon.empty() ? std::string("Fists") : weapon);
+    const sf2::scene::MoveDef* best = nullptr;
+    for (const auto& kv : moves) {
+        const sf2::scene::MoveDef& m = kv.second;
+        bool peaceful = false;
+        for (const std::string& t : m.template_tags) {
+            if (t == "PeacefulStart") {
+                peaceful = true;
+                break;
+            }
+        }
+        if (!peaceful) continue;
+        const std::string ln = norm_token(m.name.empty() ? kv.first : m.name);
+        if (ln.size() < key.size() || ln.compare(0, key.size(), key) != 0) continue;
+        if (best == nullptr || m.priority > best->priority) best = &m;
+    }
+    if (best == nullptr) return "";
+    return clip_for_move(*best);
+}
+
 // Draws one idle fighter (mesh + capsule strip) with the same formulas as
 // the fight screen's file-local twin (capsule `zu`/`Dk` strip, stroke =
 // Radius1*2 — JS_RENDER §4): kept as a separate helper so the fight render
@@ -17160,8 +17220,11 @@ bool EquipmentScreen::ensure_avatar(App& app) {
             avatar_model_ = assets.merge_names(model_names);
         }
         if (avatar_model_.bones.empty()) avatar_model_ = assets.merged;
-        const std::string idle =
-            find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+        std::string idle =
+            find_peaceful_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+        if (idle.empty()) {
+            idle = find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+        }
         const auto it = idle.empty() ? assets.clips.end() : assets.clips.find(idle);
         if (!avatar_model_.bones.empty() && it != assets.clips.end() &&
             !it->second.frames.empty()) {
@@ -17252,7 +17315,7 @@ bool EquipmentScreen::arm_block_preview(App& app) {
     if (md != nullptr) cit = assets.clips.find(shop_clip_key(*md));
     if (cit == assets.clips.end() || cit->second.frames.empty()) {
         const std::string idle =
-            find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+            find_peaceful_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
         if (!idle.empty()) cit = assets.clips.find(idle);
     }
     if (cit == assets.clips.end() || cit->second.frames.empty()) return false;
