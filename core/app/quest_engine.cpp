@@ -4582,6 +4582,13 @@ void QuestEngine::arm_showblock_gate_for_test(App& app) {
 bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
     if (!tutorial_gate_.active) return false;
     if (dt <= 0.0f) return false;
+    // JS `Fo` (ShowBlock, L1126) registers NO `Re(.., TutorialStepTimeout)`
+    // timer — only `Bo`/`Do`/`Eo` (L1121/L1123/L1125) do. The block lesson
+    // completes ONLY on the model animation END (`Ad.kg` -> `oHa` -> `Cxa`),
+    // or immediately when the preview widget is absent (`aDa()==null` ->
+    // `Cxa`). The port's timeout here made the "view the block" step
+    // auto-complete after 15 s without the player watching the animation.
+    if (tutorial_gate_.beat == 4) return false;
     tutorial_gate_.remaining -= dt;
     if (tutorial_gate_.remaining > 0.0f) return false;
     std::fprintf(stdout, "[quest] tutorial lesson beat %d done -> chain resumes\n",
@@ -5478,8 +5485,9 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     if (event == "SessionStart") game_started_ = true;
     // JS `Do`/`Eo` register `Cm` on `p.o.zi.LE` — the story-step change event
     // (`zt.PMa` fires `LE`). A step change while a lesson is parked resumes the
-    // chain immediately; the `TutorialStepTimeout` is only the fallback.
-    if (tutorial_gate_.active) {
+    // chain immediately; the `TutorialStepTimeout` is only the fallback. `Fo`
+    // (beat 4) registers NO `LE` listener (nor a timer), so it is excluded.
+    if (tutorial_gate_.active && tutorial_gate_.beat != 4) {
         std::string live;
         try {
             live = app.save().load().story_step();

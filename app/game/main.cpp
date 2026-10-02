@@ -1552,6 +1552,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --tutorial-showblock-probe: park a synthetic beat-4 gate and assert the
     // EquipmentScreen profile-avatar animation END resumes it (JS `Fo` L1126).
     bool tutorial_showblock_probe = false;
+    // --tutorial-block-shop-probe: seed SHOW_BLOCK, drive Dojo->Shop (the
+    // reported wrong turn) then Shop->Profile, dumping the lock/step/gate at
+    // each edge (the reported "step auto-completed + lock stuck" repro).
+    bool tutorial_block_shop_probe = false;
     // --profile-avatar-probe: the persistent `Pi` profile avatar (the player's
     // worn hero model + its idle animation/pose) + the `$r.Op.pa` -> `Ad.kg`
     // two-stage Show chain (VIEW button -> move playback -> UI restore).
@@ -1702,6 +1706,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             tutorial_real_verify = true;
         } else if (arg == "--tutorial-showblock-probe") {
             tutorial_showblock_probe = true;
+        } else if (arg == "--tutorial-block-shop-probe") {
+            tutorial_block_shop_probe = true;
         } else if (arg == "--profile-avatar-probe") {
             profile_avatar_probe = true;
         } else if (arg == "--fidelity-tour") {
@@ -2707,7 +2713,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // END step (L200) — once short-circuited the chain cannot be armed, so a
     // stale completed local save would make the tutorial steps stall. The
     // oracle harness seeds the same fresh state.
-    if (fidelity_tour || quest_verify || observe_dialogs || tutorial_real_verify) {
+    if (fidelity_tour || quest_verify || observe_dialogs || tutorial_real_verify ||
+        tutorial_block_shop_probe) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
             const std::string hashed = res_root + "/users_default.b7da2019.xml";
@@ -2733,6 +2740,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 w.set_story_step("STEP_BUY_ITEM");
                 ss.save(w);
                 std::fprintf(stdout, "[qverify] seeded story step -> STEP_BUY_ITEM\n");
+                std::fflush(stdout);
+            } else if (tutorial_block_shop_probe) {
+                w.set_story_step("SHOW_BLOCK");
+                ss.save(w);
+                std::fprintf(stdout, "[blockprobe] seeded story step -> SHOW_BLOCK\n");
                 std::fflush(stdout);
             } else if (!w.story_step().empty()) {
                 w.set_story_step("");
@@ -3206,6 +3218,67 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return ok ? 0 : 1;
+    } else if (tutorial_block_shop_probe) {
+        // --- [bug B repro] SHOW_BLOCK -> Shop (wrong turn) -> Profile --------
+        // Seed the reported step and drive the two edges; dump lock/gate/step
+        // after each. No OS input, hidden window (RULE 0).
+        glfwHideWindow(app.renderer().window());
+        app.set_auto_attack(false);
+        app.set_headless_frames(0);
+        // The seed (SHOW_BLOCK) + tutorial include load happen at boot (see the
+        // driver seed above). Settle the boot edges, then drive Dojo->Shop.
+        for (int i = 0; i < 120; ++i) app.run_one_frame();
+        sf2::app::QuestEngine& q = app.quest_engine();
+        const auto dump = [&](const char* tag) {
+            std::string step;
+            try {
+                step = app.save().load().story_step();
+            } catch (const std::exception&) {
+            }
+            std::fprintf(stdout,
+                         "[blockprobe] %-20s screen=%d step=%s locked=%d target=%s "
+                         "navlock=%d navflash=%s gate=%d modal=%d\n",
+                         tag, app.screens().current_id(), step.c_str(),
+                         q.controls_locked() ? 1 : 0, q.lock_target().c_str(),
+                         q.nav_locked() ? 1 : 0, q.nav_flash().c_str(),
+                         q.tutorial_gate_beat(), q.has_modal() ? 1 : 0);
+            std::fflush(stdout);
+        };
+        dump("seed");
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenShop));
+        for (int i = 0; i < 30; ++i) app.run_one_frame();
+        dump("shop");
+        for (int k = 0; k < 12 && q.has_modal(); ++k) {
+            q.press_dialog(app, 1);
+            app.run_one_frame();
+        }
+        dump("shop_drained");
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        bool completed = false;
+        int frames = 0;
+        for (; frames < 900; ++frames) {
+            app.run_one_frame();
+            auto* es = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+            if (es != nullptr && es->block_preview_completed()) {
+                completed = true;
+                break;
+            }
+            if (frames > 5 && q.tutorial_gate_beat() != 4) break;
+        }
+        dump("profile");
+        std::fprintf(stdout, "[blockprobe] preview_completed=%d frames=%d\n",
+                     completed ? 1 : 0, frames);
+        std::fflush(stdout);
+        for (const char* raw :
+             {"dlgSenseiCongratulation",
+              "dlgSenseiLevelIndicator{img::MiscSprites.level}{?Player[].Level}",
+              "dlgSenseiText", "tutorial_try_move{img::ComboButtons.icon_down}{img::ComboButtons.icon_plus}{img::ComboButtons.icon_kick}{img::ComboButtons.icon_kick}"}) {
+            std::fprintf(stdout, "[blockprobe] Y.na(%s) -> [%s]\n", raw,
+                         sf2::app::dialog_line_text_for_test(app, raw).c_str());
+        }
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (tutorial_real_verify) {
         // --- REAL-PATH tutorial gate (permanent, NO harness arm) -------------
         // Boots the way the REAL app does: NO `fresh_tutorial` arm and NO

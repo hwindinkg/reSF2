@@ -1636,6 +1636,10 @@ std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
 // is the tap target.
 int quest_dialog_row_hit_index(App& app, const EngineDialog& d, double x, double y);
 
+// Test hook: resolve one dialog row text through the JS `ba.Fz` + `Y.na`
+// chain (the `--tutorial-block-shop-probe` prints the level-up line).
+std::string dialog_line_text_for_test(App& app, const std::string& raw);
+
 // `--dialog-verify` headless self-check (no OS input, no pixels): queues the
 // crafted `He` dialogs and asserts the D1/D2/D7 display + dispatch contracts,
 // printing `[dlgverify] PASS/FAIL <case>` per case. Returns true only when

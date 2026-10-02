@@ -494,6 +494,159 @@ std::string loc(App& app, const std::string& key, const std::string& fallback) {
     return lang_text(app.res_root(), app.language(), key, fallback);
 }
 
+// JS `qd(a,b)` (L3387): `a.indexOf(b)==0`.
+bool starts_with(const std::string& a, const std::string& b) {
+    return a.size() >= b.size() && a.compare(0, b.size(), b) == 0;
+}
+
+// JS `Cc.LTa` (L1274149): the `%key` terminator set `b_a`/`r9a` splits on.
+const std::string& na_percent_delims() {
+    static const std::string d =
+        " \n.?!,:;()[]{}<>*+#&'\"\\|/`~";
+    return d;
+}
+
+// JS `Cc.ln` (L920) arg conversion (the `img::`/`prefabid::`/`strike::` pass,
+// L471382-471703): `MiscSprites.` is stripped (12 chars), `img::X` becomes the
+// `<quad name=X size=1 width=1 >` that the `<quad>` pass rewrites to
+// `<image>X</image>` (with `.`->`/`). The port emits the FINAL `<image>` form
+// directly (the rich-text drawer consumes it); a `prefabid::`/`strike::` arg
+// has no port renderer and resolves to empty (documented divergence).
+std::string na_convert_arg(const std::string& arg) {
+    if (starts_with(arg, "img::")) {
+        std::string name = arg.substr(5);
+        const std::string misc = "MiscSprites.";
+        if (name.find(misc) != std::string::npos) {
+            // JS `J.substr(f,12,null)` drops the leading `MiscSprites.` (12).
+            const std::size_t p = name.find(misc);
+            if (p == 0) name = name.substr(misc.size());
+        }
+        for (std::size_t i = 0; i < name.size(); ++i) {
+            if (name[i] == '.') name[i] = '/';
+        }
+        return "<image>" + name + "</image>";
+    }
+    if (starts_with(arg, "prefabid::") || starts_with(arg, "strike::")) {
+        return std::string();
+    }
+    return arg;
+}
+
+// JS `Cc.b_a` (L471940): resolve `%key` recursive table references. A `%%`
+// pair collapses to one `%`; a `%key` (key = up to the next delimiter) is
+// replaced by `ln(key)`; an empty key becomes `Cc.p7` = "%%ERROR%%".
+std::string na_percent(App& app, const std::string& in, const std::string& fallback);
+
+// JS `Y.na` (L917) -> `Cc.ln` (L920): the string-table lookup PLUS the trailing
+// `{...}` token substitution. XML dialog/notification texts carry their
+// arguments as trailing `{...}` groups
+// ("dlgSenseiLevelIndicator{img::MiscSprites.level}{?Player[].Level}") while
+// the table stores the base key with `{0}`/`{1}` placeholders ("{0}{1}").
+// The old `loc` looked the WHOLE raw string up, missed, and returned the raw
+// key — the reported "raw text token" sensei dialog. Mirrors `Cc.ln`:
+//   key = substring before the first `{`; look it up (EN fallback);
+//   unescape `{br}`/`&lt;`/`&gt;`; unwrap `<size=N>...</size>`;
+//   parse the raw `{...}` groups as args;
+//   substitute each `{n}` in the value with args[n] (converted);
+//   recursively resolve `%key`.
+std::string loc_na(App& app, const std::string& raw, const std::string& fallback) {
+    if (raw.empty()) return fallback;
+    const std::size_t brace = raw.find('{');
+    const std::string base = brace == std::string::npos ? raw : raw.substr(0, brace);
+    // `X.Xa(this.QU,b)` miss -> `Cc.p7`; the port keeps the caller fallback so
+    // an unknown key never surfaces a raw token.
+    const std::string looked = lang_text(app.res_root(), app.language(), base, std::string());
+    if (looked.empty()) return loc(app, base, fallback);
+    std::string text = looked;
+    // `Rc(Rc(Rc(b,"{br}","\n"),"&lt;","<"),"&gt;",">")`.
+    {
+        auto rep = [](std::string& s, const std::string& from, const std::string& to) {
+            for (std::size_t p = s.find(from); p != std::string::npos; p = s.find(from, p + to.size())) {
+                s.replace(p, from.size(), to);
+            }
+        };
+        rep(text, "{br}", "\n");
+        rep(text, "&lt;", "<");
+        rep(text, "&gt;", ">");
+    }
+    // `f=new Ua("<size=\\d+>([\\s\\S]*?)</size>","g"); f.match(b)&&(b=f.jg(1))`.
+    {
+        const std::size_t so = text.find("<size=");
+        const std::size_t sc = text.find("</size>");
+        if (so != std::string::npos && sc != std::string::npos && sc > so) {
+            const std::size_t gt = text.find('>', so);
+            if (gt != std::string::npos && gt < sc) text = text.substr(gt + 1, sc - gt - 1);
+        }
+    }
+    if (brace == std::string::npos) return na_percent(app, text, fallback);
+    // Parse the raw `{...}` groups (JS breaks on a nested `{` before the `}`).
+    std::vector<std::string> args;
+    for (std::size_t d = brace; d != std::string::npos;) {
+        const std::size_t close = raw.find('}', d + 1);
+        const std::size_t next_open = raw.find('{', d + 1);
+        if (close == std::string::npos) break;
+        if (next_open != std::string::npos && next_open < close) break;
+        args.push_back(raw.substr(d + 1, close - d - 1));
+        d = next_open;
+    }
+    if (args.empty()) return na_percent(app, text, fallback);
+    // Substitute each `{n}` placeholder in the localized value.
+    for (std::size_t a = text.find('{'); a != std::string::npos;) {
+        const std::size_t close = text.find('}', a + 1);
+        const std::size_t next_open = text.find('{', a + 1);
+        if (close == std::string::npos) break;
+        if (next_open != std::string::npos && next_open < close) break;
+        const std::string ph = text.substr(a + 1, close - a - 1);
+        // `K.parseInt(ph)`; a non-numeric placeholder strips A-Z and retries.
+        int idx = -1;
+        {
+            bool numeric = !ph.empty();
+            for (char ch : ph) {
+                if (ch < '0' || ch > '9') { numeric = false; break; }
+            }
+            if (numeric) idx = std::atoi(ph.c_str());
+        }
+        std::string value;
+        if (idx >= 0 && idx < static_cast<int>(args.size())) {
+            value = na_convert_arg(args[static_cast<std::size_t>(idx)]);
+        }
+        const std::string token = "{" + ph + "}";
+        const std::size_t at = text.find(token);
+        if (at != std::string::npos) {
+            text.replace(at, token.size(), value);
+            a = text.find('{', at + value.size());
+        } else {
+            a = text.find('{', a + 1);
+        }
+    }
+    return na_percent(app, text, fallback);
+}
+
+std::string na_percent(App& app, const std::string& in, const std::string& fallback) {
+    std::string b = in;
+    for (std::size_t a = b.find('%'); a != std::string::npos;) {
+        if (a + 1 < b.size() && b[a + 1] == '%') {
+            b.erase(a, 1);
+            a = b.find('%', a + 1);
+            continue;
+        }
+        std::size_t e = a + 1;
+        const std::string& delims = na_percent_delims();
+        while (e < b.size() && delims.find(b[e]) == std::string::npos) ++e;
+        const std::string key = b.substr(a + 1, e - a - 1);
+        std::string repl;
+        if (key.empty()) {
+            repl = "%%ERROR%%";  // `Cc.p7`
+        } else {
+            repl = loc_na(app, key, fallback);
+        }
+        b.replace(a, (e - a), repl);
+        a = b.find('%', a + repl.size());
+    }
+    return b;
+}
+
+
 // Item display name: JS `Y.na(item.Cg || item.name)` (L2246-2247 `Ne.refresh`
 // -> `Vc.V(Y.na(a))`; L1881 `ur.info.V(Y.na(a.name))`). The list.xml `Name` is
 // a lang key ("WEAPON_KNIVES" -> "Knives"). When the table lacks it, fall back
@@ -511,10 +664,62 @@ std::string item_display_name(App& app, const CatalogItem& it) {
 // the JS line advance `(fontSize/eF)*ij*lineHeight*nha` (L1627 `d`); native
 // menu eF=100 and the port models the authored `Kc` line factor as 1, so
 // `line_step = ua_scale * font->line_height * ea.b1`.
+// JS rich-text `<image ...>name</image>` inline run (the `Y.na` `img::`
+// output, L471898, plus the dialog body's `level`/`energy`/`ruby`/`gold`
+// tweaks at L1006915). The port draws the named atlas frame inline; the tag is
+// replaced by the 0-width placeholder 0x01 for wrap/measure.
+struct RichImage {
+    std::string name;
+    float scale = 1.0f;  // the `<image s=N>` factor (default 1)
+    float y = 0.0f;      // the `<image y=N>` baseline offset (default 0)
+};
+
 struct UiWrap {
     std::vector<std::string> lines;
     float line_step = 0.0f;
+    std::vector<RichImage> images;  // in `<image>` order (0x01 placeholders)
 };
+
+// Forward (defined after the dialog art below).
+bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
+                           float w, float h, float alpha, bool fill, bool flip_x,
+                           bool top_left);
+
+// Replaces every `<image ...>name</image>` with 0x01 and records the runs in
+// order. `<image y=-0.1 s=0.6>level</image>` parses both attrs. Plain text
+// (no `<image`) is returned byte-identical.
+std::string rich_strip_images(const std::string& in, std::vector<RichImage>& imgs) {
+    if (in.find("<image") == std::string::npos) return in;
+    std::string out;
+    out.reserve(in.size());
+    std::size_t i = 0;
+    while (i < in.size()) {
+        const std::size_t tag = in.find("<image", i);
+        if (tag == std::string::npos) {
+            out.append(in, i, std::string::npos);
+            break;
+        }
+        out.append(in, i, tag - i);
+        const std::size_t gt = in.find('>', tag);
+        const std::size_t close = in.find("</image>", tag);
+        if (gt == std::string::npos || close == std::string::npos || close < gt) {
+            out.append(in, tag, std::string::npos);  // malformed -> literal
+            break;
+        }
+        RichImage ri;
+        const std::string attrs = in.substr(tag + 6, gt - tag - 6);
+        const std::size_t sp = attrs.find("s=");
+        if (sp != std::string::npos) ri.scale = std::atof(attrs.c_str() + sp + 2);
+        const std::size_t yp = attrs.find("y=");
+        if (yp != std::string::npos) ri.y = std::atof(attrs.c_str() + yp + 2);
+        ri.name = in.substr(gt + 1, close - gt - 1);
+        imgs.push_back(ri);
+        out.push_back('\x01');
+        i = close + 8;  // "</image>" = 8 chars
+    }
+    return out;
+}
+
 
 // The wrap + line advance itself, shared by the draw below and by the `od`
 // content-height measurement (`Od.lj` L1950 `this.Md = Math.max(kb.ew(),
@@ -527,7 +732,9 @@ UiWrap wrap_ui_text(App& app, const std::string& text, float w, float ua_scale,
     const sf2::data::font* font = app.menu_font();
     if (font == nullptr) return out;
     // `{br}` inline markup -> hard line break (see expand_br).
-    const std::string body = expand_br(text);
+    std::string body = expand_br(text);
+    // JS rich-text `<image>` runs -> 0x01 placeholders + the image list.
+    body = rich_strip_images(body, out.images);
     const float scale = ua_scale * ea_a1(app);
     if (scale <= 0.0f) return out;
     // `nha` (L1623/L1627): `ea.Kc(a)` (L1712) sets `nha = a*ea.b1`, so the
@@ -596,12 +803,48 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
     const float line_step = wr.line_step;
     if (line_step <= 0.0f) return;
     float yy = y;
+    std::size_t img_i = 0;
+    const sf2::data::font* font = app.menu_font();
+    const float scale = ua_scale * ea_a1(app);
     for (const std::string& ln : wr.lines) {
         if (yy + line_step > y + h) break;  // `e > height-jd` -> vn (clip)
         // 1.0f = the `a` param; `fit=false` keeps the wrapped width (the line
         // already fits `w`, so the single-line `Sk` shrink must not re-run).
-        draw_ui_label(app, x, yy, w, line_step, ln, ua_scale, align, r, g, b,
-                      1.0f, /*fit=*/false);
+        if (ln.find('\x01') == std::string::npos || align != UiAlign::Left) {
+            std::string plain = ln;
+            if (align != UiAlign::Left) {
+                plain.erase(std::remove(plain.begin(), plain.end(), '\x01'), plain.end());
+            }
+            draw_ui_label(app, x, yy, w, line_step, plain, ua_scale, align, r, g, b,
+                          1.0f, /*fit=*/false);
+        } else {
+            // JS rich-text: text runs interleaved with inline `<image>` sprites.
+            float cx = x;
+            std::size_t p = 0;
+            while (p < ln.size()) {
+                const std::size_t ph = ln.find('\x01', p);
+                const std::string seg =
+                    ln.substr(p, ph == std::string::npos ? std::string::npos : ph - p);
+                if (!seg.empty()) {
+                    draw_ui_label(app, cx, yy, w, line_step, seg, ua_scale, UiAlign::Left,
+                                  r, g, b, 1.0f, /*fit=*/false);
+                    if (font != nullptr && scale > 0.0f) {
+                        cx += app.measure_text(*font, seg, scale);
+                    }
+                }
+                if (ph == std::string::npos) break;
+                if (img_i < wr.images.size()) {
+                    const RichImage& ri = wr.images[img_i++];
+                    const float size = line_step * (ri.scale > 0.0f ? ri.scale : 1.0f);
+                    const float iy = yy + line_step * 0.5f + ri.y * line_step;
+                    try_draw_atlas_button(app, ri.name, cx + size * 0.5f, iy, size, size,
+                                          1.0f, /*fill=*/false, /*flip_x=*/false,
+                                          /*top_left=*/false);
+                    cx += size;
+                }
+                p = ph + 1;
+            }
+        }
         yy += line_step;
     }
 }
@@ -6732,12 +6975,53 @@ OdLayout od_layout(float md) {
     return o;
 }
 
+// JS `ba.Fz` (L519481): substitute every `{...}` group with the resolved quest
+// expression. `?Player[].Level` -> the level; a literal (`img::...`) resolves
+// to itself and is left untouched (`c!=b` guard).
+std::string dialog_brace_substitute(App& app, const std::string& raw,
+                                    const QuestJournal& journal) {
+    if (raw.find('{') == std::string::npos) return raw;
+    std::string out = raw;
+    for (std::size_t open = out.find('{'); open != std::string::npos;) {
+        const std::size_t close = out.find('}', open + 1);
+        if (close == std::string::npos) break;
+        const std::string inner = out.substr(open + 1, close - open - 1);
+        std::string resolved = app.quest_engine().resolve_for_test(app, inner, journal);
+        if (resolved != inner) {
+            const std::size_t at = out.find(inner);
+            if (at != std::string::npos) out.replace(at, inner.size(), resolved);
+        }
+        open = out.find('{', open + 1);
+    }
+    return out;
+}
+
+// The dialog row text: JS `He.S` L1050-1051 `F.text=ba.cg(a,F.text);
+// F.text=ba.Fz(F.text,a)` then the draw-time `Y.na`. The port's parse already
+// ran `ba.cg` for `_`-refs, so only `ba.Fz` + `loc_na` remain. The inline
+// sprite tweaks are `uj.sqb` L1006915.
+std::string dialog_line_text(App& app, const EngineDialog& d, const std::string& raw) {
+    std::string text = dialog_brace_substitute(app, raw, d.journal);
+    text = loc_na(app, text, raw);
+    auto rep = [](std::string& s, const std::string& from, const std::string& to) {
+        for (std::size_t p = s.find(from); p != std::string::npos;
+             p = s.find(from, p + to.size())) {
+            s.replace(p, from.size(), to);
+        }
+    };
+    rep(text, "<image>level</image>", "<image y=-0.1 s=0.6>level</image>");
+    rep(text, "<image>energy</image>", "<image y=0.2>energy</image>");
+    rep(text, "<image>ruby</image>", "<image s=0.8>ruby</image>");
+    rep(text, "<image>gold</image>", "<image s=0.8>gold</image>");
+    return text;
+}
+
 // `Od.Xma` L1948: the CURRENT row's text (`He` pages one `<Line>` at a time
 // via `Od.EF`/`Od.X2` L1946/L1950).
 std::string dialog_page_body(App& app, const EngineDialog& d) {
     if (d.lines.empty()) return std::string();
     const std::size_t page = d.page < d.lines.size() ? d.page : d.lines.size() - 1;
-    return loc(app, d.lines[page], d.lines[page]);
+    return dialog_line_text(app, d, d.lines[page]);
 }
 
 // The dialog's content height `Md` (design px). `Od.lj` L1950
@@ -6754,7 +7038,7 @@ float dialog_content_md(App& app, const EngineDialog& d) {
     float h = 0.0f;
     if (dialog_scrolls_all_lines(d.type)) {
         for (const std::string& ln : d.lines) {  // `sqb` L1953 rows
-            h += measure_ui_wrapped(app, loc(app, ln, ln), kOdBodyW * safe_c,
+            h += measure_ui_wrapped(app, dialog_line_text(app, d, ln), kOdBodyW * safe_c,
                                     dialog_text_ua_scale(app, 100.0f) * safe_c, kOdBodyKc);
         }
     } else {
@@ -6832,7 +7116,7 @@ std::string ib_joined_lines(App& app, const EngineDialog& d) {
     std::string joined;
     for (const std::string& ln : d.lines) {
         if (!joined.empty()) joined.push_back('\n');
-        joined += loc(app, ln, ln);
+        joined += dialog_line_text(app, d, ln);
     }
     return joined;
 }
@@ -6902,7 +7186,7 @@ std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
     const bool all = dialog_scrolls_all_lines(d.type);
     float y = L.body_y;
     for (std::size_t i = 0; i < d.lines.size(); ++i) {
-        const float h = all ? measure_ui_wrapped(app, loc(app, d.lines[i], d.lines[i]),
+        const float h = all ? measure_ui_wrapped(app, dialog_line_text(app, d, d.lines[i]),
                                                  kOdBodyW * c,
                                                  dialog_text_ua_scale(app, 100.0f) * c,
                                                  kOdBodyKc)
@@ -7144,7 +7428,7 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         // all inside the scroll container `this.yO`.
         float y = L.body_y;
         for (const std::string& ln : d.lines) {
-            const std::string text = loc(app, ln, ln);
+            const std::string text = dialog_line_text(app, d, ln);
             const float h = measure_ui_wrapped(app, text, kOdBodyW * c,
                                                dialog_text_ua_scale(app, 100.0f) * c,
                                                kOdBodyKc);
@@ -7173,7 +7457,7 @@ void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_od_base(app, ren, L.panel);
     draw_dialog_title(app, L, d.title);
     const std::string body =
-        d.lines.empty() ? std::string() : loc(app, d.lines[0], d.lines[0]);
+        d.lines.empty() ? std::string() : dialog_line_text(app, d, d.lines[0]);
     draw_ui_wrapped(app, L.sx(kOdVeBodyX), L.body_y, kOdVeBodyW * L.panel.c, L.body_h, body,
                     dialog_text_ua_scale(app, 125.0f) * L.panel.c, UiAlign::Left,
                     0.12f, 0.09f, 0.06f, kOdBodyKc);
@@ -19694,6 +19978,11 @@ bool energy_regen_probe() {
     std::fprintf(stdout, "[energy] RESULT %s\n", ok ? "PASS" : "FAIL");
     std::fflush(stdout);
     return ok;
+}
+
+std::string dialog_line_text_for_test(App& app, const std::string& raw) {
+    EngineDialog d;
+    return dialog_line_text(app, d, raw);
 }
 
 } // namespace sf2::app
