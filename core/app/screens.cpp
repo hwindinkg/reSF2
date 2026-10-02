@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -7348,6 +7349,37 @@ std::string dialog_line_text(App& app, const EngineDialog& d, const std::string&
     return text;
 }
 
+// `He.jkb` L1042 `TextColor`: `b=a.attributes.get("TextColor"); b=b!=null?b:"";
+// qd(b,"0x")||(b="0x"+b); b=="0x"&&(b="0x0"); b=K.parseInt(b);
+// b!=0&&(c.VI=Na.cd(b))`. A missing or zero value keeps `VI`'s default, so the
+// port keeps its default text colour (0.12,0.09,0.06). Shipped
+// `TextColor="0xfefe95"` (24 PriceLines) renders 254,254,149.
+void dialog_row_color(const EngineDialog& d, std::size_t i, float& r, float& g,
+                      float& b) {
+    r = 0.12f;
+    g = 0.09f;
+    b = 0.06f;
+    if (i >= d.line_colors.size()) return;
+    std::string h = d.line_colors[i];
+    if (h.empty()) return;
+    if (h.rfind("0x", 0) != 0 && h.rfind("0X", 0) != 0) h = "0x" + h;
+    const unsigned long v = std::strtoul(h.c_str(), nullptr, 16);
+    if (v == 0) return;  // JS `b!=0&&`
+    r = static_cast<float>((v >> 16) & 0xff) / 255.0f;
+    g = static_cast<float>((v >> 8) & 0xff) / 255.0f;
+    b = static_cast<float>(v & 0xff) / 255.0f;
+}
+
+// `He.jkb` `FontSize` -> `c.fontSize` (`u.I(..,-1)`); the row text node uses
+// `ua(d.fontSize>0?d.fontSize:def)` (L1005581 `Od`, L1006506 `uj`), `def`=100
+// for those and 125 for the `Ve` no-avatar body (L1913 `ua(125)`). Shipped
+// `FontSize="220"` on the level-indicator line (2).
+float dialog_row_font_px(const EngineDialog& d, std::size_t i, float def) {
+    if (i < d.line_font_sizes.size() && d.line_font_sizes[i] > 0)
+        return static_cast<float>(d.line_font_sizes[i]);
+    return def;
+}
+
 // `Od.Xma` L1948: the CURRENT row's text (`He` pages one `<Line>` at a time
 // via `Od.EF`/`Od.X2` L1946/L1950).
 std::string dialog_page_body(App& app, const EngineDialog& d) {
@@ -7369,14 +7401,20 @@ float dialog_content_md(App& app, const EngineDialog& d) {
     const float safe_c = c > 0.0f ? c : 1.0f;
     float h = 0.0f;
     if (dialog_scrolls_all_lines(d.type)) {
-        for (const std::string& ln : d.lines) {  // `sqb` L1953 rows
-            h += measure_ui_wrapped(app, dialog_line_text(app, d, ln), kOdBodyW * safe_c,
-                                    dialog_text_ua_scale(app, 100.0f) * safe_c, kOdBodyKc);
+        for (std::size_t i = 0; i < d.lines.size(); ++i) {  // `sqb` L1953 rows
+            h += measure_ui_wrapped(
+                app, dialog_line_text(app, d, d.lines[i]), kOdBodyW * safe_c,
+                dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * safe_c,
+                kOdBodyKc);
         }
     } else {
         // `Od.Xma` L1948 -> `lj` re-measures the CURRENT row.
-        h = measure_ui_wrapped(app, dialog_page_body(app, d), kOdBodyW * safe_c,
-                               dialog_text_ua_scale(app, 100.0f) * safe_c, kOdBodyKc);
+        const std::size_t page =
+            d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
+        h = measure_ui_wrapped(
+            app, dialog_page_body(app, d), kOdBodyW * safe_c,
+            dialog_text_ua_scale(app, dialog_row_font_px(d, page, 100.0f)) * safe_c,
+            kOdBodyKc);
     }
     return std::max(h / safe_c, d.min_content_height);
 }
@@ -7520,7 +7558,8 @@ std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
     for (std::size_t i = 0; i < d.lines.size(); ++i) {
         const float h = all ? measure_ui_wrapped(app, dialog_line_text(app, d, d.lines[i]),
                                                  kOdBodyW * c,
-                                                 dialog_text_ua_scale(app, 100.0f) * c,
+                                                 dialog_text_ua_scale(
+                                                     app, dialog_row_font_px(d, i, 100.0f)) * c,
                                                  kOdBodyKc)
                             : L.body_h;
         const bool button = i < d.line_actions.size() && !d.line_actions[i].empty();
@@ -7735,10 +7774,15 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_od_base(app, ren, L.panel);
     draw_dialog_title(app, L, d.title);
     draw_dialog_portrait(app, d, L);
+    const std::size_t od_page =
+        d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
+    float od_r = 0.12f, od_g = 0.09f, od_b = 0.06f;
+    dialog_row_color(d, od_page, od_r, od_g, od_b);
     draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, kOdBodyBoxH * L.panel.c,
                     dialog_page_body(app, d),
-                    dialog_text_ua_scale(app, 100.0f) * L.panel.c, UiAlign::Left,
-                    0.12f, 0.09f, 0.06f, kOdBodyKc);
+                    dialog_text_ua_scale(app, dialog_row_font_px(d, od_page, 100.0f)) *
+                        L.panel.c,
+                    UiAlign::Left, od_r, od_g, od_b, kOdBodyKc);
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
 }
@@ -7759,21 +7803,28 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         // `sqb` L1953: one text node per `<Line>`, `b += f.ew() + e.offsetY`,
         // all inside the scroll container `this.yO`.
         float y = L.body_y;
-        for (const std::string& ln : d.lines) {
-            const std::string text = dialog_line_text(app, d, ln);
-            const float h = measure_ui_wrapped(app, text, kOdBodyW * c,
-                                               dialog_text_ua_scale(app, 100.0f) * c,
-                                               kOdBodyKc);
+        for (std::size_t i = 0; i < d.lines.size(); ++i) {
+            const std::string text = dialog_line_text(app, d, d.lines[i]);
+            const float h = measure_ui_wrapped(
+                app, text, kOdBodyW * c,
+                dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
+                kOdBodyKc);
+            float rr = 0.12f, gg = 0.09f, bb = 0.06f;
+            dialog_row_color(d, i, rr, gg, bb);
             draw_ui_wrapped(app, L.body_x, y, L.body_w, h, text,
-                            dialog_text_ua_scale(app, 100.0f) * c, UiAlign::Left,
-                            0.12f, 0.09f, 0.06f, kOdBodyKc);
+                            dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
+                            UiAlign::Left, rr, gg, bb, kOdBodyKc);
             y += h;
         }
     } else {
+        const std::size_t uj_page =
+            d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
+        float rr = 0.12f, gg = 0.09f, bb = 0.06f;
+        dialog_row_color(d, uj_page, rr, gg, bb);
         draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h,
                         dialog_page_body(app, d),
-                        dialog_text_ua_scale(app, 100.0f) * c, UiAlign::Left, 0.12f,
-                        0.09f, 0.06f, kOdBodyKc);
+                        dialog_text_ua_scale(app, dialog_row_font_px(d, uj_page, 100.0f)) * c,
+                        UiAlign::Left, rr, gg, bb, kOdBodyKc);
     }
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);

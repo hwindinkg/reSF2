@@ -127,6 +127,10 @@ struct QuestJournal {
 struct QuestCond {
     std::string kind = "Equal";  // leaf kind, or "And" / "Or" operator
     bool invert = false;         // Not="1"
+    // JS `yb.zwa` (L491578): `(CaseSensitive != null ? CaseSensitive : "1")=="1"`.
+    // Read only for the string operators (`NEa()` true for Contains/Starts/Ends,
+    // L491578); their `v0a` lowercases both operands when false.
+    bool case_sensitive = true;
     std::string value1;
     std::string value2;
     std::vector<QuestCond> children;  // Operator branches
@@ -275,6 +279,19 @@ struct EngineDialog {
     // `press_dialog` runs it by row id. Before this the nested `<GiveItem>` of
     // a `DeliveryDelay` row was dropped entirely (a real divergence).
     std::vector<std::vector<QuestAction>> line_actions;
+    // `He.jkb` (L1042): per-row presentation attrs, parallel to `lines`:
+    //   `TextColor` -> `c.VI` (`qd(b,"0x")||(b="0x"+b); b=parseInt(b);
+    //                 b!=0&&(c.VI=Na.cd(b))` — a parsed 0 keeps the default);
+    //   `FontSize`  -> `c.fontSize` (`u.I(..,-1)`; the row text node L1005581
+    //                 `ua(d.fontSize>0?d.fontSize:100)`);
+    //   `FontName`  -> `c.font` (the named font asset).
+    // The port drew every row with the fixed default colour/scale, so the
+    // shipped `TextColor="0xfefe95"` PriceLines (24) and the
+    // `FontSize="220" FontName="carterOneLevel"` level-indicator line (2) were
+    // dropped.
+    std::vector<std::string> line_colors;   // raw `TextColor` ("" -> default)
+    std::vector<int> line_font_sizes;       // `FontSize` (-1 -> default)
+    std::vector<std::string> line_fonts;    // `FontName`
     // `He.gjb` (L1058): `DifficultyOf Fight` -> `this.Yca` (the resolved fight
     // triple). `He.Gz()` resolves it and returns the difficulty number.
     std::string difficulty_fight;
@@ -1164,6 +1181,14 @@ private:
     // treats the comparison as UNKNOWN.
     bool resolve_token(App& app, const std::string& token, const EvalCtx& ctx,
                        std::string& out);
+    // `ba.CD(a,b)` expression evaluation for the numeric attr readers the JS
+    // routes through `ba.Zv`/`ba.S8a` (e.g. a dialog row's `Hide`). The port's
+    // `resolve_token` covers single `_`/`?` tokens and ` Or `/` And `; this
+    // adds the shipped comparison forms (`?query == literal`, `?query !=
+    // literal`) and then returns the numeric result (JS `.Ie`).
+    double eval_expr_num(App& app, const std::map<std::string, std::string>& locals,
+                         const QuestJournal& journal, const std::string& iterator,
+                         const std::string& expr);
     // `?Method[arg].Field` — the subset of the JS query engine the shipped
     // conditions read. Returns false (UNKNOWN, logged) for the rest.
     bool resolve_query(App& app, const std::string& token, const EvalCtx& ctx,

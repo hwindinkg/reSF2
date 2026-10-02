@@ -8,6 +8,7 @@
 #include "app/quest_engine.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -263,6 +264,9 @@ void parse_condition_element(const pugi::xml_node& ch, QuestCond& parent) {
         leaf.value1 = ch.attribute("Value1").value();
         leaf.value2 = ch.attribute("Value2").value();
         leaf.invert = not_attr == "1";
+        // `yb.parse` L491578: `NEa()` (Contains/Starts/Ends) reads
+        // `CaseSensitive` (absent -> "1").
+        leaf.case_sensitive = ch.attribute("CaseSensitive").value() != "0";
         parent.children.push_back(std::move(leaf));
         return;
     }
@@ -621,14 +625,21 @@ void QuestEngine::parse_quest_node(App& app, const pugi::xml_node& q,
     const pugi::xml_node acts = q.child("Actions");
     if (acts) {
         // JS `be.Gib` (L517407): `this.k7 = be.ifa(attributes.get("Place")
-        // != null ? Place : "Map")`; `be.ifa` (L519046) is the scene map
-        // Map->5 / Fight->6 / Dojo->3 / else->-1. `k7` becomes each action's
-        // `Faa` and, through `Ln.iLa` (L531194), the auto-checkpoint's
+        // != null ? Place : "Map")`; `be.ifa` (L519046) is `Fight`->6 /
+        // `Dojo`->3 / `Map`->5 / else->-1. `k7` becomes each action's `Faa`
+        // and, through `Ln.iLa` (L531194), the auto-checkpoint's
         // `ScreenIndex`. It is NEVER a fire gate (the `ha.RA` pump L522515
         // does not read it); `place` exists only to feed the `Checkpoint`
-        // action below.
+        // action below. NOTE the `be.ifa` table is NOT `xn.iOa` (the screen-id
+        // map `scene_id_for_name`): `Place="Shop"` is -1 here, not 4, and an
+        // absent `Place` defaults to "Map" (5), not 0. The port used
+        // `scene_id_for_name` + a 0 default, so the one shipped
+        // `<Actions Place="Shop">` and any checkpoint-less default differed.
         const std::string place_name = acts.attribute("Place").value();
-        if (!place_name.empty()) def.place = scene_id_for_name(place_name);
+        {
+            const std::string pn = place_name.empty() ? "Map" : place_name;
+            def.place = (pn == "Fight") ? 6 : (pn == "Dojo") ? 3 : (pn == "Map") ? 5 : -1;
+        }
         for (pugi::xml_node a = acts.first_child(); a; a = a.next_sibling()) {
             if (a.type() != pugi::node_element) continue;
             QuestAction act;
@@ -2636,6 +2647,61 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
     return true;
 }
 
+// `ba.CD(a,b)` (L520179 `Zv`/`S8a`/`Pc`/`cg` all funnel through it). The
+// shipped attr readers that use it (`ba.Zv` = `.Ie > 0`) carry only
+// `?query == literal` / `?query != literal` forms; the port's `resolve_token`
+// already handles the `_`/`?` operands and ` Or `/` And `, so this layers the
+// comparison on top: split on ` == `/` != ` (JS evaluates both sides to `oc`
+// results, then `w0a` does `Uha` numeric or `PNa` string equality), return
+// 1.0/0.0. A bare operand falls through to `resolve_token` -> numeric value.
+double QuestEngine::eval_expr_num(
+    App& app, const std::map<std::string, std::string>& locals,
+    const QuestJournal& journal, const std::string& iterator,
+    const std::string& expr) {
+    EvalCtx c;
+    c.journal = journal;
+    c.iterator = iterator;
+    c.locals = &locals;
+    c.level = journal.player_level;
+    try {
+        const WarriorSave w = app.save().load();
+        c.story_step = w.story_step();
+        c.level = w.level;
+        c.save = w;
+        c.save_loaded = true;
+    } catch (const std::exception&) {
+    }
+    struct Op {
+        const char* sep;
+        bool ne;
+    };
+    static const Op kOps[] = {{" == ", false}, {" != ", true},
+                              {" >= ", false}, {" <= ", false}};
+    for (const Op& op : kOps) {
+        const std::string sep = op.sep;
+        const std::size_t p = expr.find(sep);
+        if (p == std::string::npos) continue;
+        std::string a, b;
+        if (!resolve_token(app, expr.substr(0, p), c, a)) return 0.0;
+        if (!resolve_token(app, expr.substr(p + sep.size()), c, b)) return 0.0;
+        bool eq;
+        if (op.sep[1] == '>') {
+            eq = is_numeric(a) && is_numeric(b) && to_number(a) >= to_number(b);
+        } else if (op.sep[1] == '<') {
+            eq = is_numeric(a) && is_numeric(b) && to_number(a) <= to_number(b);
+        } else if (is_numeric(a) && is_numeric(b)) {
+            eq = to_number(a) == to_number(b);
+        } else {
+            eq = a == b;  // `PNa`
+        }
+        if (op.ne) eq = !eq;
+        return eq ? 1.0 : 0.0;
+    }
+    std::string v;
+    if (!resolve_token(app, expr, c, v)) return 0.0;
+    return is_numeric(v) ? to_number(v) : 0.0;
+}
+
 QuestEngine::Tri QuestEngine::eval_cond(App& app, const QuestCond& cond, const EvalCtx& ctx) {
     if (cond.kind == "And" || cond.kind == "Or") {
         const bool is_or = cond.kind == "Or";
@@ -2670,11 +2736,31 @@ QuestEngine::Tri QuestEngine::eval_cond(App& app, const QuestCond& cond, const E
     if (!resolve_token(app, cond.value1, ctx, a)) return Tri::Unknown;
     if (!resolve_token(app, cond.value2, ctx, b)) return Tri::Unknown;
     bool ok = false;
-    if (cond.kind == "Equal" || cond.kind == "Contains" || cond.kind == "Starts" ||
-        cond.kind == "Ends") {
+    if (cond.kind == "Equal") {
         // Both numeric -> numeric compare; otherwise exact string compare
         // (`w0a` falls back to `PNa`).
         ok = (is_numeric(a) && is_numeric(b)) ? (to_number(a) == to_number(b)) : (a == b);
+    } else if (cond.kind == "Contains" || cond.kind == "Starts" || cond.kind == "Ends") {
+        // JS `NEa()` L491578 routes types 8/9/10 to `v0a` (L495218), NOT the
+        // `w0a` equality path: `Cb` (contains), `qd` (starts-with), `Yf`
+        // (ends-with), on `a.toString()`/`b.toString()`. `zwa` (CaseSensitive,
+        // default true) selects the case-folded variants. The port used to
+        // treat all three as `Equal` — a divergence (latent: 0 shipped uses).
+        std::string x = a, y = b;
+        if (!cond.case_sensitive) {
+            auto lower = [](std::string& s) {
+                for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            };
+            lower(x);
+            lower(y);
+        }
+        if (cond.kind == "Contains") {
+            ok = x.find(y) != std::string::npos;
+        } else if (cond.kind == "Starts") {
+            ok = x.rfind(y, 0) == 0;
+        } else {
+            ok = x.size() >= y.size() && x.compare(x.size() - y.size(), y.size(), y) == 0;
+        }
     } else if (cond.kind == "Greater" || cond.kind == "GreaterEqual" ||
                cond.kind == "Less" || cond.kind == "LessEqual") {
         if (is_numeric(a) && is_numeric(b)) {
@@ -2911,6 +2997,17 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                                         c.tag == "DeliveryDelay" ||
                                         c.tag == "PriceLine";
                     if (is_row) {
+                        // `He.S` L1051: `if(F.pn!="0"&&ba.Zv(a,F.pn))continue;`
+                        // — a row whose `Hide` expression (`ba.Zv` = `ba.CD(..)
+                        // .Ie > 0`) is truthy is dropped before the widget is
+                        // built. Shipped: `Hide="?SysInfo[].AdvertisingSupport
+                        // == 0"` (quests.xml, 15 rows) + `Hide="?Offer[
+                        // _CurrentOffer].TimerActive == 0"` (offers.xml, 1).
+                        const std::string hide = attr_or(c.attrs, "Hide");
+                        if (!hide.empty() && hide != "0" &&
+                            eval_expr_num(app, locals, journal, iterator, hide) > 0.0) {
+                            continue;
+                        }
                         std::string text = attr_or(c.attrs, "Text");
                         // `_`-refs: run-locals then the global quest variables
                         // (see `quest_var`). An unresolved ref drops the row.
@@ -2921,6 +3018,11 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                         dlg.line_buttons.push_back(attr_or(c.attrs, "ButtonText"));
                         if (!text.empty()) {
                             dlg.lines.push_back(text);
+                            // `He.jkb` L1042 presentation attrs.
+                            dlg.line_colors.push_back(attr_or(c.attrs, "TextColor"));
+                            dlg.line_font_sizes.push_back(
+                                parse_int_or(attr_or(c.attrs, "FontSize"), -1));
+                            dlg.line_fonts.push_back(attr_or(c.attrs, "FontName"));
                             dlg.line_content_types.push_back(
                                 c.tag == "PriceLine"   ? 1
                                 : c.tag == "LineButton" ? 2
