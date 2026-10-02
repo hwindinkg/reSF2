@@ -2888,6 +2888,19 @@ void za_nav_rail_rect(float yI, float& x, float& y, float& w, float& h) {
     h = ch0 + (rail_h - ch0) * t;
 }
 
+}  // namespace
+
+// The live centre of the `gk.Af` header/rail (see screens.hpp). The toggle
+// button rides `Af`, so a tap must target its CURRENT position.
+void za_nav_rail_center(ScreenId id, float& cx, float& cy) {
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+    za_nav_rail_rect(za_nav_state(id).yI, x, y, w, h);
+    cx = x + w * 0.5f;
+    cy = y + h * 0.5f;
+}
+
+namespace {
+
 // Hit test for the vertical nav column; -1 when outside every button.
 int za_nav_hit(double px, double py) {
     const ZaLayout lay = za_layout();

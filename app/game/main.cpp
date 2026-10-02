@@ -5395,7 +5395,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // `gk.aa` (L1998) swallows input while `PF`, so wait the run out.
         tick(28);
         check(za_nav_expanded(kScreenMap), "map header tap EXPANDS the menu column");
-        app.inject_click(120.0, 90.0);
+        // The toggle button RIDES `gk.Af` (`gk.JT` L2001: `this.Af.node.D(
+        // a*this.height-a*this.Af.height/2)`), so once expanded it sits at the
+        // column bottom - tap its LIVE centre, not the collapsed top.
+        float rcx = 120.0f, rcy = 90.0f;
+        za_nav_rail_center(kScreenMap, rcx, rcy);
+        app.inject_click(static_cast<double>(rcx), static_cast<double>(rcy));
         tick(28);
         check(!za_nav_expanded(kScreenMap), "map header tap collapses it again");
         // (3) ZONE DOTS: a tap on the strip must switch the shown zone.

@@ -1563,9 +1563,15 @@ void set_za_nav_open(bool open);
 // (L1839) gate ACCEPTED it (the guided `tk` target or an unlocked overlay) and
 // false when the quest's `Sb.Xva` block rejected it. `--tutorial-real-verify`.
 bool za_nav_try_tap(App& app, int hit);
-// The `za` column's expanded state for a shell screen (`gk.uJ`) — asserted by
+// The `za` column's expanded state for a shell screen (`gk.uJ`) - asserted by
 // the `--flow-verify` probe for the Map/Shop header tap.
 bool za_nav_expanded(ScreenId id);
+// The LIVE centre of the `gk.Af` header/rail the toggle button rides (`gk.JT`
+// L2001: `this.Af.node.D(a*this.height-a*this.Af.height/2)`): the collapsed
+// header at the top (`yI=0`) or the full-width column-bottom rail (`yI=1`).
+// A probe/driver taps THIS point (not a fixed top position) to toggle the
+// column, because the button MOVES with the rail.
+void za_nav_rail_center(ScreenId id, float& cx, float& cy);
 // JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): the `<Fight>` the boss ladder is on —
 // the wins recorded for the battle, clamped to its `<Fight>` count, so the
 // quest journal's `_$Fight` is `zone|name|(index+1)`.
