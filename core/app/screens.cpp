@@ -254,6 +254,12 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     // serialized chain on the same app clock (the next tutorial beat is only
     // queued once the lesson budget elapses).
     quest_tutorial_gate_tick(app);
+    // `Rd` (L1078843): while the ActScreen title overlay owns the screen the JS
+    // chain is parked at step 6, so no dialog input is possible. Block input
+    // AFTER the read-time/tutorial clocks so their auto-advance is untouched.
+    // Live only: the headless drivers run the overlay as a pure display (their
+    // synthetic clocks predate the title), so they keep the pre-title input.
+    if (!app.headless() && app.quest_engine().has_act_overlay()) return true;
     const EngineDialog* d = quest_modal_top(app);
     if (d == nullptr) return false;
     // `He.S` L1048-1050: the Types whose JS body is a bare `debugger;`
@@ -966,21 +972,6 @@ void draw_closing_dialog(App& app, sf2::render::Renderer& ren);
 // falls through to `this.sa()`, so the port advances without displaying.
 void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) {
     if (!is_top) return;  // layered stack: only the top screen draws the modal
-    // `Rd` (L1078843): the live `zn` ActScreen overlay. JS draws it on its own
-    // `mc.K.cf` child above the scene — a black dim + the current line, 1 s
-    // fade-in / hold per `Frames/60` / 1 s fade-out (`aa` steps 0-5). Placed
-    // here because every screen's render calls `draw_quest_modal` last.
-    if (app.quest_engine().has_act_overlay()) {
-        const float a = app.quest_engine().act_overlay_alpha();
-        const float dim[] = {0.0f,   0.0f,   kViewW, 0.0f,   0.0f,   kViewH,
-                             kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
-        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f * a);
-        draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
-                        kViewH * 0.16f,
-                        loc(app, app.quest_engine().act_overlay_text(),
-                            app.quest_engine().act_overlay_text()),
-                        0.9f, UiAlign::Center, 1.0f, 1.0f, 1.0f);
-    }
     // D13: `Wb` owns ONE top dialog — the Settings `un` (case 310) draws here
     // too, over the CURRENT screen (it is opened by the `za` nav #5).
     draw_settings_dialog(app, ren);
@@ -993,20 +984,44 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     if (const EngineDialog* n = quest_notification_top(app)) {
         if (n != d) draw_notification(app, ren, *n);
     }
-    if (d == nullptr) return;
-    const DialogAnim anim = dialog_anim_now(app, *d);
-    switch (dialog_kind(d->type)) {
-        case DialogKind::kIbBar:
-            // `Notification` (L1050): fire-and-forget, no dialog object -> no
-            // screen dim (`BlockRaycast="0"`); the OK plate only draws when
-            // the button nests a callback (`hab()` L1060).
-            draw_notification(app, ren, *d);
-            return;
-        case DialogKind::kOd280: draw_od280_dialog(app, ren, *d, anim); return;
-        case DialogKind::kUj290: draw_uj290_dialog(app, ren, *d, anim); return;
-        case DialogKind::kVe340: draw_ve340_dialog(app, ren, *d, anim); return;
-        case DialogKind::kVn370: draw_vn370_dialog(app, ren, *d, anim); return;
-        case DialogKind::kNone: return;  // JS `debugger` branch (L1048-1050)
+    if (d != nullptr) {
+        const DialogAnim anim = dialog_anim_now(app, *d);
+        switch (dialog_kind(d->type)) {
+            case DialogKind::kIbBar:
+                // `Notification` (L1050): fire-and-forget, no dialog object ->
+                // no screen dim (`BlockRaycast="0"`); the OK plate only draws
+                // when the button nests a callback (`hab()` L1060).
+                draw_notification(app, ren, *d);
+                break;
+            case DialogKind::kOd280: draw_od280_dialog(app, ren, *d, anim); break;
+            case DialogKind::kUj290: draw_uj290_dialog(app, ren, *d, anim); break;
+            case DialogKind::kVe340: draw_ve340_dialog(app, ren, *d, anim); break;
+            case DialogKind::kVn370: draw_vn370_dialog(app, ren, *d, anim); break;
+            case DialogKind::kNone: break;  // JS `debugger` branch (L1048-1050)
+        }
+    }
+    // `Rd` (L1078843): the live `zn` ActScreen overlay. JS parks the chain at
+    // `Rd` step 6 while the overlay owns the screen, so no dialog exists yet;
+    // the port's synchronous chain has already queued it, so the overlay is
+    // drawn ON TOP (after the dialog) to give the title the screen — the
+    // reported Old-Wounds "dialog plays during the title".
+    if (app.quest_engine().has_act_overlay()) {
+        // `hf=Fc.Ed(-16777216,..)` is an OPAQUE black backdrop (0xFF000000)
+        // faded by `hf.wa`; the label is `La(Na.cd(13743222))` = 0xD1B476
+        // (gold) faded by the node's `wa`. Was: a 0.55 dim + pure white text
+        // (the reported "white text, no backdrop"). `draw_ui_wrapped` has no
+        // alpha, so the text fade is folded into its colour against the black.
+        const float dim_a = app.quest_engine().act_overlay_alpha();
+        const float text_a = app.quest_engine().act_overlay_text_alpha();
+        const float dim[] = {0.0f,   0.0f,   kViewW, 0.0f,   0.0f,   kViewH,
+                             kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
+        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, dim_a);
+        draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
+                        kViewH * 0.16f,
+                        loc(app, app.quest_engine().act_overlay_text(),
+                            app.quest_engine().act_overlay_text()),
+                        0.9f, UiAlign::Center, 0.8196f * text_a, 0.7059f * text_a,
+                        0.4627f * text_a);
     }
 }
 
@@ -5121,6 +5136,86 @@ std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_
     return out;
 }
 
+// JS `bb.M3` (L452786): the stage `<Fight><Rules>` tags that retarget the
+// PLAYER's identity. `bb.M3` maps `EquipItem`->`hn`, `Avatar`->`Ym`,
+// `Name`->`kn`; `du.OK` (L463103) files the Avatar/Name rules into `x7`/`L9`
+// and the EquipItems into the ApplyTo buckets (`Ff.Kib` L440554: default
+// `Player`, `Bot`->2, `All`->3), then the fight scene (L193968) runs
+// `ud.YXa(kc)` -> `kc.Hf = Avatar`, `kc.$s = Name` and `ud.BY(kc, ud.lX)` ->
+// the player's gear. The SENSEI_MEMORIES ("Old Wounds") battles use this to
+// make the player fight AS THE SENSEI: `EquipItem WEAPON_NINJA_SWORD /
+// ARMOR_FOREIGN / HELM_LIGHT / NoRanged / NoMagic`, `Avatar
+// character_sensei_young`, `Name characterSensei`.
+struct PlayerRuleOverride {
+    bool has = false;
+    std::string avatar;              // `<Avatar Name>` (`Ym.name` -> `kc.Hf`)
+    std::string name;                // `<Name Name>` (`kn.name` -> `kc.$s`)
+    std::vector<std::string> items;  // `<EquipItem Name>` (ApplyTo != Bot)
+};
+
+PlayerRuleOverride battle_player_override(const std::string& battle_name,
+                                          const std::string& zone_name) {
+    PlayerRuleOverride out;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/stages.xml", std::ios::binary);
+        if (!in) return out;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return out;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return out;
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (!battle) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return out;
+        const pugi::xml_node fight = battle.child("Fight");
+        if (!fight) return out;
+        const pugi::xml_node rules = fight.child("Rules");
+        if (!rules) return out;
+        for (const pugi::xml_node r : rules.children()) {
+            const std::string tag = r.name();
+            if (tag == "Avatar") {
+                out.avatar = r.attribute("Name").value();
+                out.has = true;
+            } else if (tag == "Name") {
+                out.name = r.attribute("Name").value();
+                out.has = true;
+            } else if (tag == "EquipItem") {
+                if (std::string(r.attribute("ApplyTo").value()) == "Bot") continue;
+                const std::string nm = r.attribute("Name").value();
+                if (!nm.empty()) out.items.push_back(nm);
+                out.has = true;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
 // The FIRST <Warrior> of the current battle's first <Fight> (stages.xml),
 // resolved exactly like JS `ur` (L186-195) reads a warrior node: FirstName
 // (`$s`, L188), the NotAI (`Fj`, L194) and NotAnimation (`QD`, L195)
@@ -5542,6 +5637,55 @@ std::vector<sf2::scene::OwnedItem> owned_items(App& app) {
     if (!has_type("Skeleton")) out.push_back({"Skeleton", "Skeleton", "Skeleton"});
     if (!has_type("Weapon")) out.push_back({"Weapon", "Fists", "Fists"});
     return out;
+}
+
+// The player's owned rows for a fight whose stage `<Rules>` retarget the
+// player's gear (`battle_player_override`). JS `ud.BY(kc, ud.lX)` (L193968)
+// replaces the player's equipped slots with the rule's `<EquipItem>` set; the
+// body/skeleton is NOT a rule (the `Avatar` rule only swaps the portrait), so
+// the save's skeleton is kept. Falls back to the default Skeleton/Weapon rows
+// exactly like `owned_items`.
+std::vector<sf2::scene::OwnedItem> player_owned_from_override(
+    App& app, const std::vector<std::string>& names) {
+    std::vector<sf2::scene::OwnedItem> out;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+    }
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    const auto push = [&catalog, &out](const std::string& name) {
+        if (name.empty()) return;
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == name) {
+                out.push_back({ci.type, ci.subtype, ci.name});
+                return;
+            }
+        }
+    };
+    push(w.skeleton);
+    for (const std::string& n : names) push(n);
+    const auto has_type = [&out](const std::string& t) {
+        for (const sf2::scene::OwnedItem& o : out) {
+            if (o.type == t) return true;
+        }
+        return false;
+    };
+    if (!has_type("Skeleton")) out.push_back({"Skeleton", "Skeleton", "Skeleton"});
+    if (!has_type("Weapon")) out.push_back({"Weapon", "Fists", "Fists"});
+    return out;
+}
+
+// The override `<EquipItem>` whose list.xml `Type` is Weapon (the token
+// `set_fighter_weapons` wields). Empty when none resolves.
+std::string player_override_weapon(App& app, const std::vector<std::string>& names) {
+    const std::vector<CatalogItem> catalog = load_full_catalog(app);
+    for (const std::string& n : names) {
+        for (const CatalogItem& ci : catalog) {
+            if (ci.name == n && ci.type == "Weapon") return n;
+        }
+    }
+    return std::string();
 }
 
 // JS `xc.cM` (L809-810): the fighter's model-name list, in the exact slot
@@ -9792,8 +9936,15 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // (`--fight`/`--verify-input`/`--input-tape`/capture drivers) and the
     // Map/Dojo launch then build the IDENTICAL player move list from the same
     // save (JS `ra.Hza` L684-685 always tests the fighter's real items).
+    // JS `ud.BY(kc, ud.lX)` (L193968): the stage `<Rules>` may retarget the
+    // player's gear (SENSEI_MEMORIES -> fight as the sensei). Resolve the
+    // override once here so the move list, the model and the weapon agree.
+    const PlayerRuleOverride pov =
+        battle_player_override(battle_name_, app().pending_battle().zone);
     const std::vector<sf2::scene::OwnedItem> player_owned =
-        owned.empty() ? owned_items(app()) : owned;
+        (pov.has && !pov.items.empty())
+            ? player_owned_from_override(app(), pov.items)
+            : (owned.empty() ? owned_items(app()) : owned);
     player_owned_ = player_owned;
     std::fprintf(stdout, "[fight] player owned items: %zu\n", player_owned.size());
     std::fflush(stdout);
@@ -10047,8 +10198,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
             if (!w.first_name.empty()) pfirst = w.first_name;
         } catch (const std::exception&) {
         }
+        // JS `ud.YXa(kc)` (L193968): the `<Name>`/`<Avatar>` rules retarget the
+        // player's displayed name/portrait (SENSEI_MEMORIES -> the sensei).
+        if (!pov.name.empty()) pfirst = pov.name;
         vs_player_name_ = loc(app(), pfirst, "SHADOW");
-        vs_player_image_ = "avatar_hero";
+        vs_player_image_ = pov.avatar.empty() ? "avatar_hero" : pov.avatar;
         std::string efirst = bw.first_name.empty() ? battle_name_ : bw.first_name;
         vs_enemy_name_ = loc(app(), efirst, efirst);
         // The portrait is the resolved template's `Avatar` (JS `ur` -> `Hf`);
@@ -10192,6 +10346,19 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
             player_items = {w.skeleton, w.weapon, w.armor, w.helm};
         } catch (const std::exception&) {
         }
+        if (pov.has && !pov.items.empty()) {
+            // JS `ud.BY(kc, ud.lX)`: the rule's gear replaces the save's
+            // weapon/armor/helm (the sensei's sword/armor/helm); the body
+            // skeleton is kept.
+            std::vector<std::string> ov_items;
+            try {
+                const WarriorSave w = app().save().load();
+                ov_items.push_back(w.skeleton);
+            } catch (const std::exception&) {
+            }
+            for (const std::string& n : pov.items) ov_items.push_back(n);
+            player_items = ov_items;
+        }
         const std::vector<std::string> pnames =
             fighter_model_names(app(), player_items);
         if (!pnames.empty() && !pnames[0].empty()) {  // skeleton slot present
@@ -10319,6 +10486,10 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         try {
             pw = app().save().load().weapon;
         } catch (const std::exception&) {
+        }
+        if (pov.has && !pov.items.empty()) {
+            const std::string ow = player_override_weapon(app(), pov.items);
+            if (!ow.empty()) pw = ow;  // JS `hn` -> the player's wielded item
         }
         if (pw.empty()) pw = "Fists";
         fight_->set_fighter_weapons(pw, "Fists");
@@ -13269,8 +13440,21 @@ void ResultsScreen::update_impl(float dt) {
     // handoff still grants (JS `v.kD` runs once per fight).
     apply_fight_reward(app());
     const App::PointerState& p = app().pointer();
-    if (p.pressed) {
-        std::fprintf(stdout, "[result] click -> back to Map\n");
+    if (p.pressed && !reveal_done_) {
+        // JS `kk.Efb` (L1060361): a press on the results catcher calls
+        // `this.FB.Nda()` -> `Lr.Nda` (L1071686: `pc.Nda` sets `skipped=!0`
+        // on every `Or`/`Pr` row, so each jumps to its final value on the
+        // next frame) and then `Lr.XMa` -> `bza` shows the OK plate; the
+        // catcher is hidden by `fs.X(!1)`. The press is CONSUMED here — the
+        // OK plate closes on the NEXT press. Was: any press skipped straight
+        // to the Map, so the reveal never played (the reported "stats skip
+        // instantly on click").
+        reveal_t_ = kRevealSettle;
+        reveal_done_ = true;
+        std::fprintf(stdout, "[result] click -> fast-forward reveal (Efb/Nda)\n");
+        std::fflush(stdout);
+    } else if (p.pressed) {
+        std::fprintf(stdout, "[result] OK -> back to Map\n");
         std::fflush(stdout);
         // JS `qxa` (L1213) pops back to the map: the Results screen sits on
         // top of the Fight screen it replaced, so both pop (the fight is

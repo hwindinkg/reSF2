@@ -887,12 +887,17 @@ public:
     float act_elapsed = 0.0f;            // seconds since start
     float act_hold = 0.0f;               // sum(act_line_secs)
     float act_total = 0.0f;              // 1 + hold + 1 (fade-in/out)
-    float act_alpha = 0.0f;              // current fade alpha
+    float act_alpha = 0.0f;              // legacy alias (== dim alpha)
+    float act_dim_alpha = 0.0f;          // `hf.wa` — the black backdrop
+    float act_text_alpha = 0.0f;         // `label` node `wa` — the title text
+    float act_complete = 0.0f;           // JS `Rd` step 6 completion (seconds)
+    bool act_sound_played = false;       // `Ut` -> `lb.OS("act")`
     std::string act_text;                // current line
     std::size_t act_actions = 0;         // ActScreen overlays displayed
     bool has_act_overlay() const { return act_active; }
     const std::string& act_overlay_text() const { return act_text; }
-    float act_overlay_alpha() const { return act_alpha; }
+    float act_overlay_alpha() const { return act_dim_alpha; }
+    float act_overlay_text_alpha() const { return act_text_alpha; }
     // The list.xml `BonusPrice` (`catalog_bonus_price`) — the Ruby price
     // `BuyItem Currency="Ruby"` charges. Public for the probe.
     int bonus_price(App& app, const std::string& name) const {

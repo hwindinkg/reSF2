@@ -4048,13 +4048,31 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             act_line_secs = ov.seconds;
             act_hold = 0.0f;
             for (float s : act_line_secs) act_hold += s < 0.0f ? 0.0f : s;
-            act_total = 1.0f + act_hold + 1.0f;  // fade-in + hold + fade-out
+            // JS `Rd.aa` (L1078843) timeline: step 0 dim fade-in `ed(1)`,
+            // step 1 text fade-in `ed(1)`, steps 2-4 hold (`Frames/60` per
+            // line; the `Text`-only `zvb` waits `ed(5)`), step 5 text
+            // fade-out `ed(1)`, step 6 = completion (`this.ge()` -> `sa`),
+            // step 7 `ed(.5)` -> `end()` removes the dim. So the CHAIN
+            // resumes at `3 + hold` and the overlay clears at `3.5 + hold`.
+            act_complete = 3.0f + act_hold;
+            act_total = act_complete + 0.5f;
             act_elapsed = 0.0f;
             act_alpha = 0.0f;
+            act_dim_alpha = 0.0f;
+            act_text_alpha = 0.0f;
+            act_sound_played = false;
             act_text = act_lines.empty() ? std::string() : act_lines.front();
             act_active = !act_lines.empty();
             ++act_actions;
             fx.act_overlays.push_back(std::move(ov));
+            // `zn.S` (L524831) plays the overlay through `v.$ub`/`v.Zub` with
+            // `this.sa` as the completion, so in JS the chain does not advance
+            // to the next action (the dialogs) until `Rd` step 6 fires. The
+            // port keeps the serialized chain synchronous and instead HIDES
+            // the queued modal while the overlay is live (`quest_modal_top`),
+            // so the title always precedes the dialog. (A real `pending_`
+            // suspend here delayed the tutorial driver's tail past its
+            // synthetic read points — the driver is not a JS clock.)
             // `Ya.get()!=null && a.pzb()` (`pzb` L1096388): the current
             // screen's refresh hook; no port equivalent -> no-op.
         } else if (t == "ChangePlayerAvatar") {
@@ -4830,24 +4848,39 @@ void QuestEngine::tick(App& app) {
         act_elapsed += 1.0f / 60.0f;
         if (act_elapsed >= act_total) {
             act_active = false;
-            act_alpha = 0.0f;
-        } else if (act_elapsed < 1.0f) {
-            act_alpha = act_elapsed;  // step 0 fade-in
-        } else if (act_elapsed < 1.0f + act_hold) {
-            act_alpha = 1.0f;  // steps 1-3 hold
-            const float t = act_elapsed - 1.0f;
-            float acc = 0.0f;
-            for (std::size_t k = 0; k < act_line_secs.size(); ++k) {
-                const float s = act_line_secs[k] < 0.0f ? 0.0f : act_line_secs[k];
-                if (t < acc + s || k + 1 == act_lines.size()) {
-                    act_text = act_lines[k];
-                    break;
-                }
-                acc += s;
-            }
+            act_alpha = act_dim_alpha = act_text_alpha = 0.0f;
         } else {
-            act_alpha = 1.0f - (act_elapsed - (1.0f + act_hold));  // step 5 fade-out
-            if (act_alpha < 0.0f) act_alpha = 0.0f;
+            // step 0: the black backdrop `hf.wa` fades 0 -> 1 over `ed(1)`.
+            act_dim_alpha = act_elapsed < 1.0f ? act_elapsed : 1.0f;
+            // step 1: the text node `this.node.wa` fades 0 -> 1 over `ed(1)`.
+            if (act_elapsed < 1.0f) {
+                act_text_alpha = 0.0f;
+            } else if (act_elapsed < 2.0f) {
+                act_text_alpha = act_elapsed - 1.0f;
+            } else if (act_elapsed < 2.0f + act_hold) {
+                act_text_alpha = 1.0f;  // steps 2-4 hold
+                const float t = act_elapsed - 2.0f;
+                float acc = 0.0f;
+                for (std::size_t k = 0; k < act_line_secs.size(); ++k) {
+                    const float s = act_line_secs[k] < 0.0f ? 0.0f : act_line_secs[k];
+                    if (t < acc + s || k + 1 == act_lines.size()) {
+                        act_text = act_lines[k];
+                        break;
+                    }
+                    acc += s;
+                }
+            } else {
+                // step 5: the text node fades out over `ed(1)`.
+                act_text_alpha = 1.0f - (act_elapsed - (2.0f + act_hold));
+                if (act_text_alpha < 0.0f) act_text_alpha = 0.0f;
+            }
+            act_alpha = act_dim_alpha;  // legacy alias
+            // step 0 end (`a==1`): `ta.Zla(); this.Ut()` -> `lb.OS("act",!1)`
+            // (L1079654/L654420): stop the current track and play `act` once.
+            if (!act_sound_played && act_elapsed >= 1.0f) {
+                act_sound_played = true;
+                sf2::audio::AudioEngine::instance().play_music("act", false);
+            }
         }
     }
     if (app.headless()) {

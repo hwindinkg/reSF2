@@ -223,6 +223,10 @@ struct HeadlessLoopDriver {
     int last_seen = -1;
     bool clicked = false;       // the current step's click has been sent
     bool tab_clicked = false;   // the current step's tab pre-click (if any)
+    // JS `kk.Efb` (L1060361): the FIRST press on the results fast-forwards the
+    // reveal; the OK plate closes on the NEXT press. The loop injects that
+    // second press for the two results->map steps.
+    bool results_ok_clicked = false;
     bool next_clicked = false;  // the between-rounds NEXT click has been sent
     bool captured_menu = false;
     int guard = 0;
@@ -318,6 +322,19 @@ struct HeadlessLoopDriver {
 
         // Phase B: wait for the post-click screen (or hold for same-screen
         // actions), then advance.
+        // JS `kk.Efb` (L1060361): the results->map steps need a SECOND press
+        // (the first fast-forwards the reveal, `reveal_done_`; the OK plate
+        // then pops on the next press). Inject it one frame after the first.
+        if (s.wait_screen == kScreenResults && cur == kScreenResults &&
+            !results_ok_clicked) {
+            std::fprintf(stdout, "[loop] step %d/%d %s -> OK click (%.0f, %.0f)\n",
+                         step + 1, kLoopStepCount, s.label, s.x, s.y);
+            std::fflush(stdout);
+            app.inject_click(s.x, s.y);
+            results_ok_clicked = true;
+            ++step_frame;
+            return;
+        }
         if (s.hold_frames > 0) {
             if (step_frame >= s.min_delay + s.hold_frames) {
                 // D2: a shop step must NOT print a bare "done" for a failed
@@ -391,6 +408,7 @@ struct HeadlessLoopDriver {
         step_frame = 0;
         clicked = false;
         tab_clicked = false;
+        results_ok_clicked = false;
         if (step >= kLoopStepCount) {
             finished = true;
             std::fprintf(stdout, "[loop] ALL %d STEPS DONE\n", kLoopStepCount);
@@ -699,6 +717,10 @@ struct TourDriver {
     bool key_up_done = false;
     bool next_clicked = false;
     bool tab_clicked = false;   // the step's zone-tab pre-click has been sent
+    // JS `kk.Efb` (L1060361): the FIRST press on the results fast-forwards the
+    // reveal; the OK plate pops on the NEXT press. The tour injects that
+    // second press for the results->map steps.
+    bool results_ok_clicked = false;
     int guard = 0;
     bool finished = false;
     int applied_auto_attack = -1;  // last per-step auto-attack override applied
@@ -853,6 +875,20 @@ struct TourDriver {
             return;
         }
 
+        // JS `kk.Efb` (L1060361): the first press on the results fast-forwards
+        // the reveal; the OK plate pops on the NEXT press. Inject the second
+        // press while the Results is still current.
+        if (s.wait_screen == kScreenResults && cur == kScreenResults &&
+            !results_ok_clicked) {
+            std::fprintf(stdout, "%s step %d/%d %s -> OK click (%.0f, %.0f)\n", tag,
+                         step + 1, count, s.label, s.x, s.y);
+            std::fflush(stdout);
+            app.inject_click(s.x, s.y);
+            results_ok_clicked = true;
+            ++step_frame;
+            return;
+        }
+
         // Key release shortly after the press (P/Esc toggle on down edge).
         if (s.key != 0 && !key_up_done && step_frame >= s.min_delay + 5) {
             app.inject_key(s.key, false);
@@ -932,6 +968,7 @@ struct TourDriver {
         acted = false;
         key_up_done = false;
         tab_clicked = false;
+        results_ok_clicked = false;
         gate_open_frame = -1;
         if (step >= count) {
             finished = true;
