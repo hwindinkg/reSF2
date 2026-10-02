@@ -4472,9 +4472,27 @@ void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_t
     // starts. In phase 2 the press is buffered into the fighter directly
     // (`eu==2 && b.yJa(a)`).
     if (phase_ == fight_phase::start_stance) {
-        if (press == press_type::tap && !start_buffer_filled_) {
-            start_buffer_key_ = key;
-            start_buffer_filled_ = true;
+        // JS `ca.N0a` (L426) phase-1 branch: `this.eu==1 ? b.WC==-1&&(b.WC=a)`.
+        // Only the FIRST press of the phase is latched into the single-slot
+        // round-start buffer `WC`. JS `ca.O0a` (L426, the release handler)
+        // then clears it when the released control matches:
+        //   `a=this.LBa(a.control); b.WC==a&&(b.WC=-1); b.Gmb(a)`.
+        // The port used to IGNORE every phase-1 release, so `WC` (here
+        // `start_buffer_filled_`) stayed set and `llb` replayed a press the
+        // player had ALREADY released during the intro. `Fighter::input(tap)`
+        // then leaves that key in `held_keys_` (JS `Sgb` sets `a.sl=!0`) with
+        // no matching release, so the key is held for the WHOLE fight: the
+        // first real tap of that key is swallowed by the `!a.sl` guard and a
+        // double-tap can never complete. Clearing on release matches `O0a`.
+        if (press == press_type::tap) {
+            if (!start_buffer_filled_) {
+                start_buffer_key_ = key;
+                start_buffer_filled_ = true;
+            }
+        } else if (press == press_type::release) {
+            if (start_buffer_filled_ && start_buffer_key_ == key) {
+                start_buffer_filled_ = false;
+            }
         }
         return;  // holds/releases during the intro are not moves — ignore
     }

@@ -1382,7 +1382,8 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
         if (!pass) {
             if (trace_cond &&
                 (m->name.rfind("Throw", 0) == 0 || m->name == "HighPunch" ||
-                 m->name == "StepForward" || m->name == "ShortUpwardElbowStrike")) {
+                 m->name == "StepForward" || m->name == "ShortUpwardElbowStrike" ||
+                 m->name == "DoublePunch" || m->name == "HeavyPunch")) {
                 std::fprintf(stdout, "[cond] %s FAIL cur=%s@%d enemy_intervals=[",
                              m->name.c_str(),
                              current_move_ != nullptr ? current_move_->name.c_str() : "",

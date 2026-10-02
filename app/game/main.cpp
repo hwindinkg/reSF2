@@ -6164,6 +6164,76 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      hp_pre.c_str(), hp_pre_frame, hp_post.c_str(), fs->fight_frame(),
                      fs->player_decision().c_str());
         std::fflush(stdout);
+        // ---- probe 5: the double-press window (Forward x2) ---------------
+        // A REAL cross-frame double-tap: the first Forward tap starts
+        // StepForward; the second tap inside the `zl.dX` 15-frame window must
+        // let the 2-key DoubleStepForward (Priority 20) beat the 1-key
+        // StepForward (10). Park the enemy far RIGHT and re-pin BOTH fighters
+        // every frame so the facing never flips mid-probe (the lunge of a
+        // running move would otherwise carry the player past the enemy and
+        // reverse the `vm.he` requirement). Sweep the gap (frames between the
+        // two downs). JS expectation: DoubleStepForward for gap <= 15, plain
+        // StepForward once the buffer has aged out (gap >= 16).
+        std::fprintf(stdout, "[place] DOUBLE-PRESS window sweep (Forward x2):\n");
+        for (int gap : {2, 5, 8, 10, 12, 14, 15, 16, 18, 21}) {
+            for (int i = 0; i < 50; ++i) app.run_one_frame();
+            fs->reset_player_move();
+            const float px = fs->player_world_x();
+            auto pin = [&]() { fs->place_fighters(px, px + 400.0f); };
+            pin();
+            for (int i = 0; i < 2; ++i) { pin(); app.run_one_frame(); }
+            fs->inject_game_key(3, true);   // first Forward tap (down)
+            pin(); app.run_one_frame();
+            fs->inject_game_key(3, false);  // release
+            for (int i = 0; i < gap - 1; ++i) { pin(); app.run_one_frame(); }
+            fs->inject_game_key(3, true);   // second Forward tap (down)
+            pin(); app.run_one_frame();
+            const std::string mv = fs->player_current_move();
+            const std::string dec = fs->player_decision();
+            fs->inject_game_key(3, false);
+            std::fprintf(stdout,
+                         "[place]   gap=%2d -> '%s' %s\n[place]     decision: %s\n",
+                         gap, mv.c_str(),
+                         mv == "DoubleStepForward" ? "PASS(double)" : "single/none",
+                         dec.c_str());
+            std::fflush(stdout);
+        }
+        // ---- probe 6: the Punch x2 + Forward Hold double (DoublePunch) ----
+        // The `3key` DoublePunch requires two Punch taps AND a Forward Hold.
+        // Hold Forward for the whole probe; sweep the gap between the two
+        // Punch downs. Enemy pinned far RIGHT so the facing never flips.
+        std::fprintf(stdout, "[place] DOUBLE-PRESS sweep (Punch x2 + Forward Hold):\n");
+        for (int gap : {2, 5, 8, 10, 12, 14, 15}) {
+            for (int i = 0; i < 50; ++i) app.run_one_frame();
+            fs->reset_player_move();
+            const float px = fs->player_world_x();
+            // dist 100: within ShortUpwardElbowStrike's `<Distance Max="130">`
+            // so the 1-key pick is ShortUpwardElbowStrike (Priority 150,
+            // `Uninterrupt [0,11]`), the close-range case where DoublePunch can
+            // chain once that window ends (gap 12..15).
+            auto pin = [&]() { fs->place_fighters(px, px + 100.0f); };
+            pin();
+            for (int i = 0; i < 2; ++i) { pin(); app.run_one_frame(); }
+            fs->inject_game_key(3, true);   // Forward HOLD
+            pin(); app.run_one_frame();
+            fs->inject_game_key(9, true);   // first Punch tap
+            pin(); app.run_one_frame();
+            fs->inject_game_key(9, false);
+            const std::string mv1 = fs->player_current_move();
+            for (int i = 0; i < gap - 1; ++i) { pin(); app.run_one_frame(); }
+            fs->inject_game_key(9, true);   // second Punch tap
+            pin(); app.run_one_frame();
+            const std::string mv = fs->player_current_move();
+            const std::string dec = fs->player_decision();
+            fs->inject_game_key(9, false);
+            fs->inject_game_key(3, false);
+            std::fprintf(stdout,
+                         "[place]   gap=%2d 1st='%s' 2nd='%s' %s\n[place]     decision: %s\n",
+                         gap, mv1.c_str(), mv.c_str(),
+                         mv == "DoublePunch" ? "PASS(double)" : "single/none",
+                         dec.c_str());
+            std::fflush(stdout);
+        }
         app.shutdown();
         return (mir_ok && fwd_ok && thr_ok && rs_blocked) ? 0 : 1;
     } else if (input_tape) {
@@ -6253,6 +6323,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             {1312, 75, true}, {1318, 75, false},
             {1400, 68, true}, {1406, 68, false},
             {1412, 68, true}, {1418, 68, false},
+            // [double-press sweep] Punch x2 + Forward Hold, cross-frame (not
+            // the same-frame down;up;down of the verify tape). The Forward
+            // hold is the third `<Key>` of DoublePunch's `<Keys>`; the two
+            // Punch taps 12 frames apart must let DoublePunch (Priority 130)
+            // beat the 1-key pick of the first tap.
+            {1600, 68, true},
+            {1620, 75, true}, {1626, 75, false},
+            {1632, 75, true}, {1638, 75, false},
+            {1680, 68, false},
+            // Forward double-tap gap sweep (gap = 2nd-down - 1st-down).
+            {1750, 68, true}, {1753, 68, false}, {1758, 68, true}, {1763, 68, false},   // gap 8
+            {1900, 68, true}, {1903, 68, false}, {1914, 68, true}, {1919, 68, false},   // gap 14
+            {2050, 68, true}, {2053, 68, false}, {2065, 68, true}, {2070, 68, false},   // gap 15
+            {2200, 68, true}, {2203, 68, false}, {2216, 68, true}, {2221, 68, false},   // gap 16
+            {2350, 68, true}, {2353, 68, false}, {2371, 68, true}, {2376, 68, false},   // gap 21
         };
         constexpr int kTapeCount = static_cast<int>(sizeof(kTape) / sizeof(kTape[0]));
         const int last_frame = kTape[kTapeCount - 1].frame;
