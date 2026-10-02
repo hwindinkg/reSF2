@@ -142,6 +142,11 @@ public:
     App(const App&) = delete;
     App& operator=(const App&) = delete;
 
+    // JS `ad` Loader on a scene change (`Zd.load` -> `ad.load`): arms the
+    // 30-frame "Loading 100%" hold (`ad.kp` @1014756). No-op during boot.
+    // Public: ScreenManager::push_impl arms it on every scene push.
+    void begin_scene_loader();
+
     // Creates the window + GL context, loads the shared assets, boots to
     // the main menu. Returns false on failure. `lang` selects the UI
     // language; empty (the default) resolves through the platform locale —
@@ -393,7 +398,9 @@ private:
     void update_fixed(float dt);
     void render_frame();
     // Draws the Preloader/Loader boot overlay (JS `Rg` L1967 / `ad` L1969).
-    void draw_boot_splash();
+    // `force_loader` draws the `ad` Loader branch (logo + "Loading 100%")
+    // instead of the boot Preloader ramp — used for a menu/fight scene change.
+    void draw_boot_splash(bool force_loader = false);
 
     // Loads `menu_font_`/`font_tex_` for the resolved `lang_` (JS asset ids
     // 264/265, `ui/font{lang}`). Factored out of `init` so `reload_language`
@@ -465,6 +472,8 @@ private:
     // Boot overlay countdown in fixed steps (0 = off; drawn when not headless).
     int boot_splash_frames_ = 0;
     int boot_splash_total_ = 0;
+    // Scene-transition Loader hold (JS `ad.kp` `aHa>30`), fixed steps.
+    int scene_loader_frames_ = 0;
     std::unique_ptr<sf2::data::font> digits_font_;
     unsigned int digits_tex_ = 0;
     std::unique_ptr<sf2::data::font> round_font_;

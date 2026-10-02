@@ -1200,6 +1200,12 @@ void App::update_fixed(float dt) {
     if (boot_splash_frames_ > 0) {
         --boot_splash_frames_;
     }
+    // Scene-transition Loader hold (`ad.kp` @1014756: `aHa>30` after the target
+    // scene's assets resolve). The port loads assets synchronously, so the
+    // 30-frame "Loading 100%" hold is the visible part of a menu/fight change.
+    if (scene_loader_frames_ > 0) {
+        --scene_loader_frames_;
+    }
     // Advance the game clock (`p.Dc`) by the fixed app step — the JS
     // `L.K.time += a` that `Hb.now()` adds (`Hb.getTime()` L... = `ed.getDate(
     // N$+(L.K.time-baa))`). `quest_now()`/`?Fight.TimeLeft`/`Timer` all read it.
@@ -1226,11 +1232,24 @@ void App::render_frame() {
     // and goldens stay byte-stable (the countdown still runs).
     if (boot_splash_frames_ > 0 && headless_frames_ == 0) {
         draw_boot_splash();
+    } else if (scene_loader_frames_ > 0 && headless_frames_ == 0) {
+        // A menu/fight scene change: the JS `ad` Loader (scene 2) shows the
+        // logo + "Loading 100%" while the target scene mounts.
+        draw_boot_splash(/*force_loader=*/true);
     }
     renderer_->end_frame();
 }
 
-void App::draw_boot_splash() {
+void App::begin_scene_loader() {
+    // JS `ad` Loader mount on a scene change (`Zd.load` @946574 -> `ad.load`
+    // @1014478); `ad.kp` (@1014756) holds "Loading 100%" for `aHa>30` frames
+    // after the target scene's assets resolve. Assets load synchronously in
+    // the port, so arm the same 30-frame hold (skipped during boot, which
+    // already runs the full `Rg` -> `ad` overlay).
+    if (boot_splash_frames_ <= 0) scene_loader_frames_ = 30;
+}
+
+void App::draw_boot_splash(bool force_loader) {
     // JS `Rg`/`Tk` (L1967, L87-90) Preloader -> `ad` (L1969) Loader.
     // `Tk` layout (cast id 278, scroll id 274) + the localized
     // `splash/loading{lang}` BMF (ids 276/277, `ea` L87-88) with the UTF-8
@@ -1244,7 +1263,7 @@ void App::draw_boot_splash() {
     // `oi.kp()`), so phase 0 is a timed ramp rather than real byte progress.
     //   - the `ad` view `tr` art (id 816/817, L1867-1868) IS drawn below
     //     (loader branch); the Preloader `Tk` branch is the `!loader` path.
-    const bool loader = boot_splash_frames_ <= kBootLoaderFrames;
+    const bool loader = force_loader || boot_splash_frames_ <= kBootLoaderFrames;
     sf2::render::Camera ui_cam;
     ui_cam.center_x = static_cast<float>(view_w_) * 0.5f;
     ui_cam.center_y = static_cast<float>(view_h_) * 0.5f;

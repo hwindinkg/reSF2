@@ -1237,6 +1237,14 @@ float arrow_flashing_frames() {  // `ge.gba`
     static const float v = internal_ui_setting("Basic", "ArrowFlashingFrames", 120.0f);
     return v;
 }
+// JS `Ut.$O` (`kyb` L825: `this.$O++`) advances once per `Ut.Al` call = one
+// 60 Hz frame. The port's present loop is uncapped (`glfwSwapInterval(0)`), so
+// the phase MUST step in the screen's fixed `update_impl`, not in
+// `render_impl` (the same rule the `Gr` callout tick documents, line ~11772).
+// One counter per viewer: the Dojo `FightNone` viewer and the fight `ql`
+// viewer are separate `Ut` instances (each resets `$O=0` in `V0a` L831).
+static int g_dojo_arrow_phase = 0;
+static int g_fight_arrow_phase = 0;
 float life_bar_min_show() {  // `Jj.jha`
     static const float v = internal_ui_setting("Fight", "LifeBarMin", 0.01f);
     return v;
@@ -2796,6 +2804,8 @@ struct ZaNavState {
     float pma = 0.0f;
     float time = 0.0f;
     int zI = 2;
+    int hD = 0;         // JS `gk.hD` drag state (0 idle, 1 dragging, 2 done)
+    float Qya = 0.0f;   // JS `gk.Qya` drag-start pointer y
 };
 enum { kZaNavScreenSlots = 16 };
 static ZaNavState g_za_nav_by_screen[kZaNavScreenSlots];
@@ -2856,6 +2866,26 @@ void za_header_rect(float& x, float& y, float& w, float& h) {
     y = 72.0f * s;
     w = 190.0f * s;
     h = 40.0f * s;
+}
+
+// The `gk.Af` title rail rect at the current open fraction `yI` (`gk.JT` case
+// 1, L2001: `this.Af.node.D(a*this.height - a*this.Af.height/2)`). Collapsed
+// (`yI=0`) it is the oracle-measured header at the top (x89..279, y72..112);
+// expanded (`yI=1`) it is the full-width `Zh` rail at the column bottom
+// (`lay.sp + lay.nav_col_h - rail_h`). The click target is `gk.button` — a
+// child of `Af` — so it MOVES with the rail (the reported bug was a FIXED top
+// rect that never followed the button down).
+void za_nav_rail_rect(float yI, float& x, float& y, float& w, float& h) {
+    float cx0 = 0.0f, cy0 = 0.0f, cw0 = 0.0f, ch0 = 0.0f;
+    za_header_rect(cx0, cy0, cw0, ch0);
+    const ZaLayout lay = za_layout();
+    const float rail_h = 90.0f * lay.nav_scale;
+    const float rail_top = lay.sp + lay.nav_col_h - rail_h;
+    const float t = std::clamp(yI, 0.0f, 1.0f);
+    x = cx0 + (lay.nav_x - cx0) * t;
+    y = cy0 + (rail_top - cy0) * t;
+    w = cw0 + (lay.nav_w - cw0) * t;
+    h = ch0 + (rail_h - ch0) * t;
 }
 
 // Hit test for the vertical nav column; -1 when outside every button.
@@ -3039,9 +3069,42 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
     // `this.uJ?collapse(.3):expand(.3)`. While collapsed the five `Le`
     // buttons are hidden (`NLa` L2001), so only the header answers taps.
     float hx = 0.0f, hy = 0.0f, hw = 0.0f, hh = 0.0f;
-    za_header_rect(hx, hy, hw, hh);
+    // The hit rect FOLLOWS the rail (`gk.button` is a child of the moving
+    // `Af`): when expanded the `МЕНЮ` button has slid to the column bottom, so
+    // a tap THERE (not the original top slot) closes it.
+    za_nav_rail_rect(st.yI, hx, hy, hw, hh);
     const double px = app.pointer().x, py = app.pointer().y;
     const bool header_hit = px >= hx && px <= hx + hw && py >= hy && py <= hy + hh;
+    // JS `gk.aa` (L1998) drag (`case 0/1/2`): pressing the rail enters state 1
+    // and tracks the held y; dragging DOWN past `2*this.vk` from collapsed
+    // expands, dragging UP past `-2*this.vk` from expanded collapses; release
+    // ends the drag. Runs only `if(!this.PF)` (the animation lock).
+    if (!st.PF) {
+        const float vk2 = 2.0f * 50.0f * za_layout().nav_scale;  // 2*this.vk
+        switch (st.hD) {
+            case 0:
+                if (header_hit && app.pointer().down) {
+                    st.Qya = static_cast<float>(py);
+                    st.hD = 1;
+                }
+                break;
+            case 1: {
+                if (!app.pointer().down) { st.hD = 0; break; }
+                const float dy = static_cast<float>(py) - st.Qya;
+                if (st.yI <= 0.0f && dy > vk2) {
+                    st.hD = 2;
+                    za_nav_expand_run(st, kZaNavAnimSeconds);
+                } else if (st.yI >= 1.0f && dy < -vk2 && dy > -4000.0f) {
+                    st.hD = 2;
+                    za_nav_collapse_run(st, kZaNavAnimSeconds);
+                }
+                break;
+            }
+            case 2:
+                if (!app.pointer().down) st.hD = 0;
+                break;
+        }
+    }
     // Collapsed (JS `collapse(0)` L1978): the header expands the column.
     // While collapsed only the header answers (`NLa` L2001 hides the five
     // `Le` rows); a header press toggles the column.
@@ -3552,12 +3615,14 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
             // 256..279, tan centre x111..256 (145 = 191.7 - 2*22.3).
             const float mid_w = lay.nav_w - 2.0f * qka;
             const float cy = lay.sp + col_h * 0.5f;
+            // The content fades in with the open fraction (JS `NLa` L2001
+            // drives `lyb(yI)`/the `iL` reveal), so the unfold is visible.
             try_draw_atlas_button(app, "paper_edge_left", lay.nav_x + qka * 0.5f, cy, qka,
-                                  col_h, 1.0f, /*fill=*/true);
+                                  col_h, nav_frac, /*fill=*/true);
             try_draw_atlas_button(app, "paper", lay.nav_x + qka + mid_w * 0.5f, cy, mid_w,
-                                  col_h, 1.0f, /*fill=*/true);
+                                  col_h, nav_frac, /*fill=*/true);
             try_draw_atlas_button(app, "paper_edge_right",
-                                  lay.nav_x + lay.nav_w - qka * 0.5f, cy, qka, col_h, 1.0f,
+                                  lay.nav_x + lay.nav_w - qka * 0.5f, cy, qka, col_h, nav_frac,
                                   /*fill=*/true, /*flip_x=*/true);
         }
     }
@@ -3573,7 +3638,8 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                                 : (is_active && def.active != nullptr ? def.active : def.normal);
         const float cy_i = lay.nav_first_y + static_cast<float>(i) * lay.nav_step;
         const bool row_flash = (i == flash_idx);
-        if (!try_draw_atlas_button(app, frame, nav_cx, cy_i, lay.nav_btn, lay.nav_btn, 1.0f)) {
+        if (!try_draw_atlas_button(app, frame, nav_cx, cy_i, lay.nav_btn, lay.nav_btn,
+                                   nav_frac)) {
             draw_flat_button(app, def.label, nav_cx, cy_i, lay.nav_btn, lay.nav_btn,
                              is_active ? 0.6f : (is_hover ? 0.5f : 0.35f), 0.4f, 0.28f,
                              is_hover);
@@ -3616,22 +3682,29 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // `90*d`; `Zh.ba(e,railH)` -> `c = railH>e = false`, so the roll is
     // horizontal across the column width with `roll_end` caps.
     {
-        const float rail_h = 90.0f * lay.nav_scale;
-        const float rail_cy = lay.sp + lay.nav_col_h - rail_h * 0.5f;
+        // `gk.JT` case 1 (L2001): the `Zh` title rail SLIDES with the menu
+        // (`Af.node.D(a*this.height - a*this.Af.height/2)`). Interpolate its
+        // rect by the open fraction so the unfold is visible (previously the
+        // draw hard-switched at `yI>0`, so there was no animation).
+        float rx = 0.0f, ry = 0.0f, rw = 0.0f, rh = 0.0f;
+        za_nav_rail_rect(nav_frac, rx, ry, rw, rh);
+        const float rail_h = rh;
+        const float rail_cy = ry + rh * 0.5f;
+        const float rail_cx = rx + rw * 0.5f;
         constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
         const float cap_w = kRollEndW * (rail_h / kRollEndH);
-        const float body_w = std::max(lay.nav_w - 2.0f * cap_w, 10.0f);
+        const float body_w = std::max(rw - 2.0f * cap_w, 10.0f);
         load_scroll_atlas(app);
-        try_draw_atlas_button(app, "roll_end", lay.nav_x + cap_w * 0.5f, rail_cy, cap_w,
+        try_draw_atlas_button(app, "roll_end", rx + cap_w * 0.5f, rail_cy, cap_w,
                               rail_h, 1.0f, /*fill=*/true);
-        try_draw_atlas_button(app, "roll_center", lay.nav_x + cap_w + body_w * 0.5f, rail_cy,
+        try_draw_atlas_button(app, "roll_center", rx + cap_w + body_w * 0.5f, rail_cy,
                               body_w, rail_h, 1.0f, /*fill=*/true);
-        try_draw_atlas_button(app, "roll_end", lay.nav_x + cap_w + body_w + cap_w * 0.5f,
+        try_draw_atlas_button(app, "roll_end", rx + cap_w + body_w + cap_w * 0.5f,
                               rail_cy, cap_w, rail_h, 1.0f, /*fill=*/true, /*flip_x=*/true);
         // Label (`gk.ba` case 1): `Lx.Fa(a-2*b, c-2*d)`, `C(b)`, `D(d)` with
         // `b=a*.2`, `d=c*.2`; color `Z.sc` (0.184/0.145/0.106).
-        draw_ui_label(app, lay.nav_x + 0.2f * lay.nav_w,
-                      rail_cy - rail_h * 0.5f + 0.2f * rail_h, 0.6f * lay.nav_w,
+        draw_ui_label(app, rail_cx - 0.3f * rw,
+                      rail_cy - rail_h * 0.5f + 0.2f * rail_h, 0.6f * rw,
                       0.6f * rail_h, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE", 0.5f,
                       UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
@@ -6834,6 +6907,12 @@ DojoScreen::DojoScreen(ScreenManager& mgr) : Screen(mgr, "Dojo") {
 }
 
 void DojoScreen::update_impl(float dt) {
+    // JS `Ut.kyb` (`kyb` L825) advances `$O` once per 60 Hz frame. Step the
+    // flashing-arrow phase here (the fixed update), never in `render_impl`.
+    {
+        const int f = static_cast<int>(arrow_flashing_frames());
+        if (f > 0) g_dojo_arrow_phase = (g_dojo_arrow_phase + 1) % f;
+    }
     // The hub's live `FightNone` controller (JS `Tf.init` L1971
     // `this.Ig=v.m1a(a)`; `aa(): this.YL(Ig,a)` steps it every frame). Build
     // once the fight assets are up; null-safe when they are not. Built before
@@ -8084,13 +8163,13 @@ void DojoScreen::render_impl(App& app) {
                                             ? static_cast<float>(afr.source_h)
                                             : static_cast<float>(afr.h);
                     const float kArrowFlashingFrames = arrow_flashing_frames();  // `ge.gba`
-                    static int arrow_phase = 0;                      // JS `Ut.$O`
+                    // `Ut.$O` is stepped in `update_impl` (fixed 60 Hz), NOT
+                    // here (the present loop is uncapped).
+                    const int arrow_phase = g_dojo_arrow_phase;      // JS `Ut.$O`
                     const float alpha =
                         0.5f + 0.5f * std::sin(3.14159265358979323846f /
                                                kArrowFlashingFrames *
                                                static_cast<float>(arrow_phase));
-                    arrow_phase =
-                        (arrow_phase + 1) % static_cast<int>(kArrowFlashingFrames);
                     // One-shot evidence line (JS `Ut.V0a` L831 / `kyb` L825):
                     // the marker frame resolved + its projected screen pos.
                     static bool arrow_logged = false;
@@ -8110,7 +8189,7 @@ void DojoScreen::render_impl(App& app) {
                                       static_cast<float>(afr.w),
                                       static_cast<float>(afr.h),
                                       static_cast<float>(atw), static_cast<float>(ath), sx,
-                                      sy, nat_w * hub_cam.zoom, nat_h * hub_cam.zoom, alpha,
+                                      sy, nat_w, nat_h, alpha,
                                       /*flip_x=*/false);
                 }
             }
@@ -8945,15 +9024,22 @@ void MapScreen::update_impl(float dt) {
         }
     }
     if (node_hit >= 0) {
-        hover_ = node_hit;
+        // Pointer hover is ONLY the pressed-look (JS `Qr` `jc[2]` "Pressed"
+        // frame). The selection (`qe.kE`, set by `GT`) changes on a real PRESS
+        // only (`Qr.pa.addListener` -> `qe.jhb` -> `GT`, L2144/L2149), so a
+        // bare hover must not re-target the `Rr` info panel / FIGHT target.
+        hover_node_ = node_hit;
         const Node& n = zones_[zone_sel_].nodes[static_cast<std::size_t>(node_hit)];
         // One node per tap (JS buttons are exclusive — the topmost node fires).
         if (p.pressed) {
             node_tap = true;
+            hover_ = node_hit;  // `qe.jhb` -> `GT(a)`: select on a real press
             std::fprintf(stdout, "[map] node focus -> %s [%s] (%s)\n", n.name.c_str(),
                          n.zone.c_str(), n.active ? "active" : "locked");
             std::fflush(stdout);
         }
+    } else {
+        hover_node_ = -1;  // off every node: clear the pressed-look
     }
     // The `Rr` FIGHT button (`tj`, L2099/L2102): the ONLY fight trigger.
     // JS `Ya` -> `v.Am(battle)` (L1216) -> `wa.mp(6)`. A boss node arms the
@@ -9784,20 +9870,26 @@ void MapScreen::render_impl(App& app) {
     for (std::size_t i = 0; i < node_count; ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // `WDa` + `Qr.lla` (JS L256/L2094)
-        const bool hovered = static_cast<int>(i) == hover_;
+        const bool selected = static_cast<int>(i) == hover_;      // JS `kE`
+        const bool hovered = static_cast<int>(i) == hover_node_;  // pointer only
         // JS `Qr` (L2092-2095) `b=a.tt()`: the `<Battle>` record's `Locked`
         // (not `!active` — the visible-node gate already implies `active`).
         const bool locked = n.locked;
         // JS `Qr` (L2092-2095): frame = "BattleBtn<State>/<suffix>", suffix
         // base_/active_/locked_/locked_active_/pressed_ + Icon (`Lc.*` L2482,
-        // `U9a..X9a` L1405). Hover swaps to Active; locked uses BattleBtnLock*.
+        // `U9a..X9a` L1405). The SELECTED node (`kE`, set by `GT` on a real
+        // press) uses Active; a bare pointer hover uses the Pressed frame
+        // (`jc[2]`, no lock variant: `vea("Pressed")` L2093); locked uses
+        // BattleBtnLock*.
         const std::string base =
             std::string(locked ? "BattleBtnLock/locked_" : "BattleBtnBase/base_") + n.icon;
         const std::string active =
             std::string(locked ? "BattleBtnLockActive/locked_active_"
                                : "BattleBtnActive/active_") +
             n.icon;
-        const char* tex_frame = hovered ? active.c_str() : base.c_str();
+        const std::string pressed = std::string("BattleBtnPressed/pressed_") + n.icon;
+        const char* tex_frame =
+            selected ? active.c_str() : (hovered ? pressed.c_str() : base.c_str());
         bool drawn = try_draw_atlas_button(app, tex_frame, n.x, n.y, node_px, node_px, 1.0f);
         if (!drawn && locked) {
             const std::string lock_base = std::string("BattleBtnBase/base_") + n.icon;
@@ -11642,6 +11734,12 @@ void FightScreen::tick_callouts() {
 }
 
 void FightScreen::update_impl(float dt) {
+    // JS `Ut.kyb` (`kyb` L825): `$O` advances once per 60 Hz frame; the
+    // uncapped present loop must not step it (see DojoScreen::update_impl).
+    {
+        const int f = static_cast<int>(arrow_flashing_frames());
+        if (f > 0) g_fight_arrow_phase = (g_fight_arrow_phase + 1) % f;
+    }
     if (fight_ == nullptr) return;
     ++callout_sim_frame_;  // fixed-step frame for the `[callout-life]` span
     // Sensei dialog modal gate (quest engine `He` records): a dialog queued
@@ -12396,12 +12494,11 @@ void FightScreen::render_impl(App& app) {
                                                 : static_cast<float>(afr.w);
             const float nat_h = afr.source_h > 0 ? static_cast<float>(afr.source_h)
                                                 : static_cast<float>(afr.h);
-            static int arrow_phase = 0;  // JS `Ut.$O` (reset to 0 in `V0a` L831)
+            // `Ut.$O` is stepped in `update_impl` (fixed 60 Hz), not here.
+            const int arrow_phase = g_fight_arrow_phase;  // JS `Ut.$O`
             const float alpha =
                 0.5f + 0.5f * std::sin(kPi / kArrowFlashingFrames *
                                        static_cast<float>(arrow_phase));
-            arrow_phase =
-                (arrow_phase + 1) % static_cast<int>(kArrowFlashingFrames);
             static bool fight_arrow_logged = false;
             if (!fight_arrow_logged) {
                 fight_arrow_logged = true;
@@ -12416,8 +12513,8 @@ void FightScreen::render_impl(App& app) {
             draw_atlas_region(app, "arrow", static_cast<float>(afr.x),
                               static_cast<float>(afr.y), static_cast<float>(afr.w),
                               static_cast<float>(afr.h), static_cast<float>(atw),
-                              static_cast<float>(ath), sx, sy, nat_w * camera.zoom,
-                              nat_h * camera.zoom, alpha, /*flip_x=*/false);
+                              static_cast<float>(ath), sx, sy, nat_w,
+                              nat_h, alpha, /*flip_x=*/false);
         }
     }
 

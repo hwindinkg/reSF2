@@ -488,7 +488,8 @@ public:
 private:
     std::vector<ZoneTab> zones_;
     int zone_sel_ = 0;
-    int hover_ = -1;
+    int hover_ = -1;      // JS `qe.kE` — the SELECTED node (a real press only)
+    int hover_node_ = -1; // pointer hover (the pressed-look; never selects)
     int tab_hover_ = -1;
     // `Ur` red-bulb / selected-slot blink (`sZa`/`rZa` L2116-2117), ticked in
     // `update_impl` and read by the dot draw.
