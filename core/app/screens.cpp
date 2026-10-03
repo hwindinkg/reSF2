@@ -17376,6 +17376,25 @@ bool EquipmentScreen::ensure_avatar(App& app) {
             avatar_fighter_->set_color(assets.dojo.root_color());  // `p.o_.XCa()`
             avatar_clip_ = &it->second;
             avatar_clip_name_ = it->first;
+            // [FIX profile draw loop] Resolve the `StartIdleStance` the JS `Gc`
+            // selects on the draw's `AnimationEnd` (`KnivesStartStanceIdle` ->
+            // `knives_stance_idle`), so `update_impl` can transition instead of
+            // restarting the draw.
+            {
+                const std::string idle_loop =
+                    find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+                const auto il = idle_loop.empty() ? assets.clips.end()
+                                                  : assets.clips.find(idle_loop);
+                if (il != assets.clips.end() && !il->second.frames.empty()) {
+                    for (const auto& kv : assets.moves) {
+                        if (shop_clip_key(kv.second) == il->first) {
+                            avatar_idle_move_ = &kv.second;
+                            break;
+                        }
+                    }
+                    if (avatar_idle_move_ != nullptr) avatar_idle_clip_ = &il->second;
+                }
+            }
             // `Pi.ia` -> `wd.ia` -> `Te.ia` subframe pacing (not 1/tick).
             avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_);
             avatar_frame_ = avatar_fighter_->move_frame();
@@ -17560,11 +17579,18 @@ void EquipmentScreen::update_impl(float dt) {
     if (avatar_ok_ && avatar_fighter_ != nullptr && avatar_move_ != nullptr &&
         avatar_clip_ != nullptr && !avatar_clip_->frames.empty() &&
         !block_preview_active_) {
-        // The idle loops: when `Te.KNa` ends the clip, restart it (the JS `Aua`
-        // idle auto-play re-picks the stance). Advance through the `Te.ia`
-        // subframe pacing, not one frame per tick.
+        // The idle loops: when `Te.KNa` ends the clip the JS `Gc` selects the
+        // `AnimationEnd` move — the `StartIdleStance` (`KnivesStartStanceIdle`)
+        // once the `PeacefulStart` draw ends. The old port RESTARTED the draw
+        // forever (the reported "profile loops the weapon-draw"). Advance
+        // through the `Te.ia` subframe pacing, not one frame per tick.
         if (!avatar_fighter_->preview_active()) {
-            avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_);
+            if (avatar_idle_move_ != nullptr && avatar_idle_clip_ != nullptr &&
+                !avatar_idle_clip_->frames.empty()) {
+                avatar_fighter_->start_preview_clip(*avatar_idle_move_, *avatar_idle_clip_);
+            } else {
+                avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_);
+            }
         }
         avatar_fighter_->advance(dt);
         avatar_frame_ = avatar_fighter_->move_frame();

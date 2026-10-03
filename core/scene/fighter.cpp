@@ -2090,6 +2090,17 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     world_x_ = node_x;
     world_y_ = node_y;
     render_offset_valid_ = false;
+    // [FIX preview sink / first-entry bind pose] JS `Te.Skb` L551 runs
+    // `Gub()` (align, L557-559) and `Pka`/`qrb` (the two play-buffer prepend
+    // slots, L551) BEFORE the first `eda` sample. `start_preview_clip` omitted
+    // BOTH: `prepend_` stayed empty, so the first `sample()` took the
+    // `else px[i]=bones[i].x` bind fallback (the "stretched polygons" frame)
+    // and `render_offset_y_` was captured against the BIND pivot instead of
+    // the clip pivot. The anchor then rode `clip_pivot_y - bind_pivot_y` off
+    // the `J9=(0,-93)` seat — the reported knives sink (bind NPivot y ~ -169
+    // vs the clip pivot). Mirror `start_move_impl`'s exact order.
+    compute_align(move);
+    build_prepend(move);
     sample_current();  // the first `Te.eda` pose
 }
 

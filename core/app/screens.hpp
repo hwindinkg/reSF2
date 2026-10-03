@@ -1430,6 +1430,13 @@ private:
     const sf2::scene::MoveDef* avatar_move_ = nullptr;   // owned by FightAssets
     const sf2::data::anim_clip* avatar_clip_ = nullptr;  // owned by FightAssets
     std::string avatar_clip_name_;
+    // [FIX profile draw loop] JS `Gc` AnimationEnd: `KnivesStartStanceIdle`
+    // (`<Events><AnimationEnd/></Events>` + `<Conditions><CurrentAnimation
+    // Name="StanceLeft"/>`, moves.xml L3895) is selected once the
+    // `PeacefulStart` draw (`KnivesStartStance-Left`) ends. `avatar_clip_` is
+    // the draw; these hold the `StartIdleStance` loop the avatar transitions to.
+    const sf2::scene::MoveDef* avatar_idle_move_ = nullptr;   // owned by FightAssets
+    const sf2::data::anim_clip* avatar_idle_clip_ = nullptr;  // owned by FightAssets
     int avatar_frame_ = 0;
     bool avatar_tried_ = false;
     bool avatar_ok_ = false;
