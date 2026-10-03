@@ -14435,14 +14435,19 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     if (!app.has_fight_assets()) return;
     FightAssets& assets = app.fight_assets();
 
-    // The worn set: the save's items + the previewed one (JS `Pi.Ex` writes
-    // the item into its slot before `cM()`), for the TryOn move's locks.
-    std::vector<sf2::scene::OwnedItem> worn = owned_items(app);
-    bool present = false;
-    for (const sf2::scene::OwnedItem& o : worn) {
-        if (o.name == it.name) present = true;
+    // The worn set: the save's items with the previewed one REPLACING its own
+    // typed slot (JS `Pi.Ex` L2301: `a.type==I.vg?this.Ca.Hd=a : a.type==I.Ai?
+    // this.Ca.hg=a : ...` writes the item INTO the slot before `cM()`). The
+    // old port merely APPENDED it, so the current weapon stayed in `worn` and
+    // `shop_tryon_move`'s `Aua` priority pick kept the CURRENT weapon's TryOn
+    // move on a tie (WEAPON_KNIVES before WEAPON_SAI, both Priority 130 in
+    // moves.xml) — the report's "try-on plays the current weapon's animation".
+    std::vector<sf2::scene::OwnedItem> worn;
+    for (const sf2::scene::OwnedItem& o : owned_items(app)) {
+        if (!it.type.empty() && o.type == it.type) continue;  // slot replaced
+        worn.push_back(o);
     }
-    if (!present) worn.push_back({it.type, it.subtype, it.name});
+    worn.push_back({it.type, it.subtype, it.name});
 
     // Body: the save's typed slots with the item swapped into its own
     // (`fighter_model_names` buckets by list.xml Type, last-in wins).
