@@ -605,13 +605,21 @@ int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out,
 }
 }  // namespace
 
-// JS `YAa` (L608-609) + `Q6a` (L609-610): the safe-attack table selection.
-// Finds the record for my weapon pair in the safe-attack table (Z0()[1])
-// and adds the distance-windowed outcome candidates.
-const TacticRecord* AiController::find_record(const std::string& enemy_anim) const {
+// Finds the record for the current enemy animation in the tactics table
+// selected by `table_index` (JS `Z0()[table_index]`):
+//   0 = attack (JS `XAa` L611 `Z0()[0]`),
+//   1 = safe   (JS `Q6a` L609 `Z0()[1]`),
+//   2 = throw  (JS `Gea` L613 `Z0()[2]`).
+// Each parsed file carries its JS table index in `TacticsFile::version` (the
+// `h`/`b` int of `Si.dxb`/`Si.cxb`, routed by `tactics_parse_file`), so the
+// file must match the requested table — previously ONE table (index 0) was
+// searched for all three decisions.
+const TacticRecord* AiController::find_record(const std::string& enemy_anim,
+                                              int table_index) const {
+    if (table_index < 0 || table_index > 2) return nullptr;
     for (const TacticsFile& tf : tactics_) {
-        if (tf.version == 2 || tf.version == 7) continue;  // single-weapon tables
-        for (const TacticRecord& r : tf.set.tables[0]) {
+        if (tf.version != table_index) continue;  // JS `P.wO[table_index]`
+        for (const TacticRecord& r : tf.set.tables[table_index]) {
             if ((r.weapon.empty() || r.weapon == oo_ || weapon_.empty()) &&
                 r.anim == enemy_anim) {
                 return &r;
@@ -626,7 +634,7 @@ int AiController::yaa(const AiFightState& st) {
     Ao_ = (Fl_ % 5) != 0;  // P.sp (TablesReduction Step) = 5
     if (st.enemy_anim.empty()) return 0;
 
-    const TacticRecord* rec = find_record(st.enemy_anim);
+    const TacticRecord* rec = find_record(st.enemy_anim, /*safe=*/1);
     if (rec == nullptr) return 0;
 
     // JS `Q6a` (L609-611) is called as
@@ -686,7 +694,7 @@ int AiController::xaa(const AiFightState& st) {
     // consumed here so the shared `Da.pg` stream position matches.
     aea_ = aea_draw();
 
-    const TacticRecord* rec = find_record(st.enemy_anim);
+    const TacticRecord* rec = find_record(st.enemy_anim, /*attack=*/0);
     if (rec == nullptr) return 0;
 
     // JS L611-612 (exact):
@@ -723,7 +731,7 @@ int AiController::gea(const AiFightState& st, int variant) {
     (void)variant;
     wb_.clear();
     if (st.enemy_anim.empty()) return 0;
-    const TacticRecord* rec = find_record(st.enemy_anim);
+    const TacticRecord* rec = find_record(st.enemy_anim, /*throw=*/2);
     if (rec == nullptr) return 0;
     for (const TacticRow& row : rec->rows) {
         const float target =

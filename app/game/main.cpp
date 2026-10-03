@@ -7458,7 +7458,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         auto roll01 = [&rng]() {
             return static_cast<float>(rng()) / static_cast<float>(rng.max());
         };
-        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.tactics_sets,
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.select_tactics("Fists", battle.enemy_weapon_subtype),
                        tactic, "Player", "Enemy", battle.player_spawn_x,
                        battle.player_spawn_y, battle.enemy_spawn_x,
                        battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
@@ -7513,7 +7513,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const sf2::scene::TacticDef* tactic = nullptr;
         const auto tit = fa.tactic_defs.find("Standard");
         if (tit != fa.tactic_defs.end()) tactic = &tit->second;
-        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.tactics_sets,
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.select_tactics("Fists", battle.enemy_weapon_subtype),
                        tactic, "Player", "Enemy", battle.player_spawn_x,
                        battle.player_spawn_y, battle.enemy_spawn_x,
                        battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
@@ -7612,7 +7612,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const sf2::scene::TacticDef* tactic = nullptr;
         const auto tit = fa.tactic_defs.find("Standard");
         if (tit != fa.tactic_defs.end()) tactic = &tit->second;
-        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.tactics_sets,
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips, fa.select_tactics("Fists", battle.enemy_weapon_subtype),
                        tactic, "Player", "Enemy", battle.player_spawn_x,
                        battle.player_spawn_y, battle.enemy_spawn_x,
                        battle.enemy_spawn_y, battle.max_hp, battle.max_hp,

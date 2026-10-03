@@ -6930,7 +6930,8 @@ void DojoScreen::build_dojo_fight(App& app) {
     dojo_fight_->set_silent_entry(true);  // no gong (the `m1a` factory path)
     dojo_fight_->set_global_triggers(&assets.global_triggers);
     dojo_fight_->init_locks(
-        battle, assets.merged, assets.moves, assets.clips, assets.tactics_sets, tactic,
+        battle, assets.merged, assets.moves, assets.clips,
+        assets.select_tactics("Fists", battle.enemy_weapon_subtype), tactic,
         "Player", bw.first_name.empty() ? battle_name : bw.first_name,
         battle.player_spawn_x, battle.player_spawn_y, battle.enemy_spawn_x,
         battle.enemy_spawn_y, battle.max_hp, battle.max_hp, {}, player_owned,
@@ -10810,7 +10811,8 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // entry (`start_battle`); suppress the ctor's copy so it never double-plays.
     fight_->set_silent_entry(entry_audio_from_map);
     fight_->init_locks(battle, assets.merged, assets.moves, assets.clips,
-                       assets.tactics_sets, tactic, "Player", enemy_name,
+                       assets.select_tactics("Fists", battle.enemy_weapon_subtype),
+                       tactic, "Player", enemy_name,
                        battle.player_spawn_x, battle.player_spawn_y,
                        battle.enemy_spawn_x, battle.enemy_spawn_y,
                        battle.max_hp, battle.max_hp, {},

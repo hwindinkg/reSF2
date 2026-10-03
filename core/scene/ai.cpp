@@ -217,8 +217,9 @@ TacticsSet parse_sb_blob(BinReader& r, const std::vector<std::string>& anim_pool
                 tr.rows.push_back(std::move(row));
             }
         }
-        // Route into slot 0; the AiController routes by container version
-        // at decision time (see tactics_parse_file).
+        // parse_sb_blob collects into slot 0; tactics_parse_file moves the
+        // records into the file's declared table index afterwards (JS
+        // `P.$ua(...,h)` -> `P.wO[h]`, `Si.dxb` L655 / `Si.cxb` L654).
         set.tables[0].push_back(std::move(tr));
     }
     return set;
@@ -227,23 +228,23 @@ TacticsSet parse_sb_blob(BinReader& r, const std::vector<std::string>& anim_pool
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// tactics_parse_file — JS `Si.cxb` (L653-654)
+// tactics_parse_file — JS `Si.cxb` (L653-654) + `Si.dxb` (L654-655)
 // ---------------------------------------------------------------------------
 std::vector<TacticsFile> tactics_parse_file(const std::uint8_t* data,
-                                            std::size_t size) {
+                                            std::size_t size, bool pair) {
     const std::vector<std::uint8_t> decompressed = sf2::data::zstd_decompress(data, size);
     BinReader r(decompressed.data(), decompressed.size());
 
     std::vector<TacticsFile> out;
     while (r.remaining() > 0) {
         TacticsFile tf;
+        // JS `Si.dxb`: `h=Kb.tl(c)` (table index), `f=sb.fJ(c)` (weapon A),
+        // `g=sb.fJ(c)` (weapon B). JS `Si.cxb`: `b=Kb.tl(c)` (table index),
+        // `d=sb.fJ(c)` (the single name, registered as the pair `(d,d)` by
+        // `P.$ua(f,d,d,b)`).
         tf.version = static_cast<int>(r.u32());
         tf.weapon_a = r.cstr();
-        if (tf.version == 2 || tf.version == 7) {
-            tf.weapon_b = "";
-        } else {
-            tf.weapon_b = r.cstr();
-        }
+        tf.weapon_b = pair ? r.cstr() : tf.weapon_a;
         const std::uint32_t blob_size = r.u32();
         if (blob_size > r.remaining()) {
             throw std::runtime_error("tactics: blob size exceeds payload");
@@ -267,6 +268,13 @@ std::vector<TacticsFile> tactics_parse_file(const std::uint8_t* data,
         const std::vector<std::string> pool_b = br.strings(count_b);
 
         tf.set = parse_sb_blob(br, pool_a, pool_b);
+        // Route the records into the table index the file declares (JS
+        // `P.$ua(...,h)` -> `P.wO[h]`, `P.$Ba` L630). `parse_sb_blob` collects
+        // into slot 0, so move them for indices 1 (safe) and 2 (throw).
+        if (tf.version == 1 || tf.version == 2) {
+            tf.set.tables[tf.version] = std::move(tf.set.tables[0]);
+            tf.set.tables[0].clear();
+        }
         r.skip(blob_size);
         out.push_back(std::move(tf));
     }

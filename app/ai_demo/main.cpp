@@ -324,7 +324,8 @@ int main(int argc, char** argv) {
         std::cout << "tactics groups: " << t_sets.size();
         for (const auto& g : t_sets) {
             std::cout << "  v" << g.version << "(" << g.weapon_a << "," << g.weapon_b
-                      << ") records=" << g.set.tables[0].size();
+                      << ") records=" << g.set.tables[0].size() + g.set.tables[1].size() +
+                             g.set.tables[2].size();
         }
         std::cout << "\n\n";
 

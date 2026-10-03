@@ -307,6 +307,97 @@ void load_magic_atlas_bundle(sf2::app::App& app, const std::string& res) {
 
 } // namespace
 
+// JS `P.CFa` (L621-622) + `T4a` (L218472) + `Si.cxb`/`Si.dxb` (L653-655).
+// Builds the per-fight tactics set the JS registers for the two fighters'
+// weapon subtypes: the singles `tactics/<w>.dat` (w=="" -> `default.dat`) and
+// the canonical pairs `tactics/<g>_<f>.dat` (`Si.adb`: g==f || g=="" ||
+// (f!="" && g<f)), skipping the self-pair `(g,g)` when g is a fighter weapon
+// (`b` after `J.remove(b, Au="Fists")`). Missing files are skipped (JS
+// `G.data.v[...] == null` -> null). Previously app.cpp hard-loaded only
+// `fists_fists.dat`, so every non-Fists enemy resolved no table record.
+std::vector<sf2::scene::TacticsFile> FightAssets::select_tactics(
+    const std::string& my_weapon, const std::string& enemy_weapon) const {
+    std::vector<sf2::scene::TacticsFile> out;
+    if (tactics_dir.empty()) return out;
+    // `FightController::setup` maps an empty enemy subtype to "Fists"; mirror
+    // that here so the two agree.
+    const std::string enemy =
+        enemy_weapon.empty() ? std::string("Fists") : enemy_weapon;
+
+    auto lower = [](std::string s) {
+        for (char& c : s) {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        }
+        return s;
+    };
+    auto contains = [](const std::vector<std::string>& v, const std::string& s) {
+        return std::find(v.begin(), v.end(), s) != v.end();
+    };
+    auto dedup_push = [&](std::vector<std::string>& v, const std::string& s) {
+        if (!contains(v, s)) v.push_back(s);
+    };
+
+    // a = [my, enemy, "Fists"(Au), ""]; b = [my, enemy] minus Au.
+    std::vector<std::string> a;
+    dedup_push(a, my_weapon);
+    dedup_push(a, enemy);
+    dedup_push(a, "Fists");
+    dedup_push(a, "");
+    std::vector<std::string> b;
+    dedup_push(b, my_weapon);
+    dedup_push(b, enemy);
+    b.erase(std::remove(b.begin(), b.end(), std::string("Fists")), b.end());
+
+    // `Si.adb(g,f)`: the pair loads only in canonical order.
+    auto adb = [](const std::string& g, const std::string& f) {
+        return g == f || g.empty() || (!f.empty() && g < f);
+    };
+
+    // The directory index (stem -> path), so `<stem>.<hash>.dat` resolves.
+    std::map<std::string, std::string> by_stem;
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator(tactics_dir, ec)) {
+        if (!e.is_regular_file()) continue;
+        const std::string name = e.path().filename().string();
+        const std::size_t dot = name.find('.');
+        if (dot == std::string::npos) continue;
+        if (name.substr(name.size() - 4) != ".dat") continue;
+        by_stem.emplace(name.substr(0, dot), e.path().string());
+    }
+
+    auto load_one = [&](const std::string& stem, bool pair) {
+        const auto it = by_stem.find(stem);
+        if (it == by_stem.end()) return;  // JS `G.data.v` miss -> null
+        try {
+            const std::vector<std::uint8_t> bytes = read_file_bytes(it->second);
+            std::vector<sf2::scene::TacticsFile> parsed =
+                sf2::scene::tactics_parse_file(bytes.data(), bytes.size(), pair);
+            for (sf2::scene::TacticsFile& tf : parsed) {
+                out.push_back(std::move(tf));
+            }
+        } catch (const std::exception&) {
+            // Malformed/short file: JS would leave the table untouched.
+        }
+    };
+
+    // Singles (`Si.cxb` L653: one cstring per record).
+    for (const std::string& g : a) {
+        load_one(g.empty() ? std::string("default") : lower(g), /*pair=*/false);
+    }
+    // Pairs (`Si.dxb` L654-655: two cstrings per record).
+    for (const std::string& g : a) {
+        for (const std::string& f : a) {
+            if (g == f && contains(b, g)) continue;  // JS self-pair skip
+            if (!adb(g, f)) continue;
+            load_one(lower(g) + "_" + lower(f), /*pair=*/true);
+        }
+    }
+    std::fprintf(stdout, "[tactics] select my=%s enemy=%s -> %zu sets\n",
+                 my_weapon.c_str(), enemy.c_str(), out.size());
+    std::fflush(stdout);
+    return out;
+}
+
 App::App() = default;
 
 App::~App() { shutdown(); }
@@ -878,9 +969,12 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             std::fprintf(stderr, "app: perks.xml load failed: %s\n", e.what());
         }
 
-        // The fists tactics file (the AI's decision tables).
+        // The fists tactics file (the AI's decision tables). The PER-FIGHT
+        // set is built by `select_tactics` (JS `P.CFa` L621-622); this boot
+        // load keeps `tactics_sets` populated for the demos/fallbacks.
         {
             const std::string dir = res + "/tactics";
+            fight_assets_->tactics_dir = dir;
             std::string t_file;
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 const std::string name = entry.path().filename().string();

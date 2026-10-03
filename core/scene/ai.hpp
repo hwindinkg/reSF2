@@ -125,9 +125,14 @@ struct TacticRecord {
     std::string weapon;                  // pool B weapon-type branch
     std::vector<TacticRow> rows;         // condition rows (vec28B)
 };
-// The parsed tactics structure for ONE weapon pair / version (JS `sb`).
-// `tables[0]` = safe-attack table (Q6a/`Z0()[1]`), `tables[1]` =
-// attack table (XAa/`Z0()[0]`), `tables[2]` = throw table (Gea/`Z0()[2]`).
+// The parsed tactics structure for ONE weapon pair / table index (JS `sb`).
+// The record's table index (JS `Si.dxb` `h` / `Si.cxb` `b`, the value pushed
+// into `P.wO[h]` by `P.$ua`) selects the slot:
+//   `tables[0]` = attack table  (XAa / `Z0()[0]`, JS `de.XAa` L611),
+//   `tables[1]` = safe table    (Q6a / `Z0()[1]`, JS `de.Q6a` L609),
+//   `tables[2]` = throw table   (Gea / `Z0()[2]`, JS `de.Gea` L613).
+// (The previous comment had 0/1 swapped; verified against the shipped blobs:
+// `batons_fists.dat` carries index 0 and 1, the single `batons.dat` index 2.)
 struct TacticsSet {
     bool empty() const {
         return tables[0].empty() && tables[1].empty() && tables[2].empty();
@@ -135,18 +140,22 @@ struct TacticsSet {
     std::vector<TacticRecord> tables[3];
 };
 
-// Decompress + parse ONE tactics .dat file (a single-weapon or weapon-pair
-// archive; JS `Si.cxb` L653-654). `data`/`size` = the RAW COMPRESSED file
-// bytes. Returns the parsed set keyed by weapon pair "(a,b)" with the
-// version, or throws std::runtime_error on malformed input.
+// Decompress + parse ONE tactics .dat file (JS `Si.cxb` L653 single-weapon
+// or `Si.dxb` L654-655 weapon-pair). `data`/`size` = the RAW COMPRESSED file
+// bytes. `pair` selects the record layout: pair files (`<a>_<b>.dat`) carry
+// TWO cstrings (weapon A, weapon B) per record; single files (`<a>.dat` /
+// `default.dat`) carry ONE (JS `Si.cxb` reads `d=sb.fJ(c)` once, `Si.dxb`
+// reads `f=sb.fJ(c)` + `g=sb.fJ(c)`). Returns the parsed sets keyed by the
+// pair + table index, or throws std::runtime_error on malformed input.
 struct TacticsFile {
     std::string weapon_a;   // first weapon (may be "" = unarmed)
-    std::string weapon_b;   // second weapon
-    int version = 0;        // table version (0/1/2/7; 2=single, 7=per-anim)
+    std::string weapon_b;   // second weapon (== weapon_a for single files)
+    int version = 0;        // JS table index (0/1/2; 7 = per-anim, skipped)
     TacticsSet set;
 };
 std::vector<TacticsFile> tactics_parse_file(const std::uint8_t* data,
-                                            std::size_t size);
+                                            std::size_t size,
+                                            bool pair = true);
 
 // ---------------------------------------------------------------------------
 // Tactic settings (tactic_settings.xml) — JS `P` + `Md`
@@ -632,8 +641,10 @@ private:
     int dqb(const AiFightState& st);
     // Finds the tactics table record whose weapon matches mine AND whose
     // anim matches the enemy's current animation (JS: the Il record whose
-    // `Tfa` == `OO` inside `ds.Z0()[n]`).
-    const TacticRecord* find_record(const std::string& enemy_anim) const;
+    // `Tfa` == `OO` inside `ds.Z0()[table_index]`). `table_index` is the JS
+    // table: 0 = attack (XAa), 1 = safe (Q6a), 2 = throw (Gea).
+    const TacticRecord* find_record(const std::string& enemy_anim,
+                                    int table_index) const;
     // The facing (JS `b6a` L603).
     int b6a(const AiFightState& st) const;
     // JS `t0` (L618): `a.oa.Fe().ma.x < b.oa.Fe().ma.x ? 1 : -1` minus the

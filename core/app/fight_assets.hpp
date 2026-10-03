@@ -128,6 +128,21 @@ struct FightAssets {
     // set, registered into every fight (locks-gated) alongside the perks.
     std::vector<sf2::scene::GlobalTrigger> global_triggers;
     std::vector<sf2::scene::TacticsFile> tactics_sets;
+    // The `res/tactics` directory (set by app.cpp). The per-fight loader
+    // (`select_tactics`) reads the JS-selected files from here.
+    std::string tactics_dir;
+    // JS `P.CFa` (L621-622) + `T4a` (L218472): the per-fight tactics files.
+    // `my_weapon`/`enemy_weapon` are the two fighters' move-list subtypes
+    // (JS `xc.Fd`), `Au` (the config `<Weapon>`) is "Fists". The JS list is
+    //   a = [my, enemy, "Fists", ""]  (deduped; `Wmb`),
+    //   singles  `tactics/<a>.dat`        (g=="" -> `default.dat`),
+    //   pairs    `tactics/<g>_<f>.dat`    for every g,f in a with
+    //            `Si.adb(g,f)` (g==f || g=="" || (f!="" && g<f)), skipping
+    //            the self-pair `(g,g)` when g is a real fighter weapon.
+    // Missing files are skipped (JS `G.qf`/`G.data` returns null). Defined
+    // in app.cpp (it needs the raw-byte reader + the parser).
+    std::vector<sf2::scene::TacticsFile> select_tactics(
+        const std::string& my_weapon, const std::string& enemy_weapon) const;
     std::map<std::string, sf2::scene::TacticDef> tactic_defs;  // by name
     // Perk catalog (res/perks.xml `Be` defs) for the fight trigger bus
     // (`ZOa` equip mapping needs def lookup by name at fight setup).
