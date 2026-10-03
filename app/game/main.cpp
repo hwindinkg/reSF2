@@ -7875,7 +7875,26 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // pair stays permanently committed — which would stop the
                 // boss's AI ever reaching the `Pqb` L606 `else` path again.
                 const std::string boss_move = fs->enemy_current_move();
-                const bool boss_hittable = bag_probe || !boss_move.empty();
+                // [FIX probe gate — active boss] The boss's stance idle
+                // (`*StartStanceIdle`/`StanceIdle`) inherits the `<Stance>`
+                // template's Block interval, so a tap during idle is ALWAYS
+                // absorbed (`[hit] ... BLOCK`) and only provokes the boss.
+                // The pre-fix AI sat in that idle on its own, so excluding it
+                // left `boss_hittable` permanently false -> NO-HIT. With the
+                // JS-exact window distance the boss now LEAVES the idle on its
+                // own (range-appropriate STRIKES), so tap ONLY while the boss
+                // is outside its idle — a real, non-block window. This is the
+                // gate the probe was written for; it is now reachable.
+                const bool boss_idle =
+                    boss_move.empty() ||
+                    boss_move.find("Idle") != std::string::npos;
+                // [FIX probe gate — active boss] A boss move's startup carries
+                // a block/Uninterrupt interval (the idle block inherited from
+                // `<Stance>`; `Uninterrupt 0->11` on its strikes). A tap only
+                // lands in the post-startup window, so wait for it.
+                const bool boss_open = fs->enemy_move_frame() >= 12;
+                const bool boss_hittable =
+                    bag_probe || (!boss_idle && boss_open);
                 const std::string my_move = fs->player_current_move();
                 // [FIX probe gate] The player's LIVE idle after the intro is
                 // the `IdleStance` family — `StanceIdle` (moves.xml L1056,

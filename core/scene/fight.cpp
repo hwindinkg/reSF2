@@ -6068,6 +6068,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // MIRROR, not its `b6a` facing (`fighter.facing()`), or the `Pqb`
         // facing-lock fires every frame and the AI never issues a move.
         st.enemy_clip_mirror = foe.fighter.clip_mirror();
+        // JS `a.da.dw()` (`Te.dw` L547): the OPPONENT's root world-x while its
+        // clip plays (`Pe`), else 0. `st.enemy_playing` is set below, so gate
+        // on the raw `Pe` state (non-null clip + not reacting) here.
+        st.enemy_dw = (foe.fighter.current_move() != nullptr &&
+                       !foe.fighter.ragdoll_active())
+                          ? foe.fighter.world_x()
+                          : 0.0f;
         st.my_anim = me.fighter.current_move() ? me.fighter.current_move()->name : "";
         st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
         st.enemy_move = foe.fighter.current_move();
@@ -6132,8 +6139,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          " | branch=%s fk=%d aqa=%d gate=%d ycb=%d lbb=%d"
                          " pcb=%d rua=%d caa=%d nG=%d hcb=%d ef=%d x=%d"
                          " ue=%d ae=%d wb=%d"
-                         " wea{target=%.3f old=%.3f mu=%.3f my_facing=%d"
-                         " label='%s'} dec='%s'\n",
+                         " wea{target=%.3f old=%.3f wea=%.3f dw=%.3f hd=%d"
+                         " mu=%.3f my_facing=%d label='%s'} dec='%s'\n",
                          frame_, me.name.c_str(), st.ranged,
                          me.ranged_available ? 1 : 0,
                          me.ranged_available ? 1 : -1,
@@ -6145,8 +6152,9 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          d.caa ? 1 : 0, d.nG ? 1 : 0, d.hcb ? 1 : 0,
                          d.enemy_frame, d.x, d.enemy_uninterrupt_end,
                          d.enemy_attack_end, d.wb,
-                         d.target, st.my_facing * st.enemy_x + d.mu, d.mu,
-                         st.my_facing, d.label.c_str(), decision.c_str());
+                         d.target, st.my_facing * d.wea + d.mu, d.wea, d.dw,
+                         d.hd, d.mu, st.my_facing, d.label.c_str(),
+                         decision.c_str());
             std::fflush(stdout);
             last_ai_log_ = decision;
         }

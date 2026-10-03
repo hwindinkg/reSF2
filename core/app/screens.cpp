@@ -11531,6 +11531,13 @@ std::string FightScreen::enemy_current_move() const {
     return m != nullptr ? m->name : std::string();
 }
 
+// [probe, authorised] The enemy's current move frame (JS `Te.Xh`), for the
+// `--boss-hit-probe` tap timing: a tap only lands once the boss is past its
+// move's startup block/Uninterrupt interval.
+int FightScreen::enemy_move_frame() const {
+    return fight_ != nullptr ? fight_->enemy().fighter.move_frame() : -1;
+}
+
 // [probe, authorised] Enemy hit-reaction state for `--boss-hit-probe`.
 bool FightScreen::enemy_ragdoll_active() const {
     return fight_ != nullptr && fight_->enemy().fighter.ragdoll_active();

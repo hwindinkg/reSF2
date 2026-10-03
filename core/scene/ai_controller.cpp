@@ -43,12 +43,13 @@
 //     `f!=g -> wait(f-g)` tail (L609-611). `gea` (throw, `Z0()[2]`) still
 //     passes `hu_pick=-1` and skips the `gcb`/`Uea` structure — cited
 //     divergence (throws only).
-//   - the table target: JS `Wea` (L600) returns the FIGHTER BONE named
-//     `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`, resolved on MY
-//     fighter). The weight is `enemy_hd*(t - enemy_dw) + Mu` using the
-//     enemy's `hd()`/`dw()`; `AiFightState` exposes the bone world-x and
-//     the enemy clip mirror but NOT the enemy's spatial `dw()` (`Pta`), so
-//     the port keeps `my_facing * t + Mu` (the one value not JS-exact).
+//   - the table target (NOW JS-EXACT): JS `Wea` (L600) returns the FIGHTER
+//     BONE named `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`, resolved on
+//     MY fighter); `XAa` then forms `n = a.da.hd()*(Wea - a.da.dw()) + Mu`.
+//     The port now computes exactly that (opponent clip mirror, opponent
+//     root world-x, bone world-x) — see `xaa`. `yaa` (Q6a) still drops the
+//     `xea` sub-frame term; `gea` (throw, `Z0()[2]`) still passes `hu_pick=-1`
+//     and skips the `gcb`/`Uea` structure — cited divergences (safe/throw).
 // Exact since this wave (no oracle needed — pure JS math):
 //   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
 //     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
@@ -721,19 +722,30 @@ int AiController::xaa(const AiFightState& st) {
     //       0 < r && animation != null && r <= b          // kept
     // The horizon IS applied (each kept outcome has wait <= Fl+Aea, via
     // `pba_append`'s `horizon` argument below).
-    // The target: JS `Wea` (L600) — the fighter bone named `row.label`
-    // (`da.Ic(label, t0(me,enemy)).ma.x`) — now resolved from MY fighter
-    // (`st.my_bone_world_x`). The port keeps the `my_facing * t + Mu` shell;
-    // the enemy `dw()`/`hd()` terms remain collapsed as before.
+    // The target (JS L611-612, exact):
+    //   f = a.da.hd()                            // OPPONENT's clip mirror
+    //   e = a.da.dw()                            // OPPONENT's root world-x
+    //   n = f*(Wea(row.label, this.model, a) - e) + this.Mu
+    // `Wea` resolves the bone on MY model (`this.model`) with `t0(me,enemy)`;
+    // the multiplier is the OPPONENT's `hd()`, NOT my own `b6a` facing, and
+    // the `-e` term is the OPPONENT's root world-x. The old port used
+    // `my_facing*Wea + Mu`, which left every row's window distance at the
+    // bone-local offset (≈0 for a heel bone) so `Gu.n0` always selected the
+    // CLOSE band (throws) instead of the range-appropriate strike band.
     const int horizon = Fl_ + aea_;
     for (const TacticRow& row : rec->rows) {
         const int k = ju_frame_index(Fl_, row.rda, row.hu_frames);
         if (k < 0) continue;
-        const float target =
-            st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
+        const float wv = wea(st, row.label);
+        const float target = static_cast<float>(st.enemy_clip_mirror) *
+                                 (wv - st.enemy_dw) +
+                             static_cast<float>(Mu_);
         dbg_.target = target;
         dbg_.mu = static_cast<float>(Mu_);
         dbg_.label = row.label;
+        dbg_.wea = wv;
+        dbg_.dw = st.enemy_dw;
+        dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_, k, horizon);
     }
     return static_cast<int>(wb_.size());

@@ -620,6 +620,8 @@ public:
     // (`Fighter::facing()`, the pose dump's `fx`). The `--verify-place` victim
     // probe reads them to log what the throw's victim actually does.
     std::string enemy_current_move() const;
+    // [probe, authorised] The enemy's current move frame (JS `Te.Xh`).
+    int enemy_move_frame() const;
     float player_facing() const;
     float enemy_facing() const;
 

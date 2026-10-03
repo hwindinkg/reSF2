@@ -366,6 +366,14 @@ struct AiFightState {
     // - me_x)`). Feeding the `b6a` value made `b6a(b)*b.hd()` always `+1`, so
     // the facing-lock fired every frame and the AI returned 0 (never moved).
     int enemy_clip_mirror = 1;
+    // JS `a.da.dw()` (`Te.dw` L547: `dw(){return this.Pe?this.Pta:0}`): the
+    // OPPONENT's root world-x while its clip plays, else 0. `XAa`/`Q6a`/`Gea`
+    // subtract it from the `Wea` bone world-x to form the window distance
+    // (`n = hd*(Wea(label) - dw) + Mu`). The port's `world_x()` is the
+    // fighter's root/pivot world-x (`oa.Fe().ma.x`), the same quantity
+    // `Te.dw` accumulates in `yaa`/`Pta`; the fight supplies it gated by
+    // `enemy_playing`. Probes that model no opponent leave it 0 (JS `Pe` off).
+    float enemy_dw = 0.0f;
     // My / enemy current animation names (`da.Ua.name`).
     std::string my_anim;
     std::string enemy_anim;
@@ -543,6 +551,13 @@ public:
         float target = 0.0f;
         float mu = 0.0f;
         std::string label;
+        // The raw `Wea` bone world-x, the opponent `dw()` (root world-x) and
+        // the opponent `hd()` (clip mirror) that build `target`:
+        //   target = hd*(wea - dw) + mu        (JS `XAa` L611-612)
+        // so `my_facing*wea + mu` (the old port formula) is recoverable too.
+        float wea = 0.0f;
+        float dw = 0.0f;
+        int hd = 1;
     };
     const AiDebug& last_debug() const { return dbg_; }
 
