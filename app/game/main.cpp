@@ -3559,17 +3559,25 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fprintf(stdout, "[tutreal2] AFTER dojo=%d step=%s nav_flash=%s\n",
                      on_dojo ? 1 : 0, after_step.c_str(),
                      after_nav.empty() ? "-" : after_nav.c_str());
+        // The `StoryTutorialDoubleSweep` tail ends with `Activate
+        // StoryTutorialOpenScene`; on desktop its else-branch queues the
+        // `tutorial_profile_moves` Notification AND `MenuBtnFlashing
+        // BtnName="Profile"` (tutorial_quests.xml L361). So reaching SHOW_BLOCK
+        // leaves nav_flash == "Profile" — the guidance to the NEXT step, not an
+        // empty column. (Before the `resume_tutorial_gate` fix the tail's
+        // `Activate` was dropped, so nav_flash stayed empty and the sensei said
+        // nothing — the reported C.)
         const bool ok_goto = on_profile && before_step == "SHOW_DOUBLE_SWEEP" &&
                              before_nav == "Dojo" && on_dojo &&
-                             after_step == "SHOW_BLOCK" && after_nav.empty();
+                             after_step == "SHOW_BLOCK" && after_nav == "Profile";
         std::fprintf(stdout,
                      "[tutreal2] RESULT profile=%s before_step=%s before_nav=%s "
-                     "dojo=%s after_step=%s after_nav_cleared=%d lock=%s -> %s\n",
+                     "dojo=%s after_step=%s after_nav_profile=%d lock=%s -> %s\n",
                      on_profile ? "PASS" : "FAIL",
                      before_step == "SHOW_DOUBLE_SWEEP" ? "PASS" : "FAIL",
                      before_nav == "Dojo" ? "PASS" : "FAIL", on_dojo ? "PASS" : "FAIL",
                      after_step == "SHOW_BLOCK" ? "PASS" : "FAIL",
-                     after_nav.empty() ? 1 : 0, ok_lock ? "PASS" : "FAIL",
+                     after_nav == "Profile" ? 1 : 0, ok_lock ? "PASS" : "FAIL",
                      (ok_goto && ok_lock) ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();

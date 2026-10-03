@@ -330,6 +330,12 @@ public:
     // the loop driver sets it via set_headless_frames(1)). Quest modals use
     // this to auto-advance instead of modal-blocking.
     bool headless() const { return headless_frames_ > 0; }
+    // The fixed 60 Hz step counter (`fixed_steps_`). The `db.aa`/`he.aa`
+    // flashing UI (`bt += 600*a` / the 30-frame arrow bob) advances once per
+    // JS frame, NOT per rendered frame; the port's present loop is uncapped
+    // (`glfwSwapInterval(0)`), so the draw-side flash reads this to tick at the
+    // fixed rate (see ui_flash_alpha / draw_nav_hint_arrow in screens.cpp).
+    int fixed_steps() const { return fixed_steps_; }
 
     // Fresh-profile tutorial mode (JS `StoryTutorialWelcome`; the approved
     // `fresh/tutorial-from-0` boot). When armed (only by `--fidelity-tour`),

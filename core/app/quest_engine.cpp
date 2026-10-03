@@ -5231,6 +5231,28 @@ bool QuestEngine::resume_tutorial_gate(App& app) {
     (void)rest;  // a re-arm leaves the parked tail in `tutorial_gate_`
     apply_effects(app, fx);
     enqueue_effects(app, fx, gate.journal, gate.locals, gate.quest);
+    // The two post-passes the old inline resume dropped (they are part of every
+    // other chain's `run_chain_effects`):
+    //   * live UI guidance (`fire_inner` L5760-5764 / `run_chain_effects`
+    //     L6029-6031): `MenuBtnFlashing` -> `nav_flash_`, the map FIGHT plate
+    //     flash, the map focus.
+    //   * chained `Activate` (`Ge` L1024; `fire_inner` L5880 / `run_chain_effects`
+    //     L6060): re-fire with `Ge.MZ` = ActionID.
+    // The `StoryTutorialDoubleSweep` tail is
+    //   SetStoryTutorialStep SHOW_BLOCK + 3 SetVariable + Activate
+    //   StoryTutorialOpenScene,
+    // so without the `Activate` re-fire the desktop `StoryTutorialOpenScene`
+    // else-branch (the `_SenseiDialogText` Notification + the `MenuBtnFlashing`
+    // `NextScene` guidance) never ran — the reported "the sensei says nothing
+    // after the double sweep".
+    if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
+    if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
+    if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
+    for (const std::string& u : fx.activate_requests) {
+        QuestJournal j2 = gate.journal;
+        j2.action_id = u;
+        fire(app, "Activate", j2);
+    }
     return !tutorial_gate_.active;
 }
 

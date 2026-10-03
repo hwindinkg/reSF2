@@ -2504,8 +2504,14 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // `C(image.w-30)`, `D(50)`, `rd(!0)` (multiline — `{br}` is a hard break,
     // the Sensei tutorial notifications need it).
     const float tx = lx(image_w - 30.0f);
+    // JS `Ib.Sr` L1910: `this.label.Kc(.65)` — the `ea.Kc` line factor is the
+    // authored `Kc` argument (see `wrap_ui_text`), so the RU two-line
+    // `tutorial_move` ("Сначала покажи,{br}как ты двигаешься!") advances at
+    // .65*ea.b1 and both lines fit the 150-tall label box. Was: the default
+    // 1.0 factor, whose line advance pushed line 2 past the box clip — the
+    // reported truncated walk phrase.
     draw_ui_wrapped(app, tx, ly(50.0f), (620.0f - image_w) * c, 170.0f * c, joined_lines,
-                    0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                    0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
     // gate (L1910) - only when the notification carries a button. `Bb` draws
     // through the `ESliced` plate (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842).
@@ -3288,12 +3294,18 @@ int energy_refill_seconds(const WarriorSave& w, int now) {
 }
 
 // `Nn`/`MenuBtnFlashing` highlight (`UseFlashing="1"`, tutorial_quests.xml
-// L156/L361): a draw-side pulse clock (one tick per rendered frame — the
-// flash has no gameplay time source), 2 s sine.
-float ui_flash_pulse() {
+// L156/L361): a 2 s sine. The JS flash has no gameplay time source, but it is
+// still stepped once per FIXED 60 Hz frame (`db.aa`/`Nn.aa` receive the frame
+// dt); the uncapped present loop must not step it. `app.fixed_steps()` gates
+// the advance to the fixed clock.
+float ui_flash_pulse(App& app) {
     static constexpr float kTwoPi = 6.28318530717958647692f;
+    static int last_step = -1;
     static float t = 0.0f;
-    t += 1.0f / 60.0f;
+    if (app.fixed_steps() != last_step) {
+        last_step = app.fixed_steps();
+        t += 1.0f / 60.0f;
+    }
     return 0.5f + 0.5f * std::sin(kTwoPi * t / 2.0f);
 }
 
@@ -3310,12 +3322,12 @@ int za_nav_index_for_scene(const std::string& scene) {
 }
 
 // The flash tint over a rect (translucent, pulses).
-void draw_flash_tint(sf2::render::Renderer& ren, float cx, float cy, float w, float h) {
-    const float p = ui_flash_pulse();
+void draw_flash_tint(App& app, float cx, float cy, float w, float h) {
+    const float p = ui_flash_pulse(app);
     const float x0 = cx - w * 0.5f, y0 = cy - h * 0.5f;
     const float x1 = cx + w * 0.5f, y1 = cy + h * 0.5f;
     const float verts[] = {x0, y0, x1, y0, x1, y1, x0, y0, x1, y1, x0, y1};
-    ren.draw_triangles(verts, 6, 1.0f, 0.88f, 0.35f, 0.20f + 0.45f * p);
+    app.renderer().draw_triangles(verts, 6, 1.0f, 0.88f, 0.35f, 0.20f + 0.45f * p);
 }
 
 // `db.aa` (L1849): the `db`/`Le` flashing overlay's alpha. `bt` is advanced
@@ -3323,20 +3335,27 @@ void draw_flash_tint(sf2::render::Renderer& ren, float cx, float cy, float w, fl
 // 250 cap, then fall `bt -= 10` PER FRAME to 0, then rise again. At the fixed
 // 60 Hz step (`dt=1/60`) `600*dt == 10`, so both legs are 10/call — a ~25-call
 // (0.42 s) half-period, NOT the old 2 s sine. Alpha is `bt/255` (max ~0.98).
-float ui_flash_alpha() {
+// The `db.aa` step is driven by the FIXED 60 Hz frame (`db.aa(a)` receives the
+// frame dt), so the uncapped present loop must not advance it: gate on
+// `app.fixed_steps()` exactly like the `Ut.$O` arrow phase.
+float ui_flash_alpha(App& app) {
+    static int last_step = -1;
     static float bt = 0.0f;
     static bool rising = false;  // `db.Qga` (ctor `!1`)
-    if (rising) {
-        bt += 10.0f;  // `bt += 600*a`
-        if (bt >= 250.0f) {
-            bt = 250.0f;
-            rising = false;
-        }
-    } else {
-        bt -= 10.0f;  // `bt -= 10` per frame
-        if (bt <= 0.0f) {
-            bt = 0.0f;
-            rising = true;
+    if (app.fixed_steps() != last_step) {
+        last_step = app.fixed_steps();
+        if (rising) {
+            bt += 10.0f;  // `bt += 600*a`
+            if (bt >= 250.0f) {
+                bt = 250.0f;
+                rising = false;
+            }
+        } else {
+            bt -= 10.0f;  // `bt -= 10` per frame
+            if (bt <= 0.0f) {
+                bt = 0.0f;
+                rising = true;
+            }
         }
     }
     return bt / 255.0f;  // `Tk.wa(this.bt/255)`
@@ -3350,7 +3369,7 @@ float ui_flash_alpha() {
 constexpr float kHighlightMenuSource = 250.0f;  // Highlight_menu sourceSize
 void draw_highlight_menu(App& app, float cx, float cy, float size) {
     // `fill=false` -> aspect-correct fit of the 250x250 source into (size,size).
-    try_draw_atlas_button(app, "Highlight_menu", cx, cy, size, size, ui_flash_alpha());
+    try_draw_atlas_button(app, "Highlight_menu", cx, cy, size, size, ui_flash_alpha(app));
 }
 
 // `he` — the `MenuBtnFlashing` hint arrow (`eo.N3a` L1117 -> `he.show(a.target)`,
@@ -3362,8 +3381,12 @@ void draw_highlight_menu(App& app, float cx, float cy, float size) {
 void draw_nav_hint_arrow(App& app, float cx, float bottom_y) {
     const float w = std::min(kViewW, kViewH) * 0.1f;
     const float h = w * 0.75f;
-    static int phase = 0;
-    const float bob = ((phase++ / 30) % 2 == 0) ? 0.8f : -0.8f;
+    // JS `he.aa` L2315 bobs `this.Oy.D(this.Oy.ra-(this.cV?this.Sta:-this.Sta))`
+    // with `this.bV` counting 0..UUa=30 then flipping `this.cV`. `he.aa` is the
+    // per-FIXED-frame update, so the bob phase reads the fixed step counter —
+    // the uncapped present loop must not flip it (the reported too-fast blink).
+    const int phase = app.fixed_steps();
+    const float bob = ((phase / 30) % 2 == 0) ? 0.8f : -0.8f;
     // JS `he.aa` L2315: `this.node.D(a.W + this.Oy.qa()*.1)` pins the arrow node
     // TOP `0.1*arrowHeight` BELOW the target rect BOTTOM (`a.W`; the rect `gb`
     // ctor L795087 is `{J=x1,P=y1,N=x2,W=y2}` so W = y2 = bottom).
@@ -7222,6 +7245,30 @@ void draw_dojo_gamepad(App& app, const PadInputState& pad_in) {
                           pad_in.btn_kick_down ? "btn_kick_action"
                                                : "btn_kick_normal",
                           pad.kick_cx, pad.kick_cy, btn_size, btn_size, 1.0f);
+    // JS `Za` tutorial control hints. `Do`/`Eo` `S` (sf2.502f0946.js
+    // L1123/L1125) gate them on `lJ()` = `ca.Ka()!=null && ca.Ka().Ra.length>=1`
+    // (L1121 `lJ`), i.e. an ACTIVE `ca`. The Dojo `FightNone` viewer builds one
+    // (`Tf.init` L1971 `this.Ig=v.m1a(a)` -> `v.Yxa` -> `new ca(...)`, L620016),
+    // so `lJ()` HOLDS here — the hints ARE shown during the dojo beats.
+    //   beat 1 (`Do`, Move): `Za.F().th.i5(!0)` shows the `ze` joystick hint
+    //     node `Pl = R.$(E.get(268), y.XQa="Highlight_Stick")` (ze ctor L235753).
+    //   beat 2 (`Eo`, Punchbag): `Za.F().sg.Si.Wm(E.get(268), y.U6=
+    //     "Kick_Highlight")` + `sg.Si.Vg(!0)`, and the same for `sg.fh` — the
+    //     `ig`/`db` flashing overlay (alpha `bt/255`, `db.aa` L1849) over the
+    //     punch + kick buttons.
+    // The `ig` overlay alpha is the SAME `db.aa` pulse as the menu highlight,
+    // so it reads `ui_flash_alpha` (fixed 60 Hz).
+    const int tut_beat = app.quest_engine().tutorial_gate_beat();
+    if (tut_beat == 1) {
+        try_draw_atlas_button(app, "Highlight_Stick", pad.joy_cx, pad.joy_cy,
+                              base_size, base_size, ui_flash_alpha(app));
+    } else if (tut_beat == 2) {
+        const float fa = ui_flash_alpha(app);
+        try_draw_atlas_button(app, "Kick_Highlight", pad.punch_cx, pad.punch_cy,
+                              btn_size, btn_size, fa);
+        try_draw_atlas_button(app, "Kick_Highlight", pad.kick_cx, pad.kick_cy,
+                              btn_size, btn_size, fa);
+    }
 }
 
 namespace {
@@ -9950,7 +9997,7 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // FLASHES this plate but must NOT press it — the pulse is draw-only and
     // the launch still needs the player's tap (update_impl FIGHT hit-test).
     if (app.quest_engine().flash_target() == "InfoBattle.FightButton") {
-        draw_flash_tint(app.renderer(), btn_cx, btn_cy, btn_w, btn_h);
+        draw_flash_tint(app, btn_cx, btn_cy, btn_w, btn_h);
     }
 }
 
