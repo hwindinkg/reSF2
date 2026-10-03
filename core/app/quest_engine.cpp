@@ -6205,6 +6205,16 @@ std::vector<std::string> QuestEngine::deliver(App& app, const std::string& item)
     return fire(app, "Delivery", j);
 }
 
+// `wa.ghb` L934: the scene-scoped UI guidance reset (see the header). Called on
+// the SceneLoaded fire and on a `wa.mp`-aborted ChangeTab edge.
+void QuestEngine::enter_scene_guidance(const std::string& scene_to) {
+    flash_target_.clear();
+    if (scene_to == nav_flash_) nav_flash_.clear();
+    // A nav-guided `eo` step completes when the player reaches the flashed
+    // scene (`XHa` L1119 `Sb.F().kk(!1)`): clear the block for that target.
+    if (!lock_target_.empty() && scene_to == lock_target_) unlock_controls();
+}
+
 std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
                                            const QuestJournal& journal) {
     std::vector<std::string> fired;
@@ -6232,13 +6242,7 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     // belongs to the screen that requested it (the map's FIGHT plate), and a
     // nav highlight clears once the player reaches its named screen (`Mn`/
     // `Yba` clear semantics, FLOW_STATIC L82/L133).
-    if (event == "SceneLoaded") {
-        flash_target_.clear();
-        if (journal.scene_to == nav_flash_) nav_flash_.clear();
-        // A nav-guided `eo` step completes when the player reaches the flashed
-        // scene (`XHa` L1119 `Sb.F().kk(!1)`): clear the block for that target.
-        if (!lock_target_.empty() && journal.scene_to == lock_target_) unlock_controls();
-    }
+    if (event == "SceneLoaded") enter_scene_guidance(journal.scene_to);
     if (!ensure_loaded(app)) return fired;
     QuestJournal j = journal;
     if (j.fight.empty()) {

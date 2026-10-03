@@ -69,7 +69,35 @@ void quest_nav(App& app, const std::string& from, ScreenId to_id) {
             j.player_level = app.save().load().level;
         } catch (const std::exception&) {
         }
-        app.quest_engine().fire(app, "ChangeTab", j);
+        const std::vector<std::string> fired =
+            app.quest_engine().fire(app, "ChangeTab", j);
+        // `wa.mp` (L933): `if(d && v.qwa(e,f)) return !1;`. `v.qwa` (L621757)
+        // is `return ha.F().Sf("QUEST_EVENT_CHANGE_TAB")`, and `Sf` (L522497)
+        // is `return this.RA(a)?(this.qT(),!0):!1` — TRUE when at least one
+        // quest MATCHED. `wa.mp` then ABORTS the navigation: it never runs
+        // `this.Td.Tf=a` / `this.fLa()`, so `wa.ghb` (L934) never fires
+        // `QUEST_EVENT_SCENE_LOADED` for this edge. The matched quest owns the
+        // transition (e.g. `StoryTutorialBuyItem`'s `OpenShop` -> `go.Thb` ->
+        // `mp(4,...)`, or `FixShopOpen`'s `ChangeScene Shop`), and on THAT
+        // later edge `StoryTutorialRetryGoToMap`'s `step==MAP` condition is not
+        // yet satisfiable (the buy lesson holds the chain). Without the abort
+        // the port fired SceneLoaded on the same edge and `RetryGoToMap` re-
+        // queued the same `tutorial_buy_knives` dialog (the double-dialog bug).
+        if (!fired.empty()) {
+            // The outer nav is aborted, but the matched quest's own
+            // `ChangeScene`/`OpenShop` mounts the SAME target (the port already
+            // pushed it, so `do_navigate` sees it current) and its `wa.ghb`
+            // SceneLoaded clears the scene-scoped guidance. Mirror that reset
+            // here so a nav highlight aimed at the target scene is consumed.
+            app.quest_engine().set_current_scene(to);
+            app.quest_engine().enter_scene_guidance(to);
+            std::fprintf(stdout,
+                         "[quest] ChangeTab matched -> wa.mp abort (no SceneLoaded) "
+                         "scene=%s->%s\n",
+                         from.c_str(), to.c_str());
+            std::fflush(stdout);
+            return;
+        }
         // `wa.ghb` L934: `ha.F().ta.Xo = xn.iOa(this.Td.Tf)` immediately before
         // `Sf("QUEST_EVENT_SCENE_LOADED")`. Set AFTER the ChangeTab fire (which
         // still sees the OLD `Xo`, as `wa.mp` L933 captured `lLa` first) and

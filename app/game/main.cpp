@@ -3626,9 +3626,18 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // JS-exact `Place` (JS `be.Gib` L517407): `k7` is ONLY the
             // auto-checkpoint scene index (`Ln.Faa` -> `QuestParameters
             // .ScreenIndex`, `Ln.iLa` L531194). The fire pump `ha.RA`
-            // (L522515) compares conditions, never the mounted screen, so a
-            // `Place="Map"` set fires ON THIS (non-Map) screen and applies its
-            // side effects at once. Assert the step advances with NO pop.
+            // (L522515) compares conditions, never the mounted screen.
+            //
+            // `bca15ee8` change F made the engine DEFER a `FightEnd` match
+            // while the mounted scene is Fight(6) (JS `ha.add` L522089 keeps
+            // `EJ` false; the port defers and drains on the next `SceneLoaded`
+            // in `drain_deferred_fight`). So the step is NOT `LEARN_PERK`
+            // immediately after the fire — it advances when the fight screens
+            // pop and the next `SceneLoaded` drains the deferred match. The
+            // pre-`bca15ee8` `immediate` reading is therefore stale; assert the
+            // POST-DRAIN step, and keep the JS-exact fire-screen check (the
+            // match was queued on the non-Map Fight screen, so its side effects
+            // apply on the Map).
             const bool fired_offmap_screen = fire_screen != kScreenMap;
             bool immediate = false;
             try {
@@ -3641,7 +3650,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          fire_screen, fired_offmap_screen ? 1 : 0,
                          immediate ? "LEARN_PERK" : "?", q.dialog_count() - dlg_before);
             // Leave the fight/result screen the way the shipped flow does
-            // (the pop drives the ChangeTab/SceneLoaded edge to the Map).
+            // (the pop drives the ChangeTab/SceneLoaded edge to the Map, which
+            // drains the deferred FightEnd matches).
             for (int k = 0; k < 4; ++k) {
                 const int c = app.screens().current_id();
                 if (c != kScreenFight && c != kScreenResults) break;
@@ -3651,10 +3661,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 ok_story_advance = app.save().load().story_step() == "LEARN_PERK";
             } catch (const std::exception&) {
             }
-            // The JS-exact path must have fired on the non-Map screen with no
-            // deferral; if not, the story step assertion is invalid.
-            if (!immediate || !fired_offmap_screen) ok_story_advance = false;
-            std::fprintf(stdout, "[qverify] FirstGuardBeaten win -> step=%s (%s)\n",
+            if (!fired_offmap_screen) ok_story_advance = false;
+            std::fprintf(stdout,
+                         "[qverify] FirstGuardBeaten win -> step=%s (immediate=%d "
+                         "post-drain=%s) (%s)\n",
+                         ok_story_advance ? "LEARN_PERK" : "?", immediate ? 1 : 0,
+                         ok_story_advance ? "LEARN_PERK" : "?",
                          ok_story_advance ? "LEARN_PERK" : "?", ok_story_advance ? "PASS" : "FAIL");
             // The verifier must not advance the SHARED save past the step the
             // loop/tour drivers expect, so put it back after asserting.

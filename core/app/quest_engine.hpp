@@ -1060,6 +1060,14 @@ public:
     // `_$SceneTo` (`ta.nLa`, written by `wa.mp` L933).
     void set_current_scene(const std::string& name) { current_scene_ = name; }
     const std::string& current_scene() const { return current_scene_; }
+    // `wa.ghb` L934 (`Mn`/`Yba` clear semantics): the scene-scoped UI guidance
+    // — the `flash_target_` plate, the `nav_flash_` nav highlight, and a
+    // nav-guided `lock_target_` — belongs to the screen that requested it and
+    // clears once the player REACHES the named scene. Called on the SceneLoaded
+    // fire AND on a `wa.mp`-aborted ChangeTab edge: the abort skips the outer
+    // nav, but the matched quest's own `ChangeScene` mounts the same target
+    // (the port already mounted it), so the guidance resets there too.
+    void enter_scene_guidance(const std::string& scene_to);
     // `v.Q1` (L2480 = !1): the session flag `v.owb` (L1215) sets right before
     // `v.uwb` -> `QUEST_EVENT_SESSION` (`dp.start` L1164). `_$GameStarted`
     // (`Bj` L962: `v.Q1?"1":"0"`) reads it. The port sets it on the
