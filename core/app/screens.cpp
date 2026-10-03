@@ -5047,7 +5047,8 @@ static std::int64_t reward_field(const pugi::xml_node& node, int level,
 void battle_rewards(const std::string& battle_name, const std::string& zone_name,
                     int fight_index, int level, std::int64_t& out_money,
                     std::int64_t& out_exp, std::int64_t& out_bonus,
-                    std::int64_t& out_prize_base, int row_from_end = 0) {
+                    std::int64_t& out_prize_base, int row_from_end = 0,
+                    int abs_row = -1) {
     out_money = 0;
     out_exp = 0;
     out_bonus = 0;
@@ -5113,8 +5114,17 @@ void battle_rewards(const std::string& battle_name, const std::string& zone_name
         std::vector<pugi::xml_node> rows;
         for (const pugi::xml_node r : rewards.children("Reward")) rows.push_back(r);
         if (rows.empty()) return;
-        const std::size_t back = static_cast<std::size_t>(row_from_end);
-        const std::size_t idx = rows.size() > back ? rows.size() - 1 - back : 0;
+        // `abs_row >= 0` selects the JS `D0(PU)` row directly (the SURVIVAL
+        // loss row: `bea` L413 `PU = Rk` = the wave the player lost at).
+        // Otherwise `row_from_end` counts back from the last row.
+        std::size_t idx;
+        if (abs_row >= 0) {
+            idx = static_cast<std::size_t>(abs_row);
+            if (idx >= rows.size()) idx = rows.size() - 1;
+        } else {
+            const std::size_t back = static_cast<std::size_t>(row_from_end);
+            idx = rows.size() > back ? rows.size() - 1 - back : 0;
+        }
         pugi::xml_node last = rows[idx];
         out_money = reward_field(last, level, "Money");
         out_exp = reward_field(last, level, "Exp");
@@ -10856,7 +10866,10 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
         mf.rules = f.rules;
         mf.location = mode_battle_.location;
         mf.music = mode_battle_.music;
-        mf.reward = sf2::scene::reward_for(mode_battle_.type, f, wave, false);
+        // JS `kD` L622187 win row: `D0(PU+1)` with `PU = Rk = wave`
+        // (`bea` L413). The terminal win lands on `D0(waves)` = the LAST row;
+        // the loss path (below) recomputes `D0(wave)`.
+        mf.reward = sf2::scene::reward_for(mode_battle_.type, f, wave, true);
         std::vector<std::string> used;
         resolved = sf2::scene::resolve_survival_warrior(
             f, wave, mode_templates_, mode_groups_,
@@ -12186,10 +12199,20 @@ void FightScreen::update_impl(float dt) {
                 loss_level = app().save().load().level;
             } catch (const std::exception&) {
             }
+            // JS `kD` L622187 loss row = `D0(PU)` with `PU = Rk` (set by
+            // `bea` L413 `this.Da.PU=this.Rk`). For a SURVIVAL mode the wave
+            // cursor IS `Rk`, so the row is `D0(wave)` — NOT the fixed
+            // second-to-last row (that coincides only when the player loses
+            // the LAST wave). A tournament loss has `Rk=0` -> `D0(0)`, which
+            // `row_from_end=1` already yields for its 2-row reward list.
+            int abs_row = -1;
+            if (mode_active_ && mode_battle_.type == "SURVIVAL") {
+                abs_row = mode_series_.wave;
+            }
             battle_rewards(pb.battle_name, pb.zone, pending_fight_ordinal(app()),
                            loss_level, pb.reward_money, pb.reward_exp,
                            pb.reward_bonus, pb.reward_prize_base,
-                           /*row_from_end=*/1);
+                           /*row_from_end=*/1, abs_row);
             std::fprintf(stdout,
                          "[fight] LOSS reward row (D0(PU)) -> money=%lld exp=%lld "
                          "bonus=%lld prizeBase=%lld\n",
@@ -13328,9 +13351,13 @@ ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won,
     // The Map ctor's play_music_once("menu") (L2125) is the teardown point.
 }
 
-// JS `OLa`/`Oz` (L253-254): the level-up thresholds (`v.FR`) parsed once
-// from character_progress.xml; 100 fallback when the file is absent.
-int ResultsScreen::exp_for_level(int level) {
+namespace {
+// JS `v.FR` (`td.Vib` L1160 `a.A("Thresholds")` -> `Wv.parse` L943): the
+// `<Threshold Level Exp>` rows. The profile's `$B` (`Bjb` L1354) is the Exp
+// values in document order, so `$B[level-1]` == the row keyed `Level` and
+// `$B.length` == the row count (52 in the shipped file) — the JS max level
+// (`OLa` L253 clamps `d` to `$B.length`). Parsed once.
+const std::map<int, int>& level_thresholds() {
     static std::map<int, int> thresholds;
     static bool loaded = false;
     if (!loaded) {
@@ -13357,6 +13384,14 @@ int ResultsScreen::exp_for_level(int level) {
         } catch (const std::exception&) {
         }
     }
+    return thresholds;
+}
+}  // namespace
+
+// JS `OLa`/`Oz` (L253-254): `Oz()` = `$B[level-1]` (the threshold to go from
+// `level` to `level+1`); 100 fallback when the file is absent.
+int ResultsScreen::exp_for_level(int level) {
+    const std::map<int, int>& thresholds = level_thresholds();
     const auto it = thresholds.find(level);
     return it != thresholds.end() ? it->second : 100;
 }
@@ -13597,7 +13632,11 @@ bool apply_fight_reward(App& app) {
     // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds. Runs on
     // BOTH outcomes — `emb`'s exp grant is `Iab` -> `Jab` -> `OLa`, the ONE
     // exp path, so a loss's participation exp can level the player up too.
-    while (w.level < 50) {
+    // The JS cap is `$B.length` (the `<Threshold>` count, 52), NOT 50:
+    // `d>this.$B.length && (d=this.$B.length, a=this.Oz(), b=!1)`. `Oz()` is
+    // `INT_MAX` once `level-1 >= $B.length`, so the loop cannot run past it.
+    const int max_level = static_cast<int>(level_thresholds().size());
+    while (w.level < max_level) {
         const int need = ResultsScreen::exp_for_level(w.level);
         if (w.experience < need) break;
         w.experience -= need;
@@ -13608,6 +13647,13 @@ bool apply_fight_reward(App& app) {
         leveled_up = true;  // `Psb` -> MaximumLevel counter delta
         std::fprintf(stdout, "[result] LEVEL UP -> %d (power %d)\n",
                      w.level, w.power);
+    }
+    // JS `OLa` L253 tail: `this.Ca.level==this.$B.length && this.Ca.level>1 &&
+    // (this.rs = a = this.$B[this.Ca.level-2])` — at the cap the displayed
+    // Experience is reset to `$B[level-2]` (`exp_for_level(level-1)`), NOT the
+    // raw remainder.
+    if (w.level == max_level && w.level > 1) {
+        w.experience = ResultsScreen::exp_for_level(w.level - 1);
     }
     // JS `fe.COa(...)` -> `p.o.yi.ika()` (L216008/L217754/L620909) + `v.Cpb`:
     // flush the session counter deltas into `<Counters>` and auto-unlock the

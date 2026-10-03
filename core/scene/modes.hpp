@@ -764,10 +764,28 @@ inline bool resolve_tournament_fight(const StageBattle& battle, int fight_index,
 inline StageReward reward_for(const std::string& battle_type, const StageFight& fight,
                               int wave, bool won) {
     (void)battle_type;
-    (void)wave;
-    (void)won;
     if (fight.rewards.empty()) return StageReward();
-    return fight.rewards.back();
+    // JS `v.kD` L622187: `c = b.PU; f.zd() && ++c; b.sR() && (c = f.zd()?1:0)`
+    // then `f.pwa(b.D0(c), ...)`; `D0(a) = this.wi.length>a ? this.wi[a] : null`
+    // (L728049). `sR() = this.Xs.length>1 ? this.pT>1 : !1` (L729188) with
+    // `pT` = `<Fight Rounds>`. Every shipped mode fight is `Xs.length==1`
+    // (one `<Warrior>`; Survival `Number=N` is the wave count, not `Xs`), and
+    // every shipped multi-`<Warrior>` fight is `Rounds="1"`, so `sR()` is
+    // FALSE for the whole shipped content -> the row is `PU + (won?1:0)`,
+    // with `PU` = `Rk` (`bea` L413 `this.Da.PU=this.Rk`; the earlier
+    // `PU=wi.length-2` is overwritten). `D0` clamps an out-of-range index to
+    // null, which the caller treats as "no grant"; the port clamps to the last
+    // row instead (the shipped win row is always `wi[Rk+1]`, Rk = waves-1).
+    int idx;
+    if (fight.warriors.size() > 1 && fight.rounds > 1) {
+        idx = won ? 1 : 0;  // `sR()`
+    } else {
+        idx = wave + (won ? 1 : 0);
+    }
+    if (idx < 0) idx = 0;
+    if (idx >= static_cast<int>(fight.rewards.size()))
+        idx = static_cast<int>(fight.rewards.size()) - 1;
+    return fight.rewards[static_cast<std::size_t>(idx)];
 }
 
 // Series advance (`Da.sR` shape): tournament next fight while fights
