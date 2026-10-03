@@ -406,6 +406,33 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     parse_magic(root.child("Magic"), v);
     // `v.hF` (L593733) = `<RewardsPrize>`.
     parse_rewards_prize(root.child("RewardsPrize"), v);
+    // LOTTERY model data (shipped JS: parsed, then INERT).
+    // `Je.parse(a.A("GUI").A("Lottery"))` (L594419): `<GUI><Lottery><Shake
+    // Time PosInfluenceX PosInfluenceY Magnitude Roughness/>` + `<PrizeEffect
+    // ScaleTo ScaleTime FadeOutTime/>`. `kc(...)` = the float parser (`u.H`).
+    if (const pugi::xml_node lot = root.child("GUI").child("Lottery")) {
+        if (const pugi::xml_node sh = lot.child("Shake")) {
+            v.lottery_shake.time = sh.attribute("Time").as_double();
+            v.lottery_shake.pos_x = sh.attribute("PosInfluenceX").as_double();
+            v.lottery_shake.pos_y = sh.attribute("PosInfluenceY").as_double();
+            v.lottery_shake.magnitude = sh.attribute("Magnitude").as_double();
+            v.lottery_shake.roughness = sh.attribute("Roughness").as_double();
+        }
+        if (const pugi::xml_node pe = lot.child("PrizeEffect")) {
+            v.lottery_prize_effect.scale_to = pe.attribute("ScaleTo").as_double();
+            v.lottery_prize_effect.scale_time = pe.attribute("ScaleTime").as_double();
+            v.lottery_prize_effect.fade_out_time =
+                pe.attribute("FadeOutTime").as_double();
+        }
+    }
+    // `v.geb.parse(a.A("LotteryRerollPrices"))` (L594432, `Xv` L607875):
+    // every `<RerollPrice Value/>` in document order (`u.I` = the int parser).
+    if (const pugi::xml_node rp = root.child("LotteryRerollPrices")) {
+        v.lottery_reroll_prices.clear();
+        for (const pugi::xml_node r : rp.children("RerollPrice")) {
+            v.lottery_reroll_prices.push_back(r.attribute("Value").as_int());
+        }
+    }
     // `v.LC` (L593864) = `<Camera><CameraSettings .../>` -> `oGa`.
     if (const pugi::xml_node cs = root.child("Camera").child("CameraSettings")) {
         if (cs.attribute("MaxWidthDelta"))

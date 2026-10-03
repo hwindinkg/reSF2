@@ -311,6 +311,28 @@ struct FightParams {
     // previously used a compile-time 50); the shipped file resolves to 50.
     float camera_max_width_delta = 50.0f;  // `oGa` (MaxWidthDelta)
 
+    // --- LOTTERY model data (shipped JS: loaded, but INERT) ----------------
+    // `Je` (L655748, static class, g="29F"): `Je.parse(a.A("GUI").A("Lottery"))`
+    // (L594419) reads `<Shake Time PosInfluenceX PosInfluenceY Magnitude
+    // Roughness/>` into `Je.K5` (`zw` g="2A0") and `<PrizeEffect ScaleTo
+    // ScaleTime FadeOutTime/>` into `Je.lja` (`Aw` g="2A1"). In the shipped
+    // build `.K5`/`.lja` occur ONLY inside `Je.parse` itself — no screen reads
+    // them (there is no lottery screen; see `--lottery-forge-probe`). Loaded
+    // for model parity, never driven.
+    struct LotteryShake {
+        double time = 0, pos_x = 0, pos_y = 0, magnitude = 0, roughness = 0;
+    };
+    struct LotteryPrizeEffect {
+        double scale_to = 0, scale_time = 0, fade_out_time = 0;
+    };
+    LotteryShake lottery_shake;
+    LotteryPrizeEffect lottery_prize_effect;
+    // `Xv` (`v.geb`, g="262" L607875): `v.geb.parse(a.A("LotteryRerollPrices"))`
+    // (L594432) pushes every `<RerollPrice Value/>` (shipped 5,10,...,55) into
+    // `Wnb`. `v.geb` has NO reader anywhere in the JS (the only `.geb` hits are
+    // this init + the static decl), so the list is loaded-but-unused.
+    std::vector<int> lottery_reroll_prices;
+
     // The process-wide instance (JS `v` statics), populated at boot from
     // internal_settings.xml by `load_fight_params_from_settings`.
     static const FightParams& defaults();

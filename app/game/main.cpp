@@ -1931,6 +1931,85 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fprintf(stdout, "[modeprobe] %s\n", pass ? "PASS" : "FAIL");
             std::fflush(stdout);
             return pass ? 0 : 1;
+        } else if (arg == "--lottery-forge-probe") {
+            // [probe] JS-observable LOTTERY + FORGE model surface. Evidence the
+            // shipped JS has NO lottery/forge SCREEN/gameplay: the action names
+            // `ShowLottery|DialogLottery|BatchLottery|ActivateLottery` occur
+            // ONLY in the quest-action whitelist (L488925); `Bj.Dab`
+            // (`_$InLottery`) / `Bj.feb` (`_$LotteryLastSpinNumber`) are
+            // assigned ONLY in the `Bj` ctor (L515659, always 0); `<Lottery>
+            // <HitGauge>` (internal_settings.xml) and the `<Warrior ...
+            // LotteryDays/LastLotteryEnterTime ...>` save attrs are never read.
+            // The bounded JS-observable surface is the loaded static model:
+            //   Je (L655748) <GUI><Lottery> Shake + PrizeEffect
+            //   Xv (L607875) <LotteryRerollPrices> RerollPrice rows
+            //   ye.gea (L467806) forge.xml <AspectScale> lookup
+            //   hv (L468044) recipe class = `{debugger}` stub, never read
+            std::vector<char> isd, fgd;
+            {
+                std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                                 std::ios::binary);
+                isd.assign(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+            }
+            {
+                std::ifstream in("reference/extracted/xml/res/forge.xml",
+                                 std::ios::binary);
+                fgd.assign(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+            }
+            sf2::scene::load_fight_params_from_settings(
+                std::string(isd.begin(), isd.end()));
+            sf2::scene::load_aspect_scale_from_forge(
+                std::string(fgd.begin(), fgd.end()));
+            const sf2::scene::FightParams& v = sf2::scene::fight_params();
+            std::fprintf(stdout,
+                         "[lotteryforge] Je.Shake time=%.0f pos=(%.0f,%.0f) "
+                         "mag=%.0f rough=%.0f\n",
+                         v.lottery_shake.time, v.lottery_shake.pos_x,
+                         v.lottery_shake.pos_y, v.lottery_shake.magnitude,
+                         v.lottery_shake.roughness);
+            std::fprintf(stdout,
+                         "[lotteryforge] Je.PrizeEffect scaleTo=%.1f scaleTime=%.1f "
+                         "fadeOutTime=%.1f\n",
+                         v.lottery_prize_effect.scale_to,
+                         v.lottery_prize_effect.scale_time,
+                         v.lottery_prize_effect.fade_out_time);
+            std::fprintf(stdout, "[lotteryforge] Xv.RerollPrices n=%zu [",
+                         v.lottery_reroll_prices.size());
+            for (std::size_t i = 0; i < v.lottery_reroll_prices.size(); ++i) {
+                std::fprintf(stdout, "%s%d", i ? "," : "",
+                             v.lottery_reroll_prices[i]);
+            }
+            std::fprintf(stdout, "]\n");
+            std::fprintf(stdout,
+                         "[lotteryforge] ye.gea levels 1/2/3/52 -> "
+                         "%.0f/%.0f/%.0f/%.0f\n",
+                         sf2::scene::aspect_scale_for_level(1),
+                         sf2::scene::aspect_scale_for_level(2),
+                         sf2::scene::aspect_scale_for_level(3),
+                         sf2::scene::aspect_scale_for_level(52));
+            std::fprintf(stdout,
+                         "[lotteryforge] hv recipe class = JS {debugger} stub "
+                         "(never read)\n");
+            const bool pass =
+                v.lottery_shake.time == 2.0 && v.lottery_shake.pos_x == 10.0 &&
+                v.lottery_shake.pos_y == 10.0 &&
+                v.lottery_shake.magnitude == 8.0 &&
+                v.lottery_shake.roughness == 4.0 &&
+                std::fabs(v.lottery_prize_effect.scale_to - 1.3) < 1e-9 &&
+                std::fabs(v.lottery_prize_effect.scale_time - 1.5) < 1e-9 &&
+                std::fabs(v.lottery_prize_effect.fade_out_time - 1.5) < 1e-9 &&
+                v.lottery_reroll_prices.size() == 11 &&
+                v.lottery_reroll_prices.front() == 5 &&
+                v.lottery_reroll_prices.back() == 55 &&
+                sf2::scene::aspect_scale_for_level(1) == 55.0 &&
+                sf2::scene::aspect_scale_for_level(2) == 60.0 &&
+                sf2::scene::aspect_scale_for_level(3) == 90.0 &&
+                sf2::scene::aspect_scale_for_level(52) == 1867.0;
+            std::fprintf(stdout, "[lotteryforge] %s\n", pass ? "PASS" : "FAIL");
+            std::fflush(stdout);
+            return pass ? 0 : 1;
         } else if (arg == "--fx-probe") {
             // Targeted FX-bus self-check (no OS input, no sim): exercises the
             // three kinds end to end — spawn (`Yl`/`lwb`), the follow update
