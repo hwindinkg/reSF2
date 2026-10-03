@@ -16556,27 +16556,24 @@ void gg_scroll_step(EquipmentScreen::ListScroll& s, const App::PointerState& p,
     s.y = std::clamp(s.y, lo, hi);
 }
 
-// `ds.NC` (L2230) packs up to two `tk` cells per tier, one `tk` row per tier
-// (or per two cells); the `Gg` list height uses the packed ROW count.
+// JS `ds.uZ` (L2227) sets `this.Tt = id.ht().tH` - the `Fp` TIER groups built
+// by `id.EWa` (L1356), ONE per `<PerkTree>` `<Level>`; `ds.pA` (L2230) returns
+// `this.Tt.length` and `ds.NC` (L2230) returns ONE `tk` cell per tier
+// (`b.$i(this.Tt[a], ...)`). Each `tk` holds at most TWO `uk` cells
+// (`tk.$i` -> `YOa` -> `Xj`/`xi`, L2217), because `EWa(c.level,
+// c.items.length==1?1:2)` creates one or two cells per tier and `Lw.q5a`
+// (L696062) caps the materialised cells at two (`a==null&&(a=2)`).
+// So the `ds` slider has ONE row per TIER, not per item.
 int perk_packed_rows(const std::vector<EquipmentScreen::PerkRow>& rows) {
-    int row = 0;
-    int col = 0;
+    int tiers = 0;
     int last_tier = -1;
     for (const EquipmentScreen::PerkRow& r : rows) {
         if (r.tier != last_tier) {
-            if (last_tier != -1) {
-                ++row;
-                col = 0;
-            }
+            ++tiers;
             last_tier = r.tier;
         }
-        if (col >= 2) {
-            ++row;
-            col = 0;
-        }
-        ++col;
     }
-    return rows.empty() ? 0 : row + 1;
+    return tiers;
 }
 
 // The four `cs` tab badge values (JS `cs.getCounterValue` L2189):
@@ -16904,6 +16901,17 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
             break;
         }
     }
+    // `Lw.q5a` (L696062): the materialised `uk` cells of a tier are the FIRST
+    // TWO items whose `K1()` (== `available`) holds, in `<Level>` order
+    // (`for(...) e.K1()&&b.push(e); if(b.length>=a)break`). Bring the available
+    // items first within each tier (stable, tiers stay in document order) so the
+    // renderer's first-two-per-tier draw is exactly `q5a`.
+    std::stable_sort(out.begin(), out.end(),
+                     [](const EquipmentScreen::PerkRow& a,
+                        const EquipmentScreen::PerkRow& b) {
+                         if (a.tier != b.tier) return a.tier < b.tier;
+                         return (a.available ? 0 : 1) < (b.available ? 0 : 1);
+                     });
     return out;
 }
 
@@ -18059,11 +18067,14 @@ void EquipmentScreen::render_impl(App& app) {
                 // only the two `uk` cells and the `Rx` arrows.
             }
             if (row_top + row_h > v.W - 34.0f) break;
-            if (col >= 2) {  // `tk` packs two `uk` cells per tier
-                row_top += row_h;
-                col = 0;
+            // `tk.$i` -> `YOa` (L2217) holds at most TWO `uk` cells per tier
+            // (`EWa` L1356 creates one or two, `Lw.q5a` L696062 caps at two);
+            // the third+ item of a 4-item `<Level>` is NOT drawn and does NOT
+            // advance the row - `ds` is ONE row per tier (`ds.pA` L2230).
+            if (col >= 2) {
+                ++col;
+                continue;
             }
-            if (row_top + row_h > v.W - 34.0f) break;
             if (row_top + row_h <= list_base) {   // scrolled above the viewer
                 ++col;
                 continue;
