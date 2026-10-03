@@ -614,27 +614,43 @@ int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out,
 // `h`/`b` int of `Si.dxb`/`Si.cxb`, routed by `tactics_parse_file`), so the
 // file must match the requested table — previously ONE table (index 0) was
 // searched for all three decisions.
-const TacticRecord* AiController::find_record(const std::string& enemy_anim,
+const TacticRecord* AiController::find_record(const std::string& key_anim,
                                               int table_index) const {
     if (table_index < 0 || table_index > 2) return nullptr;
+    // JS `de.XAa`/`de.Q6a`/`de.Gea` (L611/L609/L613) select the record with
+    //   `for(f of this.ds.Z0()[table]) if(this.OO==f.second){ for(g of
+    //    f.first) if(this.OO==g.Tfa){c=g;break} break }`
+    // — i.e. the entry whose ANIMATION (`f.second`) matches the AI's own
+    // animation id `OO` and, within it, the WEAPON record (`g.Tfa`) matching
+    // the same `OO`. `key_anim` is therefore the AI's OWN current animation
+    // (`st.my_anim`), NOT the opponent's (`st.enemy_anim`): the prior port
+    // keyed on the opponent's move, so the record it found was the stub row
+    // of the OPPONENT's animation (`HighKneeUp`, `hu=1`, 0 outcomes) and
+    // every table attack was empty. The AI's own record (`StanceIdle`,
+    // `hu=216`, 29 outcome anims) is the real attack table.
+    //
+    // The WEAPON match is EXACT (JS `g.Tfa==OO`); an empty-`weapon` record
+    // (the `default.dat` pair `$ua(e,'','')`) must NOT shadow the
+    // weapon-specific one. Prefer the exact weapon, fall back to the
+    // empty-weapon default only when none exists.
+    const TacticRecord* fallback = nullptr;
     for (const TacticsFile& tf : tactics_) {
         if (tf.version != table_index) continue;  // JS `P.wO[table_index]`
         for (const TacticRecord& r : tf.set.tables[table_index]) {
-            if ((r.weapon.empty() || r.weapon == oo_ || weapon_.empty()) &&
-                r.anim == enemy_anim) {
-                return &r;
-            }
+            if (r.anim != key_anim) continue;
+            if (r.weapon == oo_ || weapon_.empty()) return &r;
+            if (r.weapon.empty() && fallback == nullptr) fallback = &r;
         }
     }
-    return nullptr;
+    return fallback;
 }
 
 int AiController::yaa(const AiFightState& st) {
     wb_.clear();
     Ao_ = (Fl_ % 5) != 0;  // P.sp (TablesReduction Step) = 5
-    if (st.enemy_anim.empty()) return 0;
+    if (st.my_anim.empty()) return 0;
 
-    const TacticRecord* rec = find_record(st.enemy_anim, /*safe=*/1);
+    const TacticRecord* rec = find_record(st.my_anim, /*safe=*/1);
     if (rec == nullptr) return 0;
 
     // JS `Q6a` (L609-611) is called as
@@ -687,14 +703,14 @@ int AiController::xaa(const AiFightState& st) {
         return 0;
     }
     Ao_ = false;
-    if (st.enemy_anim.empty()) return 0;
+    if (st.my_anim.empty()) return 0;
 
     // JS `XAa` (L611): `for(var b=this.Aea(this.Eqa),...)` then
     // `b=this.Fl+b` — the Ju-frame horizon = `Fl + Aea(Eqa)`. The draw is
     // consumed here so the shared `Da.pg` stream position matches.
     aea_ = aea_draw();
 
-    const TacticRecord* rec = find_record(st.enemy_anim, /*attack=*/0);
+    const TacticRecord* rec = find_record(st.my_anim, /*attack=*/0);
     if (rec == nullptr) return 0;
 
     // JS L611-612 (exact):
@@ -730,8 +746,8 @@ int AiController::xaa(const AiFightState& st) {
 int AiController::gea(const AiFightState& st, int variant) {
     (void)variant;
     wb_.clear();
-    if (st.enemy_anim.empty()) return 0;
-    const TacticRecord* rec = find_record(st.enemy_anim, /*throw=*/2);
+    if (st.my_anim.empty()) return 0;
+    const TacticRecord* rec = find_record(st.my_anim, /*throw=*/2);
     if (rec == nullptr) return 0;
     for (const TacticRow& row : rec->rows) {
         const float target =

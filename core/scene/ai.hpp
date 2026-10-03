@@ -643,7 +643,7 @@ private:
     // anim matches the enemy's current animation (JS: the Il record whose
     // `Tfa` == `OO` inside `ds.Z0()[table_index]`). `table_index` is the JS
     // table: 0 = attack (XAa), 1 = safe (Q6a), 2 = throw (Gea).
-    const TacticRecord* find_record(const std::string& enemy_anim,
+    const TacticRecord* find_record(const std::string& key_anim,
                                     int table_index) const;
     // The facing (JS `b6a` L603).
     int b6a(const AiFightState& st) const;
