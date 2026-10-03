@@ -1308,6 +1308,23 @@ struct HudBarDecay {
         }
     }
 
+    // JS `Br.dbb` (L2011): a fresh `Br.init` sets BOTH bar layers to the
+    // CURRENT HP ratio immediately (`this.v5(this.Ca.gd); this.g5(this.Ca.gd)`)
+    // — no tween. The statics persist across fights, so without this snap a
+    // new fight's bars ease in from the previous fight's leftover ratio (the
+    // reported "opponent enters at half HP"). Called once per fight setup.
+    void reset() {
+        shown_ = 1.0f;
+        leak_ = 1.0f;
+        shown_to_ = 1.0f;
+        leak_to_ = 1.0f;
+        shown_step_ = 0.0f;
+        leak_step_ = 0.0f;
+        shown_left_ = 0;
+        leak_left_ = 0;
+        hold_ = 0;
+    }
+
 private:
     float shown_ = 1.0f;      // JS `JO` — the instant fill ratio
     float leak_ = 1.0f;       // JS `oN` — the trailing leak ratio
@@ -10484,6 +10501,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     const std::uint32_t fight_seed = 0x5F2u;
 
     fight_ = std::make_unique<sf2::scene::FightController>();
+    // JS `Br.dbb` (L2011): a fresh fight's `Br.init` sets the HP-bar layers to
+    // the CURRENT ratio with NO tween. These decay statics persist across
+    // fights, so snap them here (before the first `render_impl`) or the bars
+    // ease in from the previous fight's leftover (the "enemy at half HP" on
+    // entry). The ratio is full at setup, so reset to 1.0.
+    s_hud_player_decay_.reset();
+    s_hud_enemy_decay_.reset();
     // JS `ur` L186-195: resolve the battle's FIRST <Warrior> — FirstName,
     // the NotAI/NotAnimation presence flags, items and attrs. Dojo Training
     // Fight 1 is the Punchbag dummy (FirstName="Punchbag" NotAI="1"
