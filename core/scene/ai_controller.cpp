@@ -1189,10 +1189,27 @@ int AiController::pqb(const AiFightState& st) {
     //   IB = the enemy would evade a throw
     // If either, the AI re-attacks from the attack table or the
     // EvadeThrowDodges / cautious lists.
+    // JS `F6a(cs, Dqa)` (L639): the ExpectedWait lookup key is tested with
+    // `a.$k(e.first)` = `e.first == cs.name || cs.d2(e.first)`, and `d2`
+    // scans `cs.xl` (name + the transitive `<Template>` chain). Matching the
+    // BARE move name only made every `Step`/`ForwardStep` entry miss, so a
+    // `StepForward` in flight fell through to the unnamed
+    // `<Animation Base="5" HealthFactor="1" EnemyHealthFactor="-1" Limit="15"
+    // AntiLimit="1"/>` default (evaluates to ~5) instead of the
+    // `<Animation Name="Step" Base="1000" Limit="1000"/>` entry. With
+    // `expected_wait=5` the surprise gate `1-1/b < roll` fired ~80% of
+    // passes even mid-step, so the AI re-issued StepForward before the clip
+    // finished (net ~0 dx) instead of letting it run. `anim_names` IS `xl`
+    // (move_def.cpp L1094), so test name + `anim_names`.
     float expected_wait = 1.0f;
     if (tactic_ != nullptr && st.current_move != nullptr) {
+        const MoveDef& cs = *st.current_move;
         for (const auto& kv : tactic_->expected_wait) {
-            if (kv.first.empty() || kv.first == st.current_move->name) {
+            const bool key_match =
+                kv.first.empty() || kv.first == cs.name ||
+                std::find(cs.anim_names.begin(), cs.anim_names.end(),
+                          kv.first) != cs.anim_names.end();
+            if (key_match) {
                 expected_wait = weight_curve_eval(kv.second, feat_);
                 break;
             }
@@ -1225,9 +1242,12 @@ int AiController::pqb(const AiFightState& st) {
             }
             b = static_cast<int>(wb_.size());
             if (b > 0) fk_ = 9;
-        } else if (tactic_ != nullptr) {
-            // JS L607-608: `a=P.nCa()` — `wb` cleared, each
-            // <CautiousMovements> group move with wait `$I()`; `fk=5`.
+        } else if (tactic_ != nullptr && nG) {
+            // JS L607-608: `else if(this.nG){a=P.nCa();...}` — the cautious
+            // branch is gated by `nG` (the CautiousMovementsChance roll). The
+            // port omitted the gate, so it refilled `wb` with the `<Step>`
+            // group whenever XW fired even with `nG=0`; the JS leaves `b=0`
+            // and returns the watch state (`oC=3,pH=!0`).
             wb_.clear();
             if (moves_ != nullptr) {
                 for (const std::string& grp : tactic_->cautious_movements) {
