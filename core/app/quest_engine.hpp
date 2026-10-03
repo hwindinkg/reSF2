@@ -1452,6 +1452,15 @@ private:
     std::set<std::string> logged_queries_;
     // Deferred `Wait` runs + the queued live actions (see `tick`).
     std::vector<PendingRun> pending_;
+    // JS `ha.add` (L522089): a quest matched while the current scene is
+    // Fight(6) is queued but NOT auto-run (`a=wa.F().Td.Tf; this.EJ||this.xN||
+    // a==6||(this.EJ=!0)`); the queue runs on the next `qT()` — the scene load
+    // (`wa.ghb` L934 -> `ha.F().qT()`). So `FightEnd` matches (`v.kD` L622187
+    // fires while scene=Fight) must NOT run their actions on the results
+    // screen; they run when the next scene mounts. Each entry is the quest
+    // index + the match-time journal.
+    std::vector<std::pair<std::size_t, QuestJournal>> deferred_fight_quests_;
+    void drain_deferred_fight(App& app);
     std::vector<QuestSceneRequest> nav_queue_;
     std::vector<QuestShopOpen> shop_queue_;
     std::vector<QuestTabSelect> tab_queue_;

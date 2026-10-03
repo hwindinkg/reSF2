@@ -975,30 +975,40 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
     if (!is_top) return;  // layered stack: only the top screen draws the modal
     // D13: `Wb` owns ONE top dialog — the Settings `un` (case 310) draws here
     // too, over the CURRENT screen (it is opened by the `za` nav #5).
-    draw_settings_dialog(app, ren);
-    draw_closing_dialog(app, ren);  // `od.Ge(1)` L1898: the dismissed tween
-    const EngineDialog* d = quest_modal_top(app);
-    // The `Ib` bar (`Ib.F().Qhb` L1050) sits UNDER the `Wb` modal. When a
-    // `Regular` is queued the bar still shows the last posted Notification
-    // (`I.Qhb` L1907 overwrite) — both are visible at once (JS `He.S` L1050
-    // posts the bar and the `Regular` opens without waiting).
-    if (const EngineDialog* n = quest_notification_top(app)) {
-        if (n != d) draw_notification(app, ren, *n);
-    }
-    if (d != nullptr) {
-        const DialogAnim anim = dialog_anim_now(app, *d);
-        switch (dialog_kind(d->type)) {
-            case DialogKind::kIbBar:
-                // `Notification` (L1050): fire-and-forget, no dialog object ->
-                // no screen dim (`BlockRaycast="0"`); the OK plate only draws
-                // when the button nests a callback (`hab()` L1060).
-                draw_notification(app, ren, *d);
-                break;
-            case DialogKind::kOd280: draw_od280_dialog(app, ren, *d, anim); break;
-            case DialogKind::kUj290: draw_uj290_dialog(app, ren, *d, anim); break;
-            case DialogKind::kVe340: draw_ve340_dialog(app, ren, *d, anim); break;
-            case DialogKind::kVn370: draw_vn370_dialog(app, ren, *d, anim); break;
-            case DialogKind::kNone: break;  // JS `debugger` branch (L1048-1050)
+    // `Rd` (L1078843): the live `zn` ActScreen overlay OWNS the screen — JS
+    // parks the serialized chain at `Rd` step 6 (`this.ge()` runs at step 6),
+    // so NO dialog is queued or drawn until the title finishes. The port runs
+    // the chain synchronously, so the next action (the Mai dialog) is already
+    // queued; drawing it UNDER the fading-in overlay made it visible BEFORE
+    // the title (the reported "диалог с Мэй появился перед актом"). Hide the
+    // whole modal stack while the overlay is live so only the title shows.
+    const bool act_owns = app.quest_engine().has_act_overlay();
+    if (!act_owns) {
+        draw_settings_dialog(app, ren);
+        draw_closing_dialog(app, ren);  // `od.Ge(1)` L1898: the dismissed tween
+        const EngineDialog* d = quest_modal_top(app);
+        // The `Ib` bar (`Ib.F().Qhb` L1050) sits UNDER the `Wb` modal. When a
+        // `Regular` is queued the bar still shows the last posted Notification
+        // (`I.Qhb` L1907 overwrite) — both are visible at once (JS `He.S` L1050
+        // posts the bar and the `Regular` opens without waiting).
+        if (const EngineDialog* n = quest_notification_top(app)) {
+            if (n != d) draw_notification(app, ren, *n);
+        }
+        if (d != nullptr) {
+            const DialogAnim anim = dialog_anim_now(app, *d);
+            switch (dialog_kind(d->type)) {
+                case DialogKind::kIbBar:
+                    // `Notification` (L1050): fire-and-forget, no dialog object
+                    // -> no screen dim (`BlockRaycast="0"`); the OK plate only
+                    // draws when the button nests a callback (`hab()` L1060).
+                    draw_notification(app, ren, *d);
+                    break;
+                case DialogKind::kOd280: draw_od280_dialog(app, ren, *d, anim); break;
+                case DialogKind::kUj290: draw_uj290_dialog(app, ren, *d, anim); break;
+                case DialogKind::kVe340: draw_ve340_dialog(app, ren, *d, anim); break;
+                case DialogKind::kVn370: draw_vn370_dialog(app, ren, *d, anim); break;
+                case DialogKind::kNone: break;  // JS `debugger` (L1048-1050)
+            }
         }
     }
     // `Rd` (L1078843): the live `zn` ActScreen overlay. JS parks the chain at
@@ -1017,8 +1027,15 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
         const float dim[] = {0.0f,   0.0f,   kViewW, 0.0f,   0.0f,   kViewH,
                              kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
         ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, dim_a);
+        // JS `Rd.layout` (L1078843): `this.label.Fa(N.width/this.node.Eb*
+        // (.9+(N.lc-.4)/1.6*-.5), 400)` — the label box is 400 tall and
+        // MULTILINE (`rd(!0)`), so the localized `{br}` two-line title
+        // ("Act I{br}Hero Reborn") shows BOTH lines. Was: `kViewH*0.16`
+        // (~115 px), which the `draw_ui_wrapped` clip cut after line 1 — the
+        // reported "act 1 без названия самого акта". `kViewW*0.9` already
+        // matches the JS width expression; the height is the JS `400`.
         draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
-                        kViewH * 0.16f,
+                        400.0f,
                         loc(app, app.quest_engine().act_overlay_text(),
                             app.quest_engine().act_overlay_text()),
                         0.9f, UiAlign::Center, 0.8196f * text_a, 0.7059f * text_a,
@@ -3629,14 +3646,18 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
             // 256..279, tan centre x111..256 (145 = 191.7 - 2*22.3).
             const float mid_w = lay.nav_w - 2.0f * qka;
             const float cy = lay.sp + col_h * 0.5f;
-            // The content fades in with the open fraction (JS `NLa` L2001
-            // drives `lyb(yI)`/the `iL` reveal), so the unfold is visible.
+            // JS `gk.lyb` (L1030382) fades ONLY the `background` node
+            // (`this.background.wa(a)`), NOT the paper/rail/buttons. The menu
+            // content is drawn at full alpha; the unfold is the rail SLIDE
+            // (`gk.JT` case 1). Was: every content draw multiplied by the open
+            // fraction `nav_frac`, so the whole menu visibly faded in/out — the
+            // reported "меню появляется с fade in/out". Content alpha is 1.
             try_draw_atlas_button(app, "paper_edge_left", lay.nav_x + qka * 0.5f, cy, qka,
-                                  col_h, nav_frac, /*fill=*/true);
+                                  col_h, 1.0f, /*fill=*/true);
             try_draw_atlas_button(app, "paper", lay.nav_x + qka + mid_w * 0.5f, cy, mid_w,
-                                  col_h, nav_frac, /*fill=*/true);
+                                  col_h, 1.0f, /*fill=*/true);
             try_draw_atlas_button(app, "paper_edge_right",
-                                  lay.nav_x + lay.nav_w - qka * 0.5f, cy, qka, col_h, nav_frac,
+                                  lay.nav_x + lay.nav_w - qka * 0.5f, cy, qka, col_h, 1.0f,
                                   /*fill=*/true, /*flip_x=*/true);
         }
     }
@@ -3653,7 +3674,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         const float cy_i = lay.nav_first_y + static_cast<float>(i) * lay.nav_step;
         const bool row_flash = (i == flash_idx);
         if (!try_draw_atlas_button(app, frame, nav_cx, cy_i, lay.nav_btn, lay.nav_btn,
-                                   nav_frac)) {
+                                   1.0f)) {
             draw_flat_button(app, def.label, nav_cx, cy_i, lay.nav_btn, lay.nav_btn,
                              is_active ? 0.6f : (is_hover ? 0.5f : 0.35f), 0.4f, 0.28f,
                              is_hover);

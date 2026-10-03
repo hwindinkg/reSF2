@@ -5504,6 +5504,17 @@ void QuestEngine::tick(App& app) {
         if (act_elapsed >= act_total) {
             act_active = false;
             act_alpha = act_dim_alpha = act_text_alpha = 0.0f;
+            // JS `Rd.end` (L1079355): `ta.ZD||(lb.rJ=!1, lb.OS())` — when MUSIC
+            // is not muted, clear the play-once guard (`lb.rJ=!1`) and resume
+            // the MENU track (`lb.OS()` -> "menu"). The overlay's `Ut`
+            // (L1080257) played "act" through the player and left the guard
+            // set, so the shell stayed silent after the title (the reported
+            // "музыка меню не восстановилась"). Mirrors `ActPlayer::finish`.
+            sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+            if (!au.music_muted()) {
+                au.reset_music_guard();
+                au.play_music_once("menu");
+            }
         } else {
             // step 0: the black backdrop `hf.wa` fades 0 -> 1 over `ed(1)`.
             act_dim_alpha = act_elapsed < 1.0f ? act_elapsed : 1.0f;
@@ -5534,7 +5545,14 @@ void QuestEngine::tick(App& app) {
             // (L1079654/L654420): stop the current track and play `act` once.
             if (!act_sound_played && act_elapsed >= 1.0f) {
                 act_sound_played = true;
-                sf2::audio::AudioEngine::instance().play_music("act", false);
+                // JS `Rd.Ut` (L1080257): `lb.GMa(1); ta.Zla(); lb.rJ=!1;
+                // lb.OS("act",!1)` — restore the music bus, stop the current
+                // track, clear the play-once guard, play `act` non-looping.
+                sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+                au.set_music_ducked(false);
+                au.stop_music();
+                au.reset_music_guard();
+                au.play_music("act", false);
             }
         }
     }
@@ -5605,6 +5623,11 @@ bool QuestEngine::quest_active(const std::string& name) const {
     }
     for (const PendingRun& r : pending_) {
         if (r.quest == name) return true;
+    }
+    // JS `GEa` (L521470) checks the whole `Dh` queue; a deferred Fight match
+    // is still in `Dh` until `qT()` runs it, so it is "active" (skip re-fire).
+    for (const auto& dq : deferred_fight_quests_) {
+        if (dq.first < quests_.size() && quests_[dq.first].name == name) return true;
     }
     if (tutorial_gate_.active && tutorial_gate_.quest == name) return true;
     return false;
@@ -5686,6 +5709,24 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
                      });
     for (std::size_t i : order) {
         const QuestDef& q = quests_[i];
+        // JS `ha.add` (L522089): `a=wa.F().Td.Tf; this.EJ||this.xN||a==6||
+        // (this.EJ=!0)`. While the mounted scene is Fight(6) the queue does
+        // NOT auto-run; `RA` only queues + sorts (`Rla` L521963), and the run
+        // happens on the next `qT()` (`wa.ghb` L934, the scene load). So a
+        // quest matched on `FightEnd` (fired while scene=Fight, `v.kD`
+        // L622187) must run its actions when the next scene mounts — NOT on
+        // the results screen. The old port ran it immediately, playing the
+        // level-up `snd_learn` on the stats screen (the reported F).
+        if (current_scene_ == "Fight" && event != "SceneLoaded" &&
+            event != "ChangeTab") {
+            deferred_fight_quests_.emplace_back(i, journal);
+            std::fprintf(stdout,
+                         "[quest] %s matched on %s (scene=Fight) -> deferred to next "
+                         "scene load\n",
+                         q.name.c_str(), event.c_str());
+            std::fflush(stdout);
+            continue;
+        }
         // NOT a fire gate. JS `be.Gib` (L517407) makes `Place` ONLY the
         // auto-checkpoint scene index (`this.k7 = be.ifa(Place||"Map")` ->
         // each action's `Faa` -> `Ln.iLa` L531194 `setParameters(a, Faa,
@@ -6206,8 +6247,53 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     }
     if (j.fight_zone.empty() && !j.fight.empty()) j.fight_zone = battle_zone(j.fight);
     if (j.player_level <= 0) j.player_level = 1;
+    // JS `wa.ghb` (L934): on the scene load `ha.F().qT()` pumps the queue of
+    // Fight-deferred quests (see `deferred_fight_quests_`). Run them now that
+    // the new scene is mounted (`quest_nav` set `current_scene_` before this
+    // `SceneLoaded` fire), so `LevelUpFirstTime`'s `snd_learn`/dialog play on
+    // the Map, never on the results screen.
+    if (event == "SceneLoaded") drain_deferred_fight(app);
     fire_inner(app, event, j, fired, 0);
     return fired;
+}
+
+// JS `ha.qT`/`eLa` (L523000) pumped by `wa.ghb` (L934): run every quest that
+// matched while the scene was Fight(6). The per-quest body mirrors the
+// `fire_inner` run block (the only difference is that `fired`/`ClearQuestQueue`
+// bookkeeping is not replayed — these were already matched).
+void QuestEngine::drain_deferred_fight(App& app) {
+    if (deferred_fight_quests_.empty()) return;
+    std::vector<std::pair<std::size_t, QuestJournal>> dq;
+    dq.swap(deferred_fight_quests_);
+    for (auto& entry : dq) {
+        const std::size_t i = entry.first;
+        const QuestJournal& journal = entry.second;
+        if (i >= quests_.size()) continue;
+        const QuestDef& q = quests_[i];
+        QuestSideEffects fx;
+        std::map<std::string, std::string> locals;
+        const ActionRest rest =
+            run_actions(app, q.actions, journal, fx, locals, q.name, 0);
+        apply_effects(app, fx);
+        enqueue_effects(app, fx, journal, locals, q.name);
+        if (rest.dialog_parked) {
+            attach_dialog_park(rest, locals);
+        } else if (rest.suspended) {
+            PendingRun run;
+            run.actions = rest.rest;
+            run.journal = journal;
+            run.locals = locals;
+            run.quest = q.name;
+            run.frames = rest.frames;
+            pending_.push_back(std::move(run));
+        }
+        if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
+        if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
+        if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
+        std::fprintf(stdout, "[quest] FIRED %s (deferred Fight match, scene=%s)\n",
+                     q.name.c_str(), current_scene_.c_str());
+        std::fflush(stdout);
+    }
 }
 
 QuestEngine& App::quest_engine() {

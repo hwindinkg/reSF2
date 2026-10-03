@@ -131,9 +131,15 @@ void ScreenManager::push_impl(std::unique_ptr<Screen> screen, const std::string&
                  static_cast<int>(screen->id()), stack_.size() + 1);
     std::fflush(stdout);
     stack_.push_back(std::move(screen));
-    // JS scene change shows the `ad` Loader (logo + "Loading 100%") while the
-    // target scene mounts (`Zd.load` -> `ad.load`). Arm the 30-frame hold.
-    app_.begin_scene_loader();
+    // NO scene loader here. JS mounts the `ad` Loader (scene 2) only through
+    // `mc.Taa` (L63240) when the target scene's `Pea()` is non-empty, i.e. it
+    // still has unloaded assets: `a.Pea().length>0?(c=a.lBa()...)`. `Pea`
+    // (L60160) is `Yv()` minus every id already in `G.data.v`. The port loads
+    // ALL scene assets synchronously at boot, so `Pea()` is always empty and
+    // `Taa` pushes the target directly — the Loader NEVER mounts on a scene
+    // push. It mounted here on EVERY push, so it appeared on the fight->VS
+    // intro and the fight->results handoff, which are NOT `Taa` scene changes
+    // (Results is a native shell screen; the VS plate is a state of Fight).
     quest_nav(app_, nav_from, pushed_id);
 }
 
