@@ -894,8 +894,9 @@ public:
     static constexpr float kTutorialStepTimeoutSec = 15.0f;
     // Beat the suspended chain is parked at: 1 = `StoryTutorialMove`,
     // 2 = `StoryTutorialPunchbag`, 3 = `StoryTutorialDoubleSweep`,
-    // 4 = `StoryTutorialShowBlock`, 0 = not gated. The fidelity driver waits on
-    // it so each tutorial capture lands on the oracle's own beat.
+    // 4 = `StoryTutorialShowBlock`, 5 = `StoryTutorialLearnPerk`, 0 = not gated.
+    // The fidelity driver waits on it so each tutorial capture lands on the
+    // oracle's own beat.
     int tutorial_gate_beat() const { return tutorial_gate_.active ? tutorial_gate_.beat : 0; }
     // Advances the gate clock by `dt` (app-time seconds); when it elapses the
     // stashed tail runs (which may immediately hit the second lesson and
@@ -906,6 +907,12 @@ public:
     // `EquipmentScreen` avatar-anim-end publisher (`on_lesson_anim(...,
     // end=true)`) can be asserted without the whole StoryTutorial chain.
     void arm_showblock_gate_for_test(App& app);
+    // JS `Co.Qg` (LearnPerk, sf2.502f0946.js L1127): the profile learn button
+    // fired -> `Sb.F().kk(!1)` (clear the input overlay) + `this.sa()` (resume
+    // the parked tail). Returns true when a parked LearnPerk gate (beat 5)
+    // resumed. The chain tail then runs `SetStoryTutorialStep SHOW_DOUBLE_SWEEP`
+    // + the `StoryTutorialOpenScene` `tutorial_dojo_new_move` notification.
+    bool resume_learn_perk(App& app);
     // JS `Bo`/`Do`/`Eo` `Pf` (sf2.502f0946.js L1121/L1123/L1125 <- the model
     // `Pf` L386): the player fighter STARTED the animation `name` (its JS
     // `zY` type `type`, "EAnimationMove"/"EAnimationAttack"). Runs the JS
@@ -1352,7 +1359,8 @@ private:
     // suspended run plus its journal/locals and the remaining app-time.
     struct TutorialGate {
         bool active = false;
-        int beat = 0;          // 1 = move, 2 = punchbag, 3 = double sweep, 4 = block
+        int beat = 0;          // 1 = move, 2 = punchbag, 3 = double sweep, 4 = block,
+                               // 5 = learn perk (`Co`, L1127)
         float remaining = 0.0f;  // app-time seconds until `Cm` (`TutorialStepTimeout`)
         std::vector<QuestAction> rest;
         QuestJournal journal;

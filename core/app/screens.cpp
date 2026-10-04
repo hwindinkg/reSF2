@@ -875,7 +875,7 @@ bool draw_item_image(App& app, const std::string& image_ref, float cx, float cy,
 // portrait from the resolved `Image` (`Qhb(a=wt,...)` L1907 -> `v.RIa` L1909).
 // There is NO speaker row — the port drew an invented speaker label.
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
-                  const std::string& joined_lines, bool show_ok);
+                  const std::string& joined_lines, bool show_ok, float reveal);
 // `He.S` L1045-1051 Type routing (see the definition below).
 bool dialog_scrolls_all_lines(const std::string& type);
 // `od` 9-slice panel geometry (JS L1894-1900) — defined after the modal draw.
@@ -2466,7 +2466,7 @@ bool draw_dialog_image(App& app, const std::string& image, const std::string& it
 // `Ib.RP` (He.DisableNotificationsButtons, L1045) gates the OK button — the
 // caller passes `show_ok` already gated on RP.
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
-                  const std::string& joined_lines, bool show_ok) {
+                  const std::string& joined_lines, bool show_ok, float reveal) {
     const float c =
         std::clamp(std::min(kViewW * 0.75f, kViewH * 0.75f) / 600.0f, 0.2f, 1.1f);
     const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.odb L1975
@@ -2474,6 +2474,26 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     const float oy = sp;
     auto lx = [&](float v) { return ox + v * c; };
     auto ly = [&](float v) { return oy + v * c; };
+    // JS `Ib.open` L1910 / `gk.JT` L2000 (qLa=0): the mask window is
+    // `[width*(1-a), width*(2-a)]` — the bar is REVEALED from its right edge as
+    // `a` goes 0 -> 1 (the content itself stays put). Reproduce it with a
+    // screen-space clip of the visible right portion; steady state (`reveal`
+    // == 1.0) skips the clip so settled captures stay byte-identical.
+    constexpr float kBarW = 600.0f;    // `Fg(600,250,...)` long axis
+    constexpr float kBarH = 250.0f;    // short axis (pre-rotation width)
+    const bool clipping = reveal < 1.0f;
+    if (clipping) {
+        const float vis_w = kBarW * c * (reveal < 0.0f ? 0.0f : reveal);
+        ren.push_clip(kViewW - vis_w, oy, vis_w, kBarH * c);
+        // One-shot evidence: the `Ib` bar reveals from the right edge over
+        // 0.5 s (`gk.expand(.5)`), not instantly.
+        static int reveal_log = 0;
+        if (reveal_log < 3) {
+            ++reveal_log;
+            std::fprintf(stdout, "[ib] reveal=%.3f clip_w=%.1f\n", reveal, vis_w);
+            std::fflush(stdout);
+        }
+    }
     // JS `Ib.O1a` (L1906): `this.scroll = new gk(600,250,50,0,!1); let a =
     // new Fg(600,250,1,30); this.scroll.iL.appendChild(a.node);` — the bar's
     // art is the `Fg` content frame (paper rails), NOT the `Zh` roll
@@ -2496,8 +2516,6 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // `paper` body the 190 px middle, `paper_edge_right` the 30 px BOTTOM
     // strip; each sprawls the full 600 width (stretched whole-frame, exactly
     // what `try_draw_atlas_button(..., fill=true)` does).
-    constexpr float kBarW = 600.0f;    // `Fg(600,250,...)` long axis
-    constexpr float kBarH = 250.0f;    // short axis (pre-rotation width)
     constexpr float kPaperCap = 30.0f; // `Fg(...,1,30)` cap `c`
     const float mid_h = std::max(kBarH - 2.0f * kPaperCap, 10.0f);  // 190
     bool drew = false;
@@ -2553,6 +2571,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         draw_ui_label(app, lx(400.0f), ly(173.0f), 100.0f * c, 24.0f * c, "OK", 0.8f,
                       UiAlign::Center, 1.0f, 1.0f, 1.0f);
     }
+    if (clipping) ren.pop_clip();  // `Ib.open` reveal mask (see top)
 }
 
 // One resolved item image (JS `Rf` L2307): the list.xml `Image` ref
@@ -7655,7 +7674,24 @@ bool notification_show_ok(const EngineDialog& d) {
 }
 
 void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
-    draw_ib_hint(app, ren, d.image, ib_joined_lines(app, d), notification_show_ok(d));
+    // JS `Ib.open` L1910: `this.scroll.expand(.5)` — the `gk` reveal tween
+    // (`gk.Gwa` L2000 sets `PF=!0, pma=.5`; `gk.aa` runs `NLa(dc.Ln()(a))`),
+    // 0.5 s, revealed from the right edge. Keyed on the bar's content so a NEW
+    // notification restarts the reveal; steady state returns exactly 1.0 (so
+    // settled captures stay byte-identical).
+    static std::string key;
+    static float start = 0.0f;
+    std::string cur = d.type + "|" + d.title;
+    if (!d.lines.empty()) cur += "|" + d.lines[0];
+    const float now = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+    if (key != cur || now < start) {
+        key = cur;
+        start = now;
+    }
+    float t = (now - start) / 0.5f;
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    const float reveal = dialog_ease_out(t);  // `dc.Ln`
+    draw_ib_hint(app, ren, d.image, ib_joined_lines(app, d), notification_show_ok(d), reveal);
 }
 
 } // namespace
@@ -7855,6 +7891,26 @@ void draw_dialog_title(App& app, const OdLayout& L, const std::string& title) {
                   0.98f, UiAlign::Center, 0.404f, 0.243f, 0.141f);
 }
 
+// The `Od`/`Ve`/`tn` scroll-end rails (sf2.502f0946.js L1000/L1913/L1944):
+//   `this.Cy=R.$(E.get(254), y.pB, this.node)` — `y.pB="stripe_top"` (984x22)
+//   `this.Rx=R.$(E.get(254), y.sM, this.node)` — `y.sM="stripe_bottom"` (606x22)
+// placed by `od.layout` L1898 (`this.Cy.D(this.Vc.ra+-25)`,
+// `this.Rx.D(this.Cd.node.ra+b)`), i.e. the port's `div1_y`/`div2_y`. Both are
+// children of `this.node` (design x=0, centred). The port drew neither, so the
+// `od280`/`uj290`/`ve340`/`vn370` dialogs had no rolled scroll ends (the
+// reported "no scroll texture at the dialog end"). Natural size × the node
+// scale `c`; the `od.aa` open tween scales the whole node, so multiply by
+// `anim_scale` too.
+void draw_od_stripes(App& app, const OdLayout& L) {
+    if (!load_scroll_atlas(app)) return;
+    const float c = L.panel.c * L.anim_scale;
+    const float cx = L.sx(0.0f);
+    try_draw_atlas_button(app, "stripe_top", cx, L.div1_y, 984.0f * c, 22.0f * c, 1.0f,
+                          /*fill=*/true);
+    try_draw_atlas_button(app, "stripe_bottom", cx, L.div2_y, 606.0f * c, 22.0f * c, 1.0f,
+                          /*fill=*/true);
+}
+
 // `od.$A` L1945 (`this.sV!=null ? new or(this.sV) : this.ala(this.p$)`) +
 // `od.ala` L1947 (`v.RIa(a)` -> `oe(a.fileName)` at `C(-450+OB)`, `D(YV)`,
 // `la(1.8*iy)`). The dialog's `Item` composite (`Ej.Ev`, `He.ah` L1045) wins;
@@ -7917,6 +7973,7 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_dialog_backdrop(ren, anim.alpha);
     const OdLayout L = dialog_layout_for(app, d, anim);
     draw_od_base(app, ren, L.panel);
+    draw_od_stripes(app, L);  // `Od`/`Ve` `Cy`/`Rx` scroll-end rails (L1898)
     draw_dialog_title(app, L, d.title);
     draw_dialog_portrait(app, d, L);
     const std::size_t od_page =
@@ -7941,6 +7998,7 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_dialog_backdrop(ren, anim.alpha);
     const OdLayout L = dialog_layout_for(app, d, anim);
     draw_od_base(app, ren, L.panel);
+    draw_od_stripes(app, L);  // `Od`/`Ve` `Cy`/`Rx` scroll-end rails (L1898)
     draw_dialog_title(app, L, d.title);
     draw_dialog_portrait(app, d, L);
     const float c = L.panel.c > 0.0f ? L.panel.c : 1.0f;
@@ -7983,6 +8041,7 @@ void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_dialog_backdrop(ren, anim.alpha);
     const OdLayout L = dialog_layout_for(app, d, anim);
     draw_od_base(app, ren, L.panel);
+    draw_od_stripes(app, L);  // `Od`/`Ve` `Cy`/`Rx` scroll-end rails (L1898)
     draw_dialog_title(app, L, d.title);
     const std::string body =
         d.lines.empty() ? std::string() : dialog_line_text(app, d, d.lines[0]);
@@ -8000,6 +8059,7 @@ void draw_vn370_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_dialog_backdrop(ren, anim.alpha);
     const OdLayout L = dialog_layout_for(app, d, anim);
     draw_od_base(app, ren, L.panel);
+    draw_od_stripes(app, L);  // `Od`/`Ve` `Cy`/`Rx` scroll-end rails (L1898)
     draw_dialog_title(app, L, d.title);
     const float cell = 125.0f * L.panel.c;  // `vr.text.Fa(125,125)` L1939
     const float step = cell * 0.75f;
@@ -17540,6 +17600,11 @@ void EquipmentScreen::perk_buy(int index) {
         std::fprintf(stdout, "[profile] perk buy %s (tier %d, upgrade %d)\n",
                      r.name.c_str(), r.tier, r.upgrade_max);
         std::fflush(stdout);
+        // JS `Co.Qg` (L1127): the tutorial armed this very button; the press
+        // runs `Sb.F().kk(!1)` + `this.sa()` — resume the parked LearnPerk tail
+        // (`SetStoryTutorialStep SHOW_DOUBLE_SWEEP` + the sensei notification).
+        // A no-op outside the tutorial.
+        app().quest_engine().resume_learn_perk(app());
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[profile] perk buy failed: %s\n", e.what());
     }
@@ -19486,8 +19551,20 @@ bool EquipmentScreen::select_tab(int slot, const std::string& focus) {
     tab_hover_ = -1;
     hover_ = -1;
     if (tab_ >= 0 && tab_ < 4) list_scroll_[tab_].count = -1;  // `hla` recentres
-    std::fprintf(stdout, "[profile] rF slot=%d focus=%s -> tab %d\n", slot,
-                 focus.c_str(), tab_);
+    // `rF(a,b){this.hla(a); b!=null&&b!=""&&this.jq.Dr(b)}` (L1131579):
+    // `jq.Dr(name)` (L1140149) SELECTS the cell whose name matches, so the
+    // armed `Zr` improve/learn button (`ZCa()` L1124520) has a selection. The
+    // `StoryTutorialLearnPerk` focus `PERK_DOUBLE_SWEEP` (L1127) rides this.
+    if (slot == 0 && !focus.empty()) {
+        for (std::size_t i = 0; i < perk_rows_.size(); ++i) {
+            if (perk_rows_[i].name == focus) {
+                perk_sel_ = static_cast<int>(i);  // `vb.uj = a` (L2198)
+                break;
+            }
+        }
+    }
+    std::fprintf(stdout, "[profile] rF slot=%d focus=%s -> tab %d (perk_sel=%d)\n", slot,
+                 focus.c_str(), tab_, perk_sel_);
     std::fflush(stdout);
     return true;
 }

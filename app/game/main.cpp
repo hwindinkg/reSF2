@@ -4567,17 +4567,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const bool co_tabs_blocked = !q.control_allowed("ProfileTab0") &&
                                      !q.control_allowed("ProfileTab1");
         const bool co_perk_ok = q.control_allowed("ProfilePerk");
+        const int co_beat = q.tutorial_gate_beat();  // 5 = LearnPerk parked
         std::fprintf(stdout,
                      "[lockprobe] Co locked=%d target=%s tab=%d tabs_blocked=%d "
-                     "perk_ok=%d\n",
+                     "perk_ok=%d beat=%d\n",
                      co_locked ? 1 : 0, co_target.c_str(), co_tab,
-                     co_tabs_blocked ? 1 : 0, co_perk_ok ? 1 : 0);
+                     co_tabs_blocked ? 1 : 0, co_perk_ok ? 1 : 0, co_beat);
         std::fflush(stdout);
-        check(co_locked && co_target == "ProfilePerk" && co_tab == 0,
-              "Co: Sb.kk(!0) target=ProfilePerk + Perks tab");
+        check(co_locked && co_target == "ProfilePerk" && co_tab == 0 && co_beat == 5,
+              "Co: Sb.kk(!0) target=ProfilePerk + Perks tab + gate beat 5");
         check(co_tabs_blocked && co_perk_ok,
               "Co: sub-tab strip blocked, the armed perk allowed");
-        q.unlock_controls();
+        // `Co.Qg` L1127: the learn-button press (`Sb.F().kk(!1)` + `sa()`) —
+        // resumes the parked LearnPerk gate (beat 5). Without the resume the
+        // gate stays active and the next `Bo` fire cannot park.
+        q.resume_learn_perk(app);
         // --- `Bo` DoubleSweep: `za.instance.YA(!1)` nav blocker. ------------
         app.screens().pop();
         app.run_one_frame();

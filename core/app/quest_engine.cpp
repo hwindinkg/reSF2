@@ -3741,8 +3741,15 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             //   `Ao` (BuyItem, L1124): `Sb.F().kk(!0)` + the shop buy plate
             //     `M8.tk=!0` armed.
             if (t == "StoryTutorialLearnPerk") {
+                // `Co.S` L1127: `vb.get().rF(0, "PERK_DOUBLE_SWEEP")` — the
+                // Perks tab is selected AND the `PERK_DOUBLE_SWEEP` cell is
+                // focused (`rF(a,b){this.hla(a); b!=""&&this.jq.Dr(b)}` L1131579;
+                // `Dr(name)` selects the cell, L1140149). The focus string was
+                // empty, so the cell never selected -> `ZCa()` returned null and
+                // the armed learn button never appeared.
                 fx.lock_targets.push_back("ProfilePerk");
-                fx.tab_selects.push_back(QuestTabSelect{"Perks", "", 10, 7});
+                fx.tab_selects.push_back(
+                    QuestTabSelect{"Perks", "PERK_DOUBLE_SWEEP", 10, 7});
             } else if (t == "StoryTutorialShowBlock") {
                 fx.lock_targets.push_back("ProfileMove");
                 fx.tab_selects.push_back(QuestTabSelect{"Moves", "", 11, 7});
@@ -3769,19 +3776,27 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // always complete (no outer remainder to re-attach).
             if (depth == 0 && tutorial_live(app) && !tutorial_gate_.active &&
                 (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag" ||
-                 t == "StoryTutorialDoubleSweep" || t == "StoryTutorialShowBlock")) {
+                 t == "StoryTutorialDoubleSweep" || t == "StoryTutorialShowBlock" ||
+                 t == "StoryTutorialLearnPerk")) {
                 tutorial_gate_.active = true;
                 // `Do`=1, `Eo`=2 (the welcome lessons), `Bo`=3 (the double
-                // sweep), `Fo`=4 (the block). All four are the JS actions whose
-                // `S()` does NOT call `this.sa()` (L1123/L1125/L1121/L1126):
-                // the chain WAITS for the `Re(Cm, TutorialStepTimeout)` timer
-                // (or the `p.o.zi.LE` step change) before resuming. Before this
-                // the dojo beats ran straight through (record-only), so the
-                // lesson never "acted".
+                // sweep), `Fo`=4 (the block), `Co`=5 (the learn perk). All five
+                // are the JS actions whose `S()` does NOT call `this.sa()`
+                // (L1123/L1125/L1121/L1126/L1127): the chain WAITS. `Do`/`Eo`/
+                // `Bo` wait on the `Re(Cm, TutorialStepTimeout)` timer (or the
+                // `p.o.zi.LE` step change); `Fo` waits on the avatar anim END;
+                // `Co` (L1127) waits ONLY on the learn-button press (`Qg`), no
+                // timer and no `LE` listener. Before this the dojo beats ran
+                // straight through (record-only), so the lesson never "acted".
+                // `Co` without the park ran the tail (`SetStoryTutorialStep
+                // SHOW_DOUBLE_SWEEP` + the `tutorial_dojo_new_move` dialog)
+                // immediately -> the reported "sensei says it's already learned"
+                // and the still-locked, unclickable LEARN button.
                 tutorial_gate_.beat =
                     (t == "StoryTutorialMove")       ? 1
                     : (t == "StoryTutorialPunchbag") ? 2
                     : (t == "StoryTutorialDoubleSweep") ? 3
+                    : (t == "StoryTutorialLearnPerk")   ? 5
                                                         : 4;
                 tutorial_gate_.remaining = kTutorialStepTimeoutSec;
                 tutorial_gate_.rest.assign(acts.begin() + i + 1, acts.end());
@@ -5217,8 +5232,10 @@ bool QuestEngine::resume_tutorial_gate(App& app) {
     tutorial_gate_ = TutorialGate{};  // cleared first: the tail may re-park
     // The lesson's own unlock (`Cm`): `Bo`/`Do`/`Eo` (L1121/L1123/L1125) run
     // `za.instance.YA(!0)` (hide the nav blocker); `Fo` `Cxa` (L1126) runs
-    // `Sb.F().kk(!1)` (clear the input overlay). Both precede the tail resume.
-    if (gate.beat == 4) {
+    // `Sb.F().kk(!1)` (clear the input overlay); `Co` `Qg` (L1127) also runs
+    // `Sb.F().kk(!1)` (the learn-button completion). Both precede the tail
+    // resume.
+    if (gate.beat == 4 || gate.beat == 5) {
         unlock_controls();
     } else {
         unlock_nav();
@@ -5256,6 +5273,18 @@ bool QuestEngine::resume_tutorial_gate(App& app) {
     return !tutorial_gate_.active;
 }
 
+// JS `Co.Qg` (LearnPerk, L1127): the profile learn button fired -> `Sb.F().kk(!1)`
+// + `this.sa()`. Resumes the parked LearnPerk tail (beat 5); the tail runs
+// `SetStoryTutorialStep SHOW_DOUBLE_SWEEP` + the `StoryTutorialOpenScene`
+// notification. Returns true when a parked LearnPerk gate resumed.
+bool QuestEngine::resume_learn_perk(App& app) {
+    if (!tutorial_gate_.active || tutorial_gate_.beat != 5) return false;
+    std::fprintf(stdout, "[quest] learn-perk button -> chain resumes\n");
+    std::fflush(stdout);
+    resume_tutorial_gate(app);  // beat 5 -> unlock_controls() + run the tail
+    return true;
+}
+
 // Test hook (`--tutorial-showblock-probe`): mirror the `Fo` park site
 // (quest_engine.cpp ~L3527) at beat 4 with an EMPTY tail, so the resume is
 // observable as `tutorial_gate_.active` clearing. The `EquipmentScreen`
@@ -5277,12 +5306,14 @@ bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
     if (!tutorial_gate_.active) return false;
     if (dt <= 0.0f) return false;
     // JS `Fo` (ShowBlock, L1126) registers NO `Re(.., TutorialStepTimeout)`
-    // timer — only `Bo`/`Do`/`Eo` (L1121/L1123/L1125) do. The block lesson
-    // completes ONLY on the model animation END (`Ad.kg` -> `oHa` -> `Cxa`),
-    // or immediately when the preview widget is absent (`aDa()==null` ->
-    // `Cxa`). The port's timeout here made the "view the block" step
-    // auto-complete after 15 s without the player watching the animation.
-    if (tutorial_gate_.beat == 4) return false;
+    // timer — only `Bo`/`Do`/`Eo` (L1121/L1123/L1125) do. `Co` (LearnPerk,
+    // L1127) likewise registers NO timer: it resumes ONLY on the learn-button
+    // press (`Qg`). The block lesson completes ONLY on the model animation END
+    // (`Ad.kg` -> `oHa` -> `Cxa`), or immediately when the preview widget is
+    // absent (`aDa()==null` -> `Cxa`). The port's timeout here made the "view
+    // the block" step auto-complete after 15 s without the player watching the
+    // animation.
+    if (tutorial_gate_.beat == 4 || tutorial_gate_.beat == 5) return false;
     tutorial_gate_.remaining -= dt;
     if (tutorial_gate_.remaining > 0.0f) return false;
     std::fprintf(stdout, "[quest] tutorial lesson beat %d done -> chain resumes\n",
@@ -6247,8 +6278,10 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     // JS `Do`/`Eo` register `Cm` on `p.o.zi.LE` — the story-step change event
     // (`zt.PMa` fires `LE`). A step change while a lesson is parked resumes the
     // chain immediately; the `TutorialStepTimeout` is only the fallback. `Fo`
-    // (beat 4) registers NO `LE` listener (nor a timer), so it is excluded.
-    if (tutorial_gate_.active && tutorial_gate_.beat != 4) {
+    // (beat 4) registers NO `LE` listener (nor a timer), so it is excluded;
+    // `Co` (beat 5, LearnPerk) likewise registers NEITHER (L1127), so it too is
+    // excluded — only the learn-button press resumes it.
+    if (tutorial_gate_.active && tutorial_gate_.beat != 4 && tutorial_gate_.beat != 5) {
         std::string live;
         try {
             live = app.save().load().story_step();
