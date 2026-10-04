@@ -639,14 +639,28 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     sol_ma_.assign(n * 3, 0.0f);
     sol_mf_.assign(n * 3, 0.0f);
     const bool have_pos = pos_.size() == n * 2;
+    // [FIX knockdown/wall 1-frame jerk — JS `Al.start` (L582) does NOT touch
+    // the node `ma`/`mf`]. The JS `mf` at `Al.start` is whatever the last
+    // `Te.eda` (L282908) left: `e.f4()` sets `mf = ma` BEFORE `e.XA(clip)`
+    // sets `ma = new pose`, so `mf` = the frame-before-last clip pose. On the
+    // `Al.start` frame `Te.eda` does NOT run (`da.Sca()` set `Pe=false`), so
+    // the first `Vc.sk` (L405734) Verlet step integrates
+    // `new = 2*ma - mf + grav` and carries that clip velocity into the
+    // ragdoll. The old port seeded `sol_mf_ = sol_ma_` (ZERO velocity), so the
+    // first ragdoll frame advanced by gravity alone (0.4u) — the reported
+    // 1-frame jerk. The port's `prev_pos_` (snapshotted in `advance()` before
+    // the re-sample) IS that JS `mf`; seed from it. `SF2_RAGDOLL_OLDSEED`
+    // restores the old zero-velocity seed for A/B evidence only.
+    const bool have_prev = prev_pos_.size() == n * 2;
+    const bool old_seed = std::getenv("SF2_RAGDOLL_OLDSEED") != nullptr;
     for (std::size_t i = 0; i < n; ++i) {
         const float wx = have_pos ? pos_[i * 2] : model_.bones[i].x;
         const float wy = have_pos ? pos_[i * 2 + 1] : model_.bones[i].y;
         sol_ma_[i * 3] = wx;
         sol_ma_[i * 3 + 1] = wy;
         sol_ma_[i * 3 + 2] = model_.bones[i].z;
-        sol_mf_[i * 3] = wx;
-        sol_mf_[i * 3 + 1] = wy;
+        sol_mf_[i * 3] = (!old_seed && have_prev) ? prev_pos_[i * 2] : wx;
+        sol_mf_[i * 3 + 1] = (!old_seed && have_prev) ? prev_pos_[i * 2 + 1] : wy;
         sol_mf_[i * 3 + 2] = model_.bones[i].z;
     }
     solver_init_ = true;
@@ -2071,6 +2085,20 @@ void Fighter::clear_move() {
 // tick (the old raw `++frame` was 3x too fast for MidFrames=2).
 void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                                  float node_x, float node_y) {
+    // [FIX preview loop 1-frame jerk — JS `Pi.ia`/`Te.Skb`] `preview_mode_` is
+    // TRUE on a LOOP restart and FALSE on the FIRST entry (`clear_move`
+    // clears it). The `Pi.job`/`oL` J9 re-seat (below) belongs to the STATE
+    // ENTRY (`Pi.L4`/`Ex`), not to the `AnimationEnd` clip restart the loop
+    // re-issues: re-seating on every restart snapped the anchor from its
+    // clip-ridden position back to J9 (the measured ~25u loop jerk). Capture
+    // the pre-clear flag and re-seat only on the first entry.
+    const bool was_preview = preview_mode_;
+    // [probe, authorised] SF2_PV_PROBE: capture the last drawn pose so the
+    // loop-restart delta (visible jerk) can be measured after the re-seat.
+    std::vector<float> pv_last;
+    if (std::getenv("SF2_PV_PROBE") != nullptr && was_preview) {
+        pv_last = pos_;
+    }
     clear_move();  // `Te.reset`/`Bnb`: drop any previous move + ragdoll
     current_move_ = &move;
     current_clip_ = &clip;
@@ -2096,7 +2124,7 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // (probe: HighBlockProfile world_y -93 -> -29 vs the JS clip y).
     {
         const int seat_a = model_.bone_by_name(fighter_pivot_bone());
-        if (seat_a >= 0 && solver_init_ &&
+        if (!was_preview && seat_a >= 0 && solver_init_ &&
             sol_ma_.size() == model_.bones.size() * 3 &&
             sol_mf_.size() == sol_ma_.size()) {
             const std::size_t u = static_cast<std::size_t>(seat_a) * 3;
@@ -2136,6 +2164,24 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     compute_align(move);
     build_prepend(move);
     sample_current();  // the first `Te.eda` pose
+    // [probe, authorised] SF2_PV_PROBE: the visible bone delta across the
+    // preview loop restart (last drawn pose -> restarted frame-0 pose).
+    if (!pv_last.empty() && pos_.size() == pv_last.size()) {
+        float md = 0.0f;
+        std::size_t mi = 0;
+        for (std::size_t i = 0; i + 1 < pos_.size(); i += 2) {
+            const float dx = pos_[i] - pv_last[i];
+            const float dy = pos_[i + 1] - pv_last[i + 1];
+            const float d = std::sqrt(dx * dx + dy * dy);
+            if (d > md) {
+                md = d;
+                mi = i / 2;
+            }
+        }
+        std::fprintf(stdout, "[pv] restart delta max=%.3f bone=%s\n", md,
+                     mi < model_.bones.size() ? model_.bones[mi].name.c_str() : "?");
+        std::fflush(stdout);
+    }
 }
 
 // JS `Dl.NQ` (L575): `for(d in this.Wf.b3){if(a==d.first)return d.second;
@@ -2958,6 +3004,27 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             if (bones[i].is_macro) {
                 compute_macro(compute_macro, i);
             }
+        }
+        // [probe, authorised] SF2_RAGDOLL_PROBE: the visible per-frame bone
+        // delta (new solved pose vs the previous drawn `pos_`) on the first
+        // ragdoll frames — the knockdown/wall-bounce handoff evidence.
+        if (solver_world_ && nk_ && ragdoll_frame_count_ <= 3 &&
+            std::getenv("SF2_RAGDOLL_PROBE") != nullptr &&
+            pos_.size() == n * 2) {
+            float md = 0.0f;
+            std::size_t mi = 0;
+            for (std::size_t i = 0; i < n; ++i) {
+                const float dx = sol_ma_[i * 3] - pos_[i * 2];
+                const float dy = sol_ma_[i * 3 + 1] - pos_[i * 2 + 1];
+                const float d = std::sqrt(dx * dx + dy * dy);
+                if (d > md) {
+                    md = d;
+                    mi = i;
+                }
+            }
+            std::fprintf(stdout, "[ragdoll-pose] frame=%d rframe=%d maxbone=%s d=%.3f\n",
+                         frame, ragdoll_frame_count_, bones[mi].name.c_str(), md);
+            std::fflush(stdout);
         }
         // The solved pose becomes this frame's positions.
         for (std::size_t i = 0; i < n; ++i) {
