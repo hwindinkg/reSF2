@@ -1034,12 +1034,23 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
         // (~115 px), which the `draw_ui_wrapped` clip cut after line 1 — the
         // reported "act 1 без названия самого акта". `kViewW*0.9` already
         // matches the JS width expression; the height is the JS `400`.
-        draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
-                        400.0f,
-                        loc(app, app.quest_engine().act_overlay_text(),
-                            app.quest_engine().act_overlay_text()),
-                        0.9f, UiAlign::Center, 0.8196f * text_a, 0.7059f * text_a,
-                        0.4627f * text_a);
+        // `Rd` `this.label` is a CHILD of `this.node`, faded by `this.node.wa(a)`
+        // in `case 1` (L1078843). `draw_ui_wrapped` has no alpha, so the fade is
+        // folded into the colour against the black `hf` — but at `a==0` the fold
+        // yields (0,0,0), and an OPAQUE BLACK title drawn during `case 0` (the
+        // `hf` fade-in, `dim_a<1`) is VISIBLE on the still-bright scene behind
+        // the half-faded backdrop. That was the reported "надпись «акт 1»
+        // появилась ... немного раньше чем надо, до появления фона": the label
+        // showed (black) before the background. JS `wa(0)` = a fully transparent
+        // node, so draw NOTHING until the fade starts.
+        if (text_a > 0.0f) {
+            draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
+                            400.0f,
+                            loc(app, app.quest_engine().act_overlay_text(),
+                                app.quest_engine().act_overlay_text()),
+                            0.9f, UiAlign::Center, 0.8196f * text_a, 0.7059f * text_a,
+                            0.4627f * text_a);
+        }
     }
 }
 
@@ -14113,27 +14124,33 @@ void ResultsScreen::render_impl(App& app) {
             // `Hi.ap` exp). The port rendered the gold value STATIC.
             const std::int64_t money_shown = static_cast<std::int64_t>(
                 static_cast<double>(money_reward_) * dialog_ease_out(count) + 0.5);
+            // JS `Hg` (L1072451, the results number widget) label colour is
+            // `Na.cd(8908538)` = (135,238,250)/255 — light cyan. The port used
+            // (0.31,0.79,0.84) (79,201,214), too dark (a stale value).
             draw_ui_label(app, rx + 60.0f, ry - 16.0f, 120.0f, 32.0f,
-                          std::to_string(shown), 0.95f, UiAlign::Left, 0.31f * slide,
-                          0.79f * slide, 0.84f * slide);
+                          std::to_string(shown), 0.95f, UiAlign::Left, 0.52941f * slide,
+                          0.93333f * slide, 0.98039f * slide);
             (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                         slide);
             // `Pr.aa` L2083: the GOLD value is `this.el.lj(this.eZ(a))` - the
             // `eZ` = `mBa` compact formatter, NOT raw digits.
             draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
                           results_coin_text(app, money_shown), 0.95f, UiAlign::Left,
-                          0.31f * slide, 0.79f * slide, 0.84f * slide);
+                          0.52941f * slide, 0.93333f * slide, 0.98039f * slide);
             continue;
         }
         std::string lab = loc(app, r.key, r.fallback);
         if (r.has_count) lab = with_count(std::move(lab), r.count);
+        // JS `Or.vU.La(Na.cd(16776391))` (L1073997): the results row LABEL is
+        // (255,252,199)/255 — near-white cream. The port used (0.94,0.89,0.72)
+        // (240,227,184), a visibly duller beige.
         draw_ui_label(app, rx, ry - 16.0f, 400.0f, 32.0f, lab, 0.95f, UiAlign::Left,
-                      0.94f * slide, 0.89f * slide, 0.72f * slide);
+                      1.0f * slide, 0.98824f * slide, 0.78039f * slide);
         (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                     slide);
         draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
-                      results_coin_text(app, shown), 0.95f, UiAlign::Left, 0.31f * slide,
-                      0.79f * slide, 0.84f * slide);
+                      results_coin_text(app, shown), 0.95f, UiAlign::Left, 0.52941f * slide,
+                      0.93333f * slide, 0.98039f * slide);
         // `Or.Qw` ruby sub-row (L2086-2088): the `ruby` icon (`y.boa`
         // L2466) + the `We.Sfa`-formatted `oc.OY` value, shown only when
         // `x_>0` (`Or.nx` L2087) and placed LEFT of the gold value
@@ -14146,7 +14163,7 @@ void ResultsScreen::render_impl(App& app) {
                                         40.0f, slide);
             draw_ui_label(app, rx + coin_dx - 252.0f, ry - 16.0f, 160.0f, 32.0f,
                           results_spaced_text(ruby_shown), 0.9f, UiAlign::Right,
-                          0.31f * slide, 0.79f * slide, 0.84f * slide);
+                          0.52941f * slide, 0.93333f * slide, 0.98039f * slide);
         }
     }
     // PROBE (temporary, `SF2_REVEAL_PROBE=1`): per-frame reveal telemetry —

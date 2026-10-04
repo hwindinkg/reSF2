@@ -168,7 +168,20 @@ void ScreenManager::push_impl(std::unique_ptr<Screen> screen, const std::string&
     // push. It mounted here on EVERY push, so it appeared on the fight->VS
     // intro and the fight->results handoff, which are NOT `Taa` scene changes
     // (Results is a native shell screen; the VS plate is a state of Fight).
-    quest_nav(app_, nav_from, pushed_id);
+    // JS: the Results screen is NOT a scene change — `v.kD` (L622187) shows the
+    // `kk` results panel as a CHILD of the fight screen `i` (`i.lca` L2008
+    // `this.Ws=Qo(jk)`); no `Zd.load`/`wa.mp` runs. So pushing/poping Results
+    // must NOT fire `ChangeTab`/`SceneLoaded`. `quest_scene_name` maps Results
+    // to "Fight" (it has no JS scene id), which made the push fire a spurious
+    // `SceneLoaded` (scene=Fight). `fire("SceneLoaded")` -> `drain_deferred_fight`
+    // (quest_engine.cpp) then ran the FightEnd-deferred quests (FirstGuardBeaten
+    // -> the `ActScreen` Act_1) DURING the results, starting the act overlay
+    // before the map. JS `ha.add` (L522089) suppresses auto-run while scene==Fight
+    // and pumps the queue on the NEXT real scene load (the Map), so the act
+    // belongs to the Map, not the results handoff.
+    if (pushed_id != kScreenResults) {
+        quest_nav(app_, nav_from, pushed_id);
+    }
 }
 
 void ScreenManager::pop() {
@@ -180,12 +193,18 @@ void ScreenManager::pop() {
                  static_cast<int>(popped->id()), stack_.size() - 1);
     std::fflush(stdout);
     popped->set_state(kStateDestroyed);
-    const std::string nav_from = quest_scene_name(popped->id());
+    const ScreenId popped_id = popped->id();
+    const std::string nav_from = quest_scene_name(popped_id);
     stack_.pop_back();
     // The screen beneath (the JS "caller") reactivates.
     if (!stack_.empty()) {
         stack_.back()->set_state(kStateActive);
-        quest_nav(app_, nav_from, stack_.back()->id());
+        // Popping Results is not a JS scene change (see `push_impl`): skip the
+        // spurious "Fight"->"Fight" ChangeTab/SceneLoaded. The real edge
+        // (Fight->Map) still fires when the Fight itself is popped next.
+        if (popped_id != kScreenResults) {
+            quest_nav(app_, nav_from, stack_.back()->id());
+        }
     }
 }
 
