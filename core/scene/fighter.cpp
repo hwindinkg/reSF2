@@ -2082,14 +2082,48 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     last_action_frame_ = -1;  // the `cX` sentinel (first `vp` sees a change)
     ended_move_ = nullptr;
     // [FIX Pi preview placement — JS `Pi.J9` L439 + `Pi.job` L444 -> `wd.oL`
-    // L577] The `Pi` model node sits at J9=(0,-93); `oL` shifts every node's
-    // `ma` so the render anchor lands there ONCE, and the clip then rides from
-    // it. Reproduce it: the first `sample` captures `render_offset*` from this
-    // node point instead of leaving the anchor on the clip pivot.
+    // L577 -> `Dl.oL` L293874] The `Pi` model node sits at J9=(0,-93); `oL`
+    // shifts EVERY solver body so the render anchor (`Dl.Fe()` = NPivot) lands
+    // on J9 ONCE, BEFORE `Skb` runs `Gub` (align) / `qrb` (prepend) / `eda`
+    // (clip apply). Reproduce it by shifting the persisted solver state: then
+    // `compute_align` reads the J9-seated `e = currentNode.ma` (so the align
+    // shift `Fk` already carries the J9 delta on the align axes), `build_prepend`
+    // seeds the J9 pose, and the anchor rides the clip with NO extra constant.
+    // The OLD code instead captured `render_offset_y_ = node_y - py0[anchor]`
+    // and added it to EVERY later frame: since the shipped `<Align Axis>` is
+    // `X|Z` (Y is never an align axis), the JS `Gla` leaves the buffer y alone,
+    // so the constant `J9.y - bind[anchor].y` (~40..73u) sank the whole move
+    // (probe: HighBlockProfile world_y -93 -> -29 vs the JS clip y).
+    {
+        const int seat_a = model_.bone_by_name(fighter_pivot_bone());
+        if (seat_a >= 0 && solver_init_ &&
+            sol_ma_.size() == model_.bones.size() * 3 &&
+            sol_mf_.size() == sol_ma_.size()) {
+            const std::size_t u = static_cast<std::size_t>(seat_a) * 3;
+            const float dx = node_x - sol_ma_[u];
+            const float dy = node_y - sol_ma_[u + 1];
+            const float dz = 0.0f - sol_ma_[u + 2];
+            for (std::size_t i = 0; i < sol_ma_.size(); i += 3) {
+                sol_ma_[i] += dx;
+                sol_ma_[i + 1] += dy;
+                sol_ma_[i + 2] += dz;
+                sol_mf_[i] += dx;
+                sol_mf_[i + 1] += dy;
+                sol_mf_[i + 2] += dz;
+            }
+        }
+    }
     preview_mode_ = true;
     world_x_ = node_x;
     world_y_ = node_y;
-    render_offset_valid_ = false;
+    // The oL seat above already places the anchor in the solver state, so the
+    // anchor rides the clip exactly as the fight does: `render_offset_*` = 0
+    // (the JS `Gla` shift on the align axes is carried by `align_*`, which
+    // `compute_align` now derives from the J9-seated `sol_ma_`). The old capture
+    // added `node - p0[anchor]` to every later frame.
+    render_offset_ = 0.0f;
+    render_offset_y_ = 0.0f;
+    render_offset_valid_ = true;
     // [FIX preview sink / first-entry bind pose] JS `Te.Skb` L551 runs
     // `Gub()` (align, L557-559) and `Pka`/`qrb` (the two play-buffer prepend
     // slots, L551) BEFORE the first `eda` sample. `start_preview_clip` omitted

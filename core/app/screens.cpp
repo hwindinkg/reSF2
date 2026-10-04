@@ -3685,6 +3685,15 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // atlas 254, `Fg` ctor L1869), rotated 90° for the vertical column
     // (`Fg.ba` case 1 `wc.Wg(90)`). Drawn BEFORE the `Le` buttons (which are
     // children of `wc.content`).
+    // JS `gk.JT` case 1 (L1030850) + `scroll.lL(this.mI)` (L1030298): the scroll
+    // CONTENT clip `mI` slides down from above the column — `mI.P = -height +
+    // a*height`, `mI.W = mI.P + height` — so the paper + `Le` buttons are
+    // REVEALED top-down as the column opens. The port drew the whole panel at
+    // full size for any `yI > 0` (only the `Af` rail animated) — the reported
+    // "panel opens with NO animation". Clip the content to the top `nav_frac`
+    // of the column; the `Af` rail is a SIBLING of the scroll, so it stays
+    // unclipped (drawn after the pop).
+    ren.push_clip(lay.nav_x, lay.sp, lay.nav_w, nav_frac * lay.nav_col_h);
     {
         const float qka = lay.nav_qka;
         const float col_h = lay.nav_col_h;
@@ -3761,6 +3770,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
             draw_highlight_menu(app, nav_cx, cy_i, kHighlightMenuSource * lay.nav_scale);
         }
     }
+    ren.pop_clip();  // end the `gk.mI` content reveal (rail below is unclipped)
     // `gk`'s title rail (`Zh`: `y.goa`/`y.pSa` = roll_end/roll_center, L1872/
     // L2467). `JT` (L2001) puts it at `D(f - railH/2)` once expanded, so the
     // "МЕНЮ" roll slides from the column TOP (collapsed) to the BOTTOM
