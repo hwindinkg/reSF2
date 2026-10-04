@@ -594,6 +594,7 @@ private:
     int x_ = 0;                     // `$x` — ResponseDelay cache (`gfa+1`, set in jwb)
     int aea_ = 0;                   // last EnemyResponseDelay draw (`Aea`, per XAa call)
     std::string last_enemy_anim_;   // enemy-move-change detector (anim-name proxy)
+    const MoveDef* last_enemy_move_ = nullptr;  // JS `jwb` move-start detector
     bool qja_done_ = false;
     mutable DaPrng prng_;           // owned stream (JS `Da.pg`)
     int aqa_ = 1;                   // `aqa` — the distance category (dqb)    // The chance curves' evaluated scores (JS `CZ/bda/tba` from dqb).

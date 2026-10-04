@@ -1386,23 +1386,30 @@ std::string AiController::update(const AiFightState& st) {
     Fl_ = st.enemy_playing ? st.enemy_kj + j0_draw() : -1;
     q7_ = st.playing ? st.move_kj : -1;
 
+    // JS `de.ia` (L592-593): `QJa` re-rolls the five cached chance rolls
+    // (`tua/dua/Bpa/rqa/oqa`) that gate the safe attack, table attack and
+    // cautious movements. [FIX nG-freeze] The port re-rolled them only on the
+    // opponent's move START (the `jwb` proxy below), so during a long opponent
+    // move that is NOT a <RandomizingEnemyAnimation> child (e.g. the player's
+    // StepBack) every roll — including `Bpa`, the CautiousMovementsChance
+    // roll — froze; the AI then had `nG=0` for hundreds of frames and stood
+    // still. `nG=Bpa<Awa` is re-evaluated every `ia` pass, so re-roll each
+    // pass (the JS also re-rolls on the opponent's move start via `jwb`).
+    const bool move_changed = st.enemy_move != last_enemy_move_;
+    if (st.enemy_playing && st.enemy_move != nullptr) {
+        qja(st);
+        qja_done_ = true;
+    }
     // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY
     // STARTS a move: `var b=a.da,c=b.Ua; if(b.Pe&&c!=null){...this.QJa(a);
-    // if(!this.mcb(c)){...this.$x=this.gfa(this.Ol)}}`. The port detects the
-    // move start by the enemy anim name; it must ALSO require the enemy to be
-    // PLAYING with a move (`b.Pe && c!=null`) — a hit reaction (`Pe=!1`,
-    // `Ua` possibly still set) must draw NOTHING. `mcb(c)` gates the `$x`
-    // ResponseDelay cache (see `mcb`).
-    if (!qja_done_ || st.enemy_anim != last_enemy_anim_) {
+    // if(!this.mcb(c)){...this.$x=this.gfa(this.Ol)}}`. `mcb(c)` gates the
+    // `$x` ResponseDelay cache (see `mcb`).
+    if (move_changed || st.enemy_anim != last_enemy_anim_) {
         last_enemy_anim_ = st.enemy_anim;
-        if (st.enemy_playing && st.enemy_move != nullptr) {
-            qja(st);
-            qja_done_ = true;
-            // JS `jwb` L596-597: `...this.QJa(a); if(!this.mcb(c)){...
-            // this.$x=this.gfa(this.Ol)}` — the ResponseDelay cache is
-            // (re)rolled ONLY for moves NOT in `<IgnoredEnemyAnimations>`;
-            // otherwise `$x` keeps its previous value.
-            if (!mcb(*st.enemy_move)) x_ = gfa_draw();
+        last_enemy_move_ = st.enemy_move;
+        if (st.enemy_playing && st.enemy_move != nullptr &&
+            !mcb(*st.enemy_move)) {
+            x_ = gfa_draw();
         }
     }
 
