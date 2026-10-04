@@ -810,6 +810,10 @@ bool App::init(const std::string& res_root, const std::string& save_path,
         load_ui_atlas_bundle_impl(*this, ui, "profile");
         load_ui_atlas_bundle_impl(*this, ui, "misc");
         load_ui_atlas_bundle_impl(*this, ui, "skills");
+        // Enchantment icons (JS `E.get(266)` = the `enchantments` atlas): the
+        // shop cell `SE` icon row (`ns.j5` L2308) + the item detail enchant
+        // list resolve their frames here (`EnchantmentBleeding`, ...).
+        load_ui_atlas_bundle_impl(*this, ui, "enchantments");
         load_ui_atlas_bundle_impl(*this, mp, "buttons");
         // Virtual-gamepad art (Joystick*, btn_punch_*, btn_kick_*): loaded
         // at boot (Dojo wave) so the Dojo hub pad resolves on frame 1.

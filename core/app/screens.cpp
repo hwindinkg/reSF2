@@ -48,6 +48,7 @@
 #include "app/save_system.hpp"
 #include "atlas.hpp"
 #include "audio/audio.hpp"
+#include "audio/sfx_table.hpp"  // `sfx_stem_for_js` = JS `ta.WBa` (L1265-1274)
 #include "audio/special_regen.hpp"
 #include "font.hpp"
 #include "scene/fight.hpp"
@@ -14687,6 +14688,136 @@ const char* shop_default_for_type(const std::string& type) {
     return "Fists";
 }
 
+// Reads one XML doc from the extracted res dir (same silent-on-absence rule the
+// other shell loaders use) — local to the shop catalog helpers below.
+bool shop_read_res_xml(const std::string& path, sf2::data::xml_doc& doc) {
+    try {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return false;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// JS `v.TMa` (`internal_settings.xml` `<Shop><Override Screen=.. Type=.. Name=..>`;
+// parse L593892 `v.TMa.parse(a.A("Shop"))`, `T7a(a)` L613638 = `m.find(this.ica,
+// b => b.screen == a)`). `Pi.$yb(type)` L226818 runs inside `Pi.Ex`: it resolves
+// the override whose `Screen` equals the previewed item's TYPE and, when found,
+// `this.Ca.hk(a.type, p.items.$b(a.iE)); this.Ca.cM()` — i.e. it writes that
+// override's slot item into the preview body and re-merges. Shipped: EVERY
+// `Screen` in {Armor,Helm,Ranged,Magic,RealMoneyItem,Free} maps to
+// `Type="Weapon" Name="Fists"`, so an armor/helm try-on wears a BARE (Fists)
+// weapon — without this the player's current weapon model leaked into the
+// preview (the reported "two smooth spikes from the back" on an armor/helm
+// try-on).
+struct ShopOverride {
+    std::string type;  // the slot to overwrite ("Weapon")
+    std::string name;  // the item to wear ("Fists")
+};
+
+// `v.TMa` keyed by `Screen` (the previewed type). Parsed from
+// internal_settings.xml `<Shop><Override>`; empty when the file/child is absent.
+const std::map<std::string, ShopOverride>& shop_overrides() {
+    static const std::map<std::string, ShopOverride> kMap = [] {
+        std::map<std::string, ShopOverride> m;
+        sf2::data::xml_doc doc;
+        if (shop_read_res_xml("reference/extracted/xml/res/internal_settings.xml", doc)) {
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                for (const pugi::xml_node ov : root.child("Shop").children("Override")) {
+                    const std::string screen = ov.attribute("Screen").value();
+                    if (screen.empty()) continue;
+                    m[screen] = ShopOverride{ov.attribute("Type").value(),
+                                             ov.attribute("Name").value()};
+                }
+            }
+        }
+        return m;
+    }();
+    return kMap;
+}
+
+// `Ye.wza(perk)` L960022: `a = Ye.Fxb(perk.image)` (basename after the last
+// `.`/`/`) then `a.substring(0, a.indexOf("_"))` (truncate at the first `_`).
+// The perk's `Image` comes from perks.xml (`v.Rg`); the resulting frame name is
+// looked up in atlas 266 (`E.get(266)`, `dk.refresh` L965511).
+std::string shop_perk_frame(const std::string& image) {
+    std::string a = image;
+    const std::size_t dot = a.find_last_of("./");
+    if (dot != std::string::npos) a = a.substr(dot + 1);
+    const std::size_t us = a.find('_');
+    if (us != std::string::npos) a = a.substr(0, us);
+    return a;
+}
+
+// perks.xml `Name -> Image` (JS `v.Rg.jn` L174391 resolves the perk def). Cached;
+// the enchant icons on the shop cells (`ns.j5` L2308 `SE.p5(p.BD(bc))`) resolve
+// each `<Enchantments><Perk Name>` through this map.
+const std::map<std::string, std::string>& shop_perk_images() {
+    static const std::map<std::string, std::string> kMap = [] {
+        std::map<std::string, std::string> m;
+        sf2::data::xml_doc doc;
+        if (!shop_read_res_xml("reference/extracted/xml/res/perks.xml", doc)) {
+            return m;
+        }
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return m;
+        std::map<std::string, pugi::xml_node> nodes;
+        for (const pugi::xml_node p : root.children("Perk")) {
+            const std::string name = p.attribute("Name").value();
+            if (!name.empty()) nodes[name] = p;
+        }
+        // JS `v.Rg.jn(name)` resolves the perk DEF with its `<Perk Template=..>`
+        // chain, so a templated enchant (`PERK_ITEM_SPECIAL_BLEEDING_WEAPON`
+        // -> `PERK_ITEM_SPECIAL_BLEEDING`) inherits the base `Image`. Walk the
+        // chain to the first non-empty `Image`.
+        for (const auto& kv : nodes) {
+            std::string image;
+            for (pugi::xml_node cur = kv.second; cur;) {
+                const char* im = cur.attribute("Image").value();
+                if (im != nullptr && *im != '\0') {
+                    image = im;
+                    break;
+                }
+                const std::string tmpl = cur.attribute("Template").value();
+                if (tmpl.empty()) break;
+                const auto it = nodes.find(tmpl);
+                if (it == nodes.end()) break;
+                cur = it->second;
+            }
+            if (!image.empty()) m[kv.first] = image;
+        }
+        return m;
+    }();
+    return kMap;
+}
+
+// `p.BD(item)` L111598: the enchant list of `item` — the OWNED runtime entry's
+// `be` when the player owns it (`p.rf(name)`), else the catalog `<Enchantments>`
+// (`item.GF`). The port maps both to the list of enchant PERK names, in order.
+std::vector<std::string> shop_item_enchants(const CatalogItem& it,
+                                            const WarriorSave& seen) {
+    std::vector<std::string> out;
+    for (const WarriorSave::OwnedItem& o : seen.items) {
+        if (o.name != it.name) continue;
+        // `b.be` — the save's `<Enchantments><Perk Name>` rows.
+        for (const WarriorSave::ItemEnchantment& e : o.enchantments) {
+            if (!e.name.empty()) out.push_back(e.name);
+        }
+        if (!out.empty()) return out;
+        break;
+    }
+    // `a.GF` — the catalog `<Enchantments>` rows.
+    for (const ItemPerkRef& ref : it.perks) {
+        if (ref.enchant && !ref.name.empty()) out.push_back(ref.name);
+    }
+    return out;
+}
+
 // The `<Screen Name>` a shop item's `TryOn` move is gated to (`Gm` L?; the
 // shipped names are ShopWeapon/ShopArmor/ShopHelm/ShopMagic/ShopMissile/
 // ShopOther). The list.xml Type buckets: Weapon->ShopWeapon (58 moves),
@@ -14723,6 +14854,58 @@ std::string shop_clip_key(const sf2::scene::MoveDef& m) {
 // dojo/fight return is unaffected. The clip is the move the worn item's
 // `<Screen>` + `<Item>` locks admit (WEAPON_KNIVES -> `ShopKnivesSuperSlash`,
 // moves.xml L9437 -> `knives_super_slash.bin`).
+// JS `Pi.ia` L445 -> `wd.ia` L499 -> `Te.ia` L547 -> `Te.Lwa` L563-564
+// (`EActionStart`) -> `wd.mHa` L530 -> `wd.BNa` L523 -> each `<Actions>`
+// handler. The shop preview drives the SAME `Fighter` the fight does, so the
+// TryOn move's `<Sound>` frames (`ShopKnivesSuperSlash` ships
+// `snd_m_pl_attack1`/`snd_swish_sword1/2` on frames 2/4/14/16) must fire here
+// too. The old port advanced the clip but never dispatched, so a weapon try-on
+// was silent. Sound / RandomSound / StopSound only — the other kinds need the
+// fight's systems (child models, camera, bullets).
+void shop_dispatch_preview_sounds(sf2::scene::Fighter& f) {
+    for (const sf2::scene::MoveAction* act : f.take_frame_actions()) {
+        if (act == nullptr) continue;
+        // JS `fm.fka(voice)` L735 / `am.fka(voice)` L733: a `<Sound Voice="X">`
+        // fires only when X equals the body's own voice.
+        if (act->has_voice && act->voice != f.voice()) continue;
+        if (act->kind == "StopSound") {
+            if (sf2::audio::sfx_stem_for_js(act->name.c_str()) != nullptr) {
+                sf2::audio::AudioEngine::instance().stop(act->name);
+            }
+            continue;
+        }
+        if (act->kind == "Sound") {
+            // JS `ta.ak(name, looped)` L1264: a name absent from `ta.WBa`
+            // plays NOTHING.
+            const char* stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
+            std::fprintf(stdout, "[shop] TryOn sfx %s name=%s stem=%s\n",
+                         act->kind.c_str(), act->name.c_str(),
+                         stem != nullptr ? stem : "<none>");
+            std::fflush(stdout);
+            if (stem != nullptr) {
+                sf2::audio::AudioEngine::instance().play(act->name, act->looped);
+            }
+            continue;
+        }
+        // NOTE: `RandomSound` (`am` L733) is intentionally not handled — all
+        // 110 ShopTryOn moves ship only `<Sound>` (grep moves.xml: 0 RandomSound
+        // in a ShopTryOn move), and its `Math.random` pick lives on the fight's
+        // private stream.
+    }
+}
+
+// JS `Oa.f5` L2287 (`this.Ad.LX==7 && this.yS()`): a tab switch while a TryOn
+// preview is live ends it — `Ad.$Ma()` (drop the model) + `fU()` (`bB.node.Rc(!0)`,
+// re-show the body) + `Oya=!0`. The port's one-shot `body_hidden_` is cleared
+// here too, so the hide never leaks onto the newly-selected tab.
+void ShopScreen::cancel_preview() {
+    preview_active_ = false;
+    preview_fighter_.reset();
+    preview_clip_ = nullptr;
+    preview_frame_ = 0;
+    body_hidden_ = false;
+}
+
 void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     preview_fighter_.reset();
     preview_model_ = sf2::scene::Model{};
@@ -14749,12 +14932,38 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     // Body: the save's typed slots with the item swapped into its own
     // (`fighter_model_names` buckets by list.xml Type, last-in wins).
     std::vector<std::string> names;
+    std::string player_voice;
     try {
         const WarriorSave w = app.save().load();
         names = {w.skeleton, w.weapon, w.armor, w.helm};
+        player_voice = w.voice;  // `xc.voice` for the `<Sound Voice=..>` gate
     } catch (const std::exception&) {
     }
     names.push_back(it.name);
+    // JS `Pi.$yb(it.type)` L226818 (`v.TMa.T7a` L613638): the previewed TYPE's
+    // `<Shop><Override Screen=.. Type=.. Name=..>` REPLACES that slot on the
+    // preview body (`this.Ca.hk(ov.type, p.items.$b(ov.name)); this.Ca.cM()`).
+    // Shipped: Armor/Helm/Ranged/Magic/RealMoneyItem/Free all map to
+    // `Type="Weapon" Name="Fists"`, so an armor/helm try-on wears a BARE
+    // (Fists) weapon. Without it the player's current weapon model leaked into
+    // the preview (the reported "two smooth spikes from the back").
+    {
+        const auto ov_it = shop_overrides().find(it.type);
+        if (ov_it != shop_overrides().end() && !ov_it->second.name.empty()) {
+            const ShopOverride& ov = ov_it->second;
+            names.push_back(ov.name);  // last-in wins in the typed bucket
+            std::string sub;
+            for (const CatalogItem& ci : load_full_catalog(app)) {
+                if (ci.name == ov.name) { sub = ci.subtype; break; }
+            }
+            worn.erase(std::remove_if(worn.begin(), worn.end(),
+                                      [&](const sf2::scene::OwnedItem& o) {
+                                          return o.type == ov.type;
+                                      }),
+                       worn.end());
+            worn.push_back({ov.type, sub, ov.name});
+        }
+    }
     const std::vector<std::string> model_names = fighter_model_names(app, names);
     if (model_names.empty() || model_names[0].empty()) {
         std::fprintf(stdout, "[shop] Ex(a,7) preview: no model names for %s\n",
@@ -14789,6 +14998,11 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     preview_fighter_ = std::make_unique<sf2::scene::Fighter>();
     preview_fighter_->set_model(preview_model_);
     preview_fighter_->set_color(assets.dojo.root_color());
+    // JS `xc.voice` (the player character's `Voice`): `Pi.Ex` builds the preview
+    // body from `new xc(v.cw())`, so the TryOn move's `<Sound Voice="Male">`
+    // attack grunt passes `fm.fka` L735. Without it every Voice-gated action is
+    // silent (the reported "no attack sound on a weapon try-on").
+    preview_fighter_->set_voice(player_voice);
     preview_clip_ = &cit->second;
     // `Pi.Ex` (L2301) seats the clip and runs `this.ia()` ONCE; `Oa.Fhb` then
     // calls `this.Ad.aa(L.K.sk.Bm)` (one more `ia()`). Drive the SAME `Te.ia`
@@ -14796,6 +15010,12 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     // was `(MidFrames+1)` = 3x too fast).
     preview_fighter_->start_preview_clip(*tm, *preview_clip_);
     preview_fighter_->advance(0.0f);  // `Pi.Ex`'s internal `this.ia()`
+    // JS `Te.ia` dispatches that first frame's `<Actions>` (`Te.Lwa` L563-564)
+    // — `Oa.Fhb` L2301 then calls `this.Ad.aa(L.K.sk.Bm)` (a SECOND `ia()`), so
+    // the TryOn move's FIRST frame's sounds (ShopKnivesSuperSlash frame 2:
+    // `snd_m_pl_attack1`) must fire at arm time, not be dropped by the next
+    // `advance`'s `frame_actions_.clear()`.
+    shop_dispatch_preview_sounds(*preview_fighter_);
     preview_frame_ = preview_fighter_->move_frame();
     preview_active_ = true;
     // Preview-owned storage: the shared body (`assets.merged`, used by the
@@ -15661,6 +15881,16 @@ void ShopScreen::update_impl(float dt) {
                 p.y >= tl.cy - tl.btn_h / 2 && p.y <= tl.cy + tl.btn_h / 2) {
                 tab_hover_ = t;
                 if (p.pressed && t != tab_) {
+                    // JS `Oa.f5` L2287: `... this.Ad.LX==7 && this.yS()` — a
+                    // tab switch while a TryOn preview is live ENDS it
+                    // (`Ad.$Ma(); this.fU(); Oya=!0`), which re-shows the body.
+                    // Without this the preview stayed armed across tabs and the
+                    // one-shot `body_hidden_` state leaked onto the new tab.
+                    if (preview_active_) {
+                        cancel_preview();
+                        std::fprintf(stdout, "[shop] f5 tab switch -> yS()/fU()\n");
+                        std::fflush(stdout);
+                    }
                     tab_ = t;
                     sel_ = 0;  // Oa.f5 -> usb() auto-selects the first cell
                     auto_sel_row_ = -1;  // `Za.Kmb()` clears `Ac`
@@ -15981,12 +16211,16 @@ void ShopScreen::update_impl(float dt) {
                     // L1228) handled while the panel is armed below; a TRY
                     // press never buys directly.
                     arm_preview(app(), it);
+                    // JS `Oa.Fhb` L2301 -> `this.sab()` -> `Bcb()` L2301: hide
+                    // the shop body for a TryOn on a tab OTHER than Armor (1) /
+                    // Helm (2). One-shot at the press; `fU()` restores it.
+                    body_hidden_ = (tab_ != 1 && tab_ != 2);
                     buy_armed_ = sel;
                     std::fprintf(stdout,
                                  "[shop] Fhb -> Ex(a,7) Pi panel OPEN for %s (price %lld, "
-                                 "have %lld)\n",
+                                 "have %lld) body_hidden=%d\n",
                                  it.name.c_str(), static_cast<long long>(it.price),
-                                 static_cast<long long>(w.money));
+                                 static_cast<long long>(w.money), body_hidden_ ? 1 : 0);
                     std::fflush(stdout);
                 }
             }
@@ -16077,12 +16311,23 @@ void ShopScreen::update_impl(float dt) {
     // (the `Ad.kg` animation-end -> `Oa.yS` -> `Ex(null,6)`).
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
+        // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
+        // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
+        // the actions collected by the advance() just run.
+        shop_dispatch_preview_sounds(*preview_fighter_);
         preview_frame_ = preview_fighter_->move_frame();
         if (!preview_fighter_->preview_active()) {
             preview_active_ = false;
             preview_fighter_.reset();
             preview_clip_ = nullptr;
             preview_frame_ = 0;
+            // JS `Pi.wia` L446 -> `Oa.yS` L2300 -> `fU()`: the body is shown
+            // again (`this.bB.node.Rc(!0)`) when the TryOn clip ends.
+            if (body_hidden_) {
+                std::fprintf(stdout, "[shop] TryOn end -> fU() body shown\n");
+                std::fflush(stdout);
+            }
+            body_hidden_ = false;
         }
     }
     // Display-only: the screen's own `za` state (`gk.uJ`) is untouched so the Dojo keeps its column.
@@ -16111,7 +16356,7 @@ void ShopScreen::render_impl(App& app) {
     // (`this.bB.node.Rc(!1)`) and shows only the `Pi` model + dim overlay. The
     // port drew the full UI over the weapon try-on (the report: "не пропадает
     // интерфейс магазина").
-    if (preview_active_ && tab_ != 1 && tab_ != 2) return;
+    if (body_hidden_) return;
 
     // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width
     // bar + `Le` buttons (id 248 shop atlas `buttons/<Category>[_active]`),
@@ -16290,13 +16535,71 @@ void ShopScreen::render_impl(App& app) {
                 try_draw_atlas_button(app, "lock", cx, cy, cw * 0.2f, cw * 0.2f, 1.0f,
                                       false, false);
             }
+            // `SE`=`gi` enchant icon row: `ns.j5` L2308 `this.SE.p5(p.BD(this.bc))`
+            // (the OWNED runtime entry's `be`, else the catalog `<Enchantments>`),
+            // drawn by `gi.ba(ce.x, 40)` (@1186046): one `dk` icon per enchant,
+            // scaled `40/icon.fa.y*1.3`, laid left-to-right, row centred in the
+            // cell's bottom 40-unit strip. The old port drew NOTHING here, so an
+            // enchanted shop item showed no enchant icons (the report).
+            {
+                const std::vector<std::string> ench = shop_item_enchants(it, seen_);
+                if (!ench.empty()) {
+                    const std::map<std::string, std::string>& imgs =
+                        shop_perk_images();
+                    struct EnchIcon {
+                        std::string frame;  // `enchantments` atlas frame
+                        float w;            // source width
+                        float h;            // source height
+                    };
+                    std::vector<EnchIcon> icons;
+                    for (const std::string& nm : ench) {
+                        const auto iit = imgs.find(nm);
+                        if (iit == imgs.end() || iit->second.empty()) continue;
+                        // `Ye.wza(image)` (basename, truncated at `_`): the
+                        // `enchantments` atlas frame ("SkillsEnch02.
+                        // EnchantmentBleeding" -> "EnchantmentBleeding").
+                        const std::string frame = shop_perk_frame(iit->second);
+                        sf2::data::atlas_frame fr;
+                        int tw = 0, th = 0;
+                        unsigned int gl = 0;
+                        if (frame.empty() ||
+                            !app.get_atlas_frame(frame.c_str(), &fr, &tw, &th, &gl)) {
+                            continue;
+                        }
+                        const float sw = fr.source_w > 0
+                                             ? static_cast<float>(fr.source_w)
+                                             : static_cast<float>(fr.w);
+                        const float sh = fr.source_h > 0
+                                             ? static_cast<float>(fr.source_h)
+                                             : static_cast<float>(fr.h);
+                        icons.push_back({frame, sw, sh});
+                    }
+                    if (!icons.empty()) {
+                        // `c = this.Oa[0].icon.fa.y` (the FIRST icon's height);
+                        // `g.la(b/c*1.3)` with b=40.
+                        const float c0 = icons[0].h > 0.0f ? icons[0].h : 1.0f;
+                        const float isc = (40.0f / c0) * 1.3f;
+                        float total = 0.0f;
+                        for (const EnchIcon& ic : icons) total += ic.w * isc;
+                        float ex = cell.J + (cw - total) * 0.5f;
+                        const float ey = jw_top + fr_h * 0.5f;
+                        for (const EnchIcon& ic : icons) {
+                            const float ew = ic.w * isc;
+                            const float eh = ic.h * isc;
+                            // `dk.refresh` L965511: `wa(Wh!=0 || v.Xz(Lc) ? 1
+                            // : .5)` — a plain catalog enchant draws at 0.5.
+                            draw_cell_icon(app, ic.frame, ex + ew * 0.5f, ey, ew, eh, 0.5f);
+                            ex += ew;
+                        }
+                    }
+                }
+            }
         }
-        // NOTE (not ported, needs data the cell draw lacks): the `SE`=`gi`
-        // icon row (`SE.p5(p.BD(bc))`, @1187134), the `HG` user portrait for
-        // `type==I.Vr` (`new oe(Ye.qI(a.fileName))`, @1187118), and the `pv`
-        // amount label for `I.Ox`/`a7` (`this.pv.V(Y.na("shop_amount",
-        // p.o.uD(a.Kj)))`, @1187156) all require the upgraded `bc` variant /
-        // the player's currency lookup, not just the catalog row.
+        // NOTE (not ported, needs data the cell draw lacks): the `HG` user
+        // portrait for `type==I.Vr` (`new oe(Ye.qI(a.fileName))`, @1187118) and
+        // the `pv` amount label for `I.Ox`/`a7` (`this.pv.V(Y.na("shop_amount",
+        // p.o.uD(a.Kj)))`, @1187156) require the upgraded `bc` variant / the
+        // player's currency lookup, not just the catalog row.
         // `ns.ba` (L2306) + `ns.j5` (L2308-2309): the sale/`badge` flag `Di`
         // (atlas 248 `pieces/*`) + its text `Im`. Resolved by `shop_cell_badge`
         // (the single rule shared with the `--settings-profile-shop-probe`).
@@ -20790,6 +21093,125 @@ int run_shell_probe(App& app) {
         std::fflush(stdout);
         check(after == 2 && after != before,
               "(xiii) shop scroll auto-selects the centre cell (name/price refresh)");
+    }
+    // (xiv) SHOP CELL ENCHANT ICON ROW (this fix, report A): `ns.j5` L2308
+    // `SE.p5(p.BD(bc))` resolves the item's enchant list -> each perk's
+    // perks.xml `Image` -> `Ye.wza` frame (basename) in the `enchantments`
+    // atlas (`E.get(266)`). Prove a shipped shop item resolves end-to-end.
+    {
+        // The earlier steps may have rewritten the save with a minimal
+        // WarriorSave (dropping the unlocked packs), so re-unlock like (iii).
+        {
+            WarriorSave w = app.save().load();
+            for (const CatalogItem& it : load_full_catalog(app)) {
+                if (!it.pack_label.empty()) w.shop_lock_add(it.pack_label);
+            }
+            app.save().save(w);
+        }
+        const std::vector<CatalogItem> cat = load_catalog(app);
+        std::string item_name, frame;
+        std::size_t ench_n = 0;
+        for (const CatalogItem& it : cat) {
+            const std::vector<std::string> e = shop_item_enchants(it, WarriorSave{});
+            if (e.empty()) continue;
+            const std::map<std::string, std::string>& imgs = shop_perk_images();
+            const auto iit = imgs.find(e.front());
+            if (iit == imgs.end()) continue;
+            const std::string f = shop_perk_frame(iit->second);
+            sf2::data::atlas_frame fr;
+            int tw = 0, th = 0;
+            unsigned int gl = 0;
+            if (f.empty() || !app.get_atlas_frame(f.c_str(), &fr, &tw, &th, &gl)) continue;
+            item_name = it.name;
+            frame = f;
+            ench_n = e.size();
+            break;
+        }
+        std::size_t cat_ench = 0, img_n = 0;
+        for (const CatalogItem& it : cat) {
+            if (!shop_item_enchants(it, WarriorSave{}).empty()) ++cat_ench;
+        }
+        img_n = shop_perk_images().size();
+        std::fprintf(stdout,
+                     "[sps] enchant icon item=%s enchants=%zu frame=%s (cat=%zu "
+                     "cat_ench=%zu perk_imgs=%zu)\n",
+                     item_name.c_str(), ench_n, frame.c_str(), cat.size(), cat_ench,
+                     img_n);
+        std::fflush(stdout);
+        check(!item_name.empty() && ench_n > 0 && !frame.empty(),
+              "(xiv) shop cell enchant icon row resolves (p.BD -> perks.xml -> atlas 266)");
+    }
+    // (xv) ARMOR/HELM PREVIEW WEAPON OVERRIDE (this fix, report D): `Pi.Ex`
+    // L2301 -> `Pi.$yb(it.type)` L226818 applies the `<Shop><Override
+    // Screen="Armor" Type="Weapon" Name="Fists"/>` (internal_settings.xml), so
+    // an armor/helm try-on wears a BARE weapon — the equipped weapon model is
+    // dropped from the preview body (the reported "two smooth spikes from the
+    // back" was the current weapon's mesh).
+    {
+        ShopScreen shop(app.screens());
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const CatalogItem* wp = nullptr;
+        const CatalogItem* ar = nullptr;
+        for (const CatalogItem& it : full) {
+            if (wp == nullptr && it.type == "Weapon" && !it.model.empty() &&
+                it.price > 0 && !it.paid && !it.shop_hide) {
+                wp = &it;
+            }
+            if (ar == nullptr && it.type == "Armor" && !it.model.empty() &&
+                it.price > 0 && !it.paid && !it.shop_hide) {
+                ar = &it;
+            }
+        }
+        bool ok = false;
+        int with_w = 0, without_w = 0;
+        if (wp != nullptr && ar != nullptr) {
+            WarriorSave w = app.save().load();
+            const std::string saved_weapon = w.weapon;
+            w.weapon = wp->name;  // a MODELED weapon in the equipped slot
+            app.save().save(w);
+            with_w = static_cast<int>(
+                app.fight_assets()
+                    .merge_names(fighter_model_names(
+                        app, {w.skeleton, w.weapon, ar->name, w.helm}))
+                    .bones.size());
+            shop.probe_arm_preview(app, *ar);
+            without_w = shop.preview_bones();
+            // The previewed ARMOR replaces the armor slot (last-in wins), and
+            // the `<Shop><Override>` forces the weapon to Fists.
+            const int expect = static_cast<int>(
+                app.fight_assets()
+                    .merge_names(fighter_model_names(
+                        app, {w.skeleton, "Fists", ar->name, w.helm}))
+                    .bones.size());
+            ok = without_w == expect;
+            w.weapon = saved_weapon;  // restore
+            app.save().save(w);
+        }
+        std::fprintf(stdout,
+                     "[sps] armor preview weapon override weapon=%s armor=%s bones "
+                     "with=%d without=%d\n",
+                     wp != nullptr ? wp->name.c_str() : "-",
+                     ar != nullptr ? ar->name.c_str() : "-", with_w, without_w);
+        std::fflush(stdout);
+        check(ok, "(xv) armor try-on wears a bare weapon (Pi.$yb override)");
+    }
+    // (xvi) TAB-SWITCH CANCELS A TRY-ON (this fix, report C): `Oa.f5` L2287
+    // (`this.Ad.LX==7 && this.yS()`) ends a live preview and `fU()` re-shows the
+    // body. The pre-fix render gate `preview_active_ && tab_ != 1 && tab_ != 2`
+    // re-evaluated the CURRENT tab, so switching to the weapon tab after an
+    // armor/helm try-on hid the UI (the report). The fix makes the hide a
+    // one-shot state cleared by the tab-switch cancel.
+    {
+        ShopScreen shop(app.screens());
+        shop.probe_set_body_hidden(true);
+        const bool hidden_before = shop.probe_body_hidden();
+        shop.cancel_preview();
+        const bool hidden_after = shop.probe_body_hidden();
+        std::fprintf(stdout, "[sps] body hidden before=%d after tab-switch=%d\n",
+                     hidden_before ? 1 : 0, hidden_after ? 1 : 0);
+        std::fflush(stdout);
+        check(hidden_before && !hidden_after,
+              "(xvi) f5 tab switch ends the TryOn and re-shows the body (fU)");
     }
     std::fprintf(stdout, "[sps] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
                  fails);

@@ -81,6 +81,12 @@ struct WarriorSave {
     // false)` on the WARRIOR node — a save attribute (`users_default.xml`
     // ships "0"). Gates the shop upgrade plates (`k9 && p.o.qC`, L2255).
     bool show_upgrades = false;
+    // JS `xc.voice` (the WARRIOR `Voice` attr, `users_default.xml`/the seed
+    // ship `Voice="Male"`). Read-only in the port (the writer patches known
+    // attrs and leaves `Voice` verbatim); it feeds the `Pi` try-on preview's
+    // `<Sound Voice=..>` gate (`fm.fka` L735) so the ShopTryOn attack grunt
+    // plays (screens.cpp `arm_preview`).
+    std::string voice;
 
     // `p.o.ga.set("Avatar", a)` (JS `Fn`/`Fka` -> `Cr` L78838): the player's
     // avatar name (`<Warrior Avatar="...">`). Absent in the seed -> "".

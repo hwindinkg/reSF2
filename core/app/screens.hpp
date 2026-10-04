@@ -1040,6 +1040,14 @@ public:
     int preview_frame() const { return preview_frame_; }
     int preview_sub() const { return preview_fighter_ ? preview_fighter_->sub() : 0; }
     bool preview_active() const { return preview_active_; }
+    // [probe] the one-shot shop-body hide (JS `Oa.sab` L2301 -> `fU`) + the
+    // `f5` tab-switch cancel (`this.Ad.LX==7 && this.yS()`).
+    bool probe_body_hidden() const { return body_hidden_; }
+    void probe_set_body_hidden(bool v) { body_hidden_ = v; }
+    // JS `Oa.f5` L2287 `this.Ad.LX==7 && this.yS()`: end a live TryOn preview
+    // (`Ad.$Ma(); this.fU(); Oya=!0`) — also clears the one-shot `body_hidden_`
+    // (a tab switch must NOT leave the shop body hidden).
+    void cancel_preview();
     // [probe] arm the preview for `it` and advance it `steps` fixed ticks
     // (plus the arm's own `Pi.Ex` tick); returns the `Te.M0()` clip frame.
     int probe_preview_frame_after(App& app, const CatalogItem& it, int steps);
@@ -1139,6 +1147,15 @@ private:
     const sf2::data::anim_clip* preview_clip_ = nullptr;  // owned by FightAssets
     int preview_frame_ = 0;
     bool preview_active_ = false;
+    // JS `Oa.sab` L2301 -> `Bcb()` L2301 (`switch(this.Hg){case 1:case 2:return
+    // !1; default:return !0}`): a TryOn press on a NON-armor/helm tab HIDES the
+    // shop body (`this.bB.node.Rc(!1)`) and shows only the `Pi` model; `fU()`
+    // L2301 (`bB.node.Rc(!0)`) restores it on the clip end (`Oa.yS`). This is a
+    // ONE-SHOT state set at the press, NOT a per-frame `tab_` test — the old
+    // `preview_active_ && tab_ != 1 && tab_ != 2` render condition re-evaluated
+    // the CURRENT tab, so switching to the weapon tab after an armor/helm try-on
+    // hid the UI (the reported bug).
+    bool body_hidden_ = false;
 
     // `Oa.Fhb` L2300 unowned -> `this.Ex(a,7)` (L2301): build the preview body
     // wearing `it` and load the item's `TryOn` move clip. Preview-owned
