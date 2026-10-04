@@ -6089,10 +6089,19 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
         st.enemy_move = foe.fighter.current_move();
         st.enemy_move_frame = foe.fighter.move_frame();
-        // JS `kJ()` (`Te.lq`, advanced in lockstep with `Te.Xh`): the raw
-        // playback counters feeding `Fl`/`q7` (`de.ia` L592).
-        st.move_playhead = me.fighter.playhead();
-        st.enemy_playhead = foe.fighter.playhead();
+        // JS `kJ()` (`Te.lq`, the PER-SUB-STEP playback counter — NOT the
+        // logical `Te.Xh`): the counters feeding `Fl`/`q7` (`de.ia` L592).
+        // `kJ()` gates on `Pe`; the port's `Pe` proxy is `current_move &&
+        // !ragdoll` (the same expression `st.playing`/`st.enemy_playing`
+        // use below), so gate here.
+        st.move_kj = (me.fighter.current_move() != nullptr &&
+                      !me.fighter.ragdoll_active())
+                         ? me.fighter.played_steps()
+                         : 0;
+        st.enemy_kj = (foe.fighter.current_move() != nullptr &&
+                       !foe.fighter.ragdoll_active())
+                          ? foe.fighter.played_steps()
+                          : 0;
         for (const std::string& n : me.fighter.active_intervals()) {
             st.my_intervals.push_back({n, 0});
         }

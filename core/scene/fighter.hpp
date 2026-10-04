@@ -483,10 +483,18 @@ public:
     // JS `Te.rw` (L560): the per-clip mirror flag. `Te.xqb` (L553) swaps
     // every AttackingParts edge name ending `_1`/`_2` while it is set.
     bool mirror_swap() const { return mirror_swap_; }
-    // The raw playback counter (JS `Te.Xh`) — the quantity the JS `kJ()`
-    // returns (`kJ()` reads `lq`, which the `Te.ia` tick advances in lockstep
-    // with `Xh`). `Fl`/`q7` are built from it.
+    // The LOGICAL playback counter (JS `Te.Xh`): advanced once per
+    // `(MidFrames+1)` sub-steps (`Te.ia`'s normal branch `Xh++`). NOT the
+    // quantity `kJ()` returns.
     int playhead() const { return playhead_; }
+    // JS `Te.kJ` (L279097, @278950): `kJ(){return this.Pe?this.lq:0}` — `lq`
+    // is the PER-SUB-STEP counter, incremented on EVERY `Te.ia` tick while
+    // playing (buffer branch `lq++`; normal branch `lq++,fG++,Xh++`). The
+    // port's `advance_step()` runs once per `Te.ia` tick, so the number of
+    // sub-steps since the move start is `playhead_*sub_ + subframe_` (the
+    // `subframe_` wrap carries one `playhead_`). `Fl`/`q7` are built from
+    // THIS (sub-frame) domain, not from `Xh`.
+    int played_steps() const { return playhead_ * sub_ + subframe_; }
     // Per-clip-start serial: JS `Te.Skb` -> `x3` -> `Fu.hob()` clears the
     // `Cl` one-shot at EVERY move start, including a repeat of the same
     // move (whose pointer is unchanged).

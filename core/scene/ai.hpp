@@ -381,12 +381,12 @@ struct AiFightState {
     // AI reads `a.da.Ua` = the enemy's current animation).
     const MoveDef* enemy_move = nullptr;
     int enemy_move_frame = 0;
-    // The raw playback counters (`Te.Xh`): JS `kJ()` returns `lq`, which the
-    // `Te.ia` tick advances in lockstep with `Xh`. `Fl = kJ()+Q_+j0(Uu)` and
-    // `q7 = kJ()+Q_` are built from them (`Q_` is the shipped-JS `(qx-qx)*
-    // (XJ+1)` == 0).
-    int move_playhead = 0;    // MY `Te.Xh`
-    int enemy_playhead = 0;   // the ENEMY's `Te.Xh`
+    // JS `kJ()` (`Te.lq`, the PER-SUB-STEP playback counter; 0 while not
+    // playing). `Fl = kJ()+Q_+j0(Uu)` and `q7 = kJ()+Q_` are built from them
+    // (`Q_` is the shipped-JS `(qx-qx)*(XJ+1)` == 0). `enemy_move_frame`
+    // below is the LOGICAL `ip()`/`M0()` domain — a DIFFERENT quantity.
+    int move_kj = 0;    // MY `Te.kJ()`
+    int enemy_kj = 0;   // the ENEMY's `Te.kJ()`
     // MY OWN move list (JS `this.model.me`, the fighter's `hb`): `de.V1`
     // (L601-602) rejects any candidate not in it. Without this the slots
     // resolve weapon-mismatched moves (Spear/Staff/Tonfa for a Knives boss)

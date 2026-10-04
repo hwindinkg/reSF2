@@ -189,24 +189,17 @@ bool ocb(const MoveDef& m, int a) {
 // JS `jc.pcb` (L700, @356959): `pcb(a){return this.ocb(this.M6a(a))}` with
 // `a = this.Fl` (`de.ia` L592 @301322: `this.Fl = b.Pe ? b.kJ()+b.Q_+
 // this.j0(this.Uu) : -1`) — `a` is the SUB-FRAME playhead `kJ()+j0`. `M6a`
-// inverts `i0`, so `M6a(a)` is the LOGICAL move frame — exactly the quantity
-// the port exposes as `Fighter::move_frame` (JS `Te.ip()`/`Te.M0()`:
-// `(Xh<=2?0:Xh-2)+Mq`) and the SAME logical frame `de.Ycb`/`de.Lbb` compare
-// against `zD(!1)`/`p0(!1)`.
+// (L356541 `qx-1+((a-1)/(XJ+1)|0)`) maps it back to the LOGICAL move frame,
+// which `ocb` tests.
 //
-// The native port tests that logical frame DIRECTLY (the `M6a` remap is
-// already applied): the previous code tested the raw `Te.Xh` playback counter
-// `Fl_` (`st.enemy_playhead + j0`). `Te.Xh` is the LOGICAL counter the port's
-// `playhead_` advances once per `(MidFrames+1)` sub-steps; the JS `kJ()`
-// reads `lq`, the per-sub-step counter, and `M6a` maps it back to `Xh`'s
-// logical frame. For a move with `FirstFrame != 2` the two differ by
-// `(FirstFrame-2)` frames, so `pcb` could return false where JS returns
-// true; the `Pqb` gate then fell to `else return 0` and the AI STOOD instead
-// of reacting.
-bool pcb(const MoveDef& m, int logical_frame) {
-    // `i0` then `M6a` is the identity; kept so the JS `ocb(M6a(a))` shape and
-    // the sub-frame<->logical conversion are explicit and cited in one place.
-    return ocb(m, m6a(m, i0(m, logical_frame)));
+// [FIX kJ-vs-Xh domain] `Fl` is built from `kJ()` = `Te.lq`, the PER-SUB-STEP
+// counter. The previous port fed `st.enemy_playhead` (= `Te.Xh`, the LOGICAL
+// counter, one increment per `(MidFrames+1)` sub-steps) into `Fl`, and then
+// tested `enemy_move_frame` (= `M0()`) directly here — a different frame. With
+// `Fl` now in the sub-frame domain (`Fighter::played_steps() + j0`), `pcb`
+// must do the JS `M6a(Fl)` remap, NOT the `i0`/`M6a` identity round-trip.
+bool pcb(const MoveDef& m, int sub_frame) {
+    return ocb(m, m6a(m, sub_frame));
 }
 
 }  // namespace
@@ -288,8 +281,8 @@ float AiController::wea(const AiFightState& st, const std::string& label) const 
 //     for absolute inputs (e.g. Cautious = gd_en - gd_me); feeding ratios
 //     would graduate a nearly-binary signal — verified against
 //     res/tactic_settings.xml scales 2026-09-04.
-//   xY = enemy `kJ()` (played steps); the port feeds `enemy_move_frame`
-//     (Xh-based, same quantity as `Fl_`) — the kJ-vs-Xh residual is OPEN.
+//   xY = enemy `kJ()` (per-sub-step played steps; `zk.xY=a.da.kJ()` L302908)
+//     — now fed `st.enemy_kj`, the sub-step counter, NOT the Xh domain.
 //   pZ = `Tba` (max M2 part frames) — `enemy_max_part_frames` ✓.
 //   counter/Xb/tf = strike-memory accumulators (`Cn.d0`, JS `tu` L297387):
 //     the enemy's remembered damage/count/hits for the current move, decayed
@@ -309,7 +302,7 @@ void AiController::mq(const AiFightState& st) {
     }
     f.o1 = st.my_hp;               // absolute gd (NOT a ratio — see above)
     f.q1 = st.enemy_hp;            // absolute gd
-    f.xY = static_cast<float>(st.enemy_playhead);
+    f.xY = static_cast<float>(st.enemy_kj);
     f.cl = static_cast<float>(st.magic_bullets);
     f.k2 = static_cast<float>(st.ranged);
     f.pz = static_cast<float>(st.enemy_max_part_frames);
@@ -1073,7 +1066,7 @@ int AiController::pqb(const AiFightState& st) {
     // Probe snapshot (`--ai-probe` / the fight `[ai]` log): reset and record
     // the operands of the JS gate (L604) so the fired branch is auditable.
     dbg_ = AiDebug{};
-    dbg_.enemy_frame = st.enemy_playhead;
+    dbg_.enemy_frame = st.enemy_kj;
     dbg_.x = x_;
     dbg_.aqa = aqa_;
     if (st.enemy_move != nullptr) {
@@ -1146,18 +1139,18 @@ int AiController::pqb(const AiFightState& st) {
     //   `Ua`), `Fl` the opponent's offset frame.
     // `$x` is the CACHED ResponseDelay from `jwb` (NOT re-rolled per pass).
     // `ycb`/`lbb` test the OPPONENT's current move.
-    const int enemy_frame = st.enemy_playhead;  // JS `b.kJ()`
+    const int enemy_frame = st.enemy_kj;  // JS `b.kJ()` (sub-step `lq`)
     dbg_.gate = enemy_frame > x_ && !ycb(st);
     dbg_.ycb = ycb(st);
     dbg_.lbb = lbb(st);
-    // JS `pcb(this.Fl)`: `M6a(Fl)` is the LOGICAL frame, which the port has as
-    // `st.enemy_move_frame` (JS `ip()`/`M0()`); see `pcb` above.
+    // JS `pcb(this.Fl)`: `M6a(Fl)` maps the SUB-FRAME `Fl_` back to the
+    // LOGICAL frame; see `pcb` above.
     if (st.enemy_move != nullptr)
-        dbg_.pcb = pcb(*st.enemy_move, st.enemy_move_frame);
+        dbg_.pcb = pcb(*st.enemy_move, Fl_);
     if (dbg_.gate) {
         dbg_.branch = "gate/reactive";
         if (st.enemy_move == nullptr ||
-            pcb(*st.enemy_move, st.enemy_move_frame)) {
+            pcb(*st.enemy_move, Fl_)) {
             dbg_.pcb = st.enemy_move != nullptr;
             if (lbb(st)) {
                 dbg_.branch = "reactive/lbb";
@@ -1385,13 +1378,13 @@ std::string AiController::update(const AiFightState& st) {
     // Snapshot the features (JS mQ L620).
     mq(st);
     // JS `de.ia` (L592): `b=a.da` (a = the ENEMY) -> `Fl = b.Pe ?
-    // b.kJ()+b.Q_+this.j0(this.Uu) : -1` (the ENEMY's animation frame + the
-    // per-frame `<FrameError>` draw); `q7 = this.Ji.kJ()+...` = MY frame.
-    // `b.Q_` == 0 in the shipped JS. The `j0(Uu)` draw is the frame-start
-    // `Da.pg` consumption (two `B0()` words) that precedes the `jwb`/`QJa`
-    // caches below; no draw when the enemy is not playing (`Fl == -1`).
-    Fl_ = st.enemy_playing ? st.enemy_playhead + j0_draw() : -1;
-    q7_ = st.move_playhead;
+    // b.kJ()+b.Q_+this.j0(this.Uu) : -1` (the ENEMY's PER-SUB-STEP frame
+    // `kJ()` + the per-frame `<FrameError>` draw); `q7 = this.Ji.kJ()+...` =
+    // MY frame. `b.Q_` == 0 in the shipped JS. The `j0(Uu)` draw is the
+    // frame-start `Da.pg` consumption (two `B0()` words) that precedes the
+    // `jwb`/`QJa` caches below; no draw when the enemy is not playing.
+    Fl_ = st.enemy_playing ? st.enemy_kj + j0_draw() : -1;
+    q7_ = st.playing ? st.move_kj : -1;
 
     // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY
     // STARTS a move: `var b=a.da,c=b.Ua; if(b.Pe&&c!=null){...this.QJa(a);
