@@ -4772,7 +4772,14 @@ MapMetrics map_metrics() {
     const float lc = kViewW / kViewH;
     MapMetrics m;
     m.sp = za.sp;
-    m.qka = 50.0f * std::max(0.1f, std::min(kViewW, kViewH) * 0.35f / 430.0f);
+    // JS `Rr.layout` (offset 1081417): `var c=50; za.instance!=null&&
+    // (b=za.instance.Sp, c=za.instance.qka)` — the rail width is the za
+    // column's `qka`, which `ndb` (offset ~1018200) sets as `this.qka=50*d`
+    // AFTER the `f>a` height clamp (`d=a/c`, a=N.rect.v-Sp-100). At 1280x720
+    // that clamps d 0.586 -> 0.446, so qka is 22.3, NOT the unclamped
+    // 50*0.586=29.3. Using the raw formula pushed the paper panel's rails +
+    // content ~7 px right of the oracle (content left 985 vs 976).
+    m.qka = za.nav_qka;  // `za.instance.qka` = 50*d (clamped)
     // `qk.layout` d (`Ya.tw` = lc<.9; false for desktop).
     m.map_h = (kViewH - m.sp) * (0.5f + (std::clamp(lc, 0.9f, 1.5f) - 0.9f) / 0.6f * 0.5f) -
               kViewH * 0.1f;
@@ -10193,9 +10200,19 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         draw_flat_button(app, "^startFight^", btn_cx, btn_cy, btn_w, btn_h, 0.35f, 0.45f,
                          0.3f, false);
     }
-    draw_ui_label(app, btn_cx - btn_w * 0.5f + 8.0f, btn_cy - 11.0f, btn_w - 16.0f, 22.0f,
-                  loc(app, "startFight", "FIGHT"), 0.44f, UiAlign::Center, 0.184f, 0.145f,
-                  0.106f);
+    // `Bb.V` (offset 949388): the caption label is a child of the button node
+    // (`this.label=new ea(...); this.label.Fa(b,106.4); this.label.ua(106.4)`)
+    // so the node scale `c*.2/112` (`Pb`, offset 949275) scales BOTH the box
+    // and the `ua`. `b=(Y.za()-80)*.8` with `xc(600)` -> 416. The old hardcoded
+    // 22 px box + 0.44 ua let `mk()` fit the caption into 22 px, rendering
+    // "В БОЙ!" ~34 px tall in the oracle vs ~20 px in the port. Box = 416 x
+    // 106.4 (node-local), ua = 106.4 -> both * (btn_h/112).
+    const float btn_node_scale = btn_h / 112.0f;   // `tj.node.Eb`
+    const float lab_box_w = 416.0f * btn_node_scale;   // `(600-80)*.8`
+    const float lab_box_h = 106.4f * btn_node_scale;
+    draw_ui_label(app, btn_cx - lab_box_w * 0.5f, btn_cy - lab_box_h * 0.5f, lab_box_w,
+                  lab_box_h, loc(app, "startFight", "FIGHT"), lab_box_h / 100.0f,
+                  UiAlign::Center, 0.184f, 0.145f, 0.106f);
     // `Nn` `ClickButton Target="InfoBattle.FightButton" UseFlashing="1"
     // IgnoreCallback="1"` (tutorial_quests.xml L156): the quest FOCUSES and
     // FLASHES this plate but must NOT press it — the pulse is draw-only and
