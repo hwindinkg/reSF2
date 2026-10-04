@@ -830,6 +830,14 @@ struct BattleParams {
     // 0+10·lvl, BlockDamageFactor −23219 ⇒ 2^(−2.3219)=0.2× on block). The
     // app layer fills this (character_progress.xml + the save's level/items).
     std::map<std::string, float> player_attrs;
+    // The ENEMY's resolved attribute map (JS `ur`+`Fm`): the stage
+    // `<Warrior>`/`<Template>` chain attrs with the `WarriorPower` fold for
+    // every AlignTargetAttribute (`v.UDa`). The fight path previously seeded
+    // the enemy's attrs at 0 (`make_fighter`), so the enemy's `DamageFactor`,
+    // `WeaponDamage`, `BodyDefense`, `HeadDefense` and `BlockDamageFactor`
+    // were all 0 in `bCa` — the enemy dealt ~0 damage while taking full
+    // damage. The app layer fills this (same fold the RATING path uses).
+    std::map<std::string, float> enemy_attrs;
     // The fighter's `IY` align-armor rows (JS `xc.IY` -> `damage.hpp`
     // `AlignDelta`), resolved from stages.xml `<AttributesAlign>` (own rows
     // appended after the inherited `Default` template's — see

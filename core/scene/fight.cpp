@@ -1730,6 +1730,16 @@ FightFighter FightController::make_fighter(
         for (const auto& kv : battle_.player_attrs) {
             f.params.attributes[kv.first] = kv.second;
         }
+    } else {
+        // JS `ur`+`Fm` (L186-190): the enemy's `fM`/`attributes` = the
+        // template chain attrs + `WarriorPower` on every AlignTargetAttribute.
+        // Without this the enemy attacker read all-zero `bCa` inputs
+        // (`DamageFactor`, `WeaponDamage`/`UnarmedDamage`, `CriticalDamage`,
+        // `FistsDamageMod`) and the defender read its `BodyDefense`/
+        // `HeadDefense`/`BlockDamageFactor` as 0.
+        for (const auto& kv : battle_.enemy_attrs) {
+            f.params.attributes[kv.first] = kv.second;
+        }
     }
     // JS `xc.voice` (L807 default "", filled by `ur` L186 from the Warrior's
     // `<Voice>` attr): the `<Sound Voice="..">` gate (`fm.fka` L735 via

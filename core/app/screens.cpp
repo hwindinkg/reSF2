@@ -6900,6 +6900,34 @@ void DojoScreen::build_dojo_fight(App& app) {
     battle.player_voice = bw.player_voice;
     battle.enemy_align = to_align_deltas(bw.align);
     battle.player_align = to_align_deltas(bw.player_align);
+    // JS `ur`+`Fm` (L186-190): the enemy's `fM`/`attributes` = the merged
+    // `<Warrior>`/`<Template>` chain attrs, with `WarriorPower` added to every
+    // AlignTargetAttribute (`v.UDa`). The fight path (`make_fighter`) now
+    // applies this to the enemy's `FighterParams::attributes`, so `bCa` reads
+    // the real DamageFactor/WeaponDamage/BodyDefense/... (previously all 0).
+    for (const auto& kv : bw.attrs) {
+        try {
+            battle.enemy_attrs[kv.first] = std::stof(kv.second);
+        } catch (const std::exception&) {
+        }
+    }
+    {
+        const auto wp = bw.attrs.find("WarriorPower");
+        if (wp != bw.attrs.end()) {
+            float p = 0.0f;
+            try {
+                p = std::stof(wp->second);
+            } catch (const std::exception&) {
+            }
+            if (p != 0.0f) {
+                for (const auto& kv : sf2::scene::FightParams::defaults()
+                                         .align_target_attributes) {
+                    battle.enemy_attrs[kv.first] =
+                        battle.enemy_attrs[kv.first] + p;
+                }
+            }
+        }
+    }
     resolve_enemy_loadout(app, bw, battle);
 
     // The player's move list from its OWNED items (JS `ra.Hza` L684-685).
@@ -10691,6 +10719,32 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // i.e. always the ENEMY's rows; the player's set is `Default`'s.
     battle.enemy_align = to_align_deltas(bw.align);
     battle.player_align = to_align_deltas(bw.player_align);
+    // JS `ur`+`Fm` (L186-190): the enemy's `fM`/`attributes` = the merged
+    // `<Warrior>`/`<Template>` chain attrs, with `WarriorPower` added to every
+    // AlignTargetAttribute (`v.UDa`). See the dojo launch site above.
+    for (const auto& kv : bw.attrs) {
+        try {
+            battle.enemy_attrs[kv.first] = std::stof(kv.second);
+        } catch (const std::exception&) {
+        }
+    }
+    {
+        const auto wp = bw.attrs.find("WarriorPower");
+        if (wp != bw.attrs.end()) {
+            float p = 0.0f;
+            try {
+                p = std::stof(wp->second);
+            } catch (const std::exception&) {
+            }
+            if (p != 0.0f) {
+                for (const auto& kv : sf2::scene::FightParams::defaults()
+                                         .align_target_attributes) {
+                    battle.enemy_attrs[kv.first] =
+                        battle.enemy_attrs[kv.first] + p;
+                }
+            }
+        }
+    }
     resolve_enemy_loadout(app(), bw, battle);
     // MULTI-WAVE (JS `Da.Xs` -> `pf`, `vJa` L619534): resolve EVERY
     // `<Warrior>` of the launched `<Fight>` into `battle.enemy_waves`, so the
