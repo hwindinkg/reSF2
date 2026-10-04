@@ -1641,6 +1641,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // observation harness for the JS `v.kD` LOSS grant (`D0(PU)`).
     bool force_loss = false;
     bool enemy_move_probe = false;
+    // [probe] `--player-retreat` (companion to `--enemy-move-probe`): during the
+    // 600-frame observation loop, tap the player's Back key every 30 frames so
+    // the PLAYER MOVES AWAY from the enemy. This is the reported "AI stands
+    // when the player moves away" repro: the player's retreat move puts it in
+    // an Uninterrupt window, which fires the enemy AI's `Pqb` gate
+    // (`$x<b.kJ() && !de.Ycb(b)`) and exercises `ds.pcb(Fl)`. No OS input.
+    bool player_retreat = false;
     // --wave-probe: boot a MULTI-WAVE boss fight (default BOSS_LYNX/ZONE_1
     // Fight 6, Rounds=3, 3 warriors) and KO each wave in turn, logging the
     // per-round enemy WarriorPower/name/index — the JS `mfb` wave advance
@@ -2253,6 +2260,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             fight_ordinal = std::atoi(argv[++i]);
         } else if (arg == "--enemy-move-probe") {
             enemy_move_probe = true;
+        } else if (arg == "--player-retreat") {
+            player_retreat = true;
         } else if (arg == "--mode-enemy-probe") {
             mode_enemy_probe = true;
         } else if (arg == "--tactic" && i + 1 < argc) {
@@ -7159,6 +7168,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // `--fight` boots the ladder's Nth `<Fight>` instead of the first
+            // (`pending_fight_ordinal` parses the `|n` tail; 0 = unset). The
+            // prior code ignored the ordinal here, so `--fight --fight-ordinal
+            // 3` silently booted Fight 1 (the AI tests were misleading).
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
             std::fprintf(stdout, "[fight] direct boot: battle=%s zone=%s location=%s owned=%zu\n",
                          pb.battle_name.c_str(), pb.zone.c_str(), pb.location.c_str(),
                          pb.owned.size());
@@ -8163,6 +8181,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         float min_x = prev_x, max_x = prev_x;
         for (int f = 0; f < 600; ++f) {
             glfwPollEvents();
+            // [probe] `--player-retreat`: tap Back every 30 frames so the
+            // player steps AWAY (control 7 = Back; the enemy is on the right,
+            // so Back walks left). This drives the player through its
+            // retreat move's Uninterrupt window — the `Pqb` gate repro.
+            if (player_retreat && (f % 30) == 0) {
+                fs->inject_game_key(7, true);
+                fs->inject_game_key(7, false);
+            }
             app.run_one_frame();
             const float ex = fs->enemy_world_x();
             if (ex < min_x) min_x = ex;
@@ -8207,6 +8233,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.reward_exp = 0;
             pb.owned =
                 loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            // `--fight-ordinal N`: seed the ladder index (`zone|battle|N`) so
+            // `--boss-loss-probe` boots the ladder's Nth `<Fight>` instead of
+            // the first (`pending_fight_ordinal` parses the `|n` tail; 0 =
+            // unset). The prior code ignored the ordinal here, so
+            // `--boss-loss-probe --fight-ordinal 3` silently booted Fight 1
+            // (Shin, Beginner/Random) — the AI tests were misleading.
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);

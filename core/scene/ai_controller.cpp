@@ -166,17 +166,47 @@ bool lbb(const AiFightState& st) {
     return !(st.enemy_move_frame <= attack_end(*st.enemy_move));
 }
 
-// JS `jc.pcb` (L700): `ocb(M6a(a))` — the move has an Uninterrupt interval
-// covering the frame derived from `a` (M6a: qx-1+((a-1)/(XJ+1))). The
-// native port simplifies to: the move has an Uninterrupt interval whose
-// range contains `a`.
-bool pcb(const MoveDef& m, int frame) {
+// JS `jc.M6a` (L698, @356541): `this.qx-1+((a-1)/(this.XJ+1)|0)` — the exact
+// inverse of `i0` above; it maps the SUB-FRAME playhead `a` back to the
+// LOGICAL frame. `|0` truncates toward zero, which C++ integer division also
+// does. (`i0` is defined at the top of this anonymous namespace.)
+int m6a(const MoveDef& m, int a) {
+    const int denom = m.mid_frames + 1;
+    return m.first_frame - 1 + (denom > 0 ? (a - 1) / denom : 0);
+}
+// JS `jc.ocb` (L698, @356830): `ocb(a){let b=0,c=this.va.xb;for(;b<c.length;){
+//  let d=c[b];++b;if(d.name=="Uninterrupt"&&d.start<=a&&a<=d.finish)
+//  return!0}return!1}` — the move has an Uninterrupt interval covering the
+// LOGICAL frame `a` (`d.start`/`d.finish` are 1-based logical frames).
+bool ocb(const MoveDef& m, int a) {
     for (const Interval& iv : m.intervals) {
-        if (iv.name == "Uninterrupt" && iv.start <= frame && frame <= iv.end) {
+        if (iv.name == "Uninterrupt" && iv.start <= a && a <= iv.end) {
             return true;
         }
     }
     return false;
+}
+// JS `jc.pcb` (L700, @356959): `pcb(a){return this.ocb(this.M6a(a))}` with
+// `a = this.Fl` (`de.ia` L592 @301322: `this.Fl = b.Pe ? b.kJ()+b.Q_+
+// this.j0(this.Uu) : -1`) — `a` is the SUB-FRAME playhead `kJ()+j0`. `M6a`
+// inverts `i0`, so `M6a(a)` is the LOGICAL move frame — exactly the quantity
+// the port exposes as `Fighter::move_frame` (JS `Te.ip()`/`Te.M0()`:
+// `(Xh<=2?0:Xh-2)+Mq`) and the SAME logical frame `de.Ycb`/`de.Lbb` compare
+// against `zD(!1)`/`p0(!1)`.
+//
+// The native port tests that logical frame DIRECTLY (the `M6a` remap is
+// already applied): the previous code tested the raw `Te.Xh` playback counter
+// `Fl_` (`st.enemy_playhead + j0`). `Te.Xh` is the LOGICAL counter the port's
+// `playhead_` advances once per `(MidFrames+1)` sub-steps; the JS `kJ()`
+// reads `lq`, the per-sub-step counter, and `M6a` maps it back to `Xh`'s
+// logical frame. For a move with `FirstFrame != 2` the two differ by
+// `(FirstFrame-2)` frames, so `pcb` could return false where JS returns
+// true; the `Pqb` gate then fell to `else return 0` and the AI STOOD instead
+// of reacting.
+bool pcb(const MoveDef& m, int logical_frame) {
+    // `i0` then `M6a` is the identity; kept so the JS `ocb(M6a(a))` shape and
+    // the sub-frame<->logical conversion are explicit and cited in one place.
+    return ocb(m, m6a(m, i0(m, logical_frame)));
 }
 
 }  // namespace
@@ -1120,10 +1150,14 @@ int AiController::pqb(const AiFightState& st) {
     dbg_.gate = enemy_frame > x_ && !ycb(st);
     dbg_.ycb = ycb(st);
     dbg_.lbb = lbb(st);
-    if (st.enemy_move != nullptr) dbg_.pcb = pcb(*st.enemy_move, Fl_);
+    // JS `pcb(this.Fl)`: `M6a(Fl)` is the LOGICAL frame, which the port has as
+    // `st.enemy_move_frame` (JS `ip()`/`M0()`); see `pcb` above.
+    if (st.enemy_move != nullptr)
+        dbg_.pcb = pcb(*st.enemy_move, st.enemy_move_frame);
     if (dbg_.gate) {
         dbg_.branch = "gate/reactive";
-        if (st.enemy_move == nullptr || pcb(*st.enemy_move, Fl_)) {
+        if (st.enemy_move == nullptr ||
+            pcb(*st.enemy_move, st.enemy_move_frame)) {
             dbg_.pcb = st.enemy_move != nullptr;
             if (lbb(st)) {
                 dbg_.branch = "reactive/lbb";
