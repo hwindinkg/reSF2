@@ -9560,6 +9560,26 @@ float map_battle_rating(App& app, const std::string& battle_name,
         // WeaponDamage/BodyDefense/... all carry the WarriorPower bonus
         // (BOSS_LYNX f0 `<Warrior WarriorPower="15">` -> +15). The port kept
         // `WarriorPower` as an inert attribute, under-reading the enemy.
+        //
+        // VERIFIED JS-EXACT (2026-10-04): the fold is real and load-bearing.
+        //   * `IIa` (L195) builds each fight `<Warrior>` as
+        //     `ur(d, template.Ze)` with the 3rd arg defaulting true, so the
+        //     loop over `v.eo.attributes` seeds `fM[name] = template + OU` for
+        //     the align names; `v.EQ` -> `Wka` -> `Fm` (L414313) then copies
+        //     `fM` into `attributes`, which `pAa` (L617589) reads.
+        //   * Every shipped `<Attributes WarriorPower=...>` rule (501 of them)
+        //     also carries `Eclipse`, so it is mode 0 and `dl.jh()` drops it
+        //     outside an eclipse: the `Zi.parse` fan-out is dead here and the
+        //     `ur` fold is the only WarriorPower consumer. There is no
+        //     double-count.
+        //   * Consequence (observed, not a bug): the map RATING RATIO grows
+        //     exponentially with the ladder's WarriorPower (BOSS_LYNX
+        //     f0..f5 = 0.9534 / 127.9 / 1760 / 19918 / 225347 / 2549510).
+        //     The oracle only pins f0 (`map_zone1.png` = "Нормально", diff1);
+        //     `Wc.NAa` (L2163) has no clamp, so the higher fights all land in
+        //     diff4 and the bar simply saturates. Removing the fold restores
+        //     the pre-1eaf95c7 state where f0 reads 0.1895 (diff0) and NO
+        //     fight matches the oracle. DO NOT "fix" the ladder explosion.
         {
             const float wp = fattr("WarriorPower", 0.0f);
             if (wp != 0.0f) {
