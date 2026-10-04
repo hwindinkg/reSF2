@@ -3590,11 +3590,11 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     try_draw_atlas_button(app, "gold", x + icon_gold * 0.5f, cy, icon_gold, icon, 1.0f);
     const float money_tx = x + icon_gold;  // JS `Dq.C(Ss.za())`: no gap
     draw_ui_label(app, money_tx, cy - lay.widget_h * 0.45f, money_num_w, lay.widget_h,
-                  money_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+                  money_text, num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     const float ruby_x = x + ruby_left;  // JS `PA.C(PA.za()/2+Dq.ya+c+b)`
     try_draw_atlas_button(app, "ruby", ruby_x + icon_ruby * 0.5f, cy, icon_ruby, icon, 1.0f);
     draw_ui_label(app, ruby_x + icon_ruby, cy - lay.widget_h * 0.45f, gem_num_w, lay.widget_h,
-                  gem_text, num_scale, UiAlign::Center, 1.0f, 0.9f, 0.4f);
+                  gem_text, num_scale, UiAlign::Center, 1.0f, 1.0f, 1.0f);
     // `yr.Fg` AddMoney (JS `M1a` L1995, gated `Ca.hasFeature("iap")` — the
     // oracle has iap). `layout`: centre at `gemTextRight + boxPad + btnW/2 +
     // yr_gap`, `D(a/2)` (= cy), height `a` (widget_h).
@@ -14221,7 +14221,7 @@ void ResultsScreen::render_impl(App& app) {
                              false);
         }
         draw_ui_label(app, okx - 105.0f, oky - 13.0f, 210.0f, 26.0f, ok_label, 0.85f,
-                      UiAlign::Center, 0.20f, 0.15f, 0.08f);
+                      UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
     std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
     // The `FirstGuardBeaten` chain (`quests.xml` L260-282) is `Place="Map"`
@@ -15986,7 +15986,7 @@ void ShopScreen::render_impl(App& app) {
         }
         draw_ui_wrapped(app, sl.viewer.J + sl.scroll_inset, sl.cell_top,
                         sl.viewer.width() - 2.0f * sl.scroll_inset, sl.list_h,
-                        loc(app, key, fb), 1.0f, UiAlign::Center, 0.25f, 0.18f, 0.10f);
+                        loc(app, key, fb), 1.0f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
     // The `Oe.scroll` `Fg(500,800,0,30)` frame (paper body + rails + the two
     // `Zh` roll bands, L1869-1872) — the oracle centre column (the port drew
@@ -16046,7 +16046,7 @@ void ShopScreen::render_impl(App& app) {
                               UiAlign::Center, 1.0f, 0.9f, 0.4f);
             }
             draw_ui_label(app, sx + 20.0f, sy - 16.0f, 60.0f, 32.0f, std::to_string(it.level),
-                          0.8f, UiAlign::Left, 0.25f, 0.18f, 0.10f);
+                          0.8f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
         }
         // --- `ns` remaining frames (JS @1186046-1186300, VERBATIM) ----------
         // The bottom `jw` strip is 40 design units tall (`jw.D(ce.y-40)`,
@@ -16166,7 +16166,7 @@ void ShopScreen::render_impl(App& app) {
         const float tfont = cw0 * 0.2f;
         const float ty = cy0 + ch0 * 0.1f - tfont * 0.5f;
         draw_ui_label(app, cx0, ty, cw0, tfont, item_display_name(app, *sel_it), 0.85f,
-                      UiAlign::Center, 0.30f, 0.20f, 0.10f);
+                      UiAlign::Center, 0.184f, 0.145f, 0.106f);
         // `lH` = the `ms` attribute list (`Ne.refresh` L2248
         // `lH.refresh(Aa, $e.Qi, qC&&gW&&$e.Qi!=null)`; `lH.ba(a, a*.22)`
         // L2248). `ms.setParameters` (L2274-2275): for each `v.eo` attribute
@@ -16227,7 +16227,7 @@ void ShopScreen::render_impl(App& app) {
             if (value > 0) {
                 draw_ui_label(app, cx0 + stat_h * 1.1f, row_cy - stat_h * 0.3f, cw0 * 0.6f,
                               stat_h * 0.6f, shop_format_number(value), 0.9f, UiAlign::Left,
-                              0.20f, 0.12f, 0.06f);
+                              0.184f, 0.145f, 0.106f);
             }
             // `fi.IXa(a)` L2272: `(+N)` in `Z.mTa` (green) when >0, `(N)` in
             // `Z.RED` when <0; hidden when 0.
@@ -16293,7 +16293,7 @@ void ShopScreen::render_impl(App& app) {
         if (!status.empty()) {
             const float sb_y = cy0 + ch0 * 0.1f + tfont * 1.3f + cw0 * 0.27f;
             draw_ui_label(app, cx0, sb_y, cw0, cw0 * 0.14f, status, 0.8f, UiAlign::Center,
-                          0.30f, 0.20f, 0.10f);
+                          0.184f, 0.145f, 0.106f);
         }
         // `Tl` delivery countdown (`Ne.j7a` L2256 -> `Ksb` L2256, `Ne.aa` L2248):
         // the remaining seconds of the SELECTED item's delivery, shown inside
@@ -16304,7 +16304,7 @@ void ShopScreen::render_impl(App& app) {
             if (left > 0) {
                 const float tl_y = cy0 + ch0 * 0.1f + tfont * 1.3f + cw0 * 0.44f;
                 draw_ui_label(app, cx0, tl_y, cw0, cw0 * 0.16f, shop_countdown(left), 0.9f,
-                              UiAlign::Center, 0.30f, 0.20f, 0.10f);
+                              UiAlign::Center, 0.184f, 0.145f, 0.106f);
             }
         }
         // Bottom price button `M8` = `GoldButton` (`EButtonGreen` + the
@@ -16353,8 +16353,8 @@ void ShopScreen::render_impl(App& app) {
             try_draw_atlas_button(app, icon, cx0 + 30.0f, py, 40.0f, 40.0f, avail_a, false,
                                   false);
             draw_ui_label(app, cx0 + 56.0f, py - 15.0f, cw0 - 56.0f, 30.0f,
-                          std::to_string(value), 0.9f, UiAlign::Left, 0.15f * avail_a,
-                          0.10f * avail_a, 0.05f * avail_a);
+                          std::to_string(value), 0.9f, UiAlign::Left, 0.184f * avail_a,
+                          0.145f * avail_a, 0.106f * avail_a);
         };
         int slot = 0;
         if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
@@ -18138,14 +18138,14 @@ void EquipmentScreen::render_impl(App& app) {
                             pl.left_slot.P + pl.left_slot.height() * 0.5f - 50.0f,
                             pl.left_slot.width() - 28.0f, 100.0f,
                             loc(app, "ProfileNoPerks", "You have no learned skills"),
-                            0.5f, UiAlign::Center, 0.16f, 0.11f, 0.06f);
+                            0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
         }
         if (!any_avail) {
             draw_ui_wrapped(app, pl.right_slot.J + 14.0f,
                             pl.right_slot.P + pl.right_slot.height() * 0.5f - 36.0f,
                             pl.right_slot.width() - 28.0f, 72.0f,
                             loc(app, "profileNoSkills", "No available skills"), 0.5f,
-                            UiAlign::Center, 0.16f, 0.11f, 0.06f);
+                            UiAlign::Center, 0.184f, 0.145f, 0.106f);
         }
     }
     if (!perk_rows_.empty()) {
@@ -18347,7 +18347,7 @@ void EquipmentScreen::render_impl(App& app) {
             }
             draw_ui_label(app, ib.J, by - 10.0f, ib.width(), 20.0f,
                           loc(app, "profile_BtnImprove", "Improve"), 0.65f,
-                          UiAlign::Center, 0.2f, 0.15f, 0.08f);
+                          UiAlign::Center, 0.184f, 0.145f, 0.106f);
         }
     }
     } else if (tab_ == kProfileTabMoves) {
@@ -18421,7 +18421,7 @@ void EquipmentScreen::render_impl(App& app) {
                 const float label_w = cell_l + cell_w - label_l;
                 draw_ui_label(app, label_l, ry, label_w, cell_h,
                               loc(app, r.keys, r.keys), ui_ua_scale(app, cell_h * 0.3f),
-                              UiAlign::Left, 0.16f, 0.11f, 0.06f);
+                              UiAlign::Left, 0.184f, 0.145f, 0.106f);
             }
         }
         // `zr=Yr` right panel: the selected move name + the `$r.Op`
@@ -18433,7 +18433,7 @@ void EquipmentScreen::render_impl(App& app) {
             // panel shows the SELECTED move, not `move_rows_.front()`.
             const std::string nm = shown_move();
             draw_ui_label(app, rp.J + 8.0f, rp.P + 26.0f, rp.width() - 16.0f, 44.0f,
-                          loc(app, nm, nm), 0.95f, UiAlign::Center, 0.16f, 0.11f, 0.06f);
+                          loc(app, nm, nm), 0.95f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
             const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
             const float bx2 = rp.J + rp.width() * 0.5f;
             const float by2 = rp.W - 70.0f;
@@ -18444,8 +18444,8 @@ void EquipmentScreen::render_impl(App& app) {
                                  false);
             }
             draw_ui_label(app, bx2 - bw2 * 0.5f, by2 - 10.0f, bw2, 20.0f,
-                          loc(app, "profile_BtnShow", "VIEW"), 0.7f, UiAlign::Center, 0.2f,
-                          0.15f, 0.08f);
+                          loc(app, "profile_BtnShow", "VIEW"), 0.7f, UiAlign::Center,
+                          0.184f, 0.145f, 0.106f);
         }
     } else if (tab_ == kProfileTabSeals) {
         // Ported `gs` SEALS_SLIDER body (`gs.uZ` L2231): the owned `I.Vr`
@@ -18502,7 +18502,7 @@ void EquipmentScreen::render_impl(App& app) {
         if (achiev_rows_.empty()) {
             draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
                           loc(app, "achievement_Completed", "Completed"), 0.8f, UiAlign::Center,
-                          0.7f, 0.7f, 0.7f);
+                          0.184f, 0.145f, 0.106f);
         } else {
             const float cell_h = profile_cell_h(v, 400.0f, 130.0f);  // `ba(400,130)`
             const float row_h = cell_h + 10.0f;                      // `fs.init` spacing
@@ -18556,7 +18556,7 @@ void EquipmentScreen::render_impl(App& app) {
                     std::snprintf(pbuf, sizeof(pbuf), "%d/%d", r.value, r.target);
                 }
                 draw_ui_label(app, x1 - 104.0f, cy - 8.0f, 100.0f, 16.0f, pbuf, 0.5f,
-                              UiAlign::Right, 0.9f, 0.9f, 0.7f);
+                              UiAlign::Right, 0.184f, 0.145f, 0.106f);
                 // `is.uH` progress bar (`Uf(y.eSa,y.HRa,258)` L2212): empty
                 // `pieces/achiev_progress_empty` (profile atlas, `y.eSa`) +
                 // `Level_bar` fill (misc atlas, `y.HRa`) at
@@ -18592,7 +18592,7 @@ void EquipmentScreen::render_impl(App& app) {
                                      hov ? 0.6f : 0.42f, 0.5f, 0.2f, hov);
                     draw_ui_label(app, rb.J, by - 9.0f, rb.width(), 18.0f,
                                   loc(app, "achievement_BtnReward", "Reward"), 0.5f,
-                                  UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                                  UiAlign::Center, 0.184f, 0.145f, 0.106f);
                 }
                 yy += row_h;
             }
@@ -18608,11 +18608,11 @@ void EquipmentScreen::render_impl(App& app) {
                 const AchievRow& ar = achiev_rows_.front();
                 draw_ui_label(app, rp.J + pad, rp.P + 22.0f, rp.width() - 2.0f * pad,
                               40.0f, loc(app, ar.name, ar.name), 0.95f, UiAlign::Left,
-                              0.16f, 0.11f, 0.06f);
+                              0.184f, 0.145f, 0.106f);
                 const std::string dk = ar.description.empty() ? ar.name : ar.description;
                 draw_ui_wrapped(app, rp.J + pad, rp.P + 78.0f, rp.width() - 2.0f * pad,
                                 rp.height() - 156.0f, loc_template(app, dk, ar.name),
-                                0.52f, UiAlign::Left, 0.20f, 0.14f, 0.08f);
+                                0.52f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
                 if (ar.money_prize > 0 || ar.bonus_prize > 0) {
                     char rb[64];
                     // The RU `achievementReward` value already carries its
@@ -18621,7 +18621,7 @@ void EquipmentScreen::render_impl(App& app) {
                                   loc(app, "achievementReward", "REWARD:").c_str(),
                                   ar.money_prize + ar.bonus_prize);
                     draw_ui_label(app, rp.J + pad, rp.W - 58.0f, rp.width() - 2.0f * pad,
-                                  30.0f, rb, 0.7f, UiAlign::Left, 0.20f, 0.14f, 0.08f);
+                                  30.0f, rb, 0.7f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
                 }
             }
         }
