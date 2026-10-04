@@ -14846,7 +14846,7 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     const bool tut_buy =
         bit.name == "WEAPON_KNIVES" &&
         (bw.story_step() == "STEP_BUY_ITEM" ||
-         (bw.story_step().empty() && bw.tutorial == "MOVE"));
+         (bw.story_step() == "NotStarted" && bw.tutorial == "MOVE"));
     if (tut_buy) bw.set_story_step("MAP");
     bw.items.push_back(oi);
     app.save().save(bw);
@@ -15410,7 +15410,7 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
         const PendingBattle& pb = app().pending_battle();
         const bool tut_shop =
             step == "STEP_BUY_ITEM" ||
-            (step.empty() && w.tutorial == "MOVE" && pb.has_result && pb.player_won &&
+            (step == "NotStarted" && w.tutorial == "MOVE" && pb.has_result && pb.player_won &&
              pb.battle_name == "Training");
         if (tut_shop) {
             const std::vector<std::size_t> rows = shop_tab_rows(items_, 0);

@@ -395,21 +395,42 @@ struct BattleRecord {
 
     // The JS `rv` key for a save `<Variable Name>` (L132880: `"_" + Name`).
     // Reading a real authored save therefore stores BOTH the raw `Name` and
-    // the `_`-prefixed key, so `story_step()` (which looks up
-    // `_$StoryTutorialStep`) and the port's raw-name readers both resolve.
+    // the `_`-prefixed key, so the port's raw-name readers resolve.
     static std::string variable_key_for(const std::string& name) {
         return name.empty() || name[0] == '_' ? name : ("_" + name);
     }
 
-    // Story tutorial step (JS `_$StoryTutorialStep`, `p.L3`/`ha.WO`).
-    // Stored as a quest variable; empty = not started.
-    std::string story_step() const {
-        const auto it = variables.find("_$StoryTutorialStep");
-        return it != variables.end() ? it->second : std::string();
+    // The `v.su.kU` step list (`internal_settings.xml` L116-126
+    // `<StepsNames>`, document order). JS `zt.parse` (`zi.g="81"`, bundle
+    // line 309-310): `this.HH = v.su.Ucb(a) ? a : v.su.kU[0]` — the value
+    // read from the Warrior `Tutorial` attribute, falling back to `kU[0]`
+    // = "NotStarted" whenever it is absent or not a member. `zt.PMa` writes
+    // the step back to that same attribute (`this.$$.set("Tutorial",
+    // this.HH)`), so the `Tutorial` attribute — NOT a quest variable — is
+    // the JS storage.
+    static bool is_valid_story_step(const std::string& s) {
+        return s == "NotStarted" || s == "FIGHT" || s == "STEP_BUY_ITEM" ||
+               s == "STEP_BUY_ITEM_FINISH" || s == "MAP" || s == "LEARN_PERK" ||
+               s == "SHOW_DOUBLE_SWEEP" || s == "SHOW_BLOCK" || s == "END";
     }
 
+    // Story tutorial step (JS query `_$StoryTutorialStep` -> `p.o.zi.HH`).
+    // `zt.parse` normalizes the Warrior `Tutorial` attribute against the
+    // `<StepsNames>` list, so an absent/invalid value — the shipped
+    // `users_default` carries `Tutorial="MOVE"` — reads as `kU[0]` =
+    // "NotStarted". This is the LIVE step the `_$StoryTutorialStep` query
+    // and the tutorial-include gate (`quests.xml` L12) resolve.
+    std::string story_step() const {
+        return is_valid_story_step(tutorial) ? tutorial : std::string("NotStarted");
+    }
+
+    // `zt.PMa(a)` (`zi.g="81"`): write the step to the Warrior `Tutorial`
+    // attribute (the JS storage). The legacy port-only
+    // `_$StoryTutorialStep` quest variable is dropped so a reload cannot
+    // resurrect a stale value the JS never had.
     void set_story_step(const std::string& step) {
-        variables["_$StoryTutorialStep"] = step;
+        tutorial = step;
+        variables.erase("_$StoryTutorialStep");
     }
 
     std::string map_focus;  // `ys` (MapFocus attr; absent in seed)
