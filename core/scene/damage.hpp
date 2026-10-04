@@ -716,6 +716,11 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
 // One `ERuleAttributes` rule for the `dl.qAa` (L1428) split.
 struct RatingSideRule {
     int apply_to = 3;                  // `mc()` (1 Player / 2 Bot / 3 All)
+    // `Lb.mode` (JS `Lb.MIa` L431920): `Eclipse` absent/empty -> 2 (both the
+    // `CV` eclipse and `Ae` non-eclipse lists); `Eclipse="0"` -> 1 (Ae only);
+    // `Eclipse` truthy -> 0 (CV only). `dl.jh()` = `p.o.Yh ? CV : Ae`, so a
+    // normal (non-eclipse) fight sees mode 1 + 2 and DROPS mode 0.
+    int mode = 2;                      // `mode`
     // `xFa`/`wFa` (JS `bb.Ajb` L455854: `e.xFa=c.first; e.wFa=c.second`, where
     // `c = Zf(a,0,2147483647)` is the `<Level Min Max>` range). `Lb.d_a()` =
     // `c_a(p.o.bb())` = `level>=xFa && level<=wFa` gates the rule through
@@ -730,7 +735,8 @@ struct RatingSideRule {
 // the mirror. `Cb(name,"Defense")` = `name` contains "Defense". `level` is
 // `p.o.bb()`; a rule outside `[min_level,max_level]` is skipped (`Ti()`).
 std::vector<RatingAttrPair> rating_side_attrs(
-    const std::vector<RatingSideRule>& rules, int side, int level);
+    const std::vector<RatingSideRule>& rules, int side, int level,
+    bool eclipse = false);
 
 // `bb.OE`/`bb.M3`/`bb.xe`/`Zi` (L453078/455854/454581/433102): the fight's
 // `<Rules>/<Attributes>` -> `RatingSideRule` list.

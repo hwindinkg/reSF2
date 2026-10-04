@@ -9553,6 +9553,22 @@ float map_battle_rating(App& app, const std::string& battle_name,
             } catch (const std::exception&) {
             }
         }
+        // JS `ur` (L94004): while parsing the Warrior/`<Template>` chain, every
+        // AlignTargetAttribute (`v.UDa(name)`, L617259) gets `+ b.OU` (the
+        // node's `WarriorPower`) folded into its `fM` entry; `Fm` (L414313)
+        // then copies `fM` verbatim. So the enemy's effective
+        // WeaponDamage/BodyDefense/... all carry the WarriorPower bonus
+        // (BOSS_LYNX f0 `<Warrior WarriorPower="15">` -> +15). The port kept
+        // `WarriorPower` as an inert attribute, under-reading the enemy.
+        {
+            const float wp = fattr("WarriorPower", 0.0f);
+            if (wp != 0.0f) {
+                for (const auto& kv : sf2::scene::FightParams::defaults()
+                                         .align_target_attributes) {
+                    e.attributes[kv.first] = e.attr(kv.first) + wp;
+                }
+            }
+        }
         e.player_rating = fattr("PlayerRating", -1.0f);       // `W3`
         e.enemy_rating = fattr("EnemyRating", -1.0f);         // `C_`
         e.rating_correction = fattr("RatingCorrection", 0.0f);  // `w4`
@@ -9566,6 +9582,38 @@ float map_battle_rating(App& app, const std::string& battle_name,
                      "[maprating] perks: player=%zu enemy=%zu (warrior perks=%zu)\n",
                      p.perks.size(), e.perks.size(), bw.perks.size());
         std::fflush(stdout);
+        if (const char* rw = std::getenv("SF2_RATING_WALK")) {
+            if (*rw != '\0' && *rw != '0') {
+                std::fprintf(stdout, "[walk] PLAYER attrs(%zu):",
+                             p.attributes.size());
+                for (const auto& kv : p.attributes)
+                    std::fprintf(stdout, " %s=%.4f", kv.first.c_str(),
+                                 static_cast<double>(kv.second));
+                std::fprintf(stdout, "\n[walk] PLAYER iy(%zu):", p.iy.size());
+                for (const auto& d : p.iy)
+                    std::fprintf(stdout, " {bp=%.4f sh=%.4f pr=%d op=%d}",
+                                 static_cast<double>(d.bp),
+                                 static_cast<double>(d.shift), d.priority,
+                                 d.eclipse_op);
+                std::fprintf(stdout, "\n[walk] ENEMY attrs(%zu):",
+                             e.attributes.size());
+                for (const auto& kv : e.attributes)
+                    std::fprintf(stdout, " %s=%.4f", kv.first.c_str(),
+                                 static_cast<double>(kv.second));
+                std::fprintf(stdout, "\n[walk] ENEMY iy(%zu):", e.iy.size());
+                for (const auto& d : e.iy)
+                    std::fprintf(stdout, " {bp=%.4f sh=%.4f pr=%d op=%d}",
+                                 static_cast<double>(d.bp),
+                                 static_cast<double>(d.shift), d.priority,
+                                 d.eclipse_op);
+                std::fprintf(stdout, "\n[walk] ENEMY items(%zu):",
+                             e.equipment_names.size());
+                for (const auto& s : e.equipment_names)
+                    std::fprintf(stdout, " %s", s.c_str());
+                std::fprintf(stdout, "\n");
+                std::fflush(stdout);
+            }
+        }
         // The live `<Set>` operands `perk_aspect` reads (`?RandomAspect`/
         // `?Aspect`/`?PlayerAttribute[Enemy]`): the player's level + the two
         // sides' attributes. `isRaid`/`wd.yV`/`Da.pg` stay default (a normal

@@ -917,6 +917,16 @@ float warrior_rating(const FighterParams& self, const FighterParams& other,
             }
             B += def.weight * F;
         }
+        if (const char* rw = std::getenv("SF2_RATING_WALK")) {
+            if (*rw != '\0' && *rw != '0') {
+                std::fprintf(stdout,
+                             "[walk]   row=%s avgBase=%.6f B=%.6f\n",
+                             row.attr_name.c_str(),
+                             static_cast<double>(row.average_base_damage),
+                             static_cast<double>(B));
+                std::fflush(stdout);
+            }
+        }
         // `g.xha > 0`: `B *= xha * (X7a()*yBa(self) + k6a()*JAa(self))` where
         // `X7a`/`k6a` are the Magic Pain/DamageRecharge bases and `yBa`/`JAa`
         // the base × the warrior's attr (`v.jA`, L1186).
@@ -927,6 +937,14 @@ float warrior_rating(const FighterParams& self, const FighterParams& other,
                  (fp.magic_pain_base * pain + fp.magic_damage_base * dmg);
         }
         c += B;
+    }
+    if (const char* rw = std::getenv("SF2_RATING_WALK")) {
+        if (*rw != '\0' && *rw != '0') {
+            std::fprintf(stdout, "[walk]   JBa self=%s rating=%.6f\n",
+                         self.is_player ? "PLAYER" : "ENEMY",
+                         static_cast<double>(c));
+            std::fflush(stdout);
+        }
     }
     return c;
 }
@@ -981,6 +999,15 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
             std::fprintf(stdout, "[walk] c=%.6f d=%.6f iy_a=%zu iy_b=%zu\n",
                          static_cast<double>(c), static_cast<double>(d),
                          a.iy.size(), b.iy.size());
+            std::fprintf(stdout, "[walk] side1(%zu):", side1_attrs.size());
+            for (const auto& p : side1_attrs)
+                std::fprintf(stdout, " %s=%.1f", p.first.c_str(),
+                             static_cast<double>(p.second));
+            std::fprintf(stdout, "\n[walk] side2(%zu):", side2_attrs.size());
+            for (const auto& p : side2_attrs)
+                std::fprintf(stdout, " %s=%.1f", p.first.c_str(),
+                             static_cast<double>(p.second));
+            std::fprintf(stdout, "\n");
             std::fflush(stdout);
         }
     }
@@ -1011,15 +1038,36 @@ float rating_ratio(const FighterParams& a, const FighterParams& b,
     c = d / c * std::pow(2.0f, (q - r) * l) * k / h;
     c *= std::pow(2.0f,
                   2.0f * (b.rating_correction + e) / fp.damage_doubling_range);
+    if (const char* rw = std::getenv("SF2_RATING_WALK")) {
+        if (*rw != '\0' && *rw != '0') {
+            std::fprintf(stdout,
+                         "[walk] q=%.4f r=%.4f l=%.6f k=%.6f h=%.6f w4=%.4f "
+                         "e=%.4f BP=%.4f ratio=%.6f\n",
+                         static_cast<double>(q), static_cast<double>(r),
+                         static_cast<double>(l), static_cast<double>(k),
+                         static_cast<double>(h),
+                         static_cast<double>(b.rating_correction),
+                         static_cast<double>(e),
+                         static_cast<double>(fp.damage_doubling_range),
+                         static_cast<double>(c));
+            std::fflush(stdout);
+        }
+    }
     return c;
 }
 
 std::vector<RatingAttrPair> rating_side_attrs(
-    const std::vector<RatingSideRule>& rules, int side, int level) {
+    const std::vector<RatingSideRule>& rules, int side, int level,
+    bool eclipse) {
     std::vector<RatingAttrPair> out;
     for (const RatingSideRule& r : rules) {
         // `Lb.Ti()` -> `d_a()` -> `c_a(p.o.bb())`: the `<Level Min Max>` gate.
         if (level < r.min_level || level > r.max_level) continue;
+        // `dl.jh()` = `p.o.Yh ? this.CV : this.Ae`: mode 2 is in both lists;
+        // mode 0 only in the eclipse (`CV`) list; mode 1 only in the
+        // non-eclipse (`Ae`) list.
+        if (r.mode == 0 && !eclipse) continue;
+        if (r.mode == 1 && eclipse) continue;
         const bool non_defense = (r.apply_to == side || r.apply_to == 3);
         for (const auto& kv : r.attrs) {
             const bool is_defense = kv.first.find("Defense") != std::string::npos;
@@ -1040,14 +1088,38 @@ static RatingSideRule rating_side_rule_from_node(
     const char* at = node.attribute("ApplyTo").value();
     const std::string ats = at != nullptr ? at : "All";
     r.apply_to = ats == "Player" ? 1 : (ats == "Bot" ? 2 : (ats == "All" ? 3 : 0));
+    // `Lb.MIa` (L431920): `Xa(Eclipse) ? mode=2 : (parseBool(Eclipse) ? 0 : 1)`.
+    // `Xa(v)` is true when `v` is null or "" (`function Xa(a){return a!=null?
+    // a=="":!0}`), so an absent/empty Eclipse -> mode 2 (both lists); a present
+    // truthy value -> mode 0 (eclipse-only); a present falsy value -> mode 1.
+    {
+        const char* ec = node.attribute("Eclipse").value();
+        const std::string es = ec != nullptr ? ec : "";
+        if (es.empty()) {
+            r.mode = 2;
+        } else {
+            const float ev = js_float(es, 0.0f);
+            r.mode = (ev != 0.0f) ? 0 : 1;
+        }
+    }
     // `Zi` ctor: `for(c of v.wv) wB.set(c.name, 0)` — pre-seeded at 0.
     for (const auto& kv : wv) r.attrs[kv.first] = 0;
-    // `Zi.parse`: skip the four non-attribute names, ADD the rest.
+    // `Zi.parse` (L433634): skip Round/ApplyTo/Eclipse; ADD every other attr;
+    // and for `WarriorPower` fan its value out to EVERY `v.wv` name
+    // (`for(d=0,e=v.wv;d<e.length;) g.set(f, g.get(f)+u.H(c))`). The prior wave
+    // dropped this branch, so every `<Attributes WarriorPower=...>` rule
+    // contributed zero to its side list and the `JBa` balance multiplier
+    // under-read the enemy's attack attributes.
     for (const pugi::xml_attribute a : node.attributes()) {
         const std::string k = a.name();
         const float v = a.as_float();
-        if (k == "Round" || k == "ApplyTo" || k == "Eclipse" ||
-            k == "WarriorPower") {
+        if (k == "Round" || k == "ApplyTo" || k == "Eclipse") {
+            continue;
+        }
+        if (k == "WarriorPower") {
+            for (const auto& kv : wv) {
+                r.attrs[kv.first] += static_cast<int>(v);
+            }
             continue;
         }
         r.attrs[k] += static_cast<int>(v);
