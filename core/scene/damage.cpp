@@ -1048,10 +1048,6 @@ static RatingSideRule rating_side_rule_from_node(
         const float v = a.as_float();
         if (k == "Round" || k == "ApplyTo" || k == "Eclipse" ||
             k == "WarriorPower") {
-            if (k == "WarriorPower") {
-                // `Zi.parse`: `WarriorPower` adds its value to EVERY `v.wv` name.
-                for (const auto& kv : wv) r.attrs[kv.first] += static_cast<int>(v);
-            }
             continue;
         }
         r.attrs[k] += static_cast<int>(v);

@@ -9539,6 +9539,14 @@ float map_battle_rating(App& app, const std::string& battle_name,
         sf2::scene::FighterParams e;
         e.is_player = false;
         e.iy = to_align_deltas(bw.align);
+        // JS `xc.jt()` (L808): the enemy's OWN equipped slots — the
+        // `xc.mDa` cancelling-item test (`g.hI`/`D.hI`, L414471) drops the
+        // `Ranged`/`Magic` rating rows only when the warrior equips their
+        // `CancellingItem` (`NoRanged`/`NoMagic`). The port left this empty,
+        // so the enemy's `Ranged` (avgBase 0.1) and `Magic` (avgBase 0.45)
+        // rows were never cancelled and inflated `d` (the enemy rating) — the
+        // mirror of the player's `p.equipment_names` (which IS set above).
+        e.equipment_names = bw.items;
         for (const auto& kv : bw.attrs) {
             try {
                 e.attributes[kv.first] = std::stof(kv.second);
