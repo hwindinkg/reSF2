@@ -5815,9 +5815,16 @@ std::vector<sf2::scene::OwnedItem> owned_items(App& app) {
             }
         }
     };
-    // JS `xc.hk`: the four equipped slots, in the Of/Hd/hg/Lg order.
+    // JS `xc.jt()` (L808): the SIX equipped slots, in the exact
+    // `Of`/`Hd`/`ig`/`Mg`/`hg`/`Lg` order — Skeleton, Weapon, Ranged, Magic,
+    // Armor, Helm. The old port pushed only the four Of/Hd/hg/Lg slots, so a
+    // RANGED or MAGIC item equipped in `ig`/`Mg` was invisible to every Locks
+    // test (`ra.Hza` L684 reads `a.parameters.jt()`), dropping that weapon's
+    // moves from the fighter's list (the reported "equipped weapon removed").
     push(w.skeleton);
     push(w.weapon);
+    push(w.ranged);
+    push(w.magic);
     push(w.armor);
     push(w.helm);
     // [FIX wrong intro stance] JS `ra.Hza` (L684) tests the move `<Locks>`

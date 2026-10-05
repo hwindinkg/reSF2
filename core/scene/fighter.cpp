@@ -676,12 +676,10 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
 void Fighter::ragdoll_stop() {
     if (!nk_ && !solver_world_) return;
     const bool was_active = nk_;
-    const bool was_world = solver_world_;
     // JS `Al.stop()` (L582) is only `nk=!1; frameCount=0` — no position
-    // reset. The port additionally releases the WORLD solver pose back to
-    // clip space (below) so the resuming `Te.eda` clip apply stays
-    // continuous. The recovery probe records the released world pose so the
-    // next `sample()` can report the per-bone delta back to the clip pose.
+    // reset. The recovery probe records the released drawn pose so the next
+    // `sample()` can report the per-bone delta back to the resumed clip pose
+    // (the ragdoll->clip transition the JS `Te.eda` also makes in one frame).
     {
         const std::size_t np = model_.bones.size();
         if (was_active && ragdoll_stop_logs_ < 4 && np > 0 &&
@@ -699,18 +697,17 @@ void Fighter::ragdoll_stop() {
     nk_ = false;
     ragdoll_frame_count_ = 0;
     ragdoll_names_.clear();
-    if (was_world && solver_init_ && !sol_ma_.empty()) {
-        // Return the solver state to the clip space the resuming `eda` uses,
-        // and zero the Verlet velocity so the world delta is not read as an
-        // impulse on the transition frame.
-        for (std::size_t i = 0; i < sol_ma_.size(); i += 3) {
-            sol_ma_[i] -= solver_base_x_;
-            sol_ma_[i + 1] -= solver_base_y_;
-        }
-        sol_mf_ = sol_ma_;
-    }
+    // JS `Al.stop()` (L582) is EXACTLY `{this.nk=!1; this.frameCount=0}` — it
+    // does NOT touch the node `ma`/`mf` or any render anchor. The resuming
+    // `Te.eda` (L282908) overwrites every clip-driven node itself
+    // (`e.f4()` -> `mf=ma`, then `XA(Go)` -> `ma = clip + j8`), so no
+    // world->clip re-anchor is needed (or authored). The old port additionally
+    // subtracted `solver_base_` from `sol_ma_` and zeroed the Verlet velocity
+    // (`sol_mf_=sol_ma_`) — a port-only invention that corrupted the solver
+    // state across a physics-chain restart. `solver_world_` is the port's `nk`
+    // latch (the `Al.jE` clip-skip gate), so clearing it resumes the clip
+    // apply exactly like `Al.stop`.
     solver_world_ = false;
-    render_offset_valid_ = false;  // re-anchor on the next clip sample
 }
 
 // JS `Bl.strike` (L587-588): `a.sx.XA(l)` / `a.Zs.XA(c)` — the impulse-split
