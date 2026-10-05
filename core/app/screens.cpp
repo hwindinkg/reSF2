@@ -8808,12 +8808,11 @@ void MapScreen::apply_map_focus(const std::string& battle) {
 // un-beaten `<Fight>`. Clamped to the battle's `<Fight>` count so a cleared
 // boss replays its LAST fight (exactly the roster's `jk.init(a,b,c,d)` index
 // clamp, L2062). A fresh battle is 0 -> `|1`.
-int map_fight_index(App& app, const std::string& name, int fight_count) {
-    // JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): `TF.uP` = the fight index the
-    // ladder is on = the number of this battle's `<Fight>`s already won.
-    // `yc` records are keyed by the `hb` triple `zone|name|fight` (`il.Atb`
-    // L143548), so sum the wins over the battle's records (the legacy
-    // bare-name record still matches).
+// JS `a.index` (the battle record's fight pointer, `ca.hCa` L2197 `f.uP=a.index`):
+// the number of this battle's `<Fight>`s already won, UNCLAMPED. `yc` records
+// are keyed by the `hb` triple `zone|name|fight` (`il.Atb` L143548), so sum the
+// wins over the battle's records (the legacy bare-name record still matches).
+int map_fight_wins(App& app, const std::string& name) {
     int wins = 0;
     try {
         const WarriorSave w = app.save().load();
@@ -8832,8 +8831,15 @@ int map_fight_index(App& app, const std::string& name, int fight_count) {
         }
     } catch (const std::exception&) {
     }
-    const int last = fight_count > 0 ? fight_count - 1 : 0;
     if (wins < 0) wins = 0;
+    return wins;
+}
+
+int map_fight_index(App& app, const std::string& name, int fight_count) {
+    // JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): `TF.uP` = the fight index the
+    // ladder is on = the number of this battle's `<Fight>`s already won.
+    int wins = map_fight_wins(app, name);
+    const int last = fight_count > 0 ? fight_count - 1 : 0;
     if (wins > last) wins = last;
     return wins;
 }
@@ -8959,7 +8965,12 @@ void MapScreen::start_battle(const Node& n) {
         std::vector<BossRosterEntry> entries = boss_roster_entries(app(), n);
         if (entries.size() > 1) {
             act_node_ = n;
-            roster_.start(std::move(entries), fight_index);
+            // JS `jk.init(lD, uP, Y1)` L2062: `uP = a.index` = the UNCLAMPED
+            // win count, so `b>e && h.completed()` strikes through every
+            // already-beaten opponent (a fully-cleared ladder marks ALL of
+            // them). `fight_index` (clamped) still selects the launch ordinal.
+            roster_.start(std::move(entries), fight_index,
+                          map_fight_wins(app(), n.name));
             std::fprintf(stdout,
                          "[map] FIGHT -> jk roster armed (%zu entries, first %s)\n",
                          roster_.entries.size(), n.name.c_str());
@@ -10284,7 +10295,7 @@ void draw_boss_roster(App& app, sf2::render::Renderer& ren,
         // The overlay is a child of the entry `Kr` node (so it tracks the row
         // scroll) but NOT of `Hf`, so the state-3 `Hf.node.wa(1+-.5*a)` dim
         // does not touch it — only the state-0 row fade does.
-        if (r.index > i) {
+        if (r.completed_count > i) {
             try_draw_atlas_button(app, "botCompleted", cx, kCy, 255.0f, 258.0f,
                                   r.row_alpha);
         }
@@ -17631,6 +17642,16 @@ std::vector<EquipmentScreen::AchievRow> load_achievements(App& app, const Warrio
             }
         }
     }
+    // JS `Jv` ctor (L1248): `this.Hy.sort(function(c,d){return pb(c.counter,
+    // d.counter)})` — each Counter group's `<Achievement>` rows are sorted by
+    // `CounterValue` ascending at PARSE time. The shipped XML is already
+    // sorted, but the port must sort explicitly so the `cab` "break once the
+    // running counter is below a target" (L2216) sees the JS order for ANY
+    // achievements.xml.
+    for (Group& g : groups) {
+        std::stable_sort(g.items.begin(), g.items.end(),
+                         [](const Def& a, const Def& b) { return a.counter < b.counter; });
+    }
     // `yt.Yua` L297: an unlock record marks its def completed + sets the
     // reward-available flag (`Ir`, L1248).
     for (Group& g : groups) {
@@ -19059,6 +19080,27 @@ void EquipmentScreen::render_impl(App& app) {
         // progress + the `uy` progress text (`is.D1a` L2213). The icon atlas
         // (270) is registered by `load_achievements_atlas` above (ASTC ktx,
         // decodable after the KTX row-orientation fix); miss -> flat square.
+        // JS `Gg.aa` (L1886): the selected cell `Ac` = the last cell whose centre
+        // `Qk = size.y/2 - (ei.node.ra + i*pitch + cell_h/2)` is within 30 px.
+        // `vK.Z(Ac)` -> `Xd.Cp` -> `fs` refresh -> `vmb` -> the `Yr=as` info
+        // panel `refresh(a.TO,a.QZ)` + title `B4(a.TO.name)` (L2196/L2211). The
+        // port used `achiev_rows_.front()`: the panel was pinned to row 0 and
+        // never followed the scroll (the reported bug).
+        int achiev_sel = 0;
+        {
+            const float scell_h = profile_cell_h(v, 400.0f, 130.0f);
+            const float srow_h = scell_h + 10.0f;
+            const float slist_base = v.P + kFgRailFrac * v.width();
+            const float ssy = list_scroll_[kProfileTabAchiev].count >= 0
+                                  ? list_scroll_[kProfileTabAchiev].y
+                                  : profile_list_top(v, 400.0f, 130.0f) - slist_base;
+            const float shalf = profile_scroll_h(v) * 0.5f;
+            for (std::size_t si = 0; si < achiev_rows_.size(); ++si) {
+                const float qk =
+                    shalf - (ssy + static_cast<float>(si) * srow_h + scell_h * 0.5f);
+                if (std::fabs(qk) < 30.0f) achiev_sel = static_cast<int>(si);
+            }
+        }
         if (achiev_rows_.empty()) {
             draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
                           loc(app, "achievement_Completed", "Completed"), 0.8f, UiAlign::Center,
@@ -19165,7 +19207,9 @@ void EquipmentScreen::render_impl(App& app) {
             const ShopRect& rp = pl.right_slot;
             const float pad = rp.width() * 0.06f;
             if (!achiev_rows_.empty()) {
-                const AchievRow& ar = achiev_rows_.front();
+                const int asel = std::clamp(achiev_sel, 0,
+                                            static_cast<int>(achiev_rows_.size()) - 1);
+                const AchievRow& ar = achiev_rows_[static_cast<std::size_t>(asel)];
                 draw_ui_label(app, rp.J + pad, rp.P + 22.0f, rp.width() - 2.0f * pad,
                               40.0f, loc(app, ar.name, ar.name), 0.95f, UiAlign::Left,
                               0.184f, 0.145f, 0.106f);

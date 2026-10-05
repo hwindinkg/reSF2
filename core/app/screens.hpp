@@ -258,6 +258,12 @@ struct BossRosterScroll {
 
     std::vector<BossRosterEntry> entries;
     int index = 0;
+    // JS `jk.init(a,b,c,d)` L2062: `b` = `uP` = `a.index` (the battle record's
+    // UNCLAMPED fight pointer). `b>e && h.completed()` marks every opponent
+    // BEFORE `b` as beaten. `index` is clamped for the scroll/selection; the
+    // completion marks must use the unclamped `b` (else a fully-cleared ladder
+    // never strikes through its last opponent).
+    int completed_count = 0;
     int state = 0;
     float time = 0.0f;
     float scroll_x = 0.0f;
@@ -268,11 +274,13 @@ struct BossRosterScroll {
 
     bool active() const { return started && !done; }
 
-    // `jk.init(a,b,c,d)` L2062-2063. `idx` = `this.index = b`.
-    void start(std::vector<BossRosterEntry> e, int idx) {
+    // `jk.init(a,b,c,d)` L2062-2063. `idx` = `this.index = b`; `done_count` is
+    // the UNCLAMPED `b` for the `b>e && h.completed()` strike-through.
+    void start(std::vector<BossRosterEntry> e, int idx, int done_count = -1) {
         entries = std::move(e);
         const int n = static_cast<int>(entries.size());
         index = n == 0 ? 0 : (idx < 0 ? 0 : (idx >= n ? n - 1 : idx));
+        completed_count = done_count >= 0 ? done_count : index;
         state = 0;
         time = 0.0f;
         row_alpha = 0.0f;
