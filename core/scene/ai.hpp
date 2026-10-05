@@ -395,6 +395,15 @@ struct AiFightState {
     const std::vector<const MoveDef*>* my_moves = nullptr;
     // Active intervals on my fighter (name -> type) (`da.xj` / `P0()`).
     std::vector<std::pair<std::string, int>> my_intervals;
+    // The OPPONENT's active intervals. JS `tm.he` (`CurrentInterval`) selects
+    // the per-player interval list from the condition's `Player` attr
+    // (`Nd.ol` L705): the shipped `Throw` template's gate is
+    // `<CurrentInterval Player="Enemy" Name="Throwable"/>` (moves.xml), i.e.
+    // a throw is legal only while the OPPONENT is in a Throwable interval.
+    // `de.V1` shares the fight's `Ae` context (both fighters' interval lists),
+    // so the AI must see the opponent's too; without this the throw gate read
+    // an empty enemy list and the AI could never throw.
+    std::vector<std::pair<std::string, int>> enemy_intervals;
     // Enemy's highest body-part animation frame (`Tba` L595: max over
     // `vd` parts of `da.M2`).
     int enemy_max_part_frames = 0;

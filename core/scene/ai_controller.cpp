@@ -274,13 +274,21 @@ float AiController::wea(const AiFightState& st, const std::string& label) const 
 
 // JS `mQ` (L620): build the feature state from the fight snapshot.
 // Field semantics (exact):
-//   o1/q1 = ABSOLUTE hp (`this.model.parameters.gd` / `b.parameters.gd`;
-//     gd is absolute — the ratio form `gd/Zn` exists separately, e.g. the
-//     low-HP check `l.parameters.gd/l.parameters.Zn<=v.u4.Uva`). Curves
-//     carrying HealthFactor (1, 3) / EnemyHealthFactor (-1, -3) were authored
-//     for absolute inputs (e.g. Cautious = gd_en - gd_me); feeding ratios
-//     would graduate a nearly-binary signal — verified against
-//     res/tactic_settings.xml scales 2026-09-04.
+//   o1/q1 = NORMALIZED hp (`this.model.parameters.gd` / `b.parameters.gd`).
+//     `gd` is the `xc` actor-state field, written ONLY by `du(a)` (L416196):
+//     `this.gd = this.ZV ? this.Zn : a<0?0:a>this.Zn?this.Zn:a` — i.e. it is
+//     clamped to `[0, Zn]`. `Zn` is set in `v.Wka` (L619076):
+//     `let b=a.aB; a.Zn = b>0?b:1`. The minified `aB` field is assigned ONLY
+//     `-1` in the whole shipped bundle (L124470 `this.Ca.aB=-1`; L411643
+//     `this.L5=this.aB=-1`), so `Zn==1` and `gd ∈ [0,1]` — a health FRACTION.
+//     Independent confirmation: the shipped achievement counter
+//     `internal_settings.xml` `<Counter Name="BarelyAliveRounds"
+//     Type="HealthRemained" Value="0.1"/>` is compared DIRECTLY against
+//     `a.gd` (`xrb(a.gd)` L214711), so gd is a 0..1 fraction. The curves were
+//     authored for that scale (`CautiousMovementsChance Base=0.2 Limit=0.4
+//     HealthFactor=1 EnemyHealthFactor=-1` needs `(1-o1)-(1-q1) ∈ [-1,1]`).
+//     The port stores absolute HP (`me.hp/me.max_hp`, `battle.max_hp=100`),
+//     so feed the ratio (clamped, matching `du`).
 //   xY = enemy `kJ()` (per-sub-step played steps; `zk.xY=a.da.kJ()` L302908)
 //     — now fed `st.enemy_kj`, the sub-step counter, NOT the Xh domain.
 //   pZ = `Tba` (max M2 part frames) — `enemy_max_part_frames` ✓.
@@ -300,8 +308,12 @@ void AiController::mq(const AiFightState& st) {
         f.xb = static_cast<float>(xb);
         f.tf = static_cast<float>(tf);
     }
-    f.o1 = st.my_hp;               // absolute gd (NOT a ratio — see above)
-    f.q1 = st.enemy_hp;            // absolute gd
+    f.o1 = st.my_max_hp > 0.0f
+               ? std::min(1.0f, std::max(0.0f, st.my_hp / st.my_max_hp))
+               : 0.0f;  // normalized gd (`du` clamps to [0, Zn==1])
+    f.q1 = st.enemy_max_hp > 0.0f
+               ? std::min(1.0f, std::max(0.0f, st.enemy_hp / st.enemy_max_hp))
+               : 0.0f;  // normalized gd
     f.xY = static_cast<float>(st.enemy_kj);
     f.cl = static_cast<float>(st.magic_bullets);
     f.k2 = static_cast<float>(st.ranged);
@@ -475,6 +487,11 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     for (const auto& iv : st.my_intervals) {
         ctx.intervals.push_back({iv.first, iv.second, true});
     }
+    // JS `tm.he` (`CurrentInterval`) reads the per-player list; the `Throw`
+    // template's gate is `Player="Enemy"` -> the OPPONENT's intervals.
+    for (const auto& iv : st.enemy_intervals) {
+        ctx.intervals_enemy.push_back({iv.first, iv.second, true});
+    }
     // JS `de.V1` (L601-602): `a.Yz(this.model,null,a.FQ(2))` evaluates the
     // MOVE's condition tree (`va.rb`) — the main `<Conditions>` (Distance /
     // CurrentAnimation / …), not only the `<Tactics>` wrapper. The port used
@@ -487,11 +504,15 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
 }
 
 // Resolves a candidate animation/tag name to the move(s) whose name or
-// template tags match (JS `jc.$k`/`d2` L698: `name==a || xl.includes(a)`
-// where `xl` = the move's own name + inherited template tags). The
-// QuickAttack slot tags (`ShortAttack`, `Throw`) are the OLD game's move
-// tags; `ShortAttack` maps to the `Punch`-tagged Fists moves in this
-// build (documented — the shipped tactic_settings.xml references it).
+// template tags match (JS `ra.yz`/`ra.b9a` L349873: `b9a(a)` returns
+// `ra.xC.get(a)` or null; `yz(a,b)` appends `ra.xC.get(a).children` only when
+// the key EXISTS — `X.Xa(ra.xC,a)&&(...)`). `ra.xC` is keyed by the move
+// TEMPLATE names registered by `Fa.kxb` (L364000); there is no
+// `ShortAttack` template/move anywhere in the shipped moves.xml, so
+// `ra.b9a("ShortAttack")` returns null and the slot yields NO candidates.
+// The old port invented a `ShortAttack`->`Punch` fallback; the shipped data
+// itself comments "ShortAttack ... probably does nothing" (tactic_settings.xml
+// L93), and the JS never references the literal "ShortAttack". Removed.
 std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
                                               const std::map<std::string, MoveDef>& moves) {
     std::vector<const MoveDef*> out;
@@ -501,14 +522,6 @@ std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
             std::find(m.anim_names.begin(), m.anim_names.end(), anim) !=
                 m.anim_names.end()) {
             out.push_back(&m);
-        }
-    }
-    if (out.empty() && anim == "ShortAttack") {
-        for (const auto& kv : moves) {
-            const MoveDef& m = kv.second;
-            if (m.template_tags.count("Punch") > 0) {
-                out.push_back(&m);
-            }
         }
     }
     return out;

@@ -6192,7 +6192,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                           ? foe.fighter.played_steps()
                           : 0;
         for (const std::string& n : me.fighter.active_intervals()) {
-            st.my_intervals.push_back({n, 0});
+            st.my_intervals.push_back({n, me.fighter.interval_type(n)});
+        }
+        // The OPPONENT's active intervals: the `Throw` template's
+        // `<CurrentInterval Player="Enemy" Name="Throwable"/>` gate reads
+        // them (`de.V1` shares the fight context; `tm.he` selects by Player).
+        for (const std::string& n : foe.fighter.active_intervals()) {
+            st.enemy_intervals.push_back({n, foe.fighter.interval_type(n)});
         }
         st.enemy_max_part_frames = foe.fighter.m2();  // JS `Tba` (max `M2`)
         // JS `wd.K0` (L505): NoRanged item equipped -> +1, else -1.
