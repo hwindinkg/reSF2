@@ -2808,6 +2808,33 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // BOSS_LYNX ladder, the shop BUY/EQUIP) failed depending on the previous
     // run. Reset to the shipped template before boot; the per-mode seeds
     // (fidelity/quest-verify story step, headless-loop END+money) apply on top.
+    // Protect the player's ambient save from the driver baseline reset below:
+    // back it up now and restore it when this process exits, so a gate/probe
+    // run can never destroy the user's progress or story-tutorial step. The
+    // `--windowed` play path never arms this, because driver_mode is false
+    // there. (Before this, every hidden gate/probe silently overwrote
+    // `reference/saves/save.xml` with the post-tutorial `Tutorial="END"`
+    // baseline, which is why the initial sensei quest "stopped starting".)
+    struct DriverSaveGuard {
+        std::string path;
+        bool armed = false;
+        ~DriverSaveGuard() {
+            if (!armed) return;
+            std::error_code ec;
+            std::filesystem::copy_file(path + ".userbak", path,
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+        }
+    } driver_save_guard;
+    if (driver_mode && !keep_save && std::filesystem::exists(save_path)) {
+        std::error_code ec;
+        std::filesystem::copy_file(save_path, save_path + ".userbak",
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+        if (!ec) {
+            driver_save_guard.path = save_path;
+            driver_save_guard.armed = true;
+        }
+    }
+
     if (driver_mode && !keep_save) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
