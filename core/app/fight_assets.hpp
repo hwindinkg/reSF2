@@ -113,12 +113,16 @@ struct FightAssets {
     // not worn).
     sf2::scene::Model merge_names(const std::vector<std::string>& names) {
         std::vector<sf2::scene::Model> parts;
+        std::vector<std::string> part_names;
         for (const std::string& n : names) {
             if (n.empty()) continue;
             const sf2::scene::Model* p = load_part(n);
-            if (p != nullptr) parts.push_back(*p);
+            if (p != nullptr) {
+                parts.push_back(*p);
+                part_names.push_back(n);
+            }
         }
-        return sf2::scene::build_fighter_model(parts);
+        return sf2::scene::build_fighter_model(parts, part_names);
     }
 
     // The shared data (JS `G.data`).

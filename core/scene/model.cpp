@@ -201,9 +201,12 @@ Model model_parse(const std::uint8_t* xml, std::size_t size) {
     return model;
 }
 
-Model build_fighter_model(const std::vector<Model>& parts) {
+Model build_fighter_model(const std::vector<Model>& parts,
+                          const std::vector<std::string>& part_names) {
     Model merged;
-    for (const Model& part : parts) {
+    merged.part_names = part_names;
+    for (std::size_t pi = 0; pi < parts.size(); ++pi) {
+        const Model& part = parts[pi];
         // [F5] JS `Yc.Ijb` L571-572: append EVERY bone of every part (dupes
         // included) so `bones[]` is exactly the JS `Va.all` order that the
         // clip bone indices address; only the name -> bone map is first-wins
@@ -224,6 +227,8 @@ Model build_fighter_model(const std::vector<Model>& parts) {
                 continue;  // game: Yc.mkb drops the triangle if any node is missing
             }
             merged.resolved_tris.push_back(TriResolved{i1, i2, i3});
+            merged.tri_part.push_back(static_cast<int>(pi));
+            merged.tri_active.push_back(true);
         }
         // Macro children: merge child lists (first definition wins).
         for (const auto& kv : part.macro_children) {

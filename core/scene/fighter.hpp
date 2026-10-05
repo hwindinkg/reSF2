@@ -131,6 +131,33 @@ class Fighter {
 public:
     // Model (already merged, skeleton-first) and rest bind positions.
     void set_model(const Model& model);
+    // [weapon drop] JS `xc.P2a` (L417709) -> the dropped weapon item's
+    // `isActive=false`: stop drawing the named source part's triangles. The
+    // bones stay (clip bone indices unchanged); only the mesh hides.
+    void hide_model_part(const std::string& model_name) {
+        model_.hide_part(model_name);
+    }
+    // [weapon drop, probe] Number of triangles still drawn.
+    std::size_t active_tri_count() const {
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < model_.resolved_tris.size(); ++i) {
+            if (i >= model_.tri_active.size() || model_.tri_active[i]) ++n;
+        }
+        return n;
+    }
+    // [weapon drop, probe] True when the named part has any hidden triangle.
+    bool has_hidden_part(const std::string& model_name) const {
+        for (std::size_t i = 0; i < model_.tri_active.size() &&
+                                i < model_.tri_part.size(); ++i) {
+            const int pi = model_.tri_part[i];
+            if (pi >= 0 && static_cast<std::size_t>(pi) < model_.part_names.size() &&
+                model_.part_names[static_cast<std::size_t>(pi)] == model_name &&
+                !model_.tri_active[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     // --- move execution (Phase 3.2b) -------------------------------------
 

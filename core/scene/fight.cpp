@@ -5047,6 +5047,13 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // `Wqb` item-swap/fling/`Wsb`/drop-event bodies are presentation
         // (OPEN); the swap + attr set + vc latch are live below.
         rec.disarm = ub;
+        // [probe, authorised] `SF2_FORCE_DISARM=1`: force the R8a disarm roll
+        // true so a probe can land a disarm deterministically on an ARMED
+        // defender (the shipped crit/head chance is ~0). The gate below is
+        // still the real one (`def.weapon` / `disarm_sn`).
+        if (const char* fd = std::getenv("SF2_FORCE_DISARM")) {
+            if (fd[0] == '1') rec.disarm = true;
+        }
         if (rec.disarm) {
             if (def.shock.disarm_sn || def.weapon == "Fists") {
                 rec.disarm = false;
@@ -5057,6 +5064,20 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                     def.shock.weapon_wx = gfp.shock_loosening_delay;
                 }
             }
+        }
+        // [weapon drop] JS `Cgb` L394 disarm identity: `d=$b(v.Ub.Au)` (the
+        // config `<Weapon Name>` = "Fists"); `Hd.name==d.name` (unarmed) or
+        // `sn` vetoes. Trace the resolved gate so the enemy's wielded item
+        // (`Zb.Hd.name`) is observable end-to-end.
+        if (rec.disarm || (ub && def.weapon != "Fists")) {
+            std::fprintf(stdout,
+                         "[disarm] F%d %s->%s wield='%s' roll=%d gate=%s "
+                         "sn=%d wx=%d\n",
+                         frame, atk.name.c_str(), def.name.c_str(),
+                         def.weapon.c_str(), ub ? 1 : 0,
+                         rec.disarm ? "pass" : "veto",
+                         def.shock.disarm_sn ? 1 : 0, def.shock.weapon_wx);
+            std::fflush(stdout);
         }
     }
     rec.frame = frame;
@@ -5948,15 +5969,33 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     {
         const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();
         if (sf2::scene::shock_tick(me.shock, gfp.shock_frame_reduction)) {
-            // JS `Wqb` (L527-528): swap to the `Au` item, `EPa`/`FPa` attr
-            // set (`WeaponDamage=0`, internal_settings, verified), `vc`
-            // latch. Fling/`Wsb`/drop-event bodies are presentation (OPEN).
+            // JS `Wqb` (L268496): the drop. `a = this.parameters.Hd` (the
+            // defender's wielded item), `b = $b(v.Ub.Au)` (the config
+            // `<Weapon Name>` = "Fists"); `this.$o(b,...)` flings the item and
+            // `this.parameters.P2a()` (L417709) sets `isActive=false` on the
+            // equipped WEAPON item (`f.type==I.vg`, L417654), so the weapon
+            // MESH stops drawing. The item swap (`Hd` -> the `Au` Fists item)
+            // + `EPa`/`FPa` attr set (`WeaponDamage=0`) + `vc` latch are live.
+            const std::string dropped = me.weapon;
+            const std::string dropped_model = me.weapon_model;
             me.weapon = "Fists";
+            me.weapon_model.clear();
             me.shock.shocked_vc = true;
             me.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
             me.params.attributes["WeaponDamage"] = 0.0f;
-            std::fprintf(stdout, "[fight] F%d %s WQB pickup -> Fists\n",
-                         frame_, me.name.c_str());
+            if (!dropped_model.empty()) {
+                me.fighter.hide_model_part(dropped_model);  // `P2a` mesh hide
+            }
+            std::fprintf(stdout,
+                         "[fight] F%d %s WQB drop weapon=%s model=%s "
+                         "hidden=%d tris=%zu\n",
+                         frame_, me.name.c_str(), dropped.c_str(),
+                         dropped_model.empty() ? "-" : dropped_model.c_str(),
+                         (!dropped_model.empty() &&
+                          me.fighter.has_hidden_part(dropped_model))
+                             ? 1
+                             : 0,
+                         me.fighter.active_tri_count());
             std::fflush(stdout);
         }
         // HUD style decay `ia()` (L2092): bar-only drain, levels never drop.

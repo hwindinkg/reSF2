@@ -117,6 +117,28 @@ struct Model {
     std::vector<Bone> bones;  // document order — clip bone i = bones[i]
     std::vector<Tri> tris;    // unresolved names (part models)
     std::vector<TriResolved> resolved_tris;  // merged: indices into `bones`
+    // [weapon drop] Per-resolved-tri source part (index into `part_names`),
+    // and the active flag. JS `xc.P2a` (L417709) walks the fighter's item list
+    // and sets `isActive=false` on the `SP` items (the equipped WEAPON —
+    // `f.type==I.vg`, L417654) when the disarm fires (`wd.Wqb` L268496 calls
+    // `this.parameters.P2a()`), so the dropped weapon's MESH stops drawing
+    // while the bone hierarchy (and every clip's bone indices) stays intact.
+    // The port hides the merged weapon PART's triangles the same way
+    // (`Fighter::hide_model_part`). Parallel to `resolved_tris`; empty for
+    // models built before the part names were known.
+    std::vector<int> tri_part;
+    std::vector<bool> tri_active;
+    std::vector<std::string> part_names;
+    // Hide every triangle contributed by the named source part (JS `P2a`).
+    void hide_part(const std::string& model_name) {
+        for (std::size_t i = 0; i < tri_active.size() && i < tri_part.size(); ++i) {
+            const int pi = tri_part[i];
+            if (pi >= 0 && static_cast<std::size_t>(pi) < part_names.size() &&
+                part_names[static_cast<std::size_t>(pi)] == model_name) {
+                tri_active[i] = false;
+            }
+        }
+    }
     // [F4] The `Type="CenterOfMass"` bone's `<NodesCount>/<ChildNodeN>` list
     // (JS `Yc.Ijb` L571: `h&&(c.length=0, Yc.FIa(c,b,!1))` fills the per-part
     // `Ba` list; `Yc.Mia` then hands it to `Dl.rWa` which resolves every name
@@ -152,6 +174,7 @@ Model model_parse(const std::uint8_t* xml, std::size_t size);
 // (first definition wins on name conflict, preserving order so clip indices
 // stay valid for the SKELETON — the model list must start with the
 // skeleton); triangles and capsules are concatenated.
-Model build_fighter_model(const std::vector<Model>& parts);
+Model build_fighter_model(const std::vector<Model>& parts,
+                          const std::vector<std::string>& part_names = {});
 
 } // namespace sf2::scene

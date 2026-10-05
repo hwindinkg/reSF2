@@ -1142,6 +1142,12 @@ struct FightFighter {
                                                 // mapping lands)
     std::vector<sf2::scene::ActiveMod> dots;  // ticking DoTs/HoTs
     std::string weapon = "Fists";  // wielded weapon (disarm identity)
+    // [weapon drop] The wielded weapon's models.dat entry (the `Hd` slot's
+    // `<Item Model>`, e.g. `mdl_weapon_kunai`). `wd.Wqb` (L268496) ->
+    // `parameters.P2a()` (L417709) hides the dropped weapon item's mesh; the
+    // port hides this merged part (`Fighter::hide_model_part`). Empty when
+    // unarmed (Fists has no Model).
+    std::string weapon_model;
     // JS `wd.K0` (L505): `parameters.ig != null && parameters.ig.Yb ==
     // "NoRanged" ? 1 : -1`. `ig` is the equipped "NoRanged" item (type
     // `I.Vh`, `vzb` L108540); `ranged_available` is its negation. Fed by
@@ -1786,11 +1792,19 @@ public:
         return a;
     }
     // Wielded weapons (disarm identity; JS `$b(Au)` vs `ownHd`, L394).
-    // Defaults are Fists; the host sets the player's from the save.
+    // Defaults are Fists; the host sets the player's from the save and the
+    // ENEMY's from its resolved stage-Warrior kit (`Zb.Hd.name`, the list.xml
+    // weapon item). `*_weapon_model` are the matching models.dat entries
+    // (`fighter_model_names` slot 1) so the drop (`wd.Wqb` -> `P2a`) can hide
+    // the weapon mesh.
     void set_fighter_weapons(const std::string& player_weapon,
-                             const std::string& enemy_weapon) {
+                             const std::string& enemy_weapon,
+                             const std::string& player_weapon_model = {},
+                             const std::string& enemy_weapon_model = {}) {
         player_.weapon = player_weapon;
         enemy_.weapon = enemy_weapon;
+        player_.weapon_model = player_weapon_model;
+        enemy_.weapon_model = enemy_weapon_model;
     }
     // Test hook (`--verify-place`): move both anchors so a probe can force
     // either facing. `Ae.Wl` (`Vi.SBa` L704) = sign(enemy_x - me_x); placing

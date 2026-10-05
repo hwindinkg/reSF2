@@ -10969,6 +10969,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     sf2::scene::Model enemy_model_storage;
     const sf2::scene::Model* player_model = nullptr;
     const sf2::scene::Model* enemy_model = nullptr;
+    // [weapon drop] The wielded WEAPON's models.dat entry per side
+    // (`fighter_model_names` slot 1) so `wd.Wqb` -> `P2a` can hide the dropped
+    // weapon mesh.
+    std::string player_weapon_model;
+    std::string enemy_weapon_model;
     {
         std::vector<std::string> player_items;
         try {
@@ -10991,6 +10996,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         }
         const std::vector<std::string> pnames =
             fighter_model_names(app(), player_items);
+        if (pnames.size() > 1) player_weapon_model = pnames[1];
         if (!pnames.empty() && !pnames[0].empty()) {  // skeleton slot present
             player_model_storage = assets.merge_names(pnames);
             if (!player_model_storage.bones.empty()) player_model = &player_model_storage;
@@ -11002,6 +11008,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         } else {
             const std::vector<std::string> enames =
                 fighter_model_names(app(), bw.items);
+            if (enames.size() > 1) enemy_weapon_model = enames[1];
             if (!enames.empty() && !enames[0].empty()) {
                 enemy_model_storage = assets.merge_names(enames);
                 if (!enemy_model_storage.bones.empty()) enemy_model = &enemy_model_storage;
@@ -11110,8 +11117,12 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                  battle.player_unarmed_damage, battle.player_spawn_x, battle.player_spawn_y,
                  battle.enemy_spawn_x, battle.enemy_spawn_y, battle.max_hp);
     std::fflush(stdout);
-    // Disarm identity (JS `$b(Au)` vs `ownHd`, L394): the player's wielded
-    // weapon comes from the save; the enemy defaults to Fists (Training).
+    // Disarm identity (JS `$b(Au)` vs `Hd.name`, L394): the player's wielded
+    // weapon comes from the save; the ENEMY's is its RESOLVED stage-Warrior
+    // item (`Zb.Hd.name` — the `Hd` Weapon slot of `xc.cM`/`ra.Hza`), NOT a
+    // hardcoded "Fists". The old `"Fists"` made `Cgb`'s `Hd.name==$b(Au)`
+    // test always true for the enemy, so `Yi` was vetoed and the enemy could
+    // never be disarmed (the weapon never dropped).
     {
         std::string pw = "Fists";
         try {
@@ -11123,7 +11134,19 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
             if (!ow.empty()) pw = ow;  // JS `hn` -> the player's wielded item
         }
         if (pw.empty()) pw = "Fists";
-        fight_->set_fighter_weapons(pw, "Fists");
+        std::string ew = "Fists";
+        for (const sf2::scene::OwnedItem& o : battle.enemy_owned) {
+            if (o.type == "Weapon" && !o.name.empty()) {
+                ew = o.name;
+                break;
+            }
+        }
+        if (ew.empty()) ew = "Fists";
+        std::fprintf(stdout, "[fight] wield: player='%s' enemy='%s'\n",
+                     pw.c_str(), ew.c_str());
+        std::fflush(stdout);
+        fight_->set_fighter_weapons(pw, ew, player_weapon_model,
+                                    enemy_weapon_model);
     }
     fight_->set_bounds(wall_min, wall_max, floor_y);  // the visible dojo floor (the camera anchor)
     // [FIX Phase 4b — black silhouettes] The fighters' mesh color is the

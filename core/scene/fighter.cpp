@@ -3207,7 +3207,9 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
     // painter's sort by mean pose z re-ordered overlapping limbs and read as
     // "some triangles wrong" against the oracle (PORT_AUDIT_RENDER §3.3/§4.1,
     // ranked P0 #1): restore the document order exactly.
-    for (const TriResolved& tri : model_.resolved_tris) {
+    for (std::size_t i = 0; i < model_.resolved_tris.size(); ++i) {
+        if (i < model_.tri_active.size() && !model_.tri_active[i]) continue;
+        const TriResolved& tri = model_.resolved_tris[i];
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2]);
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1]);
         out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2]);
@@ -3222,7 +3224,9 @@ void Fighter::triangle_bbox(float& min_x, float& min_y, float& max_x,
                             float& max_y) const {
     min_x = min_y = max_x = max_y = 0.0f;
     bool first = true;
-    for (const TriResolved& tri : model_.resolved_tris) {
+    for (std::size_t ti = 0; ti < model_.resolved_tris.size(); ++ti) {
+        if (ti < model_.tri_active.size() && !model_.tri_active[ti]) continue;
+        const TriResolved& tri = model_.resolved_tris[ti];
         const int idx[3] = {tri.i1, tri.i2, tri.i3};
         for (int k = 0; k < 3; ++k) {
             const float vx = pos_[static_cast<std::size_t>(idx[k]) * 2];
