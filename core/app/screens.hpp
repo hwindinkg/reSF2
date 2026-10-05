@@ -940,6 +940,18 @@ private:
     void tick_callouts();
 };
 
+// JS `ur` (g="3E1", L968929) + `Cf` (g="3E2", L970063): the achievement-unlock
+// toast. `Cf.Oub(a)` appends the `ur` node to `mc.K.cf` / `L.K.root` — the
+// GLOBAL root layer, NOT the fight screen — so the toast persists across a
+// screen change (it is visible on the fight, the results plate and the map).
+// The counter flush (`yt.ika`/`v.Cpb`) fills `PendingBattle::achievement_toasts`;
+// `tick` drains them, runs the `ur.aa` 0.5/1.5/1.0 s state machine and `draw`
+// renders the panel + icon + localized name. Ticked once per fixed step from
+// `App::update_fixed`, drawn from `App::render_frame` (both defined in
+// screens.cpp).
+void tick_global_achievement_toasts(App& app);
+void draw_global_achievement_toast(App& app);
+
 // The battle results — native results flow (JS `v.kD` L622187 -> the
 // `Fh` results screen + `qxa` L1213 back to the map). Shows win/lose,
 // applies the money/XP reward (JS `Pa.Fwa`/`Pa.Iab` -> `p.o.Fr`/`Jab`),

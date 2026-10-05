@@ -1312,6 +1312,10 @@ void App::update_fixed(float dt) {
     // regeneration tick (`p.o.dk` toward `v.$Ca()`, one unit per `v.YE`).
     sf2::app::tick_energy(*this);
     screens_->update(dt);
+    // JS `Cf`/`ur` (L970063/L968929): the achievement-unlock toast is a GLOBAL
+    // root-layer node, ticked once per fixed step (the `ur.aa` 0.5/1.5/1.0 s
+    // state machine) independent of which screen is on top.
+    sf2::app::tick_global_achievement_toasts(*this);
     // Quest live actions: resume deferred `Wait` runs + perform the queued
     // scene/shop navigation. Runs AFTER the screen update so a `mp` push never
     // re-enters the ScreenManager iteration (the JS `mp` L477182 pushes from
@@ -1326,6 +1330,9 @@ void App::render_frame() {
     camera.view_h = static_cast<float>(view_h_);
     renderer_->begin_frame(camera);
     screens_->render(*this);
+    // JS `Cf`/`ur` (L970063/L968929): the global achievement-unlock toast draws
+    // over every screen (it lives on `L.K.root`, not the fight screen).
+    sf2::app::draw_global_achievement_toast(*this);
     // Boot overlay (JS `Rg`/`ad`). Headless runs skip the draw so captures
     // and goldens stay byte-stable (the countdown still runs).
     if (boot_splash_frames_ > 0 && headless_frames_ == 0) {

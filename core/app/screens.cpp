@@ -12275,6 +12275,136 @@ void FightScreen::tick_callouts() {
     }
 }
 
+// JS `ur` (g="3E1", L968929) + `Cf` (g="3E2", L970063): the achievement-unlock
+// toast. `Cf.Oub(a)` appends the `ur` node to `mc.K.cf` / `L.K.root` — the
+// GLOBAL root layer, NOT the fight screen — so the toast persists across a
+// screen change. The counter flush (`yt.ika`/`v.Cpb`) fills
+// `PendingBattle::achievement_toasts`; this drains them into the queue, runs
+// the `ur.aa` 0.5/1.5/1.0 s state machine, and `draw_global_achievement_toast`
+// renders the panel + icon + localized name.
+namespace {
+struct AchievToast {
+    std::string name;   // `xw.name` (the lang key `Y.na(a.name)`)
+    std::string icon;   // `xw.icon` (`Eb.replace(icon,".","/")`)
+    int priority = 0;   // `xw.priority` (`Mvb` sort key)
+};
+std::vector<AchievToast> g_achiev_queue;   // JS `xH`
+bool g_achiev_showing = false;             // JS `TG`
+float g_achiev_t = 0.0f;                   // JS `ur.time`
+int g_achiev_state = 0;                    // JS `ur.state`
+}  // namespace
+
+void tick_global_achievement_toasts(App& app) {
+    PendingBattle& pb = app.pending_battle();
+    if (!pb.achievement_toasts.empty()) {
+        for (const PendingBattle::AchievementToastRow& r : pb.achievement_toasts) {
+            g_achiev_queue.push_back(AchievToast{r.name, r.icon, r.priority});
+        }
+        pb.achievement_toasts.clear();
+        // JS `Mvb` (L202866): `this.xH.sort((a,b)=>pb(b.priority,a.priority))`.
+        std::stable_sort(g_achiev_queue.begin(), g_achiev_queue.end(),
+                         [](const AchievToast& a, const AchievToast& b) {
+                             return a.priority > b.priority;
+                         });
+        std::fprintf(stdout, "[achievement] toast queue: %zu row(s)\n",
+                     g_achiev_queue.size());
+        std::fflush(stdout);
+    }
+    if (!g_achiev_showing && !g_achiev_queue.empty()) {
+        // JS `UMa` (L215614): `if(!this.TG){this.TG=!0;this.Mvb();let
+        // a=this.xH[0];J.remove(this.xH,a);Cf.F().Oub(a)}`.
+        g_achiev_showing = true;
+        g_achiev_state = 0;
+        g_achiev_t = 0.0f;
+        const AchievToast& a = g_achiev_queue.front();
+        std::fprintf(stdout, "[achievement] TOAST %s icon=%s prio=%d\n",
+                     a.name.c_str(), a.icon.c_str(), a.priority);
+        std::fflush(stdout);
+    }
+    if (!g_achiev_showing) return;
+    g_achiev_t += 1.0f / 60.0f;  // `L.K.sk.Bm` fixed step
+    switch (g_achiev_state) {
+        case 0:  // `a=this.ed(.5); ... a==1&&(time=0,state=1)`
+            if (g_achiev_t >= 0.5f) { g_achiev_t = 0.0f; g_achiev_state = 1; }
+            break;
+        case 1:  // `this.time>=1.5&&(state=2,time=0)`
+            if (g_achiev_t >= 1.5f) { g_achiev_t = 0.0f; g_achiev_state = 2; }
+            break;
+        default:  // `a=this.ed(1); ... a==1&&(state=3,Cf.F().fia.Z(),this.B())`
+            if (g_achiev_t >= 1.0f) {
+                g_achiev_showing = false;
+                g_achiev_state = 0;
+                g_achiev_t = 0.0f;
+                g_achiev_queue.erase(g_achiev_queue.begin());
+            }
+            break;
+    }
+}
+
+void draw_global_achievement_toast(App& app) {
+    if (!g_achiev_showing || g_achiev_queue.empty()) return;
+    const AchievToast& a = g_achiev_queue.front();
+    float alpha = 1.0f;
+    if (g_achiev_state == 0) alpha = std::min(1.0f, g_achiev_t / 0.5f);        // `ed(.5)`
+    else if (g_achiev_state == 2) alpha = 1.0f - std::min(1.0f, g_achiev_t);  // `wa(1-ed(1))`
+    if (alpha <= 0.0f) return;
+    // The toast's `panel` background + achievement icons live in the
+    // `res/ui/achievements.*` atlas (JS asset 270); register it on first use
+    // (idempotent) so the toast renders even when the profile screen never
+    // opened.
+    load_achievements_atlas(app);
+    // JS `ur.aa` (L968929): `this.node.la((a.N-a.J)/this.Qa.fa.x)` scales the
+    // `panel` frame (`y.NQa="panel"`) to the screen width; `node.C`/`node.D`
+    // centre it. Draw the panel full-width, then the icon + the localized name
+    // (`Y.na(a.name)`), centred on the panel.
+    sf2::data::atlas_frame pf{};
+    int pw = 0, ph = 0;
+    unsigned int ptex = 0;
+    if (!app.get_atlas_frame("panel", &pf, &pw, &ph, &ptex) || pf.w <= 0.0f) return;
+    const float view_w = static_cast<float>(app.view_w());
+    const float view_h = static_cast<float>(app.view_h());
+    const float scale = view_w / pf.w;
+    const float ph_px = pf.h * scale;
+    const float py = (view_h - ph_px) * 0.5f;
+    app.draw_atlas_rect("panel", 0.0f, py, view_w, ph_px, alpha);
+    {
+        static std::string last_drawn;
+        if (last_drawn != a.name) {
+            last_drawn = a.name;
+            std::fprintf(stdout,
+                         "[achievement] TOAST DRAW %s panel=%dx%d alpha=%.2f "
+                         "state=%d\n",
+                         a.name.c_str(), static_cast<int>(pf.w),
+                         static_cast<int>(pf.h), static_cast<double>(alpha),
+                         g_achiev_state);
+            std::fflush(stdout);
+        }
+    }
+    std::string icon_frame = a.icon;  // `Eb.replace(a.icon,".","/")`
+    for (char& c : icon_frame) if (c == '.') c = '/';
+    const std::string text = loc_na(app, a.name, a.name);  // `Y.na(a.name)`
+    const sf2::data::font* fnt = app.menu_font();
+    const float cy = py + ph_px * 0.5f;
+    const float tscale = 0.5f;
+    float text_w = 0.0f;
+    if (fnt != nullptr) text_w = app.measure_text(*fnt, text, tscale);
+    sf2::data::atlas_frame ic{};
+    int iw = 0, ih = 0;
+    unsigned int itex = 0;
+    if (app.get_atlas_frame(icon_frame, &ic, &iw, &ih, &itex) && ic.w > 0.0f) {
+        // `this.icon.C(65); this.icon.D(25)` then re-centred left of the text
+        // (`this.icon.C(this.icon.ya+this.icon.fa.x+10)`), native px units.
+        const float ix = view_w * 0.5f - text_w * 0.5f - ic.w - 10.0f;
+        app.draw_atlas_rect(icon_frame, ix, cy - ic.h * 0.5f, ic.w, ic.h, alpha);
+    }
+    if (fnt != nullptr) {
+        // `info.La(Z.sc)` = the dark-brown achievement text colour.
+        app.draw_text_centered(*fnt, app.font_texture(), view_w * 0.5f,
+                               cy - static_cast<float>(fnt->size) * tscale * 0.5f,
+                               text, tscale, 0.184f, 0.145f, 0.106f, alpha);
+    }
+}
+
 void FightScreen::update_impl(float dt) {
     // JS `Ut.kyb` (`kyb` L825): `$O` advances once per 60 Hz frame; the
     // uncapped present loop must not step it (see DojoScreen::update_impl).
@@ -13870,7 +14000,8 @@ static std::map<std::string, int> fight_result_counter_deltas(
 // (the `WinBattle` cap uses the counter DEF's `type`) and auto-unlock the
 // matching achievements. Returns the number of achievements unlocked.
 static int flush_achievement_counters(App& app, WarriorSave& w,
-                                      const std::map<std::string, int>& deltas) {
+                                      const std::map<std::string, int>& deltas,
+                                      std::vector<PendingBattle::AchievementToastRow>* toasts) {
     (void)app;
     if (deltas.empty()) return 0;
     std::map<std::string, std::string> type_of;
@@ -13912,6 +14043,18 @@ static int flush_achievement_counters(App& app, WarriorSave& w,
                     }
                     if (already) continue;
                     w.achievement_unlocks.push_back({an, false});  // `yt.sca(g,!1)`
+                    // JS `v.X4a` (L616579) returns the `xw` achievement row;
+                    // the fight's `EE(a)` (L214933) pushes it to `xH` and the
+                    // `ur` toast (L968929) reads `a.name` + `a.icon`
+                    // (`Eb.replace(a.icon,".","/")`) + `a.priority` (the
+                    // `Mvb` sort). Carry them for the FightScreen toast.
+                    if (toasts != nullptr) {
+                        PendingBattle::AchievementToastRow row;
+                        row.name = an;
+                        row.icon = a.attribute("Icon").value();
+                        row.priority = sf2::data::xml_attr_int(a, "Priority", 0);
+                        toasts->push_back(std::move(row));
+                    }
                     std::fprintf(stdout, "[achievement] UNLOCK %s (%s=%d >= %d)\n",
                                  an.c_str(), cname.c_str(), value, target);
                     std::fflush(stdout);
@@ -14031,7 +14174,10 @@ bool apply_fight_reward(App& app) {
         const std::string cids = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
         const std::map<std::string, int> deltas =
             fight_result_counter_deltas(cids, player_won, leveled_up);
-        const int unlocked = flush_achievement_counters(app, w, deltas);
+        std::vector<PendingBattle::AchievementToastRow>& toasts =
+            pb.achievement_toasts;
+        toasts.clear();
+        const int unlocked = flush_achievement_counters(app, w, deltas, &toasts);
         std::fprintf(stdout,
                      "[result] ika flush: %zu counter delta(s), %d achievement(s) unlocked\n",
                      deltas.size(), unlocked);
@@ -21045,7 +21191,7 @@ int run_shell_probe(App& app) {
         const std::map<std::string, int> deltas =
             fight_result_counter_deltas("ZONE_1|Survival|1", /*player_won=*/true,
                                         /*leveled_up=*/false);
-        const int unlocked = flush_achievement_counters(app, w, deltas);
+        const int unlocked = flush_achievement_counters(app, w, deltas, nullptr);
         app.save().save(w);
         const WarriorSave chk = app.save().load();
         const WarriorSave::AchievementCounter* ca = chk.counter("Survival1");

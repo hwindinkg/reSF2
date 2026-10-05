@@ -122,6 +122,20 @@ struct PendingBattle {
     // direct-boot and the Map/Dojo launch must build the SAME list from the
     // same save, so this is the one shape both paths pass through.
     std::vector<sf2::scene::OwnedItem> owned;
+    // In-fight achievement-unlock TOAST queue. JS `yt.Nk` (L191682) ->
+    // `this.EE.Z(a)` (the fight's `EE(a)` L214933) -> `this.xH.push(a)` +
+    // `this.Wga=!0` -> `UMa()` (L215614) -> `Cf.F().Oub(a)` (L970063) which
+    // builds the `ur` toast (L968929). The fight-end counter flush
+    // (`yt.ika`/`v.Cpb`) unlocks the achievements; `apply_fight_reward`
+    // records them here so the live FightScreen (still up under the result
+    // plate) drains them into its toast queue. Each row is the
+    // `<Achievement>` `Name`/`Icon`/`Priority` (achievements.xml).
+    struct AchievementToastRow {
+        std::string name;
+        std::string icon;
+        int priority = 0;
+    };
+    std::vector<AchievementToastRow> achievement_toasts;
 };
 
 // A text glyph run: screen-space position + the glyph quads. The shell
