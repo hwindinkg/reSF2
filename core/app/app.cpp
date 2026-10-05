@@ -1344,7 +1344,11 @@ void App::begin_scene_loader() {
     // after the target scene's assets resolve. Assets load synchronously in
     // the port, so arm the same 30-frame hold (skipped during boot, which
     // already runs the full `Rg` -> `ad` overlay).
-    if (boot_splash_frames_ <= 0) scene_loader_frames_ = 30;
+    if (boot_splash_frames_ <= 0) {
+        scene_loader_frames_ = 30;
+        std::fprintf(stdout, "[screen] ad Loader armed (30 frames) — target scene assets uncached\n");
+        std::fflush(stdout);
+    }
 }
 
 void App::draw_boot_splash(bool force_loader) {

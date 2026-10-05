@@ -22,6 +22,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -120,7 +121,12 @@ protected:
 // The screen manager — native `mc.K` (JS L122-127).
 class ScreenManager {
 public:
-    explicit ScreenManager(App& app) : app_(app) {}
+    explicit ScreenManager(App& app) : app_(app) {
+        // JS `Rg.load` (L1967) preloads the Dojo's `Yv()` assets
+        // (`a.concat(Object.create(Tf.prototype).Yv())`) at boot, so the
+        // Dojo's FIRST mount has an empty `Pea()` and mounts with no loader.
+        scene_data_cached_.insert(kScreenDojo);
+    }
 
     // Push a screen onto the stack (the JS `Taa`). The screen becomes the
     // top and is activated.
@@ -163,6 +169,16 @@ private:
 
     App& app_;
     std::vector<std::unique_ptr<Screen>> stack_;
+    // JS asset-cache model for the `ad` Loader mount (`mc.Taa` L63240 /
+    // `Pea` L60160). `Pea()` is the scene's `Yv()` minus every id already in
+    // `G.data.v`; the port preloads every asset at boot, so this set stands in
+    // for `G.data.v`: a scene is "cached" once its first mount loaded it. The
+    // Dojo is pre-seeded in the ctor (`Rg.load` L1967) and erased on every
+    // mount because `Tf.init` (L1015725) frees asset 1355 (`G.Qr(1355)`) right
+    // after, so every LATER Dojo mount has `Pea()={1355}`. Map/Shop/Profile
+    // never call `G.Qr` on their `Yv()` ids, so they load only on the first
+    // mount. Fight(6)/Results(10) are excluded in `push_impl`.
+    std::set<int> scene_data_cached_;
 };
 
 } // namespace sf2::app

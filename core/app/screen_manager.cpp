@@ -159,15 +159,37 @@ void ScreenManager::push_impl(std::unique_ptr<Screen> screen, const std::string&
                  static_cast<int>(screen->id()), stack_.size() + 1);
     std::fflush(stdout);
     stack_.push_back(std::move(screen));
-    // NO scene loader here. JS mounts the `ad` Loader (scene 2) only through
-    // `mc.Taa` (L63240) when the target scene's `Pea()` is non-empty, i.e. it
-    // still has unloaded assets: `a.Pea().length>0?(c=a.lBa()...)`. `Pea`
-    // (L60160) is `Yv()` minus every id already in `G.data.v`. The port loads
-    // ALL scene assets synchronously at boot, so `Pea()` is always empty and
-    // `Taa` pushes the target directly — the Loader NEVER mounts on a scene
-    // push. It mounted here on EVERY push, so it appeared on the fight->VS
-    // intro and the fight->results handoff, which are NOT `Taa` scene changes
-    // (Results is a native shell screen; the VS plate is a state of Fight).
+    // JS `mc.Taa` (L63240) mounts the `ad` Loader (scene 2) only when the
+    // target scene's `Pea()` (L60160) is non-empty — its `Yv()` minus every id
+    // already in the asset cache `G.data.v`: `a.Pea().length>0?(c=a.lBa()...,
+    // new Xg(this,a),...):(...)`. The port preloads all assets at boot, so
+    // `scene_data_cached_` stands in for `G.data.v`:
+    //   - Dojo (3): `Rg.load` (L1967) preloads `Tf.Yv()`, so the FIRST mount is
+    //     clean; `Tf.init` (L1015725) then frees asset 1355 (`G.Qr(1355)`), so
+    //     every LATER mount has `Pea()={1355}` and loads.
+    //   - Shop(4)/Map(5)/Profile(7): their `Yv()` ids are never `G.Qr`-freed,
+    //     so they load only on the first mount.
+    //   - Fight(6)/Results(10) mount NO loader: the Fight scene enters with its
+    //     `ik` VS intro already playing (JS loads the scene BEFORE `ik`; the
+    //     port loads synchronously, so arming here would cover the intro), and
+    //     Results is a native shell panel (JS shows the `kk` panel as a child
+    //     of the Fight screen, `v.kD` L622187 — not a `Taa` scene change).
+    switch (pushed_id) {
+        case kScreenDojo:
+            if (scene_data_cached_.count(kScreenDojo) == 0) app_.begin_scene_loader();
+            scene_data_cached_.erase(kScreenDojo);  // `G.Qr(1355)` on every init
+            break;
+        case kScreenShop:
+        case kScreenMap:
+        case kScreenProfile:
+            if (scene_data_cached_.count(pushed_id) == 0) {
+                scene_data_cached_.insert(pushed_id);
+                app_.begin_scene_loader();
+            }
+            break;
+        default:
+            break;
+    }
     // JS: the Results screen is NOT a scene change — `v.kD` (L622187) shows the
     // `kk` results panel as a CHILD of the fight screen `i` (`i.lca` L2008
     // `this.Ws=Qo(jk)`); no `Zd.load`/`wa.mp` runs. So pushing/poping Results

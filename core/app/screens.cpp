@@ -10391,13 +10391,28 @@ void MapScreen::render_impl(App& app) {
         // One dot per rendered zone widget (`Vr.HXa` L2123-2124: only zones
         // with an active battle render).
         // `Ur` dots (JS L2113-2117). Base art = `inactive_bulb` (`DRa`) for
-        // EVERY dot (JS `WG`, `d = db.xz(null, y.DRa)`); the selected slot
-        // OVERLAYS `bulb` (`Una`, `UB`) on top (JS `ba`/`aa` position `UB` at
-        // `q9`), and a red zone overlays `red_bulb` (`MRa`, `tW`). Draw order
-        // mirrors the JS child order: `WG` base below `KG` (UB, then the `tW`
-        // markers appended by `X_a`).
+        // EVERY dot (JS `WG`, `d = db.xz(null, y.DRa)`); a red zone overlays
+        // `red_bulb` (`MRa`, `tW`) and the SELECTED slot overlays `bulb`
+        // (`Una`, `UB`) on top of it. `TWа` (L1097000) appends the `tW` markers
+        // to `KG` then `this.UB.sF()` brings `UB` to the front, so the draw
+        // order is base (`WG`) < red (`tW`) < selected `bulb` (`UB`).
         const UrBlinkCfg& blink_cfg = ur_blink_cfg();
         const std::vector<std::size_t> red = ur_red_zones(zones_, blink_cfg);
+        // [red-zone evidence] one-shot: the red zones + which is selected (the
+        // selected zone's `red_bulb` is covered by its `bulb`, JS `UB.sF()`).
+        static bool ur_red_logged = false;
+        if (!ur_red_logged) {
+            ur_red_logged = true;
+            std::fprintf(stdout, "[map] ur red zones:");
+            for (std::size_t r : red) {
+                float rx = 0.0f, ry = 0.0f;
+                zone_dot_center(r, rx, ry);
+                std::fprintf(stdout, " %zu(sel=%d dot=%.0f,%.0f)", r,
+                             r == static_cast<std::size_t>(zone_sel_) ? 1 : 0, rx, ry);
+            }
+            std::fprintf(stdout, "\n");
+            std::fflush(stdout);
+        }
         for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
             float dot_x = 0.0f, dot_cy = 0.0f;
             if (!zone_dot_center(zi, dot_x, dot_cy)) continue;
@@ -10411,13 +10426,20 @@ void MapScreen::render_impl(App& app) {
             bool drew = try_draw_atlas_button(app, "inactive_bulb", dot_x, dot_cy,
                                               u.dot_d, u.dot_d,
                                               is_red ? ur_blink_.nq / 255.0f : 1.0f);
-            if (sel) {
-                drew = try_draw_atlas_button(app, "bulb", dot_x, dot_cy, u.dot_d,
-                                             u.dot_d, 1.0f) || drew;
-            }
+            // A red zone overlays `red_bulb` (`MRa`, the `tW` markers).
             if (is_red) {
                 drew = try_draw_atlas_button(app, "red_bulb", dot_x, dot_cy, u.dot_d,
                                              u.dot_d, ur_blink_.mq / 255.0f) || drew;
+            }
+            // The SELECTED slot overlays `bulb` (`Una`, `UB`) ON TOP of the red
+            // marker: `TWа` (L1097000) appends the `tW` markers to `KG` and then
+            // `this.UB.sF()` (L821139 -> `urb`, bring-to-front) moves `UB` after
+            // them, so the yellow `bulb` is the LAST child of `KG` and covers the
+            // selected zone's red. Drawing red AFTER `bulb` (the old order)
+            // overlaid the red on the yellow highlight (the reported map bug).
+            if (sel) {
+                drew = try_draw_atlas_button(app, "bulb", dot_x, dot_cy, u.dot_d,
+                                             u.dot_d, 1.0f) || drew;
             }
             if (!drew) {
                 draw_flat_button(app, "", dot_x, dot_cy, u.dot_d * 0.5f,
