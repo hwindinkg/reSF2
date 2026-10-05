@@ -716,11 +716,24 @@ int AiController::yaa(const AiFightState& st) {
     for (const TacticRow& row : rec->rows) {
         const int k = ju_frame_index(f, row.rda, row.hu_frames);
         if (k < 0) continue;  // JS `L6a` -> null -> row contributes nothing
-        const float target =
-            st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
+        // JS `Q6a` (L609-611, exact): the row target is
+        //   n = f*(Wea(row.label, this.model, a) - e) + this.Mu
+        // where f = `a.da.hd()` = the OPPONENT's clip mirror and e = `a.da.dw()`
+        // = the OPPONENT's root world-x. The port previously used
+        // `my_facing*Wea + Mu`, which dropped the `-e` term (left the target at
+        // the raw bone world-x, ~800, instead of the range-appropriate gap) and
+        // used the wrong mirror (my own facing, not the opponent's `hd()`), so
+        // every safe-table window selected the wrong band. Same shell as `XAa`.
+        const float wv = wea(st, row.label);
+        const float target = static_cast<float>(st.enemy_clip_mirror) *
+                                 (wv - st.enemy_dw) +
+                             static_cast<float>(Mu_);
         dbg_.target = target;
         dbg_.mu = static_cast<float>(Mu_);
         dbg_.label = row.label;
+        dbg_.wea = wv;
+        dbg_.dw = st.enemy_dw;
+        dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_, k);
     }
     const int c = static_cast<int>(wb_.size());
@@ -798,11 +811,20 @@ int AiController::gea(const AiFightState& st, int variant) {
     const TacticRecord* rec = find_record(st.my_anim, /*throw=*/2);
     if (rec == nullptr) return 0;
     for (const TacticRow& row : rec->rows) {
-        const float target =
-            st.my_facing * wea(st, row.label) + static_cast<float>(Mu_);
+        // JS `Gea` (L613-616, exact): `k=f.dw(); h=f.hd();
+        //   n=h*(this.Wea(n,this.model,a.Kf())-k)+this.Mu` — the OPPONENT's
+        // `dw()`/`hd()`, the same distance shell as `XAa`. The port used
+        // `my_facing*Wea + Mu` (dropped `-e`, wrong mirror).
+        const float wv = wea(st, row.label);
+        const float target = static_cast<float>(st.enemy_clip_mirror) *
+                                 (wv - st.enemy_dw) +
+                             static_cast<float>(Mu_);
         dbg_.target = target;
         dbg_.mu = static_cast<float>(Mu_);
         dbg_.label = row.label;
+        dbg_.wea = wv;
+        dbg_.dw = st.enemy_dw;
+        dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_);
     }
     return static_cast<int>(wb_.size());
