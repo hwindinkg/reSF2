@@ -1011,7 +1011,8 @@ void AiController::qja(const AiFightState& st) {
     // JS `QJa` (L594-595): a bare `Da.jf();` then five `Da.jf()` — all from
     // the shared `Da.pg` (the port: the fight's `draw01()` stream when
     // installed, else the owned DaPrng). Load-bearing for stream position:
-    // 6 jf() calls = 12 B0 draws, then Mu (2), lN (2), $x (2).
+    // 6 jf() calls = 12 B0 draws, then Mu (2), lN (2). `$x` is NOT drawn
+    // here — JS `QJa` never touches `$x`; `jwb` draws it separately.
     next01();  // discarded
     tua_ = next01();
     dua_ = next01();
@@ -1026,9 +1027,7 @@ void AiController::qja(const AiFightState& st) {
             weight_curve_eval(tactic_->frame_error_min, feat_),
             weight_curve_eval(tactic_->frame_error_max, feat_)));
     }
-    x_ = gfa_draw();  // JS `jwb` (L596-597): `this.$x=this.gfa(this.Ol)`
 }
-
 // JS `de.mcb` (L596-597): `let b=0,c=P.S9a();for(;b<c.length;)if(a.$k(c[b++]))
 // return!0;return!1` — `jc.$k(n)` is `n == this.name || this.d2(n)`, where
 // `d2` scans the move's inherited tags (`xl`). Read by `jwb` (L596-597) to
@@ -1131,6 +1130,7 @@ int AiController::pqb(const AiFightState& st) {
         caa = static_cast<double>(dua_) < ta;
         nG = static_cast<double>(bpa_) < cm;
     }
+    dbg_.rua = rua; dbg_.caa = caa; dbg_.nG = nG;
 
     // The response-delay + uninterruptible gate (JS L604-605):
     //   $x < b.kJ() && !Ycb(b)   (the OPPONENT is inside its Uninterrupt
@@ -1386,30 +1386,36 @@ std::string AiController::update(const AiFightState& st) {
     Fl_ = st.enemy_playing ? st.enemy_kj + j0_draw() : -1;
     q7_ = st.playing ? st.move_kj : -1;
 
-    // JS `de.ia` (L592-593): `QJa` re-rolls the five cached chance rolls
+    // JS `de.ia` (L592-593): `QJa` refreshes the five cached chance rolls
     // (`tua/dua/Bpa/rqa/oqa`) that gate the safe attack, table attack and
-    // cautious movements. [FIX nG-freeze] The port re-rolled them only on the
-    // opponent's move START (the `jwb` proxy below), so during a long opponent
-    // move that is NOT a <RandomizingEnemyAnimation> child (e.g. the player's
-    // StepBack) every roll — including `Bpa`, the CautiousMovementsChance
-    // roll — froze; the AI then had `nG=0` for hundreds of frames and stood
-    // still. `nG=Bpa<Awa` is re-evaluated every `ia` pass, so re-roll each
-    // pass (the JS also re-rolls on the opponent's move start via `jwb`).
-    const bool move_changed = st.enemy_move != last_enemy_move_;
-    if (st.enemy_playing && st.enemy_move != nullptr) {
-        qja(st);
-        qja_done_ = true;
-    }
+    // cautious movements. JS-EXACT cadence: QJa runs (a) when the ENEMY
+    // STARTS a move — the `jwb` path below — and (b) each frame while the
+    // enemy's move is a `<RandomizingEnemyAnimation>` child (the `ia` L593
+    // check further down). It is NOT re-rolled on every `ia` pass: during a
+    // non-randomizing enemy move (e.g. the player's StepBack) the JS keeps
+    // the rolls frozen until the next move start. (The port previously
+    // re-rolled every frame AND again for randomizing moves, consuming the
+    // 6-roll cache twice per frame — a `Da.pg` stream divergence.)
     // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY
-    // STARTS a move: `var b=a.da,c=b.Ua; if(b.Pe&&c!=null){...this.QJa(a);
-    // if(!this.mcb(c)){...this.$x=this.gfa(this.Ol)}}`. `mcb(c)` gates the
-    // `$x` ResponseDelay cache (see `mcb`).
+    // STARTS a move: `QJa(a)` then `$x = gfa(Ol)` (unless `mcb(c)` gates it).
+    // QJa is NOT re-rolled every frame: the JS calls it (a) here, on the
+    // enemy's move start, and (b) each frame while the enemy's move is a
+    // `<RandomizingEnemyAnimation>` child (the `ia` L593 check below). The
+    // old unconditional per-frame `qja` PLUS the randomizing `qja` drew the
+    // 6-roll cache TWICE per frame for randomizing moves (e.g. the player's
+    // StanceIdle) and once per frame for non-randomizing moves — a `Da.pg`
+    // stream divergence. `$x` is now drawn only here, from `gfa` (JS
+    // `jwb`), not inside `QJa` (JS `QJa` never touches `$x`).
+    const bool move_changed = st.enemy_move != last_enemy_move_;
     if (move_changed || st.enemy_anim != last_enemy_anim_) {
         last_enemy_anim_ = st.enemy_anim;
         last_enemy_move_ = st.enemy_move;
-        if (st.enemy_playing && st.enemy_move != nullptr &&
-            !mcb(*st.enemy_move)) {
-            x_ = gfa_draw();
+        if (st.enemy_playing && st.enemy_move != nullptr) {
+            qja(st);
+            qja_done_ = true;
+            if (!mcb(*st.enemy_move)) {
+                x_ = gfa_draw();
+            }
         }
     }
 
