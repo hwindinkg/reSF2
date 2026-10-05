@@ -6814,8 +6814,15 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
     if (!tried) {
         tried = true;
         FightAssets& assets = app.fight_assets();
-        const std::string idle_name =
-            find_idle_clip_name(assets.moves, assets.clips, player_weapon_token(app));
+        // JS `Pi` idle state = `PeacefulStart` (`iz.XBa` L227616: `"PeacefulStart":4`),
+        // the SHOP variant (`ShopPeacefulStart`, `FistsStartStance-Left` ->
+        // `stance_1`), NOT the fight `*StartStanceIdle*` (`fists1_stance_idle`).
+        // The fight idle's pivot seats the model at a different height/pose —
+        // the reported "shop model stands at the wrong position" (the profile
+        // avatar already used the peaceful idle; the destination backdrop did
+        // not).
+        const std::string idle_name = find_peaceful_idle_clip_name(
+            assets.moves, assets.clips, player_weapon_token(app));
         const auto it = idle_name.empty() ? assets.clips.end()
                                           : assets.clips.find(idle_name);
         if (!assets.merged.bones.empty() && it != assets.clips.end() &&
@@ -6841,15 +6848,26 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
         }
     }
     if (!ok || fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
-    // JS `Pi.aa` L445 (`this.ia()`) advances the `Pi` fighter EVERY frame, so
-    // the destination idle is a LIVE loop, not a static frame-0 backdrop. On
-    // the clip end (`Te.KNa`) the JS `Pi` re-enters the idle state; restart it.
+    // JS `Pi.aa(a)` (L445) runs in the screen's `ma.aa` UPDATE pass — once per
+    // fixed 60 Hz tick — NOT per presented frame. The advance lives in the
+    // callers' `update_impl` (`advance_destination_model`); the old port
+    // advanced here in `render_impl`, which runs on the uncapped present loop
+    // (`glfwSwapInterval(0)`), so the idle played far too fast.
+    draw_pi_fighter(ren, *fighter, *idle, fighter->move_frame());
+}
+
+// JS `Pi.ia` (L445): advances the destination `Pi` fighter once per fixed
+// update. On the clip end (`Te.KNa`) the `Pi` re-enters the idle state; restart
+// it. Called from `update_impl` (60 Hz), never from the render pass.
+void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
+                               const sf2::data::anim_clip* idle,
+                               const sf2::scene::MoveDef* move) {
+    if (fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
     if (fighter->preview_active()) {
         fighter->advance(0.0f);
     } else if (move != nullptr) {
         fighter->start_preview_clip(*move, *idle);
     }
-    draw_pi_fighter(ren, *fighter, *idle, fighter->move_frame());
 }
 
 // Draws one `Pi` model at frame `frame` of `clip` (the `Pi.Jc` viewer). Shared
@@ -12322,6 +12340,17 @@ std::vector<AchievToast> g_achiev_queue;   // JS `xH`
 bool g_achiev_showing = false;             // JS `TG`
 float g_achiev_t = 0.0f;                   // JS `ur.time`
 int g_achiev_state = 0;                    // JS `ur.state`
+// JS `ur.aa` (L969568) reads `Sf.W4a()` = `Sf.instance.RH` (L1051140): the
+// top-centre toast rect the HUD `Sf.layout` (L1048833) updates every frame as
+//   `a=135*c; RH.J=b/2-a*3.5/2; RH.N=b/2+a*3.5/2;
+//    RH.P=Jn.node.ra+100*c; RH.W=RH.P+a`.
+// Cached here by the fight HUD draw so the global toast (drawn outside the
+// fight screen) uses the same small top-centre rect instead of the full view.
+float g_achiev_rh_j = 0.0f;
+float g_achiev_rh_n = 0.0f;
+float g_achiev_rh_p = 0.0f;
+float g_achiev_rh_w = 0.0f;
+bool g_achiev_rh_valid = false;
 }  // namespace
 
 void tick_global_achievement_toasts(App& app) {
@@ -12393,10 +12422,22 @@ void draw_global_achievement_toast(App& app) {
     if (!app.get_atlas_frame("panel", &pf, &pw, &ph, &ptex) || pf.w <= 0.0f) return;
     const float view_w = static_cast<float>(app.view_w());
     const float view_h = static_cast<float>(app.view_h());
-    const float scale = view_w / pf.w;
+    // JS `ur.aa` (L969568): `a=Sf.W4a()` (the HUD `RH` from `Sf.layout`);
+    // `node.la((a.N-a.J)/Qa.fa.x)` then `node.C((a.J+a.N)*.5)` and
+    // `node.D((a.P+a.W)*.5)` — a small TOP-CENTRE toast, NOT full screen. The
+    // pre-fix port scaled the panel to the whole view width and centred it
+    // vertically (the reported "achievements show fullscreen").
+    const float rect_w =
+        g_achiev_rh_valid ? (g_achiev_rh_n - g_achiev_rh_j) : view_w;
+    const float scale = pf.w > 0.0f ? rect_w / pf.w : 1.0f;
     const float ph_px = pf.h * scale;
-    const float py = (view_h - ph_px) * 0.5f;
-    app.draw_atlas_rect("panel", 0.0f, py, view_w, ph_px, alpha);
+    const float panel_cx =
+        g_achiev_rh_valid ? (g_achiev_rh_j + g_achiev_rh_n) * 0.5f : view_w * 0.5f;
+    const float panel_cy =
+        g_achiev_rh_valid ? (g_achiev_rh_p + g_achiev_rh_w) * 0.5f : view_h * 0.5f;
+    const float px = panel_cx - rect_w * 0.5f;
+    const float py = panel_cy - ph_px * 0.5f;
+    app.draw_atlas_rect("panel", px, py, rect_w, ph_px, alpha);
     {
         static std::string last_drawn;
         if (last_drawn != a.name) {
@@ -12414,7 +12455,7 @@ void draw_global_achievement_toast(App& app) {
     for (char& c : icon_frame) if (c == '.') c = '/';
     const std::string text = loc_na(app, a.name, a.name);  // `Y.na(a.name)`
     const sf2::data::font* fnt = app.menu_font();
-    const float cy = py + ph_px * 0.5f;
+    const float cy = panel_cy;
     const float tscale = 0.5f;
     float text_w = 0.0f;
     if (fnt != nullptr) text_w = app.measure_text(*fnt, text, tscale);
@@ -12424,12 +12465,12 @@ void draw_global_achievement_toast(App& app) {
     if (app.get_atlas_frame(icon_frame, &ic, &iw, &ih, &itex) && ic.w > 0.0f) {
         // `this.icon.C(65); this.icon.D(25)` then re-centred left of the text
         // (`this.icon.C(this.icon.ya+this.icon.fa.x+10)`), native px units.
-        const float ix = view_w * 0.5f - text_w * 0.5f - ic.w - 10.0f;
+        const float ix = panel_cx - text_w * 0.5f - ic.w - 10.0f;
         app.draw_atlas_rect(icon_frame, ix, cy - ic.h * 0.5f, ic.w, ic.h, alpha);
     }
     if (fnt != nullptr) {
         // `info.La(Z.sc)` = the dark-brown achievement text colour.
-        app.draw_text_centered(*fnt, app.font_texture(), view_w * 0.5f,
+        app.draw_text_centered(*fnt, app.font_texture(), panel_cx,
                                cy - static_cast<float>(fnt->size) * tscale * 0.5f,
                                text, tscale, 0.184f, 0.145f, 0.106f, alpha);
     }
@@ -13307,6 +13348,22 @@ void FightScreen::render_impl(App& app) {
     const float panel_player_x = hud_cx - 520.0f * hud_c * hud_e;
     const float panel_enemy_x = hud_cx + 520.0f * hud_c * hud_e;
     const float panel_y = kq_p + 150.0f * hud_c + hud_f * hud_g;
+    // JS `Sf.layout` (L1048833) tail: the top-centre toast rect `RH` that the
+    // achievement toast (`ur.aa` L969568 `Sf.W4a()` = `Sf.instance.RH`) reads.
+    //   `a=135*c; RH.J=b/2-a*3.5/2; RH.N=b/2+a*3.5/2;
+    //    RH.P=this.Jn.node.ra+100*c; RH.W=RH.P+a`
+    // `Jn` is the HUD pause widget, positioned `this.Jn.node.D(this.Id.node.ra
+    // + clamp(d,0,1)*25)` — i.e. `panel_y + clamp(hud_d,0,1)*25`. `b` = the
+    // screen width, so `b/2` = `hud_cx`.
+    {
+        const float rh_a = 135.0f * hud_c;
+        const float jn_ra = panel_y + std::clamp(hud_d, 0.0f, 1.0f) * 25.0f;
+        g_achiev_rh_j = hud_cx - rh_a * 1.75f;
+        g_achiev_rh_n = hud_cx + rh_a * 1.75f;
+        g_achiev_rh_p = jn_ra + 100.0f * hud_c;
+        g_achiev_rh_w = g_achiev_rh_p + rh_a;
+        g_achiev_rh_valid = true;
+    }
     const float bar_w = 330.0f * hud_c;                               // `Br.uL(330)`
     const float bar_h = 43.0f * hud_c;                                // `Br.Pb(43)`
     const float bar_y = panel_y - 50.0f * hud_c;                      // `al.D(-50)`
@@ -13571,6 +13628,71 @@ void FightScreen::render_impl(App& app) {
     };
     draw_base("HealthBar_Empty", base_x_player, base_w, -kPipTan25);  // player `Mx`
     draw_base("HealthBar_Empty", base_x_enemy, base_w, +kPipTan25);   // enemy `Mx`
+    // JS `Fr` (the `Sh` style meter, L1076276): the `Mx` plate (`Qp`) carries
+    // ONE `Nx` cell per `<StyleLevels>` entry (`Qp.AXa(c.Nva)`), each drawn
+    // with its `<BarImage>` frame (`CrazyBar_0_Start`..`CrazyBar_5_Fantastic`,
+    // internal_settings.xml) and CROPPED (`Nx.Oka` -> `Y.wl(vc.ho(mode, a))`)
+    // to its fill fraction. `Fr.KDa` fills cells `0..bn-1` to 1 and cell `bn`
+    // to the bar fraction (`Qp.Gb(bn)`); `Fh.EAa` names the level. The fill
+    // grows from the LEFT for the player (`Jc.io` EHorizontal) and from the
+    // RIGHT for the enemy (`Jc.TU` EHorizontalReverse). The port drew only the
+    // empty `Mx` plate — the reported "style bar does not work".
+    {
+        static const char* const kStyleFrames[6] = {
+            "CrazyBar_0_Start", "CrazyBar_1_Hard", "CrazyBar_2_Brutal",
+            "CrazyBar_3_Aggressive", "CrazyBar_4_Crazy", "CrazyBar_5_Fantastic"};
+        auto draw_style_cell = [&](const char* frame, float x, float skew_tan,
+                                   float fill, bool reverse) {
+            if (fill <= 0.0f) return;
+            fill = std::clamp(fill, 0.0f, 1.0f);
+            const float yc = plate_y + base_h * 0.5f;
+            float xy[8] = {x, plate_y, x + base_w, plate_y,
+                           x, plate_y + base_h, x + base_w, plate_y + base_h};
+            for (int c = 0; c < 4; ++c) {
+                xy[c * 2] += skew_tan * (xy[c * 2 + 1] - yc);
+            }
+            sf2::data::atlas_frame fr;
+            int tw = 0, th = 0;
+            unsigned int gl = 0;
+            if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && tw > 0 && th > 0) {
+                const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
+                const float u1 =
+                    static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+                const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
+                const float v1 =
+                    static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
+                const float ua = reverse ? u1 - (u1 - u0) * fill : u0;
+                const float ub = reverse ? u1 : u0 + (u1 - u0) * fill;
+                const float uv[8] = {ua, v0, ub, v0, ua, v1, ub, v1};
+                ren.draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+                return;
+            }
+            const float fw = base_w * fill;
+            const float fx = reverse ? x + base_w - fw : x;
+            const float r = 0.19f + 0.81f * fill;
+            const float g = 0.10f + 0.31f * fill;
+            const float dv[12] = {fx, plate_y, fx + fw, plate_y, fx, plate_y + base_h,
+                                  fx + fw, plate_y, fx + fw, plate_y + base_h,
+                                  fx, plate_y + base_h};
+            ren.draw_triangles(dv, 6, r, g, 0.08f, 1.0f);
+        };
+        const sf2::scene::StyleMeter& sm_p = fight_->player().style;
+        const sf2::scene::StyleMeter& sm_e = fight_->enemy().style;
+        for (int lvl = 0; lvl < 6; ++lvl) {
+            if (lvl <= sm_p.level) {
+                draw_style_cell(kStyleFrames[lvl], base_x_player, -kPipTan25,
+                                lvl < sm_p.level ? 1.0f
+                                                 : static_cast<float>(sm_p.frac),
+                                false);
+            }
+            if (lvl <= sm_e.level) {
+                draw_style_cell(kStyleFrames[lvl], base_x_enemy, +kPipTan25,
+                                lvl < sm_e.level ? 1.0f
+                                                 : static_cast<float>(sm_e.frac),
+                                true);
+            }
+        }
+    }
     for (int i = 0; i < rounds_total; ++i) {
         const bool p_done = i < fight_->player().rounds_won;
         const bool e_done = i < fight_->enemy().rounds_won;
@@ -16541,6 +16663,12 @@ void ShopScreen::update_impl(float dt) {
     // `(MidFrames+1)` subframe pacing the fight uses. `move_frame()` is the
     // `Te.M0()` clip frame; `preview_active()` goes false on the `Te.KNa` end
     // (the `Ad.kg` animation-end -> `Oa.yS` -> `Ex(null,6)`).
+    // Destination idle (`Pi`) advance — once per fixed 60 Hz update, matching
+    // `Oa.Fhb`'s `Ad.aa(L.K.sk.Bm)` -> `Pi.ia`. It is NOT advanced while the
+    // TryOn preview owns the `Pi` model (`Ex(a,7)` replaces it).
+    if (!preview_active_) {
+        advance_destination_model(backdrop_fighter_, backdrop_idle_, backdrop_move_);
+    }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
@@ -18511,6 +18639,12 @@ void EquipmentScreen::update_impl(float dt) {
                 std::fflush(stdout);
                 q.on_lesson_anim(app(), std::string(), std::string(), /*end=*/true);
             }
+        }
+        if (!block_preview_active_) {
+            // Destination idle advance — fixed 60 Hz update, never in render
+            // (the fallback `Pi` backdrop when no persistent avatar exists).
+            advance_destination_model(backdrop_fighter_, backdrop_idle_,
+                                      backdrop_move_);
         }
         if (block_preview_active_ && block_preview_fighter_ != nullptr) {
             // `Pi.ia` -> `wd.ia` -> `Te.ia`: the SAME (MidFrames+1) subframe

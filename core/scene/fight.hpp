@@ -2078,6 +2078,10 @@ private:
     // The round result of the round that just ended (used to pick the K.O.
     // plate art when the deferred `end_stance_pending_` raises it).
     round_result last_round_result_ = round_result::ko;
+    // JS `ca.Pf` (L196253, EndStance `eu==3`): the plate chosen for this round
+    // end — perfect/great for a player win (`Cr.GZ`), timesup/ringout for the
+    // rules, `none` when the JS `Pf` default branch shows nothing.
+    banner_kind result_plate_ = banner_kind::none;
     // --- the banner machine (JS class `Cr` L2022-2027) --------------------
     // `Cr.Sc` is a SECONDS countdown and `Cr.wU` the arm flag:
     //   `fu(a){this.Sc=a;this.X(!0);this.wU=!0;...}` (L2026)

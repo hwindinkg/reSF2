@@ -3312,6 +3312,41 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // animation; the hide + plate move to the phase-3 end-stance gate below.
     // Stash the round result so the deferred plate can pick the same art.
     last_round_result_ = result;
+    // JS `ca.Pf` (L196253, `eu==3`) -> `Cr.GZ` (L1042575): the round/battle
+    // plate.  `switch(b.Iq)` on the WINNER's end reason: `case 2` (rule,
+    // `BT` `ey=2`) -> `yca`/`xca` (`label_win`/`label_lose`); `case 3` (the
+    // plain timeout, `ey=3`) -> `uca` (`timesup`); `case 4` (`ey=4`) ->
+    // `rca` (`ringout`); `default` (`ey=0`, a normal KO) -> `GZ(...)`:
+    //   `b.cE ? GZ(!0) : b.w$a()<=v.gDa && GZ(!1)`
+    // where `cE` is the winner's unhit latch, `w$a()=gd/Zn` its HP fraction
+    // and `v.gDa=0.1` (`<Great MaxHealth="0.1">`).  The whole `default` branch
+    // is gated `!A && !B` (`A=banner type 2`, `B=!winner.qb && !PVP`), so a
+    // NON-player winner (non-PVP) shows NO plate.  The port's `ko` result is
+    // exactly this `ey=0` default branch (a rule end sets `timeout_win`/
+    // `ringout`); the plain timeout is `timeout_win` -> `timesup`.
+    if (result == round_result::timeout_win) {
+        result_plate_ = banner_kind::timesup;
+    } else if (result == round_result::ringout) {
+        result_plate_ = banner_kind::ringout;
+    } else if (w.is_player) {
+        if (w.round_unhit) {
+            result_plate_ = banner_kind::victory;  // `y.zQa` "perfect"
+        } else if (w.max_hp > 0.0f && w.hp / w.max_hp <= 0.1f) {
+            result_plate_ = banner_kind::defeat;   // `y.wQa` "great"
+        } else {
+            result_plate_ = banner_kind::none;     // took damage, HP > 10%
+        }
+    } else {
+        result_plate_ = banner_kind::none;  // `B`: enemy winner, non-PVP
+    }
+    // JS `Cr.GZ(true)` -> `Ar.GZ` -> `nvb` -> `gXa` (`Fh.d6++`, L1056510):
+    // the WINNING player's Perfect counter advances for EACH round it survives
+    // unhit (`cE`).  Only the `GZ` (default) branch counts — a rule/timeout/
+    // ringout end never reaches it, and a loss never does (`!b.qb`).
+    if (w.is_player && w.round_unhit && result != round_result::timeout_win &&
+        result != round_result::ringout) {
+        ++prize_fh_.d6;
+    }
 
     // The result plate is raised by the end-stance gate in `update`
     // (`end_stance_pending_`), after the loser's KO/knockdown animation.
@@ -3399,15 +3434,11 @@ void FightController::end_battle(const FightFighter& winner) {
     // dialog made the battle stats appear "momentally" (instantly).
     battle_end_pending_ = true;
     winner_ = &winner;
-    // JS `Pf` (L196253, EndStance `eu==3`) -> `GZ(true)` -> `nvb` -> `gXa`
-    // (`Fh.d6++`, L1056510): the WINNING player's Perfect counter advances
-    // when it survived the deciding round unhit (`cE`, the `b.qb` winner
-    // branch). A loss never reaches that branch (`!b.qb && type!=FightPVP`
-    // short-circuits), so `d6` stays 0. `Fh.lXa` (L1058250) then emits
-    // `P3 += ceil(prize*$Ia)*d6` and the Results `goldPerfect` count = `d6`.
-    if (winner.is_player && player_.round_unhit) {
-        ++prize_fh_.d6;
-    }
+    // JS `Pf` (L196253) -> `Cr.GZ` (L1042575): the plate was chosen in
+    // `apply_round_result` (`result_plate_`) from the winner's `cE`/HP
+    // fraction — perfect on an unhit player win, great at <=10% HP, `none`
+    // otherwise.  The `d6` Perfect counter also advances there, per unhit
+    // round (NOT only on the deciding round).
     round_.running = false;
     round_live_ = false;
     round_wait_ = false;
@@ -3415,10 +3446,12 @@ void FightController::end_battle(const FightFighter& winner) {
     // JS `tl.fB` (L844) / `ca.kD`: the effect containers drain at the battle
     // end (`fB()` -> `Gq.fB()`/`Hq.fB()`).
     magic_fx_.clear();
-    banner_show(winner.is_player ? banner_kind::victory : banner_kind::defeat,
-                kJsBannerHoldSeconds, banner_action::end_battle, false);
+    banner_show(result_plate_, kJsBannerHoldSeconds, banner_action::end_battle,
+                false);
     std::fprintf(stdout, "[fight] banner: %s (F%d)\n",
-                 winner.is_player ? "VICTORY" : "DEFEAT", frame_);
+                 result_plate_ == banner_kind::victory ? "PERFECT"
+                 : result_plate_ == banner_kind::defeat ? "GREAT" : "none",
+                 frame_);
     std::fflush(stdout);
 }
 
@@ -6750,15 +6783,18 @@ void FightController::update(float dt) {
             if (end_stance_pending_ && stance_ended) {
                 end_stance_pending_ = false;
                 set_scene_visible(false);  // JS `Ta.XF(!1)`
-                banner_kind result_plate = banner_kind::ko;
-                const char* plate_name = "K.O.";
-                if (last_round_result_ == round_result::timeout_win) {
-                    result_plate = banner_kind::timesup;
-                    plate_name = "TIMESUP";
-                } else if (last_round_result_ == round_result::ringout) {
-                    result_plate = banner_kind::ringout;
-                    plate_name = "RINGOUT";
-                }
+                // JS `Pf` (L196253) chose the plate in `apply_round_result`
+                // (`result_plate_`): perfect/great/none for the `ey=0` default,
+                // timesup/ringout for the rules. `none` still raises the
+                // countdown (the JS round transition is driven by the `h9`->
+                // `Onb` chain, not the plate art), so the round advances with
+                // no visible callout.
+                const banner_kind result_plate = result_plate_;
+                const char* plate_name =
+                    result_plate == banner_kind::victory ? "PERFECT"
+                    : result_plate == banner_kind::defeat ? "GREAT"
+                    : result_plate == banner_kind::timesup ? "TIMESUP"
+                    : result_plate == banner_kind::ringout ? "RINGOUT" : "none";
                 banner_show(result_plate, kJsBannerHoldSeconds,
                             banner_action::next_round, false);
                 std::fprintf(stdout, "[fight] banner: %s (F%d)\n", plate_name,
