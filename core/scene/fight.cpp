@@ -6282,6 +6282,21 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 c.anims_enemy = anim_names_of(foe.fighter);
                 fill_ctx_geometry(c, me, foe);
                 c.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+                // `CurrentInterval` conditions (JS `tm.he`) read the per-player
+                // active-interval lists. The `Throw` template gates on
+                // `<CurrentInterval Player="Enemy" Name="Throwable"/>`, so the
+                // start gate must supply BOTH fighters' intervals or the
+                // resolved throw is rejected here (it was — the AI picked a
+                // throw but `eval_move_conditions` failed for want of the
+                // opponent list).
+                for (const std::string& n : me.fighter.active_intervals()) {
+                    c.intervals.push_back(
+                        {n, me.fighter.interval_type(n), true});
+                }
+                for (const std::string& n : foe.fighter.active_intervals()) {
+                    c.intervals_enemy.push_back(
+                        {n, foe.fighter.interval_type(n), true});
+                }
                 return c;
             };
             // JS `de.V1` (L601-602) resolves the candidate to the MOVE whose
