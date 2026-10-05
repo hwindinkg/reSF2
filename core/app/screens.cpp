@@ -17901,33 +17901,41 @@ bool EquipmentScreen::perk_buyable(int index) const {
 // JS `vb.Jzb` case 1 (L2200): `p.o.co.L1a(this.ql)` (the `<Perks>` write) +
 // `p.o.co.KS.xI(name, ql.level)` (the `<PerkHistory>` append).
 void EquipmentScreen::perk_buy(int index) {
-    if (!perk_buyable(index)) return;
-    const PerkRow r = perk_rows_[index];
-    try {
-        WarriorSave w = app().save().load();
-        if (r.kind == "Upgrade") {
-            // `Bt.L1a` L306 match branch (`e&&f`): update UpgradeLevel only.
-            w.learn_perk_upgrade(r.name, r.tier, r.upgrade_max);
-        } else {
-            w.learn_perk(r.name, r.tier, r.upgrade_max);
+    // JS `vb.Jzb` case 1 (L2200) is the perk WRITE (`p.o.co.L1a` +
+    // `<PerkHistory>`); it is gated on the cell being learnable (`Zr.ROa`
+    // L2222 `Be==0`). The tutorial's `Co.Qg` (L1127) is a SEPARATE press
+    // listener on the armed improve button (`Sb.F().kk(!1)` + `sa()`), so the
+    // resume must run even when the cell is no longer learnable — otherwise the
+    // `StoryTutorialLearnPerk` park (`Sb.Xva` target=ProfilePerk) is never
+    // cleared and the Profile tabs + the Dojo menu stay dead.
+    const bool buyable = perk_buyable(index);
+    if (buyable) {
+        const PerkRow r = perk_rows_[index];
+        try {
+            WarriorSave w = app().save().load();
+            if (r.kind == "Upgrade") {
+                // `Bt.L1a` L306 match branch (`e&&f`): update UpgradeLevel only.
+                w.learn_perk_upgrade(r.name, r.tier, r.upgrade_max);
+            } else {
+                w.learn_perk(r.name, r.tier, r.upgrade_max);
+            }
+            app().save().save(w);
+            perk_rows_ = load_perk_tree(app(), w);
+            player_level_ = w.level;
+            // `Bt.L1a` (L306) -> `Bt.Qua` (L307) ends in `rb.Xkb()` = `snd_learn`
+            // (65598): every perk learn/upgrade plays it after the write.
+            sf2::audio::AudioEngine::instance().play("snd_learn");
+            std::fprintf(stdout, "[profile] perk buy %s (tier %d, upgrade %d)\n",
+                         r.name.c_str(), r.tier, r.upgrade_max);
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[profile] perk buy failed: %s\n", e.what());
         }
-        app().save().save(w);
-        perk_rows_ = load_perk_tree(app(), w);
-        player_level_ = w.level;
-        // `Bt.L1a` (L306) -> `Bt.Qua` (L307) ends in `rb.Xkb()` = `snd_learn`
-        // (65598): every perk learn/upgrade plays it after the write.
-        sf2::audio::AudioEngine::instance().play("snd_learn");
-        std::fprintf(stdout, "[profile] perk buy %s (tier %d, upgrade %d)\n",
-                     r.name.c_str(), r.tier, r.upgrade_max);
-        std::fflush(stdout);
-        // JS `Co.Qg` (L1127): the tutorial armed this very button; the press
-        // runs `Sb.F().kk(!1)` + `this.sa()` — resume the parked LearnPerk tail
-        // (`SetStoryTutorialStep SHOW_DOUBLE_SWEEP` + the sensei notification).
-        // A no-op outside the tutorial.
-        app().quest_engine().resume_learn_perk(app());
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "[profile] perk buy failed: %s\n", e.what());
     }
+    // JS `Co.Qg` (L1127): the armed learn button's press runs `Sb.F().kk(!1)`
+    // + `this.sa()` regardless of the write. A no-op outside the parked
+    // LearnPerk lesson.
+    app().quest_engine().resume_learn_perk(app());
 }
 
 // JS `as.refresh` (L2211): the reward button shows while
@@ -18406,8 +18414,15 @@ void EquipmentScreen::update_impl(float dt) {
             }
         }
         const ShopRect ib = profile_improve_rect();
-        if (perk_sel_ >= 0 && perk_buyable(perk_sel_) && p.x >= ib.J && p.x <= ib.N &&
-            p.y >= ib.P && p.y <= ib.W) {
+        // `db.aa` L1839: `Co.S` L1127 arms the improve button (`tk=!0`) with
+        // `Vg(!0)` even when the selected cell is already learned (`Yk.X(false)`
+        // in `Zr.ROa` L2222 hides it) — the armed control must stay pressable so
+        // the parked `StoryTutorialLearnPerk` tail can resume (`Co.Qg`). Without
+        // this the `Sb.Xva` target=ProfilePerk overlay leaked forever and the
+        // Profile sub-tabs + the Dojo menu went dead (the reported bug).
+        const bool armed = app().quest_engine().lock_target() == "ProfilePerk";
+        if (perk_sel_ >= 0 && (perk_buyable(perk_sel_) || armed) && p.x >= ib.J &&
+            p.x <= ib.N && p.y >= ib.P && p.y <= ib.W) {
             if (p.pressed) {
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
                 perk_buy(perk_sel_);
@@ -18849,7 +18864,9 @@ void EquipmentScreen::render_impl(App& app) {
         // with `y.qB="highlightButton"` (L1270804) — the SAME sliced-atlas-260
         // frame the `$r.Op` VIEW button uses (`$r.ba`, L2234). The former
         // flat quad was a placeholder. Label `Y.na("profile_BtnImprove")`.
-        if (perk_sel_ >= 0 && perk_buyable(perk_sel_)) {
+        if (perk_sel_ >= 0 &&
+            (perk_buyable(perk_sel_) ||
+             app.quest_engine().lock_target() == "ProfilePerk")) {
             const ShopRect ib = profile_improve_rect();
             const float bx = (ib.J + ib.N) * 0.5f;
             const float by = (ib.P + ib.W) * 0.5f;

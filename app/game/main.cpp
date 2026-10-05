@@ -1593,6 +1593,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // reported wrong turn) then Shop->Profile, dumping the lock/step/gate at
     // each edge (the reported "step auto-completed + lock stuck" repro).
     bool tutorial_block_shop_probe = false;
+    // --tutorial-learnperk-probe: seed the LEARN_PERK step and drive the REAL
+    // ChangeTab Dojo->Profile edge (the user's save state), then press the
+    // armed improve button through the screen's own hit rect. Dumps the
+    // lock/step/gate at each edge (the reported "Profile tabs + menu dead").
+    bool tutorial_learnperk_probe = false;
+    // --keep-save: skip the driver save hygiene so a run boots the SHIPPED
+    // fresh `users_default` (Tutorial="MOVE") / an ambient save VERBATIM, the
+    // way the real `--windowed` launch does. Hidden + watchdog still armed.
+    bool keep_save = false;
     // --profile-avatar-probe: the persistent `Pi` profile avatar (the player's
     // worn hero model + its idle animation/pose) + the `$r.Op.pa` -> `Ad.kg`
     // two-stage Show chain (VIEW button -> move playback -> UI restore).
@@ -1752,6 +1761,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             tutorial_showblock_probe = true;
         } else if (arg == "--tutorial-block-shop-probe") {
             tutorial_block_shop_probe = true;
+        } else if (arg == "--tutorial-learnperk-probe") {
+            tutorial_learnperk_probe = true;
+        } else if (arg == "--keep-save") {
+            keep_save = true;
         } else if (arg == "--profile-avatar-probe") {
             profile_avatar_probe = true;
         } else if (arg == "--fidelity-tour") {
@@ -2795,7 +2808,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // BOSS_LYNX ladder, the shop BUY/EQUIP) failed depending on the previous
     // run. Reset to the shipped template before boot; the per-mode seeds
     // (fidelity/quest-verify story step, headless-loop END+money) apply on top.
-    if (driver_mode) {
+    if (driver_mode && !keep_save) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
             const std::string hashed = res_root + "/users_default.b7da2019.xml";
@@ -2838,8 +2851,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // END step (L200) — once short-circuited the chain cannot be armed, so a
     // stale completed local save would make the tutorial steps stall. The
     // oracle harness seeds the same fresh state.
-    if (fidelity_tour || quest_verify || observe_dialogs || tutorial_real_verify ||
-        tutorial_block_shop_probe) {
+    if (!keep_save &&
+        (fidelity_tour || quest_verify || observe_dialogs || tutorial_real_verify ||
+         tutorial_block_shop_probe || tutorial_learnperk_probe)) {
         std::string def = res_root + "/users_default.xml";
         if (!std::filesystem::exists(def)) {
             const std::string hashed = res_root + "/users_default.b7da2019.xml";
@@ -2870,6 +2884,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 w.set_story_step("SHOW_BLOCK");
                 ss.save(w);
                 std::fprintf(stdout, "[blockprobe] seeded story step -> SHOW_BLOCK\n");
+                std::fflush(stdout);
+            } else if (tutorial_learnperk_probe) {
+                // `StoryTutorialLearnPerk` (tutorial_quests.xml L173) needs
+                // `?Player[].Level >= 2`; the shipped default is Level 1, so
+                // seed the level too (the ambient LEARN_PERK save is Level 3).
+                w.set_story_step("LEARN_PERK");
+                w.level = 3;
+                ss.save(w);
+                std::fprintf(stdout, "[learnperk] seeded story step -> LEARN_PERK (level 3)\n");
                 std::fflush(stdout);
             } else if (!w.story_step().empty()) {
                 w.set_story_step("");
@@ -3402,6 +3425,51 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          sf2::app::dialog_line_text_for_test(app, raw).c_str());
         }
         std::fflush(stdout);
+        app.shutdown();
+        return 0;
+    } else if (tutorial_learnperk_probe) {
+        // --- [bug A/B repro] LEARN_PERK -> Profile (real ChangeTab) ---------
+        // Boots the tutorial chain with the seeded LEARN_PERK step, drives the
+        // REAL `ChangeTab` Dojo->Profile edge (the user's save state), then
+        // dumps the `Sb.kk` lock / step / gate / the profile sub-tab and nav
+        // gate. No OS input, hidden window (RULE 0).
+        glfwHideWindow(app.renderer().window());
+        app.set_auto_attack(false);
+        app.set_headless_frames(0);
+        for (int i = 0; i < 120; ++i) app.run_one_frame();
+        sf2::app::QuestEngine& q = app.quest_engine();
+        const auto dump = [&](const char* tag) {
+            std::string step;
+            try {
+                step = app.save().load().story_step();
+            } catch (const std::exception&) {
+            }
+            std::fprintf(stdout,
+                         "[learnperk] %-16s screen=%d step=%s locked=%d target=%s "
+                         "navlock=%d navflash=%s gate=%d modal=%d tabs0=%d dojo=%d\n",
+                         tag, app.screens().current_id(), step.c_str(),
+                         q.controls_locked() ? 1 : 0, q.lock_target().c_str(),
+                         q.nav_locked() ? 1 : 0, q.nav_flash().c_str(),
+                         q.tutorial_gate_beat(), q.has_modal() ? 1 : 0,
+                         q.control_allowed("ProfileTab0") ? 1 : 0,
+                         q.control_allowed("Dojo") ? 1 : 0);
+            std::fflush(stdout);
+        };
+        dump("boot");
+        // The REAL edge: push Profile through the screen manager (fires the
+        // `ChangeTab` the shipped `StoryTutorialLearnPerk` observes).
+        app.screens().push(sf2::app::make_screen(app.screens(), sf2::app::kScreenProfile));
+        for (int i = 0; i < 60; ++i) app.run_one_frame();
+        dump("profile");
+        // The `Co.Qg` learn press (`perk_buy` -> `resume_learn_perk`).
+        if (auto* es = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top())) {
+            const int sel = es->perk_sel_for_test();
+            std::fprintf(stdout, "[learnperk] perk_sel=%d\n", sel);
+            std::fflush(stdout);
+            es->perk_press_for_test();
+        }
+        for (int i = 0; i < 60; ++i) app.run_one_frame();
+        dump("after_buy");
         app.shutdown();
         return 0;
     } else if (tutorial_real_verify) {

@@ -1211,6 +1211,11 @@ public:
     bool select_tab(int slot, const std::string& focus);
     // The live profile tab index (probe/verify read).
     int tab() const { return tab_; }
+    // --- [probe] `--tutorial-learnperk-probe` ----------------------------
+    // The `uk` selected perk cell (`vb.uj`, L2198) and the armed improve
+    // press (`vb.Jzb` case 1 -> `perk_buy`). Read/press from the probe.
+    int perk_sel_for_test() const { return perk_sel_; }
+    void perk_press_for_test() { if (perk_sel_ >= 0) perk_buy(perk_sel_); }
 
     // --- [probe] `--settings-profile-shop-probe` (ii) --------------------
     // The folded Moves tab selection (`vb.uj` L2198 -> `umb`/`$r.refresh`
