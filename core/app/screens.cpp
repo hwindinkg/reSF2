@@ -6273,10 +6273,16 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
     try {
         w = app.save().load();
         level = w.level > 0 ? w.level : 1;
-        equipped = {w.weapon, w.armor, w.helm, w.ranged, w.magic};
-        for (const auto& oi : w.items) {
-            if (oi.count > 0) equipped.push_back(oi.name);
-        }
+        // JS `xc.jt()` (L808): ONLY the equipped slots feed `Fm`'s `m7a`
+        // item bonus — `Of` (Skeleton) / `Hd` (Weapon) / `ig` (Ranged) /
+        // `Mg` (Magic) / `hg` (Armor) / `Lg` (Helm). The old port ALSO pushed
+        // every inventory row with `count>0`, so (a) each equipped item was
+        // summed TWICE (its slot name AND its `<Items>` row) and (b) every
+        // OWNED-but-unequipped item contributed its damage/defense. That
+        // inflated the player rating (`dl.A8a`), which is the denominator of
+        // the Map difficulty ratio, so the difficulty over-dropped (the
+        // reported "bought armor -> Impossible became Hard").
+        equipped = {w.skeleton, w.weapon, w.armor, w.helm, w.ranged, w.magic};
     } catch (const std::exception&) {
     }
     // `m7a` item bonus: the item row's matching attribute (the catalog

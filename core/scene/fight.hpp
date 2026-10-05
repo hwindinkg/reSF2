@@ -1143,6 +1143,17 @@ struct FightFighter {
     bool ranged_available = true;
     int hits_landed = 0;
     int hits_taken = 0;
+    // JS `xc.cE` (L411256 default true; cleared by the hit resolver
+    // `this.parameters.cE=!1` L259143; re-armed at each round start
+    // L203734/L210860): the per-ROUND "not hit yet" latch. The battle-end
+    // `Pf` handler (L196253) reads the WINNER's `cE` in the EndStance
+    // (`eu==3`) and, when it is still true, runs `GZ(true)` -> `nvb` ->
+    // `gXa` -> `Fh.d6++` (L1056510). `d6` is the Perfect multiplier in
+    // `Fh.lXa` (`P3 += ceil(prize*$Ia)*d6`, L1058250) and the Results
+    // `goldPerfect` row's count. The port previously used whole-battle
+    // `hits_taken==0` and never set `d6`, so a no-hit LOSS read as PERFECT
+    // and the Perfect bonus was always 0.
+    bool round_unhit = true;
     int combo_run = 0;        // consecutive landed hits (resets when taken)
     int max_combo = 0;        // battle-best run (prize ComboCount factor)
     // JS `wd.Vx` (`iu`, g="C5") per-fighter combo tracker. `combo_run` is the

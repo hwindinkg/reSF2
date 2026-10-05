@@ -3399,6 +3399,15 @@ void FightController::end_battle(const FightFighter& winner) {
     // dialog made the battle stats appear "momentally" (instantly).
     battle_end_pending_ = true;
     winner_ = &winner;
+    // JS `Pf` (L196253, EndStance `eu==3`) -> `GZ(true)` -> `nvb` -> `gXa`
+    // (`Fh.d6++`, L1056510): the WINNING player's Perfect counter advances
+    // when it survived the deciding round unhit (`cE`, the `b.qb` winner
+    // branch). A loss never reaches that branch (`!b.qb && type!=FightPVP`
+    // short-circuits), so `d6` stays 0. `Fh.lXa` (L1058250) then emits
+    // `P3 += ceil(prize*$Ia)*d6` and the Results `goldPerfect` count = `d6`.
+    if (winner.is_player && player_.round_unhit) {
+        ++prize_fh_.d6;
+    }
     round_.running = false;
     round_live_ = false;
     round_wait_ = false;
@@ -3430,6 +3439,7 @@ void FightController::between_rounds_recover() {
         f->shock.shocked_vc = false;   // `vc`
         f->fighter.set_shock_latch(false);  // `oa.vc` reset
         f->kh = false;                 // `parameters.kh`
+        f->round_unhit = true;         // `parameters.cE=!0` (round-start re-arm)
     }
     // JS `Cn.$K()` (L297964): at the round boundary every strike-memory
     // accumulator is scaled by the tactic's `<Memory RoundFactor>` (`mt()`
@@ -5046,6 +5056,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // landed-hit counter advances on every resolved hit (blocked or not);
     // `ca.Cgb` L396 reads it back for the Punchbag reaction cadence.
     def.fighter.note_hit_taken();
+    // JS `wd` hit resolver (L259143 `this.parameters.cE=!1`): the defender's
+    // per-round "not hit" latch clears on every resolved hit (blocked or
+    // not). The battle-end `Pf` handler reads it for the Perfect prize.
+    def.round_unhit = false;
     // Perk trigger bus, hit scope (replaces the direct hook):
     // slot 7 = PostHit at the `Cgb` point (`Sba(a.model,b,7)` — after the
     // R8a/disarm rolls, before `LWa`/damage; SetHit overrides land on the
@@ -5590,7 +5604,11 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
                                                     std::int64_t money,
                                                     std::int64_t bonus) const {
     BattlePrize p;
-    p.perfect = player_.hits_taken == 0;
+    // JS `Fh.d6` (the Perfect multiplier/count, set by the battle-end `Pf`
+    // -> `gXa` chain; see `end_battle`). A no-hit LOSS leaves it 0, so the
+    // Results PERFECT row reads x0 — the old `hits_taken==0` test showed
+    // PERFECT even on a loss.
+    p.perfect = prize_fh_.d6 != 0;
     p.first_strike = battle_first_hit_ && battle_first_by_player_;
     p.max_combo = player_.max_combo;
     p.shocks = player_.shocks_dealt;
