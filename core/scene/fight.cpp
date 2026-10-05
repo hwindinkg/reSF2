@@ -4259,6 +4259,11 @@ void FightController::tick_bus_side(int side) {
     side &= 1;
     FightFighter& me = side == 0 ? player_ : enemy_;
     FightFighter& foe = side == 0 ? enemy_ : player_;
+    // JS `Gc.GB` is drained into `Tu` every `Gnb`; the queue never spans more
+    // than one frame. Keep the port's pending queue frame-local (the player's
+    // move-selection pass drains it; this guards the non-fight phases where
+    // that pass does not run).
+    me.pending_interval_ends.clear();
     sf2::scene::TrigVars v;
     v.num["StepFrame"] = static_cast<double>(frame_);
     char stepbuf[32];
@@ -4386,6 +4391,16 @@ void FightController::tick_bus_side(int side) {
                 }
             }
             if (ivt == 4) set_slowmo(false);
+            // JS `Te.fIa` (L258730) fires `EStopIntervalEvent` -> `Gc.vA`
+            // L672 `Ih(13)` -> `GB`, and `Gnb` (L672) moves `GB` into `Tu`
+            // for the NEXT frame's move-selection pass. Queue the ended
+            // interval for the player's IntervalEnd re-selection; the
+            // `Gc.dxa`/`DK` pass then admits any move whose `<IntervalEnd>`
+            // spec matches (JS `Om.compare`) and whose `<Conditions>` pass —
+            // the mid-single switch into a double once `Uninterrupt` closes.
+            if (me.is_player) {
+                me.pending_interval_ends.emplace_back(n, ivt);
+            }
         }
     }
     me.prev_intervals = std::move(cur);
@@ -5759,6 +5774,23 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // <Tactics><Conditions> filter and the `Md.jL`/`iCa` weighted
         // roulette — is on the AI's `eb=true` (`Gc.Vkb`) path only and is
         // deliberately NOT applied here (see `Fighter::try_select_move`).
+        // JS `Gc.Gnb` L672 order: `Tu` holds the type-13 `EStopIntervalEvent`
+        // (moved out of `GB` at the END of the previous `Gnb`) BEFORE this
+        // frame's type-2 `KeyPressed`, so `Rwa` runs the IntervalEnd pass
+        // first. `tick_bus_side` filled `pending_interval_ends` LAST frame.
+        for (const auto& ie : me.pending_interval_ends) {
+            const std::string c2 =
+                me.fighter.try_select_move(ctx, "IntervalEnd", ie.first, ie.second);
+            if (!c2.empty()) {
+                ++me.moves_started;
+                me.last_decision = "interval:" + c2;
+                std::fprintf(stdout,
+                             "[fight] player IntervalEnd(%s) -> %s (F%d)\n",
+                             ie.first.c_str(), c2.c_str(), frame_);
+                std::fflush(stdout);
+            }
+        }
+        me.pending_interval_ends.clear();
         const std::string chosen = me.fighter.try_select_move(ctx);
         if (!chosen.empty()) {
             ++me.moves_started;

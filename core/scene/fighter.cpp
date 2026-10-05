@@ -1350,13 +1350,17 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
 // PRECONDITION (JS `wd.BHa` <- `zl.rwa`): a press EDGE, i.e. a Tap in the
 // buffer. A lingering Hold is a continuation for the running move's
 // conditions, not a new press.
-std::string Fighter::try_select_move(FightContext& ctx, const std::string& event) {
+std::string Fighter::try_select_move(FightContext& ctx, const std::string& event,
+                                     const std::string& iv_name, int iv_type) {
     decision_ = MoveDecision();  // the previous decision is stale from here on
     // JS `Gc.Gnb` (L672) walks the queued events (`this.Tu`) and runs one
     // `EZa` pass per event with the candidate set `d.Su.dea(event)`. The port
-    // keeps the two triggers the PLAYER can reach: the press edge (`Gc.mS`
-    // -> `Ih(2)`, `KeyPressed`) and the clip end (`Gc.kg` -> `Ih(10)`,
-    // `AnimationEnd`).
+    // keeps the three triggers the PLAYER can reach: the press edge (`Gc.mS`
+    // -> `Ih(2)`, `KeyPressed`), the clip end (`Gc.kg` -> `Ih(10)`,
+    // `AnimationEnd`) and the interval end (`Te.fIa` L258730 -> `Gc.vA`
+    // L672 `Ih(13)`, `IntervalEnd`; the `EStopIntervalEvent` handler). The
+    // type-13 event is the one that lets a buffered second key switch into a
+    // double once the current move's `Uninterrupt` window closes.
     const std::string ev = event.empty() ? std::string("KeyPressed") : event;
     if (event.empty()) {
         // Press edge only (`zl.rwa` L799 fires once per `zl.Sgb` L798
@@ -1377,16 +1381,24 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     std::vector<const MoveDef*> passing;
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
-        if (!m->has_event(ev)) continue;
-        // Clip-end gate (`Gc.kg` L671 -> `Ih(10)`): a candidate may only
-        // re-fire from `AnimationEnd` if it is ALSO key-triggered
-        // (`Gc.mS` L672 -> `Ih(2)`). A pure idle/`AnimationEnd`-loop move
-        // (`FistsStartStanceIdle`, `StanceIdle`) carries only
-        // `<AnimationEnd/>`; re-selecting it with no input keeps the fighter
-        // `Pe=true` with its `Uninterrupt` window live, which blocks the
-        // opponent AI (`Pqb` L604 via `de.Ycb` L620). `StepForward` also
-        // carries `<KeyPressed/>`, so the held re-fire is unaffected.
-        if (ev == "AnimationEnd" && !m->has_event("KeyPressed")) continue;
+        if (ev == "IntervalEnd") {
+            // JS `Gc.EZa` L676 walks `d.Su.dea(13)` (moves carrying an
+            // `<IntervalEnd>` event) and `Gc.iEa` -> `Om.compare` admits only
+            // the specs matching the ENDED interval's name/type.
+            if (!m->interval_end_matches(iv_name, iv_type)) continue;
+        } else {
+            if (!m->has_event(ev)) continue;
+            // Clip-end gate (`Gc.kg` L671 -> `Ih(10)`): a candidate may only
+            // re-fire from `AnimationEnd` if it is ALSO key-triggered
+            // (`Gc.mS` L672 -> `Ih(2)`). A pure idle/`AnimationEnd`-loop move
+            // (`FistsStartStanceIdle`, `StanceIdle`) carries only
+            // `<AnimationEnd/>`; re-selecting it with no input keeps the
+            // fighter `Pe=true` with its `Uninterrupt` window live, which
+            // blocks the opponent AI (`Pqb` L604 via `de.Ycb` L620).
+            // `StepForward` also carries `<KeyPressed/>`, so the held re-fire
+            // is unaffected.
+            if (ev == "AnimationEnd" && !m->has_event("KeyPressed")) continue;
+        }
         std::string trace;
         // [TASK B DIAGNOSTIC] `SF2_TRACE_COND=1` dumps the failing condition
         // tree + the enemy interval list for the throw family so the exact

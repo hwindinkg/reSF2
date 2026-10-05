@@ -649,6 +649,42 @@ struct MoveDef {
     };
     std::vector<HitEventDef> hit_events;
 
+    // JS `Om` (`kz.create` "IntervalEnd" -> type 13, L389326-389420): the
+    // `<Events><IntervalEnd Name=".." Type=".." Not=".."/></Events>` spec.
+    // `Om.compare(a)` (verbatim):
+    //   if(!super.compare(a))return!1;            // type 13 == a.type
+    //   let b=a.data; a.data instanceof fe||(b=null);
+    //   if(b==null)return!1;
+    //   if(this.AC==0||this.AC==b.type){          // AC: Attack=4 Block=5 Invulnerable=6
+    //     let c=this.Ki; if(c==null||c==""||this.Ki==b.name) a=!0 }
+    //   return this.cb?!a:a
+    // `b` is the ENDED interval (`fe`), so the name/type match the interval
+    // that just stopped. This is the trigger the fighter's move selection
+    // re-runs on (JS `Te.fIa` -> `Gc.vA` -> `Ih(13)` -> `GB` -> next-frame
+    // `Gnb` -> `Rwa`/`EZa`/`dxa` -> `DK`), which lets a buffered second key
+    // switch into a double once the single's `Uninterrupt` window closes.
+    struct IntervalEndEventDef {
+        std::string name;   // `Ki`  (Name attr; "" = any interval name)
+        int type = 0;       // `AC`  (Attack=4, Block=5, Invulnerable=6, else 0)
+        bool not_ = false;  // `cb`  (Not attr)
+    };
+    std::vector<IntervalEndEventDef> interval_end_events;
+
+    // JS `Om.compare`: does ANY of the move's `<IntervalEnd>` specs admit an
+    // interval-end event carrying `iv_name`/`iv_type`? (Type 13 membership is
+    // already implied by `interval_end_events` being non-empty.)
+    bool interval_end_matches(const std::string& iv_name, int iv_type) const {
+        for (const IntervalEndEventDef& e : interval_end_events) {
+            bool a = false;
+            if (e.type == 0 || e.type == iv_type) {
+                if (e.name.empty() || e.name == iv_name) a = true;
+            }
+            if (e.not_) a = !a;  // `this.cb ? !a : a`
+            if (a) return true;
+        }
+        return false;
+    }
+
     bool has_event(const std::string& name) const {
         return events.find(name) != events.end();
     }

@@ -694,6 +694,13 @@ bool eval_leaf(const Cond& c, const FightContext& ctx) {
     if (c.type == "Health") return eval_health(c, ctx);
     if (c.type == "CurrentInterval") return eval_current_interval(c, ctx);
     if (c.type == "CurrentAnimation") return eval_current_animation(c, ctx);
+    // JS `Em.he` (`sa.oe.set("RoundStage",7)` L704, class L755): StartStance/
+    // Fight/EndStance/TryOn. `eval_round_stage` existed but was never
+    // dispatched, so every `<RoundStage>` gate fell through to the unknown
+    // `return true` — during `Fight` the EndStance-only loss/win moves
+    // (`TimeoutLoss`, `Win_Fists`, ...) satisfied their other conditions and
+    // became selectable. Exposed by the `IntervalEnd` re-selection.
+    if (c.type == "RoundStage") return eval_round_stage(c, ctx);
     if (c.type == "PhysicsFrameNumber") return eval_physics_frame(c, ctx);
     if (c.type == "RoundResult") return eval_round_result(c, ctx);
     if (c.type == "Item") return eval_item_like(c, ctx);

@@ -6772,15 +6772,17 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // Hold Forward for the whole probe; sweep the gap between the two
         // Punch downs. Enemy pinned far RIGHT so the facing never flips.
         std::fprintf(stdout, "[place] DOUBLE-PRESS sweep (Punch x2 + Forward Hold):\n");
-        for (int gap : {2, 5, 8, 10, 12, 14, 15}) {
+        for (int gap : {2, 10, 20, 30, 40, 42, 45, 50, 55, 60}) {
             for (int i = 0; i < 50; ++i) app.run_one_frame();
             fs->reset_player_move();
             const float px = fs->player_world_x();
-            // dist 100: within ShortUpwardElbowStrike's `<Distance Max="130">`
-            // so the 1-key pick is ShortUpwardElbowStrike (Priority 150,
-            // `Uninterrupt [0,11]`), the close-range case where DoublePunch can
-            // chain once that window ends (gap 12..15).
-            auto pin = [&]() { fs->place_fighters(px, px + 100.0f); };
+            // dist 200: outside ShortUpwardElbowStrike's `<Distance Max="130">`
+            // so the 1-key pick with Forward held is HeavyPunch (Priority 120,
+            // `Uninterrupt [6,19]` -> closes ~F56 relative to the first tap).
+            // The `IntervalEnd Name="Uninterrupt"` re-selection then admits
+            // DoublePunch (Priority 130) iff the 2nd tap's `zl.dX` buffer
+            // (16 frames) still holds BOTH Punch taps (gap ~41..56).
+            auto pin = [&]() { fs->place_fighters(px, px + 200.0f); };
             pin();
             for (int i = 0; i < 2; ++i) { pin(); app.run_one_frame(); }
             fs->inject_game_key(3, true);   // Forward HOLD
@@ -6792,6 +6794,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             for (int i = 0; i < gap - 1; ++i) { pin(); app.run_one_frame(); }
             fs->inject_game_key(9, true);   // second Punch tap
             pin(); app.run_one_frame();
+            // Play out past the single's `Uninterrupt` end so the type-13
+            // `IntervalEnd` re-selection has a chance to switch into the double.
+            for (int i = 0; i < 44; ++i) { pin(); app.run_one_frame(); }
             const std::string mv = fs->player_current_move();
             const std::string dec = fs->player_decision();
             fs->inject_game_key(9, false);

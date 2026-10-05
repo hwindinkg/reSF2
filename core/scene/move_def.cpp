@@ -1128,6 +1128,21 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                     h.type = t != nullptr ? t : "";
                     h.not_ = data::xml_attr_bool(ev, "Not", false);
                     def.hit_events.push_back(std::move(h));
+                } else if (std::string(ev.name()) == "IntervalEnd") {
+                    // JS `Om.parse` (L389420): `AC` = Type mapped
+                    // (Attack->4, Block->5, Invulnerable->6, else 0);
+                    // `Ki` = Name; `cb` = Not (`tb.init` L763).
+                    MoveDef::IntervalEndEventDef ie;
+                    const char* n = ev.attribute("Name").value();
+                    ie.name = n != nullptr ? n : "";
+                    const char* t = ev.attribute("Type").value();
+                    const std::string ts = t != nullptr ? t : "";
+                    ie.type = ts == "Attack" ? 4
+                              : ts == "Block" ? 5
+                              : ts == "Invulnerable" ? 6
+                              : 0;
+                    ie.not_ = data::xml_attr_bool(ev, "Not", false);
+                    def.interval_end_events.push_back(std::move(ie));
                 }
             }
         };

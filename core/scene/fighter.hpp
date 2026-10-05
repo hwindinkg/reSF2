@@ -257,8 +257,13 @@ public:
     //     `zl.ia` L798), so the step restarts at every clip end — the
     //     continuous walk. On release the Hold drops and nothing passes.
     // Returns the started move's name, or "".
+    // `iv_name`/`iv_type` carry the ended interval for `event ==
+    // "IntervalEnd"` (JS `Om.compare` against the `fe` interval in the
+    // type-13 event's `data`). Ignored for the other events.
     std::string try_select_move(sf2::scene::FightContext& ctx,
-                                const std::string& event = std::string());
+                                const std::string& event = std::string(),
+                                const std::string& iv_name = std::string(),
+                                int iv_type = 0);
     // Hit-reaction pick (JS `Gc.DK` L673-674 + `Gc.EZa` L676-677): the
     // fighter's moves carrying a `<Hit>` event (`Su.dea(6)`) whose
     // `<Hit>`-event name matches the attacker's hit name (`Nm.compare`,

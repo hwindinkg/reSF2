@@ -1131,6 +1131,12 @@ struct FightFighter {
     // round_.number so each round plays the intro exactly once.
     int intro_played_round = -1;
     std::set<std::string> prev_intervals;  // last tick's intervals (12/13 edge)
+    // JS `Gc.GB` -> next-frame `Tu` (L672): the type-13 `EStopIntervalEvent`
+    // queue. `tick_bus_side` records each interval that just ended here; the
+    // player's move-selection pass drains it on the NEXT frame, mirroring the
+    // JS one-frame `GB`->`Tu` hand-off. Each entry is the ended interval's
+    // (name, type) — the `data` of the `Om.compare` event.
+    std::vector<std::pair<std::string, int>> pending_interval_ends;
     std::vector<sf2::scene::PerkAction> perks;  // equipped perk actions
                                                 // (empty until perk-equip
                                                 // mapping lands)
