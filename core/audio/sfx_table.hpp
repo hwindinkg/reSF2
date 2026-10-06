@@ -39,7 +39,7 @@
 //   - the PACK voices/impacts `<Sound PackName="CLANS|ZONE_*">`:
 //     `snd_low_pl_attack1..6`, `snd_low_pl_jump1..3`, `snd_low_pl_hit2`,
 //     `snd_low_cough`, `snd_midsphere_*`, `snd_bigsphere_end`,
-//     `snd_smallsphere_*`, `snd_magic_ice_cloud`, `snd_gust_whoosh_*`,
+//     `snd_magic_ice_cloud`, `snd_gust_whoosh_*`,
 //     `snd_arcane_attack`, `snd_rats_*`, `snd_hoaxen_cast`,
 //     `snd_hoaxen_tentacle_hit1..3`, `snd_perk_hunger_claws`,
 //     `snd_magic_dragon`, `snd_blade_fury`, `snd_rayshot*`,
@@ -140,30 +140,37 @@ inline bool sfx_is_js_id(const char* js_name) {
 }
 
 // The `ta.WBa()` + "which wav" resolution: a JS `snd_*` name -> the wav stem
-// under the sfx dir, or nullptr when NOTHING may play. nullptr covers both
-// "not a `ta.WBa` id" (the JS `WBa` miss — pack sounds, the `snd_Roots_*`
-// case typo) and "id present but the APK shipped no sample"
-// (`snd_smallsphere_start/middle`).
+// under the sfx dir, or nullptr when NOTHING may play. nullptr covers
+// "not a `ta.WBa` id" (the JS `WBa` miss — the 15 pack `snd_low_*` voices and
+// the `snd_Roots_*` case typo). EVERY `ta.WBa` id has a real bank sub-sound:
+// the web bank `sounds_{a,b}.*.ogg` each carry a trailing pack blob that names
+// every sub-sound and its [min,max] window in ms. `oy.vza` (L1229287) reads a
+// 7-byte trailer (`d = b[c-7]|b[c-6]<<8|b[c-5]<<16`, `e = a.slice(c-(d+7),
+// c-7)`), `Nk.e3` (L1241237) parses each entry as
+// `ie()=nameLen, chars, ie()=id, z4()=min, z4()=max`, `Ss.kWa` (L1236904)
+// does `c.id += 65535` on every entry, and `Tc.split` (L1234609) slices the
+// decoded 44100 buffer at `[d/1E3*min|0, d/1E3*max|0]`. The 23-entry `sounds_a`
+// blob yields ids 65535..65557 and the 146-entry `sounds_b` blob yields
+// 65558..65703 — together exactly the 154 `ta.WBa` ids (verified: no WBa id is
+// absent from the bank and every id matches). Every `assets/sounds/*.wav` is
+// such a slice (22050 mono). The rows whose stem differs from `name - "snd_"`:
+//   snd_click_1            = sounds_a [0,282]        -> click_1.wav
+//   snd_click_2            = sounds_b [14284,14879]  -> click_2.wav
+//   snd_focus_1            = sounds_b [25359,26110]  -> focus_1.wav
+//   snd_smallsphere_middle = sounds_b [131514,132780]-> smallsphere_middle.wav
+//   snd_smallsphere_start  = sounds_b [133029,134124]-> smallsphere_start.wav
 inline const char* sfx_stem_for_js(const char* js_name) {
     if (!sfx_is_js_id(js_name)) return nullptr;
-    // The three UI ticks shipped ONLY inside the web audio bank
-    // `reference/www/res/audio/sounds_a.ogg`; the APK wav set never carried
-    // them. `click_1.wav` here is that bank's slot 0 (see the module comment
-    // history): `Ss.kWa` (L1237018) assigns each bank sub-sound
-    // `id = GL_index + 65535`, and `ta.WBa` pins `snd_click_1 = 65535`.
-    if (eq(js_name, "snd_click_1") || eq(js_name, "snd_click_2") ||
-        eq(js_name, "snd_focus_1")) {
-        return "click_1";
-    }
+    // Three DISTINCT bank sub-sounds (`ta.WBa` pins snd_click_1=65535,
+    // snd_click_2=65570, snd_focus_1=65579); the port once collapsed all
+    // three onto click_1.wav.
+    if (eq(js_name, "snd_click_1")) return "click_1";
+    if (eq(js_name, "snd_click_2")) return "click_2";
+    if (eq(js_name, "snd_focus_1")) return "focus_1";
     // Two stems were extracted with a capital R (`Roots_start.wav` /
     // `Roots_end.wav`) while the id table spells them lowercase.
     if (eq(js_name, "snd_roots_start")) return "Roots_start";
     if (eq(js_name, "snd_roots_end")) return "Roots_end";
-    // Id present, sample absent from the shipped APK wav set -> JS-silent.
-    if (eq(js_name, "snd_smallsphere_start") ||
-        eq(js_name, "snd_smallsphere_middle")) {
-        return nullptr;
-    }
     return js_name + 4;  // skip the "snd_" prefix
 }
 
