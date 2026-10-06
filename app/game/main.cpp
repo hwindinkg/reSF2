@@ -2831,10 +2831,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
     } driver_save_guard;
     if (driver_mode && !keep_save && std::filesystem::exists(save_path)) {
+        // Create the backup ONCE and NEVER overwrite an existing one: a chain
+        // of gate/probe runs must preserve the player's ORIGINAL save. (Before
+        // this, each run re-copied the current — already mutated — save over
+        // the backup, so a gate that legitimately writes the save, e.g.
+        // `--flow-verify`'s shop buy, made its mutation "stick" and the
+        // player's real save was lost after a few verification runs.)
+        const std::string bak = save_path + ".userbak";
         std::error_code ec;
-        std::filesystem::copy_file(save_path, save_path + ".userbak",
-                                   std::filesystem::copy_options::overwrite_existing, ec);
-        if (!ec) {
+        if (!std::filesystem::exists(bak)) {
+            std::filesystem::copy_file(save_path, bak,
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+        }
+        if (std::filesystem::exists(bak)) {
             driver_save_guard.path = save_path;
             driver_save_guard.armed = true;
         }
