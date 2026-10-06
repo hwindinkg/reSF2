@@ -735,6 +735,32 @@ void Fighter::strike_node(int bone, const sf2::scene::Vec3& v) {
     sol_ma_[u * 3 + 2] += v.z;
 }
 
+// JS `wd.Wqb` (L268496): the shock-impulse fling. `d = this.oa.Va.all` (every
+// body node); `if(e.vc){ f = v.Ub.gR/e.weight; g = v.Ub.hR/e.weight; h = e.ma;
+// h.x += v.Ub.kw/e.weight; h.y += f; h.z += g }`. `e.vc` = `Vc.vc` =
+// `Shock="1"` (`Yc.Ijb` L572). The port's `sol_ma_` IS `Vc.ma`, so the
+// impulse is added there (world space) and the next `Al.sk` step turns it
+// into Verlet velocity. `e.weight` = `Bone::mass` (the JS `Vc.weight`; the
+// shipped Weapon-Node mass is 0.10170).
+void Fighter::weapon_fling(float ix, float iy, float iz) {
+    const std::size_t n = model_.bones.size();
+    if (sol_ma_.size() != n * 3) return;
+    std::size_t flung = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!model_.bones[i].shock) continue;
+        // JS divides by `e.weight` with no guard; the port's `mass` defaults
+        // to 1.0 for an absent Mass (the shipped shock nodes all carry
+        // 0.10170), so the divisor is the real mass here.
+        const float w = model_.bones[i].mass;
+        const float d = (w != 0.0f) ? w : 1.0f;
+        sol_ma_[i * 3] += ix / d;
+        sol_ma_[i * 3 + 1] += iy / d;
+        sol_ma_[i * 3 + 2] += iz / d;
+        ++flung;
+    }
+    (void)flung;
+}
+
 // [probe, authorised] The struck node's solver `ma` (JS `Vc.ma`).
 float Fighter::solver_ma_x(int bone) const {
     if (bone < 0 || sol_ma_.size() != model_.bones.size() * 3) return 0.0f;
@@ -1593,16 +1619,15 @@ std::string Fighter::try_react(FightContext& ctx,
         idx = static_cast<std::size_t>(r * static_cast<float>(top.size()));
         if (idx >= top.size()) idx = top.size() - 1;
     }
-    // JS `e.animation.MS ? a.jJa(...) : Nsb(...)` — start the picked move
-    // (the first candidate whose conditions pass, in the same order).
-    for (std::size_t k = 0; k < top.size(); ++k) {
-        const MoveDef* m = top[(idx + k) % top.size()];
-        if (ai_start_move(*m, ctx)) {
-            react_physics_ = m->physics;  // JS `e.animation.MS` (L674)
-            return m->name;
-        }
-    }
-    return "";
+    // JS `e.animation.MS ? a.jJa(e.animation,e.R1)
+    //                : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)` (L674):
+    // BOTH queue — `jJa` sets `qs` (physics/getup), `Nsb` -> `fJa` sets `Ml`
+    // (ordinary clip). The start happens on the next `wd.ia`
+    // (`process_reaction_queues`), NOT here.
+    const MoveDef* m = top[idx];
+    queue_reaction(m, m->physics);
+    react_physics_ = m->physics;  // JS `e.animation.MS` (L674)
+    return m->name;
 }
 
 // Per-frame `EveryFrame` auto-move pick (JS `Gc.ia` L671 -> `Gnb` L672 ->
@@ -1666,18 +1691,58 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
     // `Te.Skb`; the physics branch additionally starts the `Al` ragdoll
     // (`wd.Lwb` L511 -> `Nd.start`). Fall through the remaining candidates if
     // a re-test fails so the pick never stalls.
-    for (std::size_t k = 0; k < f.size(); ++k) {
-        const MoveDef* m = f[(idx + k) % f.size()];
+    // JS `e.animation.MS ? a.jJa(...) : Gc.Nsb(...)` (L674): QUEUE the pick
+    // (`jJa` -> `qs`, `Nsb` -> `Ml`); `process_reaction_queues` starts it on
+    // the next `wd.ia` (`Qnb` starts the ragdoll via `Lwb`, `Bnb` stops it).
+    (void)wall_min;
+    (void)wall_max;
+    const MoveDef* m = f[idx];
+    queue_reaction(m, m->physics);
+    react_physics_ = m->physics;  // JS `e.animation.MS`
+    return m->name;
+}
+
+// JS `wd.jJa` (L257798) / `wd.fJa` (L257400): stash the picked reaction.
+void Fighter::queue_reaction(const MoveDef* m, bool physics) {
+    if (m == nullptr) return;
+    if (physics) {
+        qs_move_ = m;  // `this.qs.animation = a`
+    } else {
+        ml_move_ = m;  // `this.Ml.animation = a`
+    }
+}
+
+// JS `wd.ia` (L253545) head:
+//   `this.Qnb() ? (this.Ml.clear(), this.GM=!1)
+//              : (this.Mnb(), this.Bnb() && (this.GM=!1))`
+// `Qnb` (L258045): `j$a()` (`qs.animation!=null`) -> `Mwb(qs.names,qs.Yga)`
+// (`-> Lwb`: `da.Sca()`, `Nd.start(names)`, `Bva`), `da.reset()`,
+// `da.etb(qs.animation)`, `f0a()`. `Bnb` (L257860): `KCa()`
+// (`Ml.animation!=null`) -> `Nd.nk && Nd.stop()`, `NS(Ml.animation,...)`,
+// `Ml.clear()`. `Mnb` clears the parked `P9` name (the port has no parked
+// slot). The port starts the move with `ai_start_move` (the `Te.Skb` path).
+std::string Fighter::process_reaction_queues(sf2::scene::FightContext& ctx,
+                                             float wall_min, float wall_max) {
+    if (qs_move_ != nullptr) {
+        const MoveDef* m = qs_move_;
+        qs_move_ = nullptr;
+        ml_move_ = nullptr;  // `this.Ml.clear()`
         if (ai_start_move(*m, ctx)) {
-            const bool physics = m->physics;  // JS `e.animation.MS`
-            react_physics_ = physics;
-            if (physics) {
-                // JS `Al.P6a` (L582) pins with a HARD `a.y=0`; the floor is
-                // the world origin (see `apply_hit`).
-                ragdoll_start(m->name, wall_min, wall_max, 0.0f);
-            }
+            // `Qnb` -> `Mwb` -> `Lwb` -> `Nd.start(a)` (`Al.start`, L582):
+            // the physics/getup reaction starts the ragdoll. `Al.P6a` pins
+            // with a HARD `a.y=0` (floor = world origin, see `apply_hit`).
+            if (m->physics) ragdoll_start(m->name, wall_min, wall_max, 0.0f);
             return m->name;
         }
+        return "";
+    }
+    // `Mnb()` (L257955): clear the parked `P9` name — no port equivalent.
+    if (ml_move_ != nullptr) {
+        const MoveDef* m = ml_move_;
+        ml_move_ = nullptr;
+        // `Bnb` (L257860): `Nd.nk && Nd.stop()` BEFORE the ordinary clip.
+        if (ragdoll_active()) ragdoll_stop();
+        if (ai_start_move(*m, ctx)) return m->name;
     }
     return "";
 }
@@ -2825,6 +2890,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // hit-reaction that no longer snaps back).
         if (!solver_world_) {
             for (std::size_t i = 0; i < nclip; ++i) {
+                // JS `Al.eda` (L282908): `if(!this.model.vc || this.model.vc
+                // && !e.vc){e.f4(); ...e.ma = clip...}`. When the model shock
+                // latch (`this.model.vc` = `shock_latch_`) is set, a node with
+                // `e.vc` (`Shock="1"`) is NOT re-posed — neither `f4()` (mf=ma)
+                // nor the clip write runs, so its solver `ma`/`mf` persist and
+                // the `Al.sk` Verlet step carries the weapon-release fling.
+                // Without this skip the weapon nodes snap back to the hand
+                // every frame (the reported "weapon jitters in the hands").
+                if (shock_latch_ && bones[i].shock) continue;
                 sol_mf_[i * 3] = sol_ma_[i * 3];
                 sol_mf_[i * 3 + 1] = sol_ma_[i * 3 + 1];
                 sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];

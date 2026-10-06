@@ -671,20 +671,19 @@ float weight_curve_eval(const WeightCurve& c, const AiFeatureState& f,
     // where D/C/H are the decaying per-animation memory accumulators. The
     // native port has no strike-memory yet — the accumulators are 0, so the
     // term is 0 (see README for the full mechanism).
-    // Conditional decision term (JS `cc.Gb` L647):
-    //   `b!=null && a.zZ.includes(b) && (c+=this.Opa)`
-    // `b` is the animation's OWN name — `iCa` (L640) passes `a.name`; the
-    // scalar callers pass none, matching the one-arg `Gb(b)` calls where the
-    // test is false. `a.zZ` (`de.iN.zZ`, L590) holds the names the
-    // safe/quick-attack slots appended (`Nwa` L603).
-    if (anim_name != nullptr && !f.zz.empty()) {
-        for (const std::string& n : f.zz) {
-            if (n == *anim_name) {
-                total += c.conditional_factor;
-                break;
-            }
-        }
-    }
+    // [FIX AI over-attack — JS `cc.Gb` @329790] The JS tail is
+    //   `b!=null && a.zZ.includes(b) && (c+=this.Opa)`.
+    // `a` is the `Ue` FEATURE SNAPSHOT (`mQ` @307027 writes `a.a6/K2/cl/
+    // counter/Xb/tf/o1/q1/xY/pZ/Lya/IGa/cQ` — it NEVER writes `a.zZ`), and
+    // `Ue.zZ` is `m.l()` (an EMPTY list) from the ctor (`class Ue` @328060).
+    // The only `zZ` writer is `de.iN.zZ` (`Nwa` @307324 / reset @307395) — a
+    // DIFFERENT `Ue` instance that is never the `Gb(a,b)` argument. So
+    // `a.zZ.includes(b)` is ALWAYS false and the `Opa` term is ALWAYS 0 for
+    // every caller, scalar or `iCa`. The old port added
+    // `c.conditional_factor` whenever the animation name was in its own
+    // `feat_.zz`, over-applying the term (the reported "AI barely attacks").
+    // The term is REMOVED (the JS value is 0 by construction).
+    (void)anim_name;
 
     if (c.linear) {
         // QYa (L648): total>=0 -> base + (limit-base)*min(1,total)

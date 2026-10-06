@@ -5312,26 +5312,15 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             // (`Fighter::start_move_impl`) calls `Al.stop` when the next clip
             // starts.
             const bool knockdown = def.fighter.last_react_physics();  // MS
-            if (knockdown) {
-                // JS `Al.P6a` (L582) pins the ragdoll body with a HARD
-                // `a.y=0` — the floor is the world origin, NOT the location's
-                // `<Root Floor>` (the camera `tl` anchor, dojo 80). Passing
-                // `floor_y_` sank the whole ragdoll 80 units under the map.
-                def.fighter.ragdoll_start(reaction, wall_min_, wall_max_, 0.0f);
-                std::fprintf(stdout, "[ragdoll] F%d %s START '%s' (nk=1)\n",
-                             frame, def.name.c_str(), reaction.c_str());
-            } else {
-                // `Nsb` (L674): no `Nd.start`, `Nd.nk` stays false; the
-                // reaction is a normal clip (the `st.playing`/`Pe` gate).
-                std::fprintf(stdout, "[ragdoll] F%d %s SKIP '%s' (nk=0 Nsb)\n",
-                             frame, def.name.c_str(), reaction.c_str());
-            }
-            // cp==7 (`ca.Lgb` L387: `a.model.lb==null -> PC(7,side)`) fires
-            // from `wd.Lwb`/`Qnb` (the `jJa`/MS/ragdoll path), not from the
-            // `Nsb` branch — arm the LoseFall pulse only for a knockdown.
+            // JS `jJa`/`Nsb` (L674) only QUEUE the pick; the start (and, for
+            // `MS`, `Nd.start` via `Qnb`->`Lwb`) happens on the next
+            // `wd.ia` (`Fighter::process_reaction_queues`, called at the top
+            // of `update_fighter`). cp==7 (`ca.Lgb` L387) fires from that
+            // `jJa`/MS path — arm the LoseFall pulse only for a knockdown.
             if (knockdown) def.reaction_fall = true;
-            std::fprintf(stdout, "[react] F%d %s -> %s\n", frame,
-                         def.name.c_str(), reaction.c_str());
+            std::fprintf(stdout, "[react] F%d %s -> %s (queued %s)\n", frame,
+                         def.name.c_str(), reaction.c_str(),
+                         knockdown ? "qs/ragdoll" : "Ml/clip");
             std::fflush(stdout);
         }
     }
@@ -5730,6 +5719,34 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // The per-fighter update: the AI (or input) picks a move, the fighter
     // executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
     // `de.ia` path (see core/scene/README.md).
+    //
+    // JS `wd.ia` (L253545) HEAD: `Qnb() ? (Ml.clear(), GM=!1)
+    //   : (Mnb(), Bnb() && (GM=!1))` — drain the reaction QUEUES (`qs`/`Ml`)
+    // BEFORE the clip advance and BEFORE `Ax()`'s every-frame event. A pick
+    // stashed by last frame's `try_react`/`try_every_frame_move` starts here:
+    // `Qnb` starts a physics/getup reaction (ragdoll via `Nd.start`), `Bnb`
+    // stops the ragdoll and starts an ordinary clip. Without the queue the
+    // port started reactions a frame early (the getup snap).
+    if (me.fighter.reaction_pending()) {
+        sf2::scene::FightContext qctx;
+        qctx.roll01 = [this]() { return draw01(); };
+        qctx.stage = static_cast<sf2::scene::round_stage>(phase_);
+        qctx.qb = me.is_player;
+        qctx.anims_me = anim_names_of(me.fighter);
+        qctx.anims_enemy = anim_names_of(foe.fighter);
+        fill_ctx_geometry(qctx, me, foe);
+        qctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+        const std::string started =
+            me.fighter.process_reaction_queues(qctx, wall_min_, wall_max_);
+        if (!started.empty()) {
+            const bool phys = me.fighter.last_react_physics();
+            std::fprintf(stdout, "[ragdoll] F%d %s START '%s' (nk=%d %s)\n",
+                         frame_, me.name.c_str(), started.c_str(),
+                         me.fighter.ragdoll_active() ? 1 : 0,
+                         phys ? "qs" : "Ml");
+            std::fflush(stdout);
+        }
+    }
     // Perk bus per-frame work (EveryFrame slot 2 + mod ia + 12/13 edges).
     tick_bus_side(&me == &player_ ? 0 : 1);
     // Perk DoTs/HoTs (JS `znb`/`Inb`, L1290/L1298): tick installed mods
@@ -6011,23 +6028,43 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // + `EPa`/`FPa` attr set (`WeaponDamage=0`) + `vc` latch are live.
             const std::string dropped = me.weapon;
             const std::string dropped_model = me.weapon_model;
-            me.weapon = "Fists";
+            // JS `this.$o(b,!0,!0,!1)`: equip the config `<Weapon Name>`
+            // (`v.Ub.Au`, shipped "Fists") and set its `<SetAttribute>`
+            // (`v.Ub.EPa`/`FPa`, shipped "WeaponDamage"=0).
+            me.weapon = gfp.shock_weapon;
             me.weapon_model.clear();
             me.shock.shocked_vc = true;
             me.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
-            me.params.attributes["WeaponDamage"] = 0.0f;
-            if (!dropped_model.empty()) {
-                me.fighter.hide_model_part(dropped_model);  // `P2a` mesh hide
+            me.params.attributes[gfp.shock_set_attr] = gfp.shock_set_value;
+            // JS `this.oa.vc=!0; this.parameters.P2a(); <impulse loop>`.
+            // `P2a` (`xc.P2a` L417709) deactivates the wielded item; the
+            // weapon MESH is NOT hidden — the weapon's `Shock="1"` nodes are
+            // released and flung (below), and the mesh follows them off the
+            // hand. The old `hide_model_part` was BOTH non-JS (it hid the
+            // mesh, so a flying weapon could never show) AND a no-op on
+            // shipped data (`hidden=0` — the merged part name never matched).
+            // [weapon-drop probe] capture the shock nodes' pre-fling render
+            // positions so `update_fighter` can prove the weapon translates.
+            me.weapon_drop_probe_ = 8;
+            me.weapon_drop_prev_.clear();
+            for (std::size_t bi = 0; bi < me.fighter.model().bones.size(); ++bi) {
+                if (!me.fighter.model().bones[bi].shock) continue;
+                me.weapon_drop_nodes_.push_back(bi);
+                const std::vector<float>& p = me.fighter.positions();
+                if (bi * 2 + 1 < p.size()) {
+                    me.weapon_drop_prev_.push_back(p[bi * 2]);
+                    me.weapon_drop_prev_.push_back(p[bi * 2 + 1]);
+                }
             }
+            me.fighter.weapon_fling(gfp.shock_impulse_x, gfp.shock_impulse_y,
+                                    gfp.shock_impulse_z);
             std::fprintf(stdout,
                          "[fight] F%d %s WQB drop weapon=%s model=%s "
-                         "hidden=%d tris=%zu\n",
+                         "flung_nodes=%zu impulse=(%.3f,%.3f,%.3f) tris=%zu\n",
                          frame_, me.name.c_str(), dropped.c_str(),
                          dropped_model.empty() ? "-" : dropped_model.c_str(),
-                         (!dropped_model.empty() &&
-                          me.fighter.has_hidden_part(dropped_model))
-                             ? 1
-                             : 0,
+                         me.weapon_drop_nodes_.size(), gfp.shock_impulse_x,
+                         gfp.shock_impulse_y, gfp.shock_impulse_z,
                          me.fighter.active_tri_count());
             std::fflush(stdout);
         }
@@ -6047,6 +6084,39 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         if (v > 0.0f && !me.is_player) me.fighter.set_time_scale(v);
     }
     me.fighter.advance(dt);
+    // [weapon drop, probe] The flung weapon's `Shock="1"` nodes must TRANSLATE
+    // after the `Wqb` impulse. Log the max render-pose delta of those nodes
+    // for the first frames after the drop (JS `Wqb` L268496 writes `e.ma`;
+    // the render pose `pos_` follows `sol_ma_`).
+    if (me.weapon_drop_probe_ > 0 && !me.weapon_drop_nodes_.empty()) {
+        const std::vector<float>& p = me.fighter.positions();
+        float maxd = 0.0f;
+        for (std::size_t k = 0; k < me.weapon_drop_nodes_.size(); ++k) {
+            const std::size_t bi = me.weapon_drop_nodes_[k];
+            if (bi * 2 + 1 >= p.size() || k * 2 + 1 >= me.weapon_drop_prev_.size())
+                continue;
+            const float dx = p[bi * 2] - me.weapon_drop_prev_[k * 2];
+            const float dy = p[bi * 2 + 1] - me.weapon_drop_prev_[k * 2 + 1];
+            const float d = std::sqrt(dx * dx + dy * dy);
+            if (d > maxd) maxd = d;
+        }
+        std::fprintf(stdout,
+                     "[fight] F%d %s WQB fling n=%zu maxdelta=%.3f "
+                     "sol_y0=%.3f\n",
+                     frame_, me.name.c_str(), me.weapon_drop_nodes_.size(), maxd,
+                     me.fighter.solver_ma_y(
+                         static_cast<int>(me.weapon_drop_nodes_.front())));
+        std::fflush(stdout);
+        // refresh the baseline so each line is the per-frame motion
+        me.weapon_drop_prev_.clear();
+        for (std::size_t bi : me.weapon_drop_nodes_) {
+            if (bi * 2 + 1 < p.size()) {
+                me.weapon_drop_prev_.push_back(p[bi * 2]);
+                me.weapon_drop_prev_.push_back(p[bi * 2 + 1]);
+            }
+        }
+        --me.weapon_drop_probe_;
+    }
     me.last_move = me.fighter.current_move() ? me.fighter.current_move()->name : "";
     // [dojo lesson] JS `Te.x3` (L508) fires the model's `Pf` (L671) with the
     // newly started animation; the lesson handlers `Bo`/`Do`/`Eo` arm on it

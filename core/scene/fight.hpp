@@ -1143,11 +1143,19 @@ struct FightFighter {
     std::vector<sf2::scene::ActiveMod> dots;  // ticking DoTs/HoTs
     std::string weapon = "Fists";  // wielded weapon (disarm identity)
     // [weapon drop] The wielded weapon's models.dat entry (the `Hd` slot's
-    // `<Item Model>`, e.g. `mdl_weapon_kunai`). `wd.Wqb` (L268496) ->
-    // `parameters.P2a()` (L417709) hides the dropped weapon item's mesh; the
-    // port hides this merged part (`Fighter::hide_model_part`). Empty when
-    // unarmed (Fists has no Model).
+    // `<Item Model>`, e.g. `mdl_weapon_kunai`). The `wd.Wqb` (L268496) drop
+    // RELEASES the weapon's `Shock="1"` body nodes and flings them
+    // (`Fighter::weapon_fling`); the weapon mesh follows the freed nodes off
+    // the hand. Empty when unarmed (Fists has no Model).
     std::string weapon_model;
+    // [weapon drop, probe] `weapon_drop_probe_` counts down after a `Wqb`;
+    // `weapon_drop_nodes_` are the flung `Shock="1"` bone indices and
+    // `weapon_drop_prev_` their pre-fling render (x,y) — `update_fighter`
+    // logs the per-frame translation for a few frames so the fling is
+    // observable in the `[fight]` trace.
+    int weapon_drop_probe_ = 0;
+    std::vector<std::size_t> weapon_drop_nodes_;
+    std::vector<float> weapon_drop_prev_;
     // JS `wd.K0` (L505): `parameters.ig != null && parameters.ig.Yb ==
     // "NoRanged" ? 1 : -1`. `ig` is the equipped "NoRanged" item (type
     // `I.Vh`, `vzb` L108540); `ranged_available` is its negation. Fed by

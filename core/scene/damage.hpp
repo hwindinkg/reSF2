@@ -217,6 +217,19 @@ struct FightParams {
     // same shape as the Magic rows above; the shipped file resolves both.
     std::string shock_crit_attr = "ShockCriticalHitChance";  // `hya`
     std::string shock_head_attr = "ShockHeadHitChance";      // `oDa`
+    // JS `hw.parse` (L613150/L613247) — the remaining `<Shock>` rows the
+    // `wd.Wqb` weapon drop (L268496) reads off `v.Ub`:
+    //   `<Weapon Name="Fists"/>`          -> `Au`  (shock_weapon)
+    //   `<SetAttribute Name="WeaponDamage" Value="0"/>` -> `EPa`/`FPa`
+    //   `<Impulse X Y Z/>`                -> `kw`/`gR`/`hR`
+    // Shipped values (internal_settings.xml): Weapon "Fists", SetAttribute
+    // "WeaponDamage"=0, Impulse Y="-0.5" (X=Z=0).
+    std::string shock_weapon = "Fists";              // `Au`
+    std::string shock_set_attr = "WeaponDamage";     // `EPa`
+    float shock_set_value = 0.0f;                    // `FPa`
+    float shock_impulse_x = 0.0f;                    // `kw`
+    float shock_impulse_y = -0.5f;                   // `gR`
+    float shock_impulse_z = 0.0f;                    // `hR`
     // `v.Qxa` (L1157): `<CounterPunches Value="50"/>` — the Punchbag hit
     // cadence `ca.Cgb` L396 tests against the defender's landed-hit counter
     // (`a.model.sI != v.Qxa`). Data-driven: `u.I(...,2)` is the JS fallback

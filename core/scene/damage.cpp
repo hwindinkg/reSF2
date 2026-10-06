@@ -241,6 +241,24 @@ void parse_shock(const pugi::xml_node n, FightParams& v) {
     // `this.oDa = HeadHitChance.Attribute`.
     if (const char* a = hhc.attribute("Attribute").value(); a != nullptr && *a != '\0')
         v.shock_head_attr = a;
+    // JS `hw.parse` (L613150): `<Weapon Name>` -> `Au`.
+    if (const pugi::xml_node w = n.child("Weapon")) {
+        if (const char* a = w.attribute("Name").value(); a != nullptr && *a != '\0')
+            v.shock_weapon = a;
+    }
+    // JS `hw.parse` (L613157): `<SetAttribute Name Value>` -> `EPa`/`FPa`.
+    if (const pugi::xml_node sa = n.child("SetAttribute")) {
+        if (const char* a = sa.attribute("Name").value(); a != nullptr && *a != '\0')
+            v.shock_set_attr = a;
+        if (sa.attribute("Value"))
+            v.shock_set_value = sa.attribute("Value").as_float(v.shock_set_value);
+    }
+    // JS `hw.parse` (L613247): `<Impulse X Y Z>` -> `kw`/`gR`/`hR`.
+    if (const pugi::xml_node im = n.child("Impulse")) {
+        if (im.attribute("X")) v.shock_impulse_x = im.attribute("X").as_float();
+        if (im.attribute("Y")) v.shock_impulse_y = im.attribute("Y").as_float();
+        if (im.attribute("Z")) v.shock_impulse_z = im.attribute("Z").as_float();
+    }
 }
 
 // JS `gw.parse` (L611558) — the `<RewardsPrize>` block (`v.hF`).

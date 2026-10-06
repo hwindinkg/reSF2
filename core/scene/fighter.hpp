@@ -320,6 +320,24 @@ public:
     std::string try_every_frame_move(sf2::scene::FightContext& ctx,
                                      float wall_min, float wall_max);
 
+    // JS `wd.qs`/`wd.Ml` (L257400 `fJa`, L257798 `jJa`) — the reaction
+    // QUEUES. `wd.ia` (L253545) drains them at the TOP of the frame:
+    //   `Qnb() ? (this.Ml.clear(), this.GM=!1)
+    //          : (this.Mnb(), this.Bnb() && (this.GM=!1))`
+    // `Qnb` (`j$a()` = `qs.animation != null`) starts the queued GETUP/PHYSICS
+    // reaction (`Mwb` -> `Lwb` -> `Nd.start` + `da.etb`); `Bnb`
+    // (`KCa()` = `Ml.animation != null`) stops the ragdoll (`Nd.nk &&
+    // Nd.stop()`) and starts the ordinary clip (`NS`). A pick from
+    // `try_react`/`try_every_frame_move` is stashed here and STARTED on the
+    // next frame — the JS order (`ia`'s Qnb/Bnb run before `Ax`'s every-frame
+    // event). `qs` (physics) wins and clears `Ml`.
+    void queue_reaction(const MoveDef* m, bool physics);
+    std::string process_reaction_queues(sf2::scene::FightContext& ctx,
+                                        float wall_min, float wall_max);
+    bool reaction_pending() const {
+        return qs_move_ != nullptr || ml_move_ != nullptr;
+    }
+
     // Starts `move` if its conditions pass: sets current_move, move_frame=0,
     // loads the clip (FileName -> anim_archive clip), sets facing toward the
     // enemy, arms the move's intervals (JS `Te.Skb` L550 + `jc.c7a` L691).
@@ -828,6 +846,19 @@ public:
     // Persistent across frames while the ragdoll is active.
     void strike_node(int bone, const sf2::scene::Vec3& v);
 
+    // JS `wd.Wqb` (L268496) — the shock-impulse weapon fling. For EVERY body
+    // node carrying `Shock="1"` (`Vc.vc`, the weapon-attachment nodes
+    // `Weapon-Node{1..4}_{1,2}` in mdl_skeleton.xml), the JS adds
+    //   `e.ma.x += v.Ub.kw/e.weight; e.ma.y += v.Ub.gR/e.weight;
+    //    e.ma.z += v.Ub.hR/e.weight`
+    // to the node's WORLD position (`sol_ma_` = JS `Vc.ma`). The impulse
+    // becomes Verlet velocity on the next `Al.sk` step and the weapon mesh
+    // (skinned to those nodes) leaves the hand. `weight` = `Bone::mass`.
+    // The clip apply must NOT re-pose these nodes while the shock latch is
+    // set (`Al.eda` L282908 gate `!(model.vc && e.vc)`), so the fling
+    // persists — see `sample`.
+    void weapon_fling(float ix, float iy, float iz);
+
     // [probe, authorised] The struck endpoint node's solver `ma` component
     // (JS `Vc.ma` = the node `ma` `Bl.strike` writes).
     float solver_ma_x(int bone) const;
@@ -999,6 +1030,12 @@ private:
     // JS `Al.oa.vc`: the model's shock latch (see `set_shock_latch`). Starts
     // false; the fight sets it when a shock lands (`ca.Cgb` L394).
     bool shock_latch_ = false;
+    // JS `wd.qs.animation` (physics/getup queue, `jJa` L257798) and
+    // `wd.Ml.animation` (ordinary-clip queue, `fJa` L257400). Drained by
+    // `process_reaction_queues` at the top of the next frame (`wd.ia`
+    // L253545 `Qnb`/`Bnb`).
+    const MoveDef* qs_move_ = nullptr;
+    const MoveDef* ml_move_ = nullptr;
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
     // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
     // a shift of the whole clip buffer. Native equivalent: added to every
