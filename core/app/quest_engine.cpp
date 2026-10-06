@@ -2287,14 +2287,56 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
 // v.su.kU[0]`, so an absent OR invalid step normalizes to `kU[0]` =
 // "NotStarted". The shipped `users_default.b7da2019.xml` carries
 // `Tutorial="MOVE"` — not a member — i.e. a FRESH tutorial profile.
-static const char* const kStorySteps[] = {
-    "NotStarted", "FIGHT",  "STEP_BUY_ITEM", "STEP_BUY_ITEM_FINISH", "MAP",
-    "LEARN_PERK", "SHOW_DOUBLE_SWEEP",     "SHOW_BLOCK",           "END"};
-static bool valid_story_step(const std::string& s) {
-    for (const char* step : kStorySteps) {
-        if (s == step) return true;
+// `v.su.kU` — the story-step universe the JS validates against, PARSED from
+// the shipped `internal_settings.xml` `<StepsNames>` (JS `nw.parse`
+// `sf2.502f0946.js` idx 614997: `this.kU.push(c.attributes.get("Name"))` for
+// every `<Step>` child; `nw.Ucb(a)` is `kU.includes(a)`). `zt.parse`
+// (`zi.g="81"`, bundle idx 157285) reads the save's `Tutorial` attribute and
+// sets `this.HH = v.su.Ucb(a) ? a : v.su.kU[0]`, so an absent OR invalid step
+// normalizes to `kU[0]` = "NotStarted". The shipped
+// `users_default.b7da2019.xml` carries `Tutorial="MOVE"` — not a member —
+// i.e. a FRESH tutorial profile.
+const std::vector<std::string>& story_steps() {
+    static std::vector<std::string> steps;
+    static bool cached = false;
+    if (cached) return steps;
+    cached = true;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in(std::string(kQuestResRoot) + "internal_settings.xml",
+                         std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            const pugi::xml_node names =
+                root ? root.child("Tutorial").child("StepsNames") : pugi::xml_node();
+            if (names) {
+                for (pugi::xml_node step : names.children("Step")) {
+                    const char* n = step.attribute("Name").as_string(nullptr);
+                    if (n != nullptr) steps.emplace_back(n);
+                }
+            }
+        }
+    } catch (const std::exception&) {
     }
-    return false;
+    // Fail-safe: an unreadable file falls back to the shipped 9-step list so
+    // the membership test can never accept a bogus value.
+    if (steps.empty()) {
+        steps = {"NotStarted", "FIGHT",          "STEP_BUY_ITEM", "STEP_BUY_ITEM_FINISH",
+                 "MAP",        "LEARN_PERK",     "SHOW_DOUBLE_SWEEP", "SHOW_BLOCK",
+                 "END"};
+    }
+    std::fprintf(stdout, "[quest] StepsNames parsed (%zu):", steps.size());
+    for (const std::string& s : steps) std::fprintf(stdout, " %s", s.c_str());
+    std::fprintf(stdout, "\n");
+    std::fflush(stdout);
+    return steps;
+}
+static bool valid_story_step(const std::string& s) {
+    const std::vector<std::string>& steps = story_steps();
+    return std::find(steps.begin(), steps.end(), s) != steps.end();
 }
 
 // `_Name` quest-variable reference. JS `p.o.f5a` (L133027) resolves in
@@ -3711,19 +3753,29 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // `xo` (L1246): `S(a){super.S(a); this.sa()}` — the shipped build
             // is a NO-OP. Nothing to execute.
         } else if (t == "ForceExecution") {
-            // `Wn.S` (L1205): `ha.F().AD(Name)` + `ha.F().Qaa(q, true)` —
-            // re-queue the named quest so it can run again. The port's latch
-            // is `fired_`; un-latch the name (a following `Activate`/event
-            // pass re-runs it).
+            // `Wn.S` (L1205): `ha.F().AD(Name)` — find the registered quest —
+            // then `ha.F().Qaa(q, true)`: `q.jLa(this.ta); this.add(q);
+            // this.Rla()`. `Qaa` queues the instance UNCONDITIONED (`compare`
+            // is never called) and `Rla` sorts; the pump (`eLa`, driven by
+            // `qT` on the next scene load) runs it. The port has no persistent
+            // `Dh`, so run the named quest's action list directly here — the
+            // closest synchronous equivalent (a later scene pump in JS).
             const std::string name = attr_or(a.attrs, "Name");
             if (!name.empty()) {
-                std::vector<std::string> keep;
-                for (const std::string& f : fired_) {
-                    if (f != name) keep.push_back(f);
+                const QuestDef* forced = nullptr;
+                for (const QuestDef& qd : quests_) {
+                    if (qd.name == name) {
+                        forced = &qd;
+                        break;
+                    }
                 }
-                fired_.swap(keep);
-                std::fprintf(stdout, "[quest] ForceExecution unlatched %s\n", name.c_str());
-                std::fflush(stdout);
+                if (forced != nullptr) {
+                    std::map<std::string, std::string> flocals;
+                    run_chain_effects(app, forced->actions, journal, flocals, name,
+                                      std::vector<QuestAction>(), nullptr);
+                    std::fprintf(stdout, "[quest] ForceExecution ran %s\n", name.c_str());
+                    std::fflush(stdout);
+                }
             }
         } else if (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag" ||
                    t == "StoryTutorialBuyItem" || t == "StoryTutorialLearnPerk" ||
@@ -5699,6 +5751,46 @@ bool QuestEngine::quest_active(const std::string& name) const {
     return false;
 }
 
+// JS `ha.Yba` (L523358): `Mn.S` (L1037) -> `ha.F().Yba([Name])`. Walks the
+// active queue `Dh` backwards and removes every entry that MATCHES the
+// name/group filter (`c.lcb(a)`) and is NOT currently running (`c.SC==1||…||`
+// short-circuits the body for a running entry). The port's `Dh` is the live
+// active queue: deferred `Wait` runs (`pending_`), deferred Fight matches
+// (`deferred_fight_quests_`) and the parked tutorial gate. It is NOT a session
+// latch — the removed quest stays eligible to re-enter the queue on a later
+// matching event (exactly the JS rule; the port used to latch the name
+// forever).
+void QuestEngine::clear_quest_queue(const std::string& name) {
+    if (name.empty()) return;
+    // `lcb(a)` matches the quest `Name` OR one of its `Group` entries (`O8`).
+    // The port does not parse `<Quest Group>` (no shipped ClearQuestQueue
+    // targets a group), so this is an exact-name match; the single shipped use
+    // is `StoryTutorialBossFight` clearing `StoryTutorialRetryGoToMap`
+    // (tutorial_quests.xml L157).
+    bool removed = false;
+    for (std::size_t i = pending_.size(); i-- > 0;) {
+        if (pending_[i].quest == name) {
+            pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
+            removed = true;
+        }
+    }
+    for (std::size_t i = deferred_fight_quests_.size(); i-- > 0;) {
+        const std::size_t qi = deferred_fight_quests_[i].first;
+        if (qi < quests_.size() && quests_[qi].name == name) {
+            deferred_fight_quests_.erase(deferred_fight_quests_.begin() +
+                                         static_cast<std::ptrdiff_t>(i));
+            removed = true;
+        }
+    }
+    if (tutorial_gate_.active && tutorial_gate_.quest == name) {
+        tutorial_gate_ = TutorialGate{};
+        removed = true;
+    }
+    std::fprintf(stdout, "[quest] ClearQuestQueue %s -> %s (transient, not latched)\n",
+                 name.c_str(), removed ? "removed active" : "no active entry");
+    std::fflush(stdout);
+}
+
 void QuestEngine::fire_inner(App& app, const std::string& event,
                              const QuestJournal& journal,
                              std::vector<std::string>& fired, int depth) {
@@ -5732,24 +5824,16 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
             }
         }
         if (!listens) continue;
-        if (q.unresumable) {
-            // `ha.GEa` (L521470): skip ONLY while this quest is still in the
-            // active queue. `Unresumable` (`be.cyb`, L518544) gates the RESUME
-            // path (`REa()`), not the fire gate — so the Lynx boss dialog
-            // re-fires on the next `SceneLoaded`/Map after a loss (step stays
-            // MAP), and is stopped only when `FirstGuardBeaten` writes
-            // LEARN_PERK (quests.xml L260-263). A `ClearQuestQueue` name
-            // (`fired_`) stays latched.
-            if (quest_active(q.name)) continue;
-            bool seen = false;
-            for (const std::string& f : fired_) {
-                if (f == q.name) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (seen) continue;
-        }
+        // JS `ha.RA` (L522633): `!this.GEa(e) && e.compare(this.ta)`.
+        // `ha.GEa` (L521470): `return a.RXa ? !1 : m.Ue(this.Dh,
+        // b=>a.name==b.name)` — the active-queue gate is applied to EVERY
+        // listener, NOT only the `Unresumable` ones. `Unresumable`
+        // (`be.cyb`, L518544) gates the RESUME path (`REa()`), not the fire
+        // gate; `AllowDoubles` (`be.RXa`) bypasses the queue check entirely
+        // (see `quest_active`). So the Lynx boss dialog re-fires on the next
+        // `SceneLoaded`/Map after a loss (step stays MAP) and is stopped only
+        // when `FirstGuardBeaten` writes LEARN_PERK (quests.xml L260-263).
+        if (!q.allow_doubles && quest_active(q.name)) continue;
         if (!conditions_hold(app, q.root, ctx)) continue;
         order.push_back(i);
     }
@@ -5828,9 +5912,9 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
         if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
         if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
-        // `Unresumable` is NOT a session latch (see the fire gate above):
-        // the instance leaves `Dh` when its run ends, so `fired_` now tracks
-        // only `ClearQuestQueue` names.
+        // `Unresumable` is NOT a session latch (see the fire gate above): the
+        // instance leaves `Dh` when its run ends. `ClearQuestQueue` is likewise
+        // transient (`clear_quest_queue`); nothing here latches the name.
         fired.push_back(q.name);
         std::fprintf(stdout, "[quest] FIRED %s on %s (step=%s scene=%s->%s)\n",
                      q.name.c_str(), event.c_str(), ctx.story_step.c_str(),
@@ -5919,17 +6003,10 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
             }
         }
         std::fflush(stdout);
-        // Queue clears (Mn `Yba` L1019): latch the named quest as done.
-        for (const std::string& c : fx.clears) {
-            bool seen = false;
-            for (const std::string& f : fired_) {
-                if (f == c) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (!seen) fired_.push_back(c);
-        }
+        // Queue clears (`Mn.S` L1037 -> `ha.F().Yba(names)`, L523358): remove
+        // matching NON-running entries from the active queue (`Dh`) — a
+        // transient removal, NOT a session latch (see `clear_quest_queue`).
+        for (const std::string& c : fx.clears) clear_quest_queue(c);
         for (const std::string& f : fx.attach_files) attaches.push_back(f);
         // Refresh the step/save snapshot for later quests in this firing.
         try {
@@ -6098,16 +6175,7 @@ QuestEngine::ActionRest QuestEngine::run_chain_effects(
     if (fights_out != nullptr) {
         for (const std::string& f : fx.fight_requests) fights_out->push_back(f);
     }
-    for (const std::string& c : fx.clears) {
-        bool seen = false;
-        for (const std::string& f : fired_) {
-            if (f == c) {
-                seen = true;
-                break;
-            }
-        }
-        if (!seen) fired_.push_back(c);
-    }
+    for (const std::string& c : fx.clears) clear_quest_queue(c);
     if (!fx.attach_files.empty()) {
         EvalCtx c;
         c.journal = journal;

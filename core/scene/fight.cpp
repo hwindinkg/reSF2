@@ -6361,9 +6361,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // Wave log: the JS-exact values the audit asked to surface —
         // `K2` (with/without the NoRanged item), `pZ` (Tba = max `M2`)
         // vs the raw move frame, the strike-memory counters, the stream.
-        if (decision != last_ai_log_) {
-            const sf2::scene::AiFeatureState& ff = me.ai->features();
-            const sf2::scene::AiController::AiDebug& d = me.ai->last_debug();
+        // Also emit on every `gate` firing: a reactive pass that resolves to
+        // no candidate (`pcb` false / watch) returns the SAME `decision` as
+        // the preceding idle frame, so the decision-dedup would hide the very
+        // branch the AI audit needs to see (`gate=$x<kJ&&!Ycb`, JS L604).
+        const sf2::scene::AiFeatureState& ff = me.ai->features();
+        const sf2::scene::AiController::AiDebug& d = me.ai->last_debug();
+        if (decision != last_ai_log_ || d.gate) {
             std::fprintf(stdout,
                          "[ai] F%d %s K2=%d (ranged_available=%d:"
                          " true->-1, false(NoRanged)->+1; alt=%d)"

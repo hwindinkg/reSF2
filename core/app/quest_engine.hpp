@@ -1294,6 +1294,9 @@ private:
     // `StoryTutorialBossFight` dialog on the Map after a LOSS
     // (`tutorial_quests.xml` L131-152: `step==MAP && SceneTo==Map`).
     bool quest_active(const std::string& name) const;
+    // JS `ha.Yba` (L523358) via `Mn.S` (L1037): remove matching NON-running
+    // entries from the active queue (`Dh`). TRANSIENT — no session latch.
+    void clear_quest_queue(const std::string& name);
     // JS `L3(a,b)` (L184): read one file, walk the root's children —
     // `Quest` -> register, `Include` -> `Sjb`.
     void load_quest_file(App& app, const std::string& rel);
@@ -1435,7 +1438,6 @@ private:
     // store. Session-scoped only — never parsed from or written to the save.
     std::map<std::string, std::string> global_vars_;
     std::vector<std::string> loaded_files_;  // shipped files the loader read
-    std::vector<std::string> fired_;  // Unresumable session latch
     // Live map-button registry (JS `Vb.F().ny`, L2167).
     std::vector<EngineMapButton> map_buttons_;
     std::map<std::string, std::string> battle_zone_;  // battle -> zone index
