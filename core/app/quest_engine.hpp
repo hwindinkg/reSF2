@@ -155,6 +155,14 @@ struct QuestDef {
     std::string file;
     int priority = 0;
     bool unresumable = false;
+    // JS `be.RXa` (ctor L516777: `this.RXa=u.ka(a.attributes.get(
+    // "AllowDoubles"),!1)`). Read by the ONLY re-entry gate `GEa` (L521470:
+    // `return a.RXa ? !1 : m.Ue(this.Dh, b => a.name==b.name)`) — a quest with
+    // `AllowDoubles` is NEVER "active", so it may re-enter the queue while an
+    // instance is still running. Shipped: 10 `AllowDoubles="1"` quests in
+    // quests.xml (DeliveryNotification / UpgradeNotification /
+    // EnchantmentNotification / …), all also `Unresumable="1"`.
+    bool allow_doubles = false;
     std::vector<std::string> events;  // ChangeTab/SceneLoaded/Activate/…
     // `<Actions Place="…">` (JS `be.Gib` L517407: `this.k7=be.ifa(Place!=null?
     // Place:"Map")`): the scene the auto-checkpoint saves at, exposed as each

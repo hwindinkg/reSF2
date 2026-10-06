@@ -613,6 +613,9 @@ void QuestEngine::parse_quest_node(App& app, const pugi::xml_node& q,
     if (def.name.empty()) return;
     def.priority = parse_int_or(q.attribute("Priority").value(), 0);
     def.unresumable = std::string(q.attribute("Unresumable").value()) == "1";
+    // JS `be` ctor L516777: `u.ka(AllowDoubles,false)` — "1"/"true" (the SAME
+    // truthiness `attr_bool01` reproduces). Read by `GEa` (L521470).
+    def.allow_doubles = attr_bool01(q.attribute("AllowDoubles").value());
     const pugi::xml_node events = q.child("Events");
     if (events) {
         for (pugi::xml_node e = events.first_child(); e; e = e.next_sibling()) {
@@ -5671,6 +5674,16 @@ void QuestEngine::tick(App& app) {
 // the name the quest is eligible again (exactly the JS re-fire rule).
 bool QuestEngine::quest_active(const std::string& name) const {
     if (name.empty()) return false;
+    // JS `GEa` (L521470): `return a.RXa ? !1 : m.Ue(this.Dh, b => a.name==b.name)`.
+    // The FIRST branch: a quest carrying `AllowDoubles` is NEVER treated as
+    // active, so it re-enters the queue even while an instance is still queued
+    // (`Dh`). The port used to ignore `AllowDoubles` entirely, so the 10
+    // shipped `AllowDoubles="1"` notification quests (DeliveryNotification,
+    // UpgradeNotification, EnchantmentNotification, …) were wrongly suppressed
+    // while one instance sat in the modal queue.
+    for (const QuestDef& q : quests_) {
+        if (q.name == name && q.allow_doubles) return false;
+    }
     for (const EngineDialog& d : dialogs_) {
         if (d.quest == name) return true;
     }
