@@ -30,6 +30,15 @@
 
 namespace sf2::app {
 
+// `v.su.kU` — the story-step universe (JS `nw.parse`, `sf2.502f0946.js` idx
+// 614997: `this.kU.push(c.attributes.get("Name"))` for every `<Step>` child of
+// `internal_settings.xml` `<Tutorial><StepsNames>`; `nw.Ucb(a)` is
+// `kU.includes(a)`). Parsed ONCE from the shipped data and shared by the save
+// validity check (`WarriorSave::is_valid_story_step`) and the quest engine
+// (`valid_story_step`), so a data change can never silently diverge. An
+// unreadable file falls back to the shipped 9-step list.
+const std::vector<std::string>& story_step_names();
+
 // The player's progression fields the shell needs (a trimmed projection of
 // the full `<Warrior>` element — the JS `p.o` user state).
 struct WarriorSave {
@@ -415,9 +424,11 @@ struct BattleRecord {
     // this.HH)`), so the `Tutorial` attribute — NOT a quest variable — is
     // the JS storage.
     static bool is_valid_story_step(const std::string& s) {
-        return s == "NotStarted" || s == "FIGHT" || s == "STEP_BUY_ITEM" ||
-               s == "STEP_BUY_ITEM_FINISH" || s == "MAP" || s == "LEARN_PERK" ||
-               s == "SHOW_DOUBLE_SWEEP" || s == "SHOW_BLOCK" || s == "END";
+        // JS `nw.Ucb(a)` = `kU.includes(a)`: membership in the SAME parsed
+        // `<StepsNames>` list the quest engine validates against (no second
+        // hardcoded copy that can drift from the data).
+        const std::vector<std::string>& steps = story_step_names();
+        return std::find(steps.begin(), steps.end(), s) != steps.end();
     }
 
     // Story tutorial step (JS query `_$StoryTutorialStep` -> `p.o.zi.HH`).

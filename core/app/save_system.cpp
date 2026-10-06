@@ -11,6 +11,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <vector>
 
@@ -51,6 +52,44 @@ int input_bind_get(int action) {  // `Af.get` (L113180)
         case 14: return 81;  // Q
         default: return -1;  // `Af.errorCode`
     }
+}
+
+// `v.su.kU` — the shared story-step universe (JS `nw.parse`, `sf2.502f0946.js`
+// idx 614997). ONE parse of `internal_settings.xml` `<Tutorial><StepsNames>`
+// (the extracted res root the quest engine also reads); the save validity
+// check and the quest engine both consult THIS list, so the data is the only
+// source. Falls back to the shipped 9-step list when the file is unreadable.
+const std::vector<std::string>& story_step_names() {
+    static std::vector<std::string> steps;
+    static bool cached = false;
+    if (cached) return steps;
+    cached = true;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                         std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            const pugi::xml_node names =
+                root ? root.child("Tutorial").child("StepsNames") : pugi::xml_node();
+            if (names) {
+                for (pugi::xml_node step : names.children("Step")) {
+                    const char* n = step.attribute("Name").as_string(nullptr);
+                    if (n != nullptr) steps.emplace_back(n);
+                }
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    if (steps.empty()) {
+        steps = {"NotStarted", "FIGHT",          "STEP_BUY_ITEM", "STEP_BUY_ITEM_FINISH",
+                 "MAP",        "LEARN_PERK",     "SHOW_DOUBLE_SWEEP", "SHOW_BLOCK",
+                 "END"};
+    }
+    return steps;
 }
 
 namespace {

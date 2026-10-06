@@ -2297,41 +2297,19 @@ bool QuestEngine::resolve_query(App& app, const std::string& token, const EvalCt
 // `users_default.b7da2019.xml` carries `Tutorial="MOVE"` — not a member —
 // i.e. a FRESH tutorial profile.
 const std::vector<std::string>& story_steps() {
-    static std::vector<std::string> steps;
-    static bool cached = false;
-    if (cached) return steps;
-    cached = true;
-    try {
-        sf2::data::xml_doc doc;
-        std::ifstream in(std::string(kQuestResRoot) + "internal_settings.xml",
-                         std::ios::binary);
-        if (in) {
-            std::vector<char> data((std::istreambuf_iterator<char>(in)),
-                                   std::istreambuf_iterator<char>());
-            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
-            const pugi::xml_node root = doc.root().first_child();
-            const pugi::xml_node names =
-                root ? root.child("Tutorial").child("StepsNames") : pugi::xml_node();
-            if (names) {
-                for (pugi::xml_node step : names.children("Step")) {
-                    const char* n = step.attribute("Name").as_string(nullptr);
-                    if (n != nullptr) steps.emplace_back(n);
-                }
-            }
-        }
-    } catch (const std::exception&) {
+    // SINGLE source: the shared `v.su.kU` list parsed by `save_system` from
+    // the shipped `internal_settings.xml` `<StepsNames>` (JS `nw.parse` idx
+    // 614997). There is no second copy here, so a data change cannot make the
+    // save validity check and the quest engine diverge.
+    static const std::vector<std::string>& steps = sf2::app::story_step_names();
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        std::fprintf(stdout, "[quest] StepsNames parsed (%zu):", steps.size());
+        for (const std::string& s : steps) std::fprintf(stdout, " %s", s.c_str());
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
     }
-    // Fail-safe: an unreadable file falls back to the shipped 9-step list so
-    // the membership test can never accept a bogus value.
-    if (steps.empty()) {
-        steps = {"NotStarted", "FIGHT",          "STEP_BUY_ITEM", "STEP_BUY_ITEM_FINISH",
-                 "MAP",        "LEARN_PERK",     "SHOW_DOUBLE_SWEEP", "SHOW_BLOCK",
-                 "END"};
-    }
-    std::fprintf(stdout, "[quest] StepsNames parsed (%zu):", steps.size());
-    for (const std::string& s : steps) std::fprintf(stdout, " %s", s.c_str());
-    std::fprintf(stdout, "\n");
-    std::fflush(stdout);
     return steps;
 }
 static bool valid_story_step(const std::string& s) {

@@ -7361,7 +7361,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          "[fight] captured reference/extracted/scene/direct_fight.png "
                          "(fight frame ~%d, guard %d)\n",
                          fight_frames, guard);
-            if (app.screens().top() != nullptr) {
+            if (app.screens().top() != nullptr &&
+                app.screens().current_id() == kScreenFight) {
                 static_cast<sf2::app::FightScreen*>(app.screens().top())->verify_fight();
             }
         } else {
@@ -8469,7 +8470,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         app.capture_png(path);
         std::fprintf(stdout, "[game] captured %s (fight frame ~%d, guard %d)\n", path.c_str(),
                      fight_frames, guard);
-        if (app.screens().top() != nullptr) {
+        if (app.screens().top() != nullptr &&
+            app.screens().current_id() == kScreenFight) {
             static_cast<sf2::app::FightScreen*>(app.screens().top())->verify_fight();
         }
     } else if (capture_fight) {
@@ -8528,7 +8530,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fprintf(stdout, "[game] captured %s (fight frame ~%d, guard %d)\n", path.c_str(),
                      fight_frames, guard);
         // [FIX Phase 4a verification] The bone-sample + bbox dump.
-        if (app.screens().top() != nullptr) {
+        if (app.screens().top() != nullptr &&
+            app.screens().current_id() == kScreenFight) {
             static_cast<sf2::app::FightScreen*>(app.screens().top())->verify_fight();
         }
     } else if (!capture_dir.empty()) {
