@@ -111,6 +111,11 @@ struct PendingBattle {
     // The fight outcome (set by the FightScreen at battle end).
     bool has_result = false;
     bool player_won = false;
+    // JS `ca.m$` (L397): the player was shocked by an enemy hit during the
+    // final round. `JZa` (L420) reads it on a win for the `ShockWin` counter
+    // (`vsb` -> `Bq("ShockWin")`, internal_settings `<Counter Name="ShockWin"
+    // Type="ShockWin" EclipseMode="0">` -> `Achievement_Name_Win_After_Shock`).
+    bool player_shocked = false;
     // JS `v.kD` (L622187) -> `v.F().dmb(f)` -> `emb` (L93552): the reward
     // (money/exp + battle record + level-up) is committed AT THE FIGHT END,
     // before the results dialog, so dismissing/skipping the dialog never

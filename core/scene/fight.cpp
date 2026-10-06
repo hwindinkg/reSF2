@@ -373,6 +373,7 @@ void FightController::init_locks(
     const sf2::scene::TacticDef* player_tactic) {
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
+    player_shocked_ = false;  // JS `ca.m$` ctor init (L379 `this.m$=!1`)
     player_.style = StyleMeter();  // style meters reset per battle
     enemy_.style = StyleMeter();
     model_ = model;
@@ -2941,6 +2942,7 @@ void FightController::round_start() {
     // sides — live timed mods do NOT persist across rounds).
     setup_bus(perk_setup_);
     dga_ = false;  // JS `Dga` reset per round (L409)
+    player_shocked_ = false;  // JS `Z2` L409 `this.m$=!1` (per-round reset)
     // JS `Z2` (L409): `this.Iga=this.kh=this.Dga=this.JJ=!1; this.ey=0;
     // this.Pu=null; this.m$=!1;` — the per-fighter round-over latch `kh`
     // (latched by `E3a` L413) is cleared for the new round.
@@ -5076,6 +5078,16 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                 def.shock.shocked_vc = true;
                 def.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
             }
+        }
+        // JS `Cgb` L397 tail: `a.Pd.parameters.qb ? wqb(...) :
+        // (this.fe.Cqb(b.block), b.Ub && (this.m$=!0))` — when the ATTACKER
+        // is the enemy (so the shocked defender is the player) and the shock
+        // latch just fired (`rec.shock` == `b.Ub`), set `m$` for the
+        // battle-end ShockWin counter.
+        // `this.Da.type=="FightNone"&&(b.Ub=!1,...)` (L396) forces the flag
+        // off in the Dojo viewer, so the `m$` set is gated on `!fight_none_`.
+        if (!fight_none_ && !atk.is_player && def.is_player && rec.shock) {
+            player_shocked_ = true;
         }
         // JS `Cgb` disarm (L394): `Yi&&(d=$b(Au); sn||own?Yi=false:...)`
         // with `Au` = Shock.Weapon (`Fists`, internal_settings, verified).

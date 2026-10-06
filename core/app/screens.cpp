@@ -12751,6 +12751,9 @@ void FightScreen::update_impl(float dt) {
         pb.reward_applied = false;
         pb.has_result = true;
         pb.player_won = player_won;
+        // JS `ca.m$` -> `JZa` (L420) `this.m$ && this.fe.vsb()`: the player
+        // was shocked in the final round (the `ShockWin` counter hook).
+        pb.player_shocked = fight_->player_shocked();
         // The terminal mode win grants the final row's reward (JS `D0(Rk)`).
         if (mode_active_ && player_won) {
             pb.reward_money = fight_->mode_reward().money;
@@ -14111,15 +14114,20 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
 //                   `Fight`/`Fight2` (L189533).
 //   Losses       -> `zrb()` on a lost fight (`Bq("Losses")`, L188930).
 //   MaximumLevel -> `Psb()` when the player reaches a new maximum level.
+// ShockWin  -> `JZa(a)` (L420) on a WIN: `this.m$ && this.fe.vsb()`, where
+//              `m$` (L397) = the player was shocked by an enemy hit in the
+//              final round. Only the shipped `ShockWin` (EclipseMode="0") row
+//              has a matching achievements.xml achievement
+//              (`Achievement_Name_Win_After_Shock`).
 // The other shipped TYPES (PerfectRound, ComboCount, Style, FirstHits, Disarm,
 // HeadHitRound, SurvivalRounds, HealthRemained, RoundQuicker/Longer,
-// RestrictedAnimation, ShockWin, BodyguardsWin, BossWin, TournamentsBeaten,
+// RestrictedAnimation, BodyguardsWin, BossWin, TournamentsBeaten,
 // ChallangesBeaten, DailyBeaten, BossNoLose, Enchantments, Quest) have NO
-// shipped trigger hook in the native FightController (it tracks round/HP/
-// combo state but not per-round perfect/disarm/style/first-hit session flags;
-// no quest-completion counter hook either), so they are SKIPPED (no invention).
+// matching achievement in the shipped achievements.xml (their counter rows are
+// inert), so they are SKIPPED (no invention).
 static std::map<std::string, int> fight_result_counter_deltas(
-    const std::string& ids, bool player_won, bool leveled_up) {
+    const std::string& ids, bool player_won, bool leveled_up,
+    bool player_shocked) {
     std::map<std::string, int> deltas;
     for (const AchievementCounterDef& d : load_achievement_counter_defs()) {
         // `EclipseMode="1"` counters need the fight's eclipse state, which the
@@ -14139,6 +14147,9 @@ static std::map<std::string, int> fight_result_counter_deltas(
                     (!d.fight2.empty() && d.fight2 == ids)) {
                     deltas[d.name] += 1;
                 }
+            } else if (d.type == "ShockWin") {
+                // JS `JZa` L420 `this.m$ && this.fe.vsb()` on a win.
+                if (player_shocked) deltas[d.name] += 1;
             }
         } else if (d.type == "Losses") {
             deltas[d.name] += 1;  // `zrb`
@@ -14325,7 +14336,8 @@ bool apply_fight_reward(App& app) {
     {
         const std::string cids = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
         const std::map<std::string, int> deltas =
-            fight_result_counter_deltas(cids, player_won, leveled_up);
+            fight_result_counter_deltas(cids, player_won, leveled_up,
+                                        pb.player_shocked);
         std::vector<PendingBattle::AchievementToastRow>& toasts =
             pb.achievement_toasts;
         toasts.clear();
@@ -21354,7 +21366,8 @@ int run_shell_probe(App& app) {
         const std::size_t ul_before = w.achievement_unlocks.size();
         const std::map<std::string, int> deltas =
             fight_result_counter_deltas("ZONE_1|Survival|1", /*player_won=*/true,
-                                        /*leveled_up=*/false);
+                                        /*leveled_up=*/false,
+                                        /*player_shocked=*/false);
         const int unlocked = flush_achievement_counters(app, w, deltas, nullptr);
         app.save().save(w);
         const WarriorSave chk = app.save().load();
@@ -21369,6 +21382,39 @@ int run_shell_probe(App& app) {
         check(after == before + 1 && unlocked >= 1 &&
                   chk.achievement_unlocks.size() > ul_before,
               "(ix) achievement counter write path: Survival1 rises + achievement unlocks");
+    }
+    // (ix-b) ShockWin counter (JS `ca.m$` L397 + `JZa` L420 `this.m$ &&
+    // this.fe.vsb()` -> `Bq("ShockWin")` L372): a WON fight in which the
+    // player was shocked emits the `ShockWin` delta and unlocks
+    // `Achievement_Name_Win_After_Shock`; the same win WITHOUT a shock emits
+    // nothing. The port previously had no `ShockWin` hook (port-only gap).
+    {
+        WarriorSave w = app.save().load();
+        const std::map<std::string, int> no_shock =
+            fight_result_counter_deltas("ZONE_1|Training|1", /*player_won=*/true,
+                                        /*leveled_up=*/false,
+                                        /*player_shocked=*/false);
+        const std::map<std::string, int> with_shock =
+            fight_result_counter_deltas("ZONE_1|Training|1", /*player_won=*/true,
+                                        /*leveled_up=*/false,
+                                        /*player_shocked=*/true);
+        const bool no_delta = no_shock.find("ShockWin") == no_shock.end();
+        const bool has_delta = with_shock.find("ShockWin") != with_shock.end() &&
+                               with_shock.at("ShockWin") == 1;
+        const std::size_t ul_before = w.achievement_unlocks.size();
+        const int unlocked = flush_achievement_counters(app, w, with_shock, nullptr);
+        app.save().save(w);
+        const WarriorSave chk = app.save().load();
+        std::fprintf(stdout,
+                     "[sps] ach ShockWin noShockDelta=%d shockDelta=%d unlocks=%d "
+                     "(total unlocks %zu->%zu)\n",
+                     no_delta ? 1 : 0, has_delta ? 1 : 0, unlocked, ul_before,
+                     chk.achievement_unlocks.size());
+        std::fflush(stdout);
+        check(no_delta && has_delta && unlocked >= 1 &&
+                  chk.achievement_unlocks.size() > ul_before,
+              "(ix-b) ShockWin counter: only a shocked win emits + unlocks "
+              "Win_After_Shock");
     }
     // (x) Settings language cycle -> RESTART (JS `un.rHa` case 4/5, offsets
     // 995437/995553): cycling `$u` reveals RESTART (`t9`), selects the

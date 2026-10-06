@@ -1884,6 +1884,14 @@ public:
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
+    // JS `ca.m$` (L379/397/409): set true when the PLAYER is shocked by an
+    // enemy hit during the current round (the `Cgb` branch
+    // `... : (this.fe.Cqb(b.block), b.Ub && (this.m$=!0))`, L397), reset at
+    // every round start (`Z2` L409 `this.m$=!1`). The battle-end `JZa` (L420)
+    // reads it for the `ShockWin` counter (`this.m$ && this.fe.vsb()` ->
+    // `Bq("ShockWin")`, L372) — the `Achievement_Name_Win_After_Shock`
+    // unlock. The port previously never set/read this flag (port-only gap).
+    bool player_shocked() const { return player_shocked_; }
     // JS `bea`/`kD` (L413/L415): the result plate's `fu(1.166)` hold is the
     // fight-end sequence; `battle_over_` flips only on its expiry, so the
     // caller's Results push (and reward) happen AFTER the K.O./end stance.
@@ -2050,6 +2058,10 @@ private:
     // first-strike side, set on the battle's first landed hit (else none).
     bool battle_first_hit_ = false;  // any hit landed yet this battle
     bool battle_first_by_player_ = false;
+    // JS `ca.m$` (L379): the player was shocked by an enemy hit this round
+    // (set in the `Cgb` hit path, cleared at each round start `Z2`). Read by
+    // the battle-end `ShockWin` counter (`JZa` -> `vsb`).
+    bool player_shocked_ = false;
     bool round_wait_ = false;      // JS: between a round's end and `FNa`
                                    // (the round-break banner holds it)
     // JS `ca.o1a` L403 / `kg` L387: the `FightNone` viewer (the Dojo hub)
