@@ -3738,7 +3738,11 @@ void FightController::setup_bus(const PerkSetup& perks) {
     {
         sf2::scene::SetValueRuntime& rt = sf2::scene::set_value_runtime();
         rt.level = static_cast<int>(player_.params.level);
-        rt.is_raid = false;  // dojo/normal fight (`FightRaid` OPEN)
+        // JS `qgb` (L685073): `a.Sd=="isRaid" && (b.result =
+        // ca.Ka().Da.type=="FightRaid" ? "1" : "0")` — derived from the
+        // CURRENT fight type, not a constant. `battle_.type` is the
+        // `Da.type` analog (`battle_type_for_kind`, screens.cpp:5557).
+        rt.is_raid = (battle_.type == "FightRaid");
         rt.me_attrs.clear();
         for (const auto& kv : player_.params.attributes) rt.me_attrs[kv.first] = kv.second;
         rt.enemy_attrs.clear();
@@ -5088,7 +5092,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             if (fd[0] == '1') rec.disarm = true;
         }
         if (rec.disarm) {
-            if (def.shock.disarm_sn || def.weapon == "Fists") {
+            if (def.shock.disarm_sn || def.weapon == gfp.shock_weapon) {
                 rec.disarm = false;
             } else {
                 def.shock.disarm_sn = true;
@@ -5102,7 +5106,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         // config `<Weapon Name>` = "Fists"); `Hd.name==d.name` (unarmed) or
         // `sn` vetoes. Trace the resolved gate so the enemy's wielded item
         // (`Zb.Hd.name`) is observable end-to-end.
-        if (rec.disarm || (ub && def.weapon != "Fists")) {
+        if (rec.disarm || (ub && def.weapon != gfp.shock_weapon)) {
             std::fprintf(stdout,
                          "[disarm] F%d %s->%s wield='%s' roll=%d gate=%s "
                          "sn=%d wx=%d\n",
