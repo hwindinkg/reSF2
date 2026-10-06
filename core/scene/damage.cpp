@@ -392,6 +392,11 @@ void load_fight_params_from_settings(const std::string& xml_text) {
     v.announce_time = root.child("Announcements").attribute("Time").as_int(60);
     v.hot_ground_time =
         root.child("HotGroundTimer").attribute("Time").as_int(90);
+    // `v.gDa` (L593098) = `u.H(a.A("Great").attributes.get("MaxHealth"),.3)` —
+    // the HP fraction `ca.Pf`'s default branch tests for the "great" plate.
+    // Shipped `<Great MaxHealth="0.1"/>`; the JS fallback is 0.3.
+    v.great_max_health =
+        root.child("Great").attribute("MaxHealth").as_float(0.3f);
     // `v.kNa`/`v.mGa`/`v.jNa`/`v.iNa` (L1156) = `<SlowMode .../>` — the
     // finishing-blow slow-mo (`u.I`/`u.H` fallbacks 10/100/4/2).
     if (const pugi::xml_node sm = root.child("SlowMode")) {

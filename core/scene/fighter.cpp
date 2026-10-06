@@ -2770,11 +2770,9 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // anchor-drive below and the `pos_` placement share one lookup.
     int anchor = model_.bone_by_name(fighter_pivot_bone());
     if (anchor < 0) {
-        // Shipped models all carry the pivot; a model without it keeps the
-        // legacy COM anchor (JS `Dl.Trb` L577 falls back to `all[0]`).
-        anchor = model_.bone_by_name("COM");
-    }
-    if (anchor < 0) {
+        // JS `Dl.Trb` (L577): `this.Va.Yd=this.Va.all.length>0?this.Va.all[0]:null`
+        // — the fallback is the FIRST body node, NOT a bone named "COM"
+        // (the port-only "COM" step was invented; `all[0]` is the JS truth).
         anchor = 0;
     }
     const std::size_t anchor_u = static_cast<std::size_t>(anchor);
@@ -2962,6 +2960,13 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         for (int it = 0; it < kEdgeIters; ++it) {
             for (std::size_t ei = 0; ei < model_.edges.size(); ++ei) {
                 const EdgeDef& e = model_.edges[ei];
+                // JS `Al.jE` (L583): `for(...){let g=c[f++]; a&&g.vc||this.fdb(g)}`
+                // — while the model shock latch (`a = oa.vc`) is set, an edge
+                // carrying `Shock="1"` (`g.vc` = `yu.vc`) is SKIPPED entirely
+                // (no `fha` ground/wall response, no `bFa` relax). The port
+                // previously relaxed every edge unconditionally, letting the
+                // cloth tear against the flung shock nodes.
+                if (shock_latch_ && e.shock) continue;
                 // [perf] Cached endpoint indices (JS `Al.jE` holds direct node
                 // refs). The old per-frame `model_.bone_by_name(e.end1/end2)`
                 // string hashes were the solver's dominant cost.

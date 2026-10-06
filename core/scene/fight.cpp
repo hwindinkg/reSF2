@@ -3321,7 +3321,8 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // `rca` (`ringout`); `default` (`ey=0`, a normal KO) -> `GZ(...)`:
     //   `b.cE ? GZ(!0) : b.w$a()<=v.gDa && GZ(!1)`
     // where `cE` is the winner's unhit latch, `w$a()=gd/Zn` its HP fraction
-    // and `v.gDa=0.1` (`<Great MaxHealth="0.1">`).  The whole `default` branch
+    // and `v.gDa` is `<Great MaxHealth>` (`internal_settings.xml`; shipped
+    // 0.1, JS fallback 0.3).  The whole `default` branch
     // is gated `!A && !B` (`A=banner type 2`, `B=!winner.qb && !PVP`), so a
     // NON-player winner (non-PVP) shows NO plate.  The port's `ko` result is
     // exactly this `ey=0` default branch (a rule end sets `timeout_win`/
@@ -3333,7 +3334,8 @@ void FightController::apply_round_result(round_result result, const FightFighter
     } else if (w.is_player) {
         if (w.round_unhit) {
             result_plate_ = banner_kind::victory;  // `y.zQa` "perfect"
-        } else if (w.max_hp > 0.0f && w.hp / w.max_hp <= 0.1f) {
+        } else if (w.max_hp > 0.0f &&
+                   w.hp / w.max_hp <= fight_params().great_max_health) {
             result_plate_ = banner_kind::defeat;   // `y.wQa` "great"
         } else {
             result_plate_ = banner_kind::none;     // took damage, HP > 10%

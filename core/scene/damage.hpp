@@ -251,6 +251,13 @@ struct FightParams {
     // — the `R9a()` life (`Gr.Qq(4)`) of the type-4 hot_ground callout.
     // Shipped `<HotGroundTimer Time="200"/>`.
     int hot_ground_time = 90;
+    // `v.gDa` (L593098) = `u.H(a.A("Great").attributes.get("MaxHealth"),.3)` —
+    // the HP fraction at/below which a KO win raises the "great" plate
+    // (`ca.Pf` L196253 default branch: `b.w$a()<=v.gDa && GZ(!1)`). The port
+    // previously hardcoded 0.1 (the shipped XML value) and used the JS default
+    // 0.3 nowhere; read it from internal_settings.xml here instead.
+    // Shipped `<Great MaxHealth="0.1"/>`.
+    float great_max_health = 0.3f;
     // `v.kNa`/`v.mGa`/`v.jNa`/`v.iNa` (L1156) = internal_settings.xml
     // `<SlowMode Value="7" MaxTime="3" RestoreWeapon="4"
     // RestoreNonWeapon="2"/>` — the FINISHING-BLOW hit-stun + slow-mo.
