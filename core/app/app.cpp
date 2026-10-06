@@ -879,6 +879,10 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             // CriticalHit rows, Lifesteal (`v.kha`), Shock (`v.Ub`), Magic
             // (`v.jA`). Loaded from the SAME document.
             sf2::scene::load_fight_params_from_settings(settings_xml);
+            // `v.eo.parse(a.A("Attributes"))` @591524 + `v.Ova.parse(
+            // a.A("BarScales"))` @593981: the shop attribute/bar-scale tables
+            // parsed from the SAME document (replaces the transcribed tables).
+            sf2::app::load_shop_tables_from_settings(settings_xml);
             // `ye.parse` (L467424): forge.xml `<Forge><AspectScale>` -> the
             // `gea(level)` table the perk `<Set>` evaluator reads.
             sf2::scene::load_aspect_scale_from_forge(extracted_xml("forge.xml"));

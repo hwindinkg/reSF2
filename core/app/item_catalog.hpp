@@ -230,10 +230,17 @@ std::vector<CatalogItem> shop_items(const std::vector<CatalogItem>& all);
 // (JS L2274) iterates these in file order; `fi.init` (L2270-2271) resolves the
 // row icon as `"attributes/" + Icon` in atlas 248 (fallback: `Icon` in 266).
 struct ShopAttributeDef {
-    const char* name;       // `Name`  ("WeaponDamage")
-    const char* icon;       // `Icon`  ("weapon_attack"; "" when the XML has none)
-    const char* bar_scale;  // `BarScale` (`gp.bP`, `ow.parse` L615845); "" if absent
-    bool hidden;            // `Hidden="1"` — `ms` skips these (`!h.hidden`)
+    std::string name;        // `Name`  ("WeaponDamage")
+    std::string icon;        // `Icon`  ("weapon_attack"; "" when the XML has none)
+    std::string bar_scale;   // `BarScale` (`gp.bP`, `ow.parse` L615845); "" if absent
+    // `hidden` (`Hidden`), `shop_hidden` (`ShopHidden`, JS `Jla`),
+    // `profile_hidden` (`ProfileHidden`, JS `DJa`) — `ow.parse` L615263 sets
+    // all three via `u.ka` (L1262938: null -> false, "1"/"true" -> true).
+    // The shop detail list (`ms.setParameters` L1170616) skips only `hidden`;
+    // the profile parameter list (`ps.pca` L1171510) skips `hidden||Jla`.
+    bool hidden = false;
+    bool shop_hidden = false;
+    bool profile_hidden = false;
 };
 
 // One `<Limit>` row of a `<BarScale>` (JS `Ew` L659xxx; filled by `Nv.kBa`
@@ -253,10 +260,10 @@ struct ShopBarScaleLimit {
 // `item_limits` (`dha` via `f7a`/`g7a`); `attribute_limits` (`kba`) is the
 // profile path (`ps` L2277) and is kept only for table fidelity.
 struct ShopBarScale {
-    const char* name;
-    const char* type;
-    float power;
-    float min;
+    std::string name;
+    std::string type;
+    float power = 0.0f;
+    float min = 0.0f;
     std::vector<ShopBarScaleLimit> attribute_limits;  // `<AttributeLimits>` (`kba`)
     std::vector<ShopBarScaleLimit> item_limits;       // `<ItemLimits>` (`dha`)
 };
@@ -266,12 +273,26 @@ struct ShopBarScale {
 // `v.Ova` (`Mv` L604556) table, selects its `<ItemLimits>` row for
 // `player_level`, and applies the `Exp`/`Linear` formula clamped to
 // `[max(0,Min), 1]` (`v.BP` = `<DamageDoublingRange>` = 10).
-float shop_attribute_bar_fill(const char* bar_scale, int value, int player_level);
+float shop_attribute_bar_fill(const std::string& bar_scale, int value, int player_level);
 
-// The shipped `<Attributes>` defs (internal_settings.xml L21744-23450), in
-// file order. `ShopHidden`/`ProfileHidden` do NOT gate the shop list — only
-// `Hidden` does (JS L2274-2275 checks `!h.hidden`), so `CriticalRating`
-// (`ShopHidden="1"`, no `Hidden`) is included.
+// Parses the shipped `internal_settings.xml` `<Attributes>` + `<BarScales>`
+// into the runtime tables the JS builds in `v.eo` (`ow.parse` L615263) and
+// `v.Ova` (`Mv.parse` L604556). Idempotent; `shop_attribute_defs` /
+// `shop_attribute_bar_fill` lazily load the canonical extracted file when
+// this was not called (the JS parses both once at config load).
+void load_shop_tables_from_settings(const std::string& xml_text);
+
+// [probe] Re-parses `internal_settings.xml` and asserts the runtime tables
+// (`shop_attribute_defs` / the `v.Ova` bar scales) equal the shipped XML,
+// logging counts + a value checksum. Returns the mismatch count (0 = PASS).
+int run_shop_tables_probe();
+
+// The shipped `<Attributes>` defs, parsed from `internal_settings.xml`
+// `<Attributes>` in file order (JS `ow.parse` L615263 -> `v.eo.attributes`).
+// The shop detail list (`ms.setParameters` L1170616) skips only `hidden`
+// (`!h.hidden`), so `CriticalRating` (`ShopHidden="1"`, no `Hidden`) IS
+// included there; the profile list (`ps.pca` L1171510) also skips
+// `shop_hidden`.
 const std::vector<ShopAttributeDef>& shop_attribute_defs();
 
 // Parses the global `<UpgradeList>` of list.xml (JS `it.qkb` L164: each

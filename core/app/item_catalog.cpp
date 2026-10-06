@@ -4,6 +4,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <stdexcept>
 
 #include "xml_doc.hpp"
@@ -20,35 +25,161 @@ constexpr const char* kTypeHelm = "Helm";
 
 bool attr_bool_str(const char* v) { return v != nullptr && std::string(v) == "1"; }
 
+// --- internal_settings.xml table parse (JS `ow.parse`/`Mv.parse`/`Nv.kBa`) ---
+// All helpers mirror the JS coercion primitives exactly.
+
+// `u.ka` (L1262938): null -> def, "1"/"true" -> true, else false.
+bool js_bool(const pugi::xml_attribute a, bool def = false) {
+    if (!a) return def;
+    const std::string v = a.value();
+    return v == "1" || v == "true";
+}
+// `u.I` (L1263010): `K.parseInt` -> int, null -> def.
+int js_int(const pugi::xml_attribute a, int def) {
+    if (!a) return def;
+    char* end = nullptr;
+    const long v = std::strtol(a.value(), &end, 10);
+    if (end == a.value()) return def;
+    return static_cast<int>(v);
+}
+// `u.H` (L1263074): `parseFloat` -> float, NaN/null -> def.
+float js_float(const pugi::xml_attribute a, float def) {
+    if (!a) return def;
+    char* end = nullptr;
+    const double v = std::strtod(a.value(), &end);
+    if (end == a.value()) return def;
+    return static_cast<float>(v);
+}
+std::string js_str(const pugi::xml_attribute a) {
+    return a ? std::string(a.value()) : std::string();
+}
+
+// `Nv.kBa` L604695: one `<AttributeLimits>`/`<ItemLimits>` block. `LeftLimit`/
+// `RightLimit`/`LevelMultiplier`/`Shift` default to -1 (`Ew` `rFa`/`MKa`/`yFa`/
+// `shift`); `Level` is a `a|b|c` list (`ir`, empty when absent).
+std::vector<ShopBarScaleLimit> parse_limit_block(const pugi::xml_node parent) {
+    std::vector<ShopBarScaleLimit> out;
+    if (!parent) return out;
+    for (const pugi::xml_node e : parent.children("Limit")) {
+        ShopBarScaleLimit f;
+        f.left_limit = js_int(e.attribute("LeftLimit"), -1);    // `rFa`
+        f.right_limit = js_int(e.attribute("RightLimit"), -1);  // `MKa`
+        if (e.attribute("Level")) {
+            const std::string lv = e.attribute("Level").value();
+            if (!lv.empty()) {
+                std::size_t p = 0;
+                for (;;) {
+                    const std::size_t q = lv.find('|', p);
+                    const std::string tok =
+                        lv.substr(p, q == std::string::npos ? q : q - p);
+                    char* end = nullptr;
+                    const long v = std::strtol(tok.c_str(), &end, 10);
+                    if (end != tok.c_str()) f.levels.push_back(static_cast<int>(v));
+                    if (q == std::string::npos) break;
+                    p = q + 1;
+                }
+            }
+        }
+        f.level_multiplier = js_float(e.attribute("LevelMultiplier"), -1.0f);  // `yFa`
+        f.shift = js_int(e.attribute("Shift"), -1);                            // `shift`
+        out.push_back(std::move(f));
+    }
+    return out;
+}
+
+// `cw` (L633598) + `bw.parse` (JS `v.xIa`, `<OutdateLevels>`): one row. `Type`
+// splits on "|" (absent -> `[""]`, `cw.parse` `a!=null?a:""`).
+struct OutdateLevel {
+    int value = 0;                   // `Value` (`u.H`)
+    std::vector<std::string> types;  // `Type`
+};
+
+// `ow.parse` L615263 (`v.eo.attributes`) + `Mv.parse` L604556 (`v.Ova`) +
+// `bw.parse` (JS `v.xIa`, `v.xIa.parse(a.A("OutdateLevels"))` @593527).
+void parse_shop_tables_xml(const std::string& xml_text,
+                           std::vector<ShopAttributeDef>* defs,
+                           std::vector<ShopBarScale>* scales,
+                           std::vector<OutdateLevel>* outdates = nullptr) {
+    sf2::data::xml_doc doc;
+    doc.parse(xml_text);
+    const pugi::xml_node root = doc.root().first_child();
+    if (!root) throw std::runtime_error("shop tables: settings root missing");
+    defs->clear();
+    scales->clear();
+    if (const pugi::xml_node attrs = root.child("Attributes")) {
+        for (const pugi::xml_node a : attrs.children("Attribute")) {
+            ShopAttributeDef d;
+            d.name = js_str(a.attribute("Name"));
+            d.icon = js_str(a.attribute("Icon"));
+            d.bar_scale = js_str(a.attribute("BarScale"));
+            d.hidden = js_bool(a.attribute("Hidden"));
+            d.shop_hidden = js_bool(a.attribute("ShopHidden"));
+            d.profile_hidden = js_bool(a.attribute("ProfileHidden"));
+            defs->push_back(std::move(d));
+        }
+    }
+    if (const pugi::xml_node bs = root.child("BarScales")) {
+        for (const pugi::xml_node s : bs.children("BarScale")) {
+            ShopBarScale sc;
+            sc.name = js_str(s.attribute("Name"));
+            sc.type = s.attribute("Type") ? std::string(s.attribute("Type").value())
+                                          : std::string("Linear");
+            sc.power = js_float(s.attribute("Power"), 0.0f);
+            sc.min = js_float(s.attribute("Min"), 0.0f);
+            sc.attribute_limits = parse_limit_block(s.child("AttributeLimits"));
+            sc.item_limits = parse_limit_block(s.child("ItemLimits"));
+            scales->push_back(std::move(sc));
+        }
+    }
+    if (outdates != nullptr) {
+        outdates->clear();
+        if (const pugi::xml_node ol = root.child("OutdateLevels")) {
+            for (const pugi::xml_node o : ol.children("OutdateLevel")) {
+                OutdateLevel d;
+                d.value = static_cast<int>(js_float(o.attribute("Value"), 0.0f));
+                const std::string t =
+                    o.attribute("Type") ? o.attribute("Type").value() : std::string();
+                std::size_t p = 0;
+                for (;;) {
+                    const std::size_t q = t.find('|', p);
+                    d.types.push_back(t.substr(p, q == std::string::npos ? q : q - p));
+                    if (q == std::string::npos) break;
+                    p = q + 1;
+                }
+                outdates->push_back(std::move(d));
+            }
+        }
+    }
+}
+
+// Runtime storage for the parsed tables (JS `v.eo.attributes` / `v.Ova.z7`).
+std::vector<ShopAttributeDef> g_attr_defs;
+std::vector<ShopBarScale> g_bar_scales;
+std::vector<OutdateLevel> g_outdate_levels;
+bool g_tables_loaded = false;
+
+// Lazily parse the canonical extracted settings file when the explicit
+// `load_shop_tables_from_settings` (config load) did not run.
+void ensure_shop_tables_loaded() {
+    if (g_tables_loaded) return;
+    std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                     std::ios::binary);
+    if (!in) throw std::runtime_error("shop tables: internal_settings.xml missing");
+    std::string text((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    load_shop_tables_from_settings(text);
+}
+
 } // namespace
 
-// `internal_settings.xml` `<Attributes>` (L21744-23450), file order. The JS
-// `ow.parse` (L615263) reads Name/Icon/Hidden + `BarScale` (`gp.bP`, L615845);
-// `ms`/`fi` (L2274-2275) consume them in this order.
+// The runtime `<Attributes>` table (JS `v.eo.attributes`; `ow.parse` L615263
+// @591524 `v.eo.parse(a.A("Attributes"))`). Populated by
+// `load_shop_tables_from_settings`; lazily parsed from the shipped
+// `internal_settings.xml` otherwise. `ms.setParameters` (L1170616) walks it
+// in file order and skips only `hidden`.
 const std::vector<ShopAttributeDef>& shop_attribute_defs() {
-    static const std::vector<ShopAttributeDef> kDefs = {
-        {"HeadDefense", "head_armor", "HeadDefense", false},
-        {"BodyDefense", "body_armor", "BodyDefense", false},
-        {"UnarmedDamage", "unarmed_attack", "BodyDefense", false},  // BarScale=BodyDefense
-        {"WeaponDamage", "weapon_attack", "WeaponDamage", false},
-        {"RangedDamage", "ranged_attack", "RangedDamage", false},
-        {"MagicDamage", "magic_attack", "MagicDamage", false},
-        {"CriticalChance", "critical_chance", "Chance", true},
-        {"CriticalRating", "critical_chance", "Enchantment", true},  // Hidden="1"
-        {"BlockDamageFactor", "", "", true},
-        {"DamageFactor", "", "", true},
-        {"RangedQuantity", "ranged_quantity", "RangedQuantity", true},
-        {"CriticalDamage", "", "", true},
-        {"MagicInitialCharge", "", "", true},
-        {"MagicPainRecharge", "", "", true},
-        {"MagicDamageRecharge", "", "", true},
-        {"RegenerationRate", "", "", true},
-        {"Lifesteal", "", "", true},
-        {"ShockCriticalHitChance", "", "", true},
-        {"ShockHeadHitChance", "", "", true},
-        {"EnchantmentResistance", "", "", true},
-    };
-    return kDefs;
+    if (!g_tables_loaded) ensure_shop_tables_loaded();
+    return g_attr_defs;
 }
 
 namespace {
@@ -64,277 +195,8 @@ namespace {
 // previous local `10.0f`.
 
 const std::vector<ShopBarScale>& shop_bar_scales() {
-    static const std::vector<ShopBarScale> kScales = {
-        {"WeaponDamage", "Exp", 0.5f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 10, -1, -1, {1}},
-            {27.0f, -7, -1, -1, {2}},
-            {35.0f, -16, -1, -1, {3, 4, 5}},
-            {41.0f, -46, -1, -1, {6}},
-            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {41.0f, -76, -1, -1, {12}},
-            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {41.0f, -106, -1, -1, {18}},
-            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {41.0f, -136, -1, -1, {24}},
-            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {41.0f, -166, -1, -1, {30}},
-            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {41.0f, -244, -1, -1, {52}},
-            {41.0f, -244, -1, -1, {}},
-         },
-         { // ItemLimits
-            {25.0f, -20, -1, -1, {1}},
-            {25.0f, -30, -1, -1, {2}},
-            {25.0f, -21, -1, -1, {3, 4, 5}},
-            {31.0f, -51, -1, -1, {6}},
-            {25.0f, -15, -1, -1, {7, 8, 9, 10, 11}},
-            {31.0f, -81, -1, -1, {12}},
-            {25.0f, -9, -1, -1, {13, 14, 15, 16, 17}},
-            {31.0f, -111, -1, -1, {18}},
-            {25.0f, -3, -1, -1, {19, 20, 21, 22, 23}},
-            {31.0f, -141, -1, -1, {24}},
-            {25.0f, 3, -1, -1, {25, 26, 27, 28, 29}},
-            {31.0f, -171, -1, -1, {30}},
-            {25.0f, 9, -1, -1, {31, 32, 33, 34, 35}},
-            {31.0f, -201, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {25.0f, 57, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {31.0f, -249, -1, -1, {52}},
-            {31.0f, -249, -1, -1, {}},
-         }},
-        {"UnarmedDamage", "Exp", 0.5f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 10, -1, -1, {1}},
-            {27.0f, -7, -1, -1, {2}},
-            {35.0f, -16, -1, -1, {3, 4, 5}},
-            {41.0f, -46, -1, -1, {6}},
-            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {41.0f, -76, -1, -1, {12}},
-            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {41.0f, -106, -1, -1, {18}},
-            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {41.0f, -136, -1, -1, {24}},
-            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {41.0f, -166, -1, -1, {30}},
-            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {41.0f, -244, -1, -1, {52}},
-            {41.0f, -244, -1, -1, {}},
-         },
-         { // ItemLimits
-            {25.0f, -20, -1, -1, {1}},
-            {27.0f, -32, -1, -1, {2}},
-            {25.0f, -21, -1, -1, {3, 4, 5}},
-            {31.0f, -51, -1, -1, {6}},
-            {25.0f, -15, -1, -1, {7, 8, 9, 10, 11}},
-            {31.0f, -81, -1, -1, {12}},
-            {25.0f, -9, -1, -1, {13, 14, 15, 16, 17}},
-            {31.0f, -111, -1, -1, {18}},
-            {25.0f, -3, -1, -1, {19, 20, 21, 22, 23}},
-            {31.0f, -141, -1, -1, {24}},
-            {25.0f, 3, -1, -1, {25, 26, 27, 28, 29}},
-            {31.0f, -171, -1, -1, {30}},
-            {25.0f, 9, -1, -1, {31, 32, 33, 34, 35}},
-            {31.0f, -201, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {25.0f, 57, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {31.0f, -249, -1, -1, {52}},
-            {31.0f, -249, -1, -1, {}},
-         }},
-        {"BodyDefense", "Exp", 0.5f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 10, -1, -1, {1}},
-            {27.0f, -7, -1, -1, {2}},
-            {35.0f, -16, -1, -1, {3, 4, 5}},
-            {41.0f, -46, -1, -1, {6}},
-            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {41.0f, -76, -1, -1, {12}},
-            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {41.0f, -106, -1, -1, {18}},
-            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {41.0f, -136, -1, -1, {24}},
-            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {41.0f, -166, -1, -1, {30}},
-            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {41.0f, -244, -1, -1, {52}},
-            {41.0f, -244, -1, -1, {}},
-         },
-         { // ItemLimits
-            {25.0f, -20, -1, -1, {1}},
-            {27.0f, -32, -1, -1, {2}},
-            {25.0f, -21, -1, -1, {3, 4, 5}},
-            {31.0f, -51, -1, -1, {6}},
-            {25.0f, -15, -1, -1, {7, 8, 9, 10, 11}},
-            {31.0f, -81, -1, -1, {12}},
-            {25.0f, -9, -1, -1, {13, 14, 15, 16, 17}},
-            {31.0f, -111, -1, -1, {18}},
-            {25.0f, -3, -1, -1, {19, 20, 21, 22, 23}},
-            {31.0f, -141, -1, -1, {24}},
-            {25.0f, 3, -1, -1, {25, 26, 27, 28, 29}},
-            {31.0f, -171, -1, -1, {30}},
-            {25.0f, 9, -1, -1, {31, 32, 33, 34, 35}},
-            {31.0f, -201, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {25.0f, 57, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {31.0f, -249, -1, -1, {52}},
-            {31.0f, -249, -1, -1, {}},
-         }},
-        {"HeadDefense", "Exp", 0.5f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 10, -1, -1, {1}},
-            {27.0f, -7, -1, -1, {2}},
-            {35.0f, -16, -1, -1, {3, 4, 5}},
-            {41.0f, -46, -1, -1, {6}},
-            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {41.0f, -76, -1, -1, {12}},
-            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {41.0f, -106, -1, -1, {18}},
-            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {41.0f, -136, -1, -1, {24}},
-            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {41.0f, -166, -1, -1, {30}},
-            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {41.0f, -244, -1, -1, {52}},
-            {41.0f, -244, -1, -1, {}},
-         },
-         { // ItemLimits
-            {25.0f, -15, -1, -1, {1}},
-            {13.0f, -13, -1, -1, {2}},
-            {25.0f, -23, -1, -1, {3, 4, 5}},
-            {31.0f, -53, -1, -1, {6}},
-            {25.0f, -17, -1, -1, {7, 8, 9, 10, 11}},
-            {31.0f, -83, -1, -1, {12}},
-            {25.0f, -11, -1, -1, {13, 14, 15, 16, 17}},
-            {31.0f, -113, -1, -1, {18}},
-            {25.0f, -5, -1, -1, {19, 20, 21, 22, 23}},
-            {31.0f, -143, -1, -1, {24}},
-            {25.0f, 1, -1, -1, {25, 26, 27, 28, 29}},
-            {31.0f, -173, -1, -1, {30}},
-            {25.0f, 7, -1, -1, {31, 32, 33, 34, 35}},
-            {31.0f, -203, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {25.0f, 55, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {31.0f, -251, -1, -1, {52}},
-            {31.0f, -251, -1, -1, {}},
-         }},
-        {"RangedDamage", "Exp", 0.5f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 10, -1, -1, {1}},
-            {27.0f, -7, -1, -1, {2}},
-            {35.0f, -16, -1, -1, {3, 4, 5}},
-            {41.0f, -46, -1, -1, {6}},
-            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {41.0f, -76, -1, -1, {12}},
-            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {41.0f, -106, -1, -1, {18}},
-            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {41.0f, -136, -1, -1, {24}},
-            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {41.0f, -166, -1, -1, {30}},
-            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {41.0f, -244, -1, -1, {52}},
-            {41.0f, -244, -1, -1, {}},
-         },
-         { // ItemLimits
-            {25.0f, -15, -1, -1, {1}},
-            {25.0f, -25, -1, -1, {2}},
-            {25.0f, -16, -1, -1, {3, 4, 5}},
-            {31.0f, -46, -1, -1, {6}},
-            {25.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {31.0f, -76, -1, -1, {12}},
-            {25.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {31.0f, -106, -1, -1, {18}},
-            {25.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {31.0f, -136, -1, -1, {24}},
-            {25.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {31.0f, -166, -1, -1, {30}},
-            {25.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {31.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {25.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {31.0f, -244, -1, -1, {52}},
-            {31.0f, -244, -1, -1, {}},
-         }},
-        {"MagicDamage", "Exp", 0.5f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 10, -1, -1, {1}},
-            {27.0f, -7, -1, -1, {2}},
-            {35.0f, -16, -1, -1, {3, 4, 5}},
-            {41.0f, -46, -1, -1, {6}},
-            {35.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {41.0f, -76, -1, -1, {12}},
-            {35.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {41.0f, -106, -1, -1, {18}},
-            {35.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {41.0f, -136, -1, -1, {24}},
-            {35.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {41.0f, -166, -1, -1, {30}},
-            {35.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {41.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {41.0f, -244, -1, -1, {52}},
-            {41.0f, -244, -1, -1, {}},
-         },
-         { // ItemLimits
-            {25.0f, -15, -1, -1, {1}},
-            {25.0f, -25, -1, -1, {2}},
-            {25.0f, -16, -1, -1, {3, 4, 5}},
-            {31.0f, -46, -1, -1, {6}},
-            {25.0f, -10, -1, -1, {7, 8, 9, 10, 11}},
-            {31.0f, -76, -1, -1, {12}},
-            {25.0f, -4, -1, -1, {13, 14, 15, 16, 17}},
-            {31.0f, -106, -1, -1, {18}},
-            {25.0f, 2, -1, -1, {19, 20, 21, 22, 23}},
-            {31.0f, -136, -1, -1, {24}},
-            {25.0f, 8, -1, -1, {25, 26, 27, 28, 29}},
-            {31.0f, -166, -1, -1, {30}},
-            {25.0f, 14, -1, -1, {31, 32, 33, 34, 35}},
-            {31.0f, -196, -1, -1, {36, 37, 38, 39, 40, 41, 42, 43}},
-            {25.0f, 62, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51}},
-            {31.0f, -244, -1, -1, {52}},
-            {31.0f, -244, -1, -1, {}},
-         }},
-        {"Chance", "Linear", 1.0f, 0.0f,
-         { // AttributeLimits
-            {-1.0f, -1, 0, 10000, {}},
-         },
-         { // ItemLimits
-            {-1.0f, -1, 0, 10000, {}},
-         }},
-        {"Enchantment", "Exp", 0.128f, 0.03f,
-         { // AttributeLimits
-            {10.0f, 50, -1, -1, {1}},
-            {27.0f, 31, -1, -1, {2}},
-            {35.0f, 0, -1, -1, {3, 4, 5, 6}},
-            {35.0f, 6, -1, -1, {7, 8, 9, 10, 11, 12}},
-            {35.0f, 12, -1, -1, {13, 14, 15, 16, 17, 18}},
-            {35.0f, 18, -1, -1, {19, 20, 21, 22, 23, 24}},
-            {35.0f, 24, -1, -1, {25, 26, 27, 28, 29, 30}},
-            {35.0f, 30, -1, -1, {31, 32, 33, 34, 35, 36}},
-            {41.0f, -186, -1, -1, {37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 72, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51, 52}},
-            {35.0f, 0, -1, -1, {}},
-         },
-         { // ItemLimits
-            {10.0f, 50, -1, -1, {1}},
-            {27.0f, 31, -1, -1, {2}},
-            {35.0f, 0, -1, -1, {3, 4, 5, 6}},
-            {35.0f, 6, -1, -1, {7, 8, 9, 10, 11, 12}},
-            {35.0f, 12, -1, -1, {13, 14, 15, 16, 17, 18}},
-            {35.0f, 18, -1, -1, {19, 20, 21, 22, 23, 24}},
-            {35.0f, 24, -1, -1, {25, 26, 27, 28, 29, 30}},
-            {35.0f, 30, -1, -1, {31, 32, 33, 34, 35, 36}},
-            {41.0f, -186, -1, -1, {37, 38, 39, 40, 41, 42, 43}},
-            {35.0f, 72, -1, -1, {44, 45, 46, 47, 48, 49, 50, 51, 52}},
-            {35.0f, 0, -1, -1, {}},
-         }},
-    };
-    return kScales;
+    if (!g_tables_loaded) ensure_shop_tables_loaded();
+    return g_bar_scales;
 }
 
 } // namespace
@@ -348,11 +210,11 @@ const std::vector<ShopBarScale>& shop_bar_scales() {
 //   Exp:    c = 2^((value-b)*rH/v.BP)                 (`v.BP`=kDamageDoublingRange)
 //   Linear: c = (value/b)^rH
 //   c<0?c=0 : c>1?c=1 ; return max(c, bC)
-float shop_attribute_bar_fill(const char* bar_scale, int value, int player_level) {
+float shop_attribute_bar_fill(const std::string& bar_scale, int value, int player_level) {
     const ShopBarScale* bs = nullptr;
-    if (bar_scale != nullptr && bar_scale[0] != '\0') {
+    if (!bar_scale.empty()) {
         for (const ShopBarScale& s : shop_bar_scales()) {
-            if (std::string(s.name) == bar_scale) {
+            if (s.name == bar_scale) {
                 bs = &s;
                 break;
             }
@@ -514,8 +376,8 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
                 r.delivery_sec = sf2::data::xml_attr_int(up, "DeliveryTime", 0);
                 r.delivery_gems = sf2::data::xml_attr_int(up, "BonusDeliveryPrice", 0);
                 for (const ShopAttributeDef& def : shop_attribute_defs()) {
-                    if (up.attribute(def.name)) {
-                        r.attributes[def.name] = sf2::data::xml_attr_int(up, def.name, 0);
+                    if (up.attribute(def.name.c_str())) {
+                        r.attributes[def.name] = sf2::data::xml_attr_int(up, def.name.c_str(), 0);
                     }
                 }
                 ci.upgrades.push_back(std::move(r));
@@ -528,9 +390,9 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         // f!=null && this.attributes.set(e.name, u.I(f)) }` — the item's combat
         // stats, keyed by the `internal_settings.xml` attribute names.
         for (const ShopAttributeDef& def : shop_attribute_defs()) {
-            if (item.attribute(def.name)) {
+            if (item.attribute(def.name.c_str())) {
                 ci.attributes[def.name] =
-                    sf2::data::xml_attr_int(item, def.name, 0);
+                    sf2::data::xml_attr_int(item, def.name.c_str(), 0);
             }
         }
         // `<Perks>` + `<Enchantments>` rows (JS `xe.Qd` be-entries, L1257):
@@ -680,8 +542,8 @@ std::vector<UpgradeTemplate> parse_upgrade_list(const std::string& xml_text) {
             r.delivery_sec = sf2::data::xml_attr_int(up, "DeliveryTime", 0);
             r.delivery_gems = sf2::data::xml_attr_int(up, "BonusDeliveryPrice", 0);
             for (const ShopAttributeDef& def : shop_attribute_defs()) {
-                if (up.attribute(def.name)) {
-                    r.attributes[def.name] = sf2::data::xml_attr_int(up, def.name, 0);
+                if (up.attribute(def.name.c_str())) {
+                    r.attributes[def.name] = sf2::data::xml_attr_int(up, def.name.c_str(), 0);
                 }
             }
             t.rows.push_back(std::move(r));
@@ -728,13 +590,17 @@ std::vector<UpgradeRow> item_upgrade_candidates(const CatalogItem& item,
     return c;
 }
 
-// `v.xIa.Gb(type)` L1188 (`bw` from `internal_settings.xml` `<OutdateLevels>`).
+// `v.xIa.Gb(type)` (`bw` from `internal_settings.xml` `<OutdateLevels>`,
+// `v.xIa.parse` @593527). `Gb` (L609451): return the first row whose `Type`
+// list contains `type` (`cw.Xcb`), else row 0's value, else 0.
 int shop_upgrade_level_cap(const std::string& type) {
-    // Table: [{Value=1, Type=absent}, {Value=1, Type="Ranged|Magic"}]. `cw.parse`
-    // L1236 maps an absent `Type` to `[""]`, so only `""` matches row 0; a
-    // Ranged/Magic type matches row 1. `Gb` falls back to row 0's value.
-    (void)type;
-    return 1;
+    if (!g_tables_loaded) ensure_shop_tables_loaded();
+    for (const OutdateLevel& d : g_outdate_levels) {
+        for (const std::string& t : d.types) {
+            if (t == type) return d.value;  // `cw.Xcb`
+        }
+    }
+    return g_outdate_levels.empty() ? 0 : g_outdate_levels[0].value;
 }
 
 // `item.vu(a,b,c,d)` L340: `a` = player level, `b` = the entry tier (`Ce`).
@@ -776,6 +642,181 @@ ItemUpgradeState resolve_item_upgrade(const CatalogItem& item,
     }
     st.maxed = st.has_rows && !st.has_next;  // `zN` L1260
     return st;
+}
+
+// Fills the runtime tables from an already-loaded `internal_settings.xml`
+// (JS `v.eo.parse(a.A("Attributes"))` @591524 + `v.Ova.parse(a.A("BarScales"))`
+// @593981). Idempotent; called once at config load.
+void load_shop_tables_from_settings(const std::string& xml_text) {
+    std::vector<ShopAttributeDef> defs;
+    std::vector<ShopBarScale> scales;
+    std::vector<OutdateLevel> outdates;
+    parse_shop_tables_xml(xml_text, &defs, &scales, &outdates);
+    g_attr_defs = std::move(defs);
+    g_bar_scales = std::move(scales);
+    g_outdate_levels = std::move(outdates);
+    g_tables_loaded = true;
+}
+
+namespace {
+
+// Deterministic FNV-1a over the table values (float/int raw bytes).
+std::uint64_t fnv_mix(std::uint64_t h, const void* data, std::size_t n) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    for (std::size_t i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+std::uint64_t table_checksum(const std::vector<ShopAttributeDef>& defs,
+                             const std::vector<ShopBarScale>& scales) {
+    std::uint64_t h = 1469598103934665603ULL;
+    for (const ShopAttributeDef& d : defs) {
+        h = fnv_mix(h, d.name.data(), d.name.size());
+        h = fnv_mix(h, d.icon.data(), d.icon.size());
+        h = fnv_mix(h, d.bar_scale.data(), d.bar_scale.size());
+        const std::uint8_t flags = static_cast<std::uint8_t>(
+            (d.hidden ? 1 : 0) | (d.shop_hidden ? 2 : 0) | (d.profile_hidden ? 4 : 0));
+        h = fnv_mix(h, &flags, 1);
+    }
+    for (const ShopBarScale& s : scales) {
+        h = fnv_mix(h, s.name.data(), s.name.size());
+        h = fnv_mix(h, s.type.data(), s.type.size());
+        h = fnv_mix(h, &s.power, sizeof(s.power));
+        h = fnv_mix(h, &s.min, sizeof(s.min));
+        for (const std::vector<ShopBarScaleLimit>* lim : {&s.attribute_limits, &s.item_limits}) {
+            for (const ShopBarScaleLimit& l : *lim) {
+                h = fnv_mix(h, &l.level_multiplier, sizeof(l.level_multiplier));
+                h = fnv_mix(h, &l.shift, sizeof(l.shift));
+                h = fnv_mix(h, &l.left_limit, sizeof(l.left_limit));
+                h = fnv_mix(h, &l.right_limit, sizeof(l.right_limit));
+                for (int lv : l.levels) h = fnv_mix(h, &lv, sizeof(lv));
+            }
+        }
+    }
+    return h;
+}
+
+} // namespace
+
+// [probe] `--shop-tables-probe`: re-parse the shipped `internal_settings.xml`
+// and assert the RUNTIME tables equal it (the JS `v.eo`/`v.Ova`). Logs counts
+// + a value checksum; returns the mismatch count (0 = PASS).
+int run_shop_tables_probe() {
+    int fails = 0;
+    std::string text;
+    {
+        std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
+                         std::ios::binary);
+        if (!in) {
+            std::fprintf(stdout, "[shoptables] FAIL open internal_settings.xml\n");
+            return 1;
+        }
+        text.assign((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+    }
+    std::vector<ShopAttributeDef> xml_defs;
+    std::vector<ShopBarScale> xml_scales;
+    std::vector<OutdateLevel> xml_outdates;
+    parse_shop_tables_xml(text, &xml_defs, &xml_scales, &xml_outdates);
+    const std::vector<ShopAttributeDef>& rt_defs = shop_attribute_defs();
+    const std::vector<ShopBarScale>& rt_scales = shop_bar_scales();
+    if (!g_tables_loaded) ensure_shop_tables_loaded();
+    const std::vector<OutdateLevel>& rt_outdates = g_outdate_levels;
+    if (rt_outdates.size() != xml_outdates.size()) {
+        std::fprintf(stdout, "[shoptables] OUTDATE COUNT %zu != %zu\n",
+                     rt_outdates.size(), xml_outdates.size());
+        ++fails;
+    } else {
+        for (std::size_t i = 0; i < xml_outdates.size(); ++i) {
+            if (rt_outdates[i].value != xml_outdates[i].value ||
+                rt_outdates[i].types != xml_outdates[i].types) {
+                std::fprintf(stdout, "[shoptables] OUTDATE[%zu] MISMATCH\n", i);
+                ++fails;
+            }
+        }
+    }
+    std::fprintf(stdout, "[shoptables] outdate rows=%zu\n", xml_outdates.size());
+    std::size_t xml_limits = 0;
+    for (const ShopBarScale& s : xml_scales)
+        xml_limits += s.attribute_limits.size() + s.item_limits.size();
+    std::size_t rt_limits = 0;
+    for (const ShopBarScale& s : rt_scales)
+        rt_limits += s.attribute_limits.size() + s.item_limits.size();
+    const std::uint64_t rt_sum = table_checksum(rt_defs, rt_scales);
+    const std::uint64_t xml_sum = table_checksum(xml_defs, xml_scales);
+    std::fprintf(stdout,
+                 "[shoptables] xml defs=%zu scales=%zu limits=%zu | runtime defs=%zu "
+                 "scales=%zu limits=%zu\n",
+                 xml_defs.size(), xml_scales.size(), xml_limits, rt_defs.size(),
+                 rt_scales.size(), rt_limits);
+    std::fprintf(stdout, "[shoptables] checksum runtime=%016llx xml=%016llx %s\n",
+                 static_cast<unsigned long long>(rt_sum),
+                 static_cast<unsigned long long>(xml_sum),
+                 rt_sum == xml_sum ? "MATCH" : "DIFFER");
+    std::fflush(stdout);
+    if (rt_defs.size() != xml_defs.size()) {
+        std::fprintf(stdout, "[shoptables] DEF COUNT %zu != %zu\n", rt_defs.size(),
+                     xml_defs.size());
+        ++fails;
+    } else {
+        for (std::size_t i = 0; i < xml_defs.size(); ++i) {
+            const ShopAttributeDef& a = rt_defs[i];
+            const ShopAttributeDef& b = xml_defs[i];
+            if (a.name != b.name || a.icon != b.icon || a.bar_scale != b.bar_scale ||
+                a.hidden != b.hidden || a.shop_hidden != b.shop_hidden ||
+                a.profile_hidden != b.profile_hidden) {
+                std::fprintf(stdout,
+                             "[shoptables] DEF[%zu] %s: icon '%s'->'%s' bar '%s'->'%s' "
+                             "hidden %d->%d shop %d->%d profile %d->%d\n",
+                             i, b.name.c_str(), a.icon.c_str(), b.icon.c_str(),
+                             a.bar_scale.c_str(), b.bar_scale.c_str(), a.hidden, b.hidden,
+                             a.shop_hidden, b.shop_hidden, a.profile_hidden,
+                             b.profile_hidden);
+                ++fails;
+            }
+        }
+    }
+    if (rt_scales.size() != xml_scales.size()) {
+        std::fprintf(stdout, "[shoptables] SCALE COUNT %zu != %zu\n", rt_scales.size(),
+                     xml_scales.size());
+        ++fails;
+    } else {
+        for (std::size_t i = 0; i < xml_scales.size(); ++i) {
+            const ShopBarScale& a = rt_scales[i];
+            const ShopBarScale& b = xml_scales[i];
+            bool ok = a.name == b.name && a.type == b.type && a.power == b.power &&
+                      a.min == b.min &&
+                      a.attribute_limits.size() == b.attribute_limits.size() &&
+                      a.item_limits.size() == b.item_limits.size();
+            if (ok) {
+                for (std::size_t k = 0; k < b.attribute_limits.size() && ok; ++k) {
+                    const ShopBarScaleLimit& x = a.attribute_limits[k];
+                    const ShopBarScaleLimit& y = b.attribute_limits[k];
+                    ok = x.level_multiplier == y.level_multiplier && x.shift == y.shift &&
+                         x.left_limit == y.left_limit && x.right_limit == y.right_limit &&
+                         x.levels == y.levels;
+                }
+                for (std::size_t k = 0; k < b.item_limits.size() && ok; ++k) {
+                    const ShopBarScaleLimit& x = a.item_limits[k];
+                    const ShopBarScaleLimit& y = b.item_limits[k];
+                    ok = x.level_multiplier == y.level_multiplier && x.shift == y.shift &&
+                         x.left_limit == y.left_limit && x.right_limit == y.right_limit &&
+                         x.levels == y.levels;
+                }
+            }
+            if (!ok) {
+                std::fprintf(stdout, "[shoptables] SCALE[%zu] '%s' MISMATCH\n", i,
+                             b.name.c_str());
+                ++fails;
+            }
+        }
+    }
+    std::fprintf(stdout, "[shoptables] RESULT %s (%d fail)\n", fails == 0 ? "PASS" : "FAIL",
+                 fails);
+    std::fflush(stdout);
+    return fails;
 }
 
 } // namespace sf2::app

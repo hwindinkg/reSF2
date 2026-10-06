@@ -1573,6 +1573,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
+    // --shop-tables-probe: re-parse internal_settings.xml and assert the
+    // runtime <Attributes>/<BarScales> tables equal the shipped XML.
+    bool shop_tables_probe = false;
     // --quest-action-probe: fire the shipped ToggleItems/Discount actions
     // through the engine path and log the save/price before/after.
     bool quest_action_probe = false;
@@ -1788,6 +1791,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             map_button_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
+        } else if (arg == "--shop-tables-probe") {
+            shop_tables_probe = true;
         } else if (arg == "--quest-action-probe") {
             quest_action_probe = true;
         } else if (arg == "--quest-lock-probe") {
@@ -5928,6 +5933,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (shop_tables_probe) {
+        // ---- shop-tables-probe: parsed internal_settings.xml == shipped ----
+        glfwHideWindow(app.renderer().window());
+        const int st_fails = sf2::app::run_shop_tables_probe();
+        app.shutdown();
+        return st_fails == 0 ? 0 : 1;
     } else if (settings_profile_shop_probe) {
         // ---- settings-profile-shop-probe: the three `e567dcb8` behaviours ----
         // RULE 0: force the hidden window; the driver watchdog is already armed
