@@ -787,8 +787,34 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
     } else if (out.type == "PerkStart") {
         // JS `wp`: always true.
     } else if (out.type == "Direction") {
-        // JS `pm`: From/To refs + sign check.
+        // JS `pm`: `Fa.Zca` (L721) builds a `Vi` from the `From`/`To` `ee`
+        // refs (`b.from.Ij(a.A("From")); b.to.Ij(a.A("To"))`) + `Impulse`;
+        // `pm.he` (L743) compares `direction.SBa(a)` against the
+        // `Player`-selected facing. The `From`/`To` parse is the SAME `ee.Ij`
+        // (L784-786) as Distance, so reuse the identical field set. Before
+        // this only the `Name` was stored, so `eval_direction` could not
+        // resolve the two ends and returned a constant `true`.
         if (node.attribute("Name")) out.name = node.attribute("Name").value();
+        if (pugi::xml_node from = node.child("From")) {
+            out.from_player_set = from.attribute("Player") != nullptr;
+            out.from_player = from.attribute("Player")
+                ? (std::strcmp(from.attribute("Player").value(), "Enemy") == 0 ? 2 : 1)
+                : 1;
+            out.from_obj = from.attribute("Object") ? from.attribute("Object").value() : "Pivot";
+            out.from_part = from.attribute("Part") ? from.attribute("Part").value() : "";
+            out.from_prev = from.attribute("Frame") &&
+                            std::strcmp(from.attribute("Frame").value(), "Previous") == 0;
+        }
+        if (pugi::xml_node to = node.child("To")) {
+            out.to_player_set = to.attribute("Player") != nullptr;
+            out.to_player = to.attribute("Player")
+                ? (std::strcmp(to.attribute("Player").value(), "Enemy") == 0 ? 2 : 1)
+                : 2;
+            out.to_obj = to.attribute("Object") ? to.attribute("Object").value() : "Pivot";
+            out.to_part = to.attribute("Part") ? to.attribute("Part").value() : "";
+            out.to_prev = to.attribute("Frame") &&
+                          std::strcmp(to.attribute("Frame").value(), "Previous") == 0;
+        }
     } else if (out.type == "Hit") {
         // JS `sm`: Type + Name (last-hit type/animation).
         if (node.attribute("Type")) out.subtype = node.attribute("Type").value();

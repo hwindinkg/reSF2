@@ -676,13 +676,38 @@ bool eval_style(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `pm.he`: Direction — facing sign matches From/To direction.
+// JS `pm.he` (L743) VERBATIM:
+//   he(a){
+//     let b=this.direction.SBa(a), c=1;
+//     switch(this.dl){
+//       case 1: c=a.sign; break;
+//       case 2: c=a.Mla; break;
+//       case 3: c=a.Nla;
+//     }
+//     a=b==c; return this.cb?!a:a }
+// `Vi.SBa(a)` (L704):
+//   `(this.fg!=0 ? (fg==1?a.kw:a.kw*-1) : (this.to.OQ(a)-this.from.OQ(a)))>=0 ? 1 : -1`
+// `this.dl` = `Nd.ol(Player)` (`Ha.parse` L739, `Nd.ol` L1235): Me=1, Enemy=2,
+// Parent=3, Both=5, ... default 0. `a.sign` = the owner's clip mirror
+// (`b.hd()`), `a.Mla` = the other fighter's (`d.hd()`), `a.Nla` =
+// `b.ef(3).hd()` (`Fa.yma` L679). The port's `ctx.direction`/`enemy_direction`
+// carry `a.sign`/`a.Mla` (`sign(enemy-me)` / `sign(me-enemy)`); `ef(3)` is not
+// tracked, so a `Parent` selector keeps the JS default `c=1`.
+// `this.cb` (Not) is applied by `eval_conditions` (JS `Ha.Nba`), not here.
 bool eval_direction(const Cond& c, const FightContext& ctx) {
-    // The direction refs (From/To) are parsed by Fa.Zca; the JS computes the
-    // sign of (to - from) on the X axis and compares to the fighter facing.
-    // Native: ctx has no facing yet; treat as unconstrained.
-    (void)c; (void)ctx;
-    return true;
+    // `SBa` with `fg==0` (no shipped `<Direction>` carries an `Impulse`, so
+    // `Vi.orb` -> 0): `sign(to.OQ(a) - from.OQ(a))` = `sign(to_x - from_x)`.
+    const float from_x = ref_x(c, /*to_end=*/false, ctx);
+    const float to_x = ref_x(c, /*to_end=*/true, ctx);
+    const int b = (to_x - from_x) >= 0.0f ? 1 : -1;
+    int cc = 1;  // `c = 1` default
+    switch (c.player) {  // `this.dl`
+        case 1: cc = ctx.direction >= 0.0f ? 1 : -1; break;        // `a.sign`
+        case 2: cc = ctx.enemy_direction >= 0.0f ? 1 : -1; break;  // `a.Mla`
+        case 3: cc = 1; break;  // `a.Nla` (ef(3)) — untracked -> JS default
+    }
+    bool a = (b == cc);  // `a = b==c`
+    return a;
 }
 
 // JS `mm.he`: Birth — fighter's aK (birth name) == Name.
