@@ -1156,6 +1156,15 @@ private:
     bool backdrop_fig_ok_ = false;
     const sf2::data::anim_clip* backdrop_idle_ = nullptr;  // owned by FightAssets
     const sf2::scene::MoveDef* backdrop_move_ = nullptr;   // owned by FightAssets
+    // The `StartIdleStance` idle LOOP the `PeacefulStart` draw transitions to
+    // on its `AnimationEnd` (JS `FistsStartStance-Left` carries NO
+    // `<AnimationEnd>`; the selector then picks the highest-priority move with
+    // `<Events><AnimationEnd/></Events>` + matching `CurrentAnimation` =
+    // `FistsStartStanceIdle-Left`/`KnivesStartStanceIdle`, which re-selects
+    // ITSELF on its own end). Restarting the DRAW every loop was the reported
+    // "shop replays the intro and drifts off-screen".
+    const sf2::data::anim_clip* backdrop_idle_loop_ = nullptr;  // owned by FightAssets
+    const sf2::scene::MoveDef* backdrop_move_loop_ = nullptr;   // owned by FightAssets
     // --- `Pi` try-on preview (`Oa.Fhb` L2300 unowned -> `Ex(a,7)` L2301) ----
     // The unowned press wears the item on the `Pi` model and plays its `TryOn`
     // clip (JS `iz.XBa("TryOn")=7` L444) BEFORE any purchase; the buy is the
@@ -1439,6 +1448,15 @@ private:
     bool backdrop_fig_ok_ = false;
     const sf2::data::anim_clip* backdrop_idle_ = nullptr;  // owned by FightAssets
     const sf2::scene::MoveDef* backdrop_move_ = nullptr;   // owned by FightAssets
+    // The `StartIdleStance` idle LOOP the `PeacefulStart` draw transitions to
+    // on its `AnimationEnd` (JS `FistsStartStance-Left` carries NO
+    // `<AnimationEnd>`; the selector then picks the highest-priority move with
+    // `<Events><AnimationEnd/></Events>` + matching `CurrentAnimation` =
+    // `FistsStartStanceIdle-Left`/`KnivesStartStanceIdle`, which re-selects
+    // ITSELF on its own end). Restarting the DRAW every loop was the reported
+    // "shop replays the intro and drifts off-screen".
+    const sf2::data::anim_clip* backdrop_idle_loop_ = nullptr;  // owned by FightAssets
+    const sf2::scene::MoveDef* backdrop_move_loop_ = nullptr;   // owned by FightAssets
 
     // --- [tutorial beat 4] the profile avatar's move-preview animation --------
     // JS `Fo` = `StoryTutorialShowBlock` (sf2.502f0946.js L1126): the profile

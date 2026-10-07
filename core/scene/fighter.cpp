@@ -719,6 +719,28 @@ void Fighter::ragdoll_stop() {
     nk_ = false;
     ragdoll_frame_count_ = 0;
     ragdoll_names_.clear();
+    // [FIX ragdoll->clip 1-frame deform] The port's solver state `sol_ma_` is
+    // CLIP space for a clip-posed fighter and WORLD space while the ragdoll is
+    // active (`ragdoll_start` promotes it: `world = clip + solver_base_`). The
+    // JS node `ma` is ALWAYS world, so the JS has no such distinction and
+    // `Al.stop()` (L582 `{nk=!1; frameCount=0}`) needs no conversion. In the
+    // port, `Al.stop`'s `solver_world_=false` alone left `sol_ma_` in WORLD
+    // space: the resuming `sample()` then writes the CLIP pose into the
+    // clip-driven bones while the non-clip bodies (cloth, macro sources) keep
+    // their WORLD values, so `pos_` mixed the two spaces for exactly one frame
+    // (the reported "meshes deform for 1 frame on a hit/knockdown"). Re-express
+    // the persisted state in clip space (`clip = world - solver_base_`), which
+    // is EXACTLY `ragdoll_start`'s promotion inverted, so the drawn pose
+    // (`pos_ = px - px[anchor] + x`) is unchanged at the stop frame and the
+    // resuming clip apply shares one space with every body.
+    if (solver_init_ && sol_ma_.size() == sol_mf_.size() && !sol_ma_.empty()) {
+        for (std::size_t i = 0; i < sol_ma_.size(); i += 3) {
+            sol_ma_[i] -= solver_base_x_;
+            sol_ma_[i + 1] -= solver_base_y_;
+            sol_mf_[i] -= solver_base_x_;
+            sol_mf_[i + 1] -= solver_base_y_;
+        }
+    }
     // JS `Al.stop()` (L582) is EXACTLY `{this.nk=!1; this.frameCount=0}` — it
     // does NOT touch the node `ma`/`mf` or any render anchor. The resuming
     // `Te.eda` (L282908) overwrites every clip-driven node itself

@@ -6822,7 +6822,9 @@ std::string shop_clip_key(const sf2::scene::MoveDef& m);
 void draw_destination_model(App& app, sf2::render::Renderer& ren,
                             std::unique_ptr<sf2::scene::Fighter>& fighter,
                             bool& tried, bool& ok, const sf2::data::anim_clip*& idle,
-                            const sf2::scene::MoveDef*& move) {
+                            const sf2::scene::MoveDef*& move,
+                            const sf2::data::anim_clip*& idle_loop,
+                            const sf2::scene::MoveDef*& move_loop) {
     if (!app.has_fight_assets()) return;
     if (!tried) {
         tried = true;
@@ -6849,6 +6851,24 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
                 }
             }
             if (move != nullptr) {
+                // The `StartIdleStance` idle LOOP (`find_idle_clip_name`:
+                // `*StartStanceIdle*`), the move the JS selector picks on the
+                // draw's `AnimationEnd` (see `advance_destination_model`).
+                const std::string idle_loop_name =
+                    find_idle_clip_name(assets.moves, assets.clips,
+                                        player_weapon_token(app));
+                const auto il = idle_loop_name.empty()
+                                    ? assets.clips.end()
+                                    : assets.clips.find(idle_loop_name);
+                if (il != assets.clips.end() && !il->second.frames.empty()) {
+                    for (const auto& kv : assets.moves) {
+                        if (shop_clip_key(kv.second) == il->first) {
+                            move_loop = &kv.second;
+                            break;
+                        }
+                    }
+                    if (move_loop != nullptr) idle_loop = &il->second;
+                }
                 fighter = std::make_unique<sf2::scene::Fighter>();
                 fighter->set_model(assets.merged);
                 fighter->set_color(assets.dojo.root_color());
@@ -6872,12 +6892,35 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
 // JS `Pi.ia` (L445): advances the destination `Pi` fighter once per fixed
 // update. On the clip end (`Te.KNa`) the `Pi` re-enters the idle state; restart
 // it. Called from `update_impl` (60 Hz), never from the render pass.
+//
+// JS-exact end chain: the `PeacefulStart` DRAW (`FistsStartStance-Left`/
+// `KnivesStartStance-Left`) carries NO `<Events><AnimationEnd/></Events>`, so
+// on its end the move selector picks the highest-priority move that DOES
+// (`FistsStartStanceIdle-Left`/`KnivesStartStanceIdle`, template
+// `StartIdleStance|Stance`, whose `<Conditions><CurrentAnimation
+// Name="StanceLeft"/>` matches); that idle carries `<AnimationEnd/>` too, so it
+// re-selects itself and loops. The port's old restart of the SAME draw looped
+// the intro and (the draw has net root motion + `start_preview_clip` does not
+// re-seat on a loop) drifted the model off-screen. Restart with the idle loop
+// once it resolves.
+void shop_dispatch_model_sounds(sf2::scene::Fighter& f, const char* tag);
 void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
                                const sf2::data::anim_clip* idle,
-                               const sf2::scene::MoveDef* move) {
+                               const sf2::scene::MoveDef* move,
+                               const sf2::data::anim_clip* idle_loop,
+                               const sf2::scene::MoveDef* move_loop) {
     if (fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
     if (fighter->preview_active()) {
         fighter->advance(0.0f);
+        // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: the Pi model's
+        // `<Sound>` frame actions (the stance draw's knife/sword swishes) fire
+        // from the SAME dispatch the fight uses. The old port never dispatched
+        // the BACKDROP's actions, so the shop draw was silent (the reported
+        // "no knife sound during the animation").
+        shop_dispatch_model_sounds(*fighter, "idle");
+    } else if (move_loop != nullptr && idle_loop != nullptr &&
+               !idle_loop->frames.empty()) {
+        fighter->start_preview_clip(*move_loop, *idle_loop);
     } else if (move != nullptr) {
         fighter->start_preview_clip(*move, *idle);
     }
@@ -15299,7 +15342,7 @@ std::string shop_clip_key(const sf2::scene::MoveDef& m) {
 // too. The old port advanced the clip but never dispatched, so a weapon try-on
 // was silent. Sound / RandomSound / StopSound only — the other kinds need the
 // fight's systems (child models, camera, bullets).
-void shop_dispatch_preview_sounds(sf2::scene::Fighter& f) {
+void shop_dispatch_model_sounds(sf2::scene::Fighter& f, const char* tag) {
     for (const sf2::scene::MoveAction* act : f.take_frame_actions()) {
         if (act == nullptr) continue;
         // JS `fm.fka(voice)` L735 / `am.fka(voice)` L733: a `<Sound Voice="X">`
@@ -15315,7 +15358,7 @@ void shop_dispatch_preview_sounds(sf2::scene::Fighter& f) {
             // JS `ta.ak(name, looped)` L1264: a name absent from `ta.WBa`
             // plays NOTHING.
             const char* stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
-            std::fprintf(stdout, "[shop] TryOn sfx %s name=%s stem=%s\n",
+            std::fprintf(stdout, "[shop] %s sfx %s name=%s stem=%s\n", tag,
                          act->kind.c_str(), act->name.c_str(),
                          stem != nullptr ? stem : "<none>");
             std::fflush(stdout);
@@ -15452,7 +15495,7 @@ void ShopScreen::arm_preview(App& app, const CatalogItem& it) {
     // the TryOn move's FIRST frame's sounds (ShopKnivesSuperSlash frame 2:
     // `snd_m_pl_attack1`) must fire at arm time, not be dropped by the next
     // `advance`'s `frame_actions_.clear()`.
-    shop_dispatch_preview_sounds(*preview_fighter_);
+    shop_dispatch_model_sounds(*preview_fighter_, "TryOn");
     preview_frame_ = preview_fighter_->move_frame();
     preview_active_ = true;
     // Preview-owned storage: the shared body (`assets.merged`, used by the
@@ -16750,14 +16793,15 @@ void ShopScreen::update_impl(float dt) {
     // `Oa.Fhb`'s `Ad.aa(L.K.sk.Bm)` -> `Pi.ia`. It is NOT advanced while the
     // TryOn preview owns the `Pi` model (`Ex(a,7)` replaces it).
     if (!preview_active_) {
-        advance_destination_model(backdrop_fighter_, backdrop_idle_, backdrop_move_);
+        advance_destination_model(backdrop_fighter_, backdrop_idle_, backdrop_move_,
+                                  backdrop_idle_loop_, backdrop_move_loop_);
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
         // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
         // the actions collected by the advance() just run.
-        shop_dispatch_preview_sounds(*preview_fighter_);
+        shop_dispatch_model_sounds(*preview_fighter_, "TryOn");
         preview_frame_ = preview_fighter_->move_frame();
         if (!preview_fighter_->preview_active()) {
             preview_active_ = false;
@@ -16791,7 +16835,8 @@ void ShopScreen::render_impl(App& app) {
         draw_pi_fighter(ren, *preview_fighter_, *preview_clip_, preview_frame_);
     } else {
         draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
-                               backdrop_fig_ok_, backdrop_idle_, backdrop_move_);
+                               backdrop_fig_ok_, backdrop_idle_, backdrop_move_,
+                               backdrop_idle_loop_, backdrop_move_loop_);
     }
     draw_destination_dim(ren);
     // JS `Oa.Fhb` L2300 -> `this.sab()` L2301 -> `Bcb()` L2301: a TryOn on a
@@ -18727,7 +18772,8 @@ void EquipmentScreen::update_impl(float dt) {
             // Destination idle advance — fixed 60 Hz update, never in render
             // (the fallback `Pi` backdrop when no persistent avatar exists).
             advance_destination_model(backdrop_fighter_, backdrop_idle_,
-                                      backdrop_move_);
+                                      backdrop_move_, backdrop_idle_loop_,
+                                      backdrop_move_loop_);
         }
         if (block_preview_active_ && block_preview_fighter_ != nullptr) {
             // `Pi.ia` -> `wd.ia` -> `Te.ia`: the SAME (MidFrames+1) subframe
@@ -18989,7 +19035,8 @@ void EquipmentScreen::render_impl(App& app) {
         draw_pi_fighter(ren, *avatar_fighter_, *avatar_clip_, avatar_frame_);
     } else {
         draw_destination_model(app, ren, backdrop_fighter_, backdrop_fig_tried_,
-                               backdrop_fig_ok_, backdrop_idle_, backdrop_move_);
+                               backdrop_fig_ok_, backdrop_idle_, backdrop_move_,
+                               backdrop_idle_loop_, backdrop_move_loop_);
     }
     draw_destination_dim(ren);
     // `qab` (L1131112): during the Show only the `Pi` avatar + bg are visible;
