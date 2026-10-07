@@ -38,6 +38,20 @@ std::vector<std::string> anim_names_of(const Fighter& f) {
     return f.current_move()->anim_names;
 }
 
+// JS `lg.vQ` reads the animator's CURRENT animation (`a.rb`), and `Te.KNa`
+// (L548) does NOT clear `Ua` at clip end, so after a clip the last animation's
+// names still answer. The EndStance re-selection (`Gc` -> `Gj(..,1)`) runs
+// when `current_move_` is already null, so it must read the JUST-ENDED clip's
+// names: an already-ragdolled loser then matches `<CurrentAnimation
+// Name="PhysicalLying"/>` in `Loss_1`/`Loss_2` (the ground death) instead of
+// falling through to `Loss_fall` (the reported "stands up, then plays the
+// death animation"). Scoped to this pick so the general idle/auto-move
+// selection keeps its empty-list semantics.
+std::vector<std::string> end_stance_anim_names_of(const Fighter& f) {
+    if (f.current_move() != nullptr) return f.current_move()->anim_names;
+    return f.last_anim_names();
+}
+
 // The fight viewport (JS `Lb.width`/`Lb.height` for the fight screen) - the
 // same 1280x720 the camera framing hardcodes (framing calls below). The
 // `sXa` ringout arrows are screen-space and need it.
@@ -2950,6 +2964,18 @@ void FightController::round_start() {
     // (latched by `E3a` L413) is cleared for the new round.
     player_.kh = false;
     enemy_.kh = false;
+    // JS `Z2` (L409) `this.ha.tca(this.round.round,!1)` -> `Cr.tca` ->
+    // `ha.mb.reset()` -> `lk.reset()` -> `Fr.tob()` (L1077361): the style
+    // meters RESET at every round transition — `ILa(0)` (level -> 0),
+    // `rqb()` (bar -> 0), `g0a()` (`VS.clear()`, the per-anim use counts).
+    // The port never ran this, so the style/level bar carried over between
+    // rounds (the reported "style does not reset between rounds"). `tob` does
+    // NOT touch the `Gr` high-water (`Gua`, the prize `b6`), so `best` stays.
+    for (FightFighter* f : {&player_, &enemy_}) {
+        f->style.level = 0;
+        f->style.frac = 0.0;
+        f->style.vs_counts.clear();
+    }
     // JS `wd.wI` per-round re-init: `Wx=-1`, `sr=0`; PLUS the shock/disarm
     // latches `vc`/`sn`, which the JS clears at every round boundary
     // (`NA` L414 `c.sn=!1;c.vc=!1` and the per-fighter `Z2` ->
@@ -3089,6 +3115,15 @@ void FightController::enter_fight() {
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
 
+    // JS `Rkb` (L410) `this.Eaa(!0)` -> `wd.ctb(!0)` (`if(this.sN=a)
+    // this.Kl.reset(), this.Mka(0)`): clear BOTH fighters' input buffers at
+    // the phase-2 round start. A key held (or a Tap left in the 15-frame
+    // window) in the previous round must not survive the round change — the
+    // reported "buttons stick across rounds / the character attacks by itself".
+    // Runs BEFORE `llb()` (the start-stance replay below), matching the JS
+    // order `this.Eaa(!0); this.ud.T4=!0; this.llb();`.
+    player_.fighter.reset_input();
+    enemy_.fighter.reset_input();
     // JS `llb` (L429): replay the StartStance input buffer as if the player
     // pressed NOW — `WC != -1 && (c.yJa(c.WC), c.WC = -1)`. The buffered tap
     // joins the player's key buffer; the next update_fighter picks it up via
@@ -6962,7 +6997,10 @@ void FightController::update(float dt) {
                     esctx.roll01 = [this]() { return draw01(); };
                     esctx.stage = sf2::scene::round_stage::end_stance;
                     esctx.qb = f->is_player;
-                    esctx.anims_me = anim_names_of(f->fighter);
+                    // `KNa` leaves `Ua` set, so the pick reads the last clip's
+                    // names (`PhysicalLying` -> the ground death) even though
+                    // `current_move_` is already null.
+                    esctx.anims_me = end_stance_anim_names_of(f->fighter);
                     esctx.anims_enemy = anim_names_of(foe.fighter);
                     fill_ctx_geometry(esctx, *f, foe);
                     esctx.health_ratio = f->max_hp > 0.0f ? f->hp / f->max_hp : 0.0f;
@@ -6971,6 +7009,13 @@ void FightController::update(float dt) {
                     esctx.round_end_timeout =
                         (rule_result_ == round_result::timeout_win ||
                          rule_result_ == round_result::ringout);
+                    // JS `Cm.he` PhysicsFrameNumber: the ground-death moves
+                    // (`Loss_1`/`Loss_2`) gate on `<PhysicsFrameNumber
+                    // Min="180"/>` as the OR-fallback when the ragdoll COM is
+                    // still settling. Without it the fallback read 0 and only
+                    // the `<Distance>` branch could pass. Same value the getup
+                    // gate above sets (`Al.frameCount`).
+                    esctx.physics_frame = f->fighter.ragdoll_frame_count();
                     const sf2::scene::MoveDef* es = f->fighter.end_stance_move(esctx);
                     if (es != nullptr && f->fighter.ai_start_move(*es, esctx)) {
                         std::fprintf(stdout, "[stance] F%d %s EndStance move=%s\n",

@@ -246,6 +246,24 @@ public:
     // the held set from the currently-down keys (`yLa`).
     void age_keys();
 
+    // JS `zl.reset()` (L798): the round-boundary input clear — empties the
+    // buffered Tap/Hold/Release rows (`zg.sh`/`zg.Fh`/`zg.released`), the
+    // physical held set (`Ff[].sl=!1`) and the tap/hold ages. Reached through
+    // `wd.ctb(!0)` (`if(this.sN=a)this.Kl.reset(),this.Mka(0)`) from
+    // `ca.Eaa(!0)` — called by `Rkb` (L410) at EVERY phase-2 round start, so a
+    // key held (or buffered) in the previous round must NOT leak into the next.
+    void reset_input();
+
+    // JS `lg.vQ` keeps the animator's CURRENT animation after a clip ends
+    // (`KNa` L548 leaves `Ua` set). The port's `current_move_` goes null at
+    // clip end, so the last played move's animation names persist here — the
+    // EndStance re-selection (`Gc` -> `Gj(..,1)`) reads them via
+    // `<CurrentAnimation Name="PhysicalLying"/>` to pick the ground death
+    // (`Loss_1`/`Loss_2`) for an already-ragdolled loser instead of `Loss_fall`.
+    const std::vector<std::string>& last_anim_names() const {
+        return last_anim_names_;
+    }
+
     // Attempts move selection from `hb` (document order, matching the JS
     // `ra.Lk` order `Gc.EZa` L676 walks) with the buffered keys + current
     // state. This is the PLAYER's path — the JS `Gc.DK` `c == false`
@@ -1227,6 +1245,11 @@ private:
     // JS `KNa`/`Sca` leaves `Ua` set; the `AnimationEnd` actions read it
     // (`Gnb` L672 `c.model.da.CZa(c.type)` -> `Te.CZa` reads `this.Ua`).
     const MoveDef* ended_move_ = nullptr;
+    // The last played move's animation names, kept after the clip ends (the
+    // `Te.KNa` `Ua` persistence). Read by `anim_names_of` when no move is
+    // current — the EndStance ground-death `<CurrentAnimation Name="Physical
+    // Lying"/>` selection depends on it.
+    std::vector<std::string> last_anim_names_;
     float enemy_x_ = 0.0f;                  // enemy world X (for facing)
     // [cross-fighter align — JS `Te.BBa` L563 + `Gub` L557-559] The opponent
     // controller (JS `Te.cQ`) and this controller's `Te.Fk` vector (ctor L546

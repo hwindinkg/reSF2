@@ -477,6 +477,20 @@ void Fighter::age_keys() {
     ++hold_age_;      // Qe++
 }
 
+// JS `zl.reset()` (L798): `this.SV.clear(); this.zg.clear();
+// let a=this.zg.sh.length=0,b=this.Ff.length; for(;a<b;)this.Ff[a++].sl=!1`
+// — drop the buffered rows (`zg.sh`/`Fh`/`released`), the physical held set
+// (`Ff[].sl`) and the ages. Called at the phase-2 round start (`Rkb` L410 ->
+// `Eaa(!0)` -> `wd.ctb(!0)` -> `this.Kl.reset()`), so a button held in the
+// previous round cannot stick into the next (nor auto-fire an attack).
+void Fighter::reset_input() {
+    keys_.clear();        // `zg.clear()` (sh/Fh/released)
+    held_keys_.clear();   // `Ff[].sl=!1`
+    tap_age_ = 0;         // `dX` (zl.ia re-arms)
+    hold_age_ = 0;        // `Qe`
+    key_edge_ = false;    // no press edge survives
+}
+
 // JS `zl.Sgb` (L798): on a key-down edge append the key to the 2-slot Tap
 // sequence `zg.sh` (NO same-key replacement — two taps of one key are two
 // entries, which is what the `2key`/`3key` templates require), evicting the
@@ -1823,6 +1837,10 @@ void Fighter::advance(float dt) {
     // advance() are what the caller dispatches (JS `Te.Lwa` L563-564 runs
     // inside `Te.ia`, i.e. once per frame advance).
     frame_actions_.clear();
+    // JS `Te.KNa` (L548) leaves the animator's `Ua` set after a clip ends, so
+    // `lg.vQ` still reports the last animation. Keep its names here before the
+    // steps can clear `current_move_` (the clip-end branch below).
+    if (current_move_ != nullptr) last_anim_names_ = current_move_->anim_names;
     // JS node `mf` (the previous solver frame's `ma`): snapshot the current
     // pose BEFORE this frame re-samples it, so `Distance ... Frame="Previous"`
     // COM/node refs read last frame's position.
