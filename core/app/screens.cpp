@@ -20241,6 +20241,25 @@ void SettingsScreen::render_impl(App& app) {
 // Factory
 // ---------------------------------------------------------------------------
 
+// See screens.hpp: carry the `za` nav state across a scene REBUILD. The JS
+// `za.instance` is a singleton, so its collapse state survives `A6()` (the
+// `wa.mp` L933 rebuild) — unlike the per-mount `make_screen` reset below.
+namespace {
+ZaNavState g_za_nav_saved;
+ScreenId g_za_nav_saved_id = kScreenDojo;
+bool g_za_nav_saved_valid = false;
+}  // namespace
+void za_nav_capture(ScreenId id) {
+    g_za_nav_saved = za_nav_state(id);
+    g_za_nav_saved_id = id;
+    g_za_nav_saved_valid = true;
+}
+void za_nav_restore(ScreenId id) {
+    if (g_za_nav_saved_valid && id == g_za_nav_saved_id) {
+        za_nav_state(id) = g_za_nav_saved;
+    }
+}
+
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id) {
     // JS `ma.D1` (L1832) builds a FRESH `za` per screen (`gk.Af = new Zh(...)`
     // L1996) whose ctor `collapse(0)` (L1998) starts it COLLAPSED. The mount is

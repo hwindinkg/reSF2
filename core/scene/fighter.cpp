@@ -2238,14 +2238,17 @@ void Fighter::clear_move() {
 // tick (the old raw `++frame` was 3x too fast for MidFrames=2).
 void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                                  float node_x, float node_y) {
-    // [FIX preview loop 1-frame jerk — JS `Pi.ia`/`Te.Skb`] `preview_mode_` is
-    // TRUE on a LOOP restart and FALSE on the FIRST entry (`clear_move`
-    // clears it). The `Pi.job`/`oL` J9 re-seat (below) belongs to the STATE
-    // ENTRY (`Pi.L4`/`Ex`), not to the `AnimationEnd` clip restart the loop
-    // re-issues: re-seating on every restart snapped the anchor from its
-    // clip-ridden position back to J9 (the measured ~25u loop jerk). Capture
-    // the pre-clear flag and re-seat only on the first entry.
-    const bool was_preview = preview_mode_;
+    // [FIX shop idle drift — JS `Pi.Ex`/`wd.wI`/`Pi.job`] The JS `Pi` does NOT
+    // keep one `wd` riding a looping clip: every state (re)entry runs
+    // `Pi.Ex`/`XOa` (L2301/L2300) -> `new wd(this.Ca)` + `this.Jc.wI()` (a
+    // FRESH fighter) then `Pi.job`/`wd.oL` (L444/L577) seats its render anchor
+    // at `Pi.J9 = (0,-93)`. So the root is RESET to the SAME x on every loop;
+    // no root motion accumulates. The old port skipped the re-seat on a loop
+    // restart (`was_preview`), so the idle clip's per-loop root motion carried
+    // over and the model crept backward (`advance_destination_model` restarts
+    // the `*StartStanceIdle*` loop with the previous `sol_ma_` state). Re-seat
+    // on EVERY entry, exactly like the JS `oL`.
+    const bool was_preview = preview_mode_;  // the `[pv]` probe still needs it
     // [probe, authorised] SF2_PV_PROBE: capture the last drawn pose so the
     // loop-restart delta (visible jerk) can be measured after the re-seat.
     std::vector<float> pv_last;
@@ -2277,7 +2280,7 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // (probe: HighBlockProfile world_y -93 -> -29 vs the JS clip y).
     {
         const int seat_a = model_.bone_by_name(fighter_pivot_bone());
-        if (!was_preview && seat_a >= 0 && solver_init_ &&
+        if (seat_a >= 0 && solver_init_ &&
             sol_ma_.size() == model_.bones.size() * 3 &&
             sol_mf_.size() == sol_ma_.size()) {
             const std::size_t u = static_cast<std::size_t>(seat_a) * 3;
@@ -2331,8 +2334,9 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
                 mi = i / 2;
             }
         }
-        std::fprintf(stdout, "[pv] restart delta max=%.3f bone=%s\n", md,
-                     mi < model_.bones.size() ? model_.bones[mi].name.c_str() : "?");
+        std::fprintf(stdout, "[pv] restart delta max=%.3f bone=%s root_x=%.3f root_y=%.3f\n",
+                     md, mi < model_.bones.size() ? model_.bones[mi].name.c_str() : "?",
+                     world_x_, world_y_);
         std::fflush(stdout);
     }
 }

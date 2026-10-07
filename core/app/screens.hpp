@@ -1620,6 +1620,14 @@ std::vector<CatalogItem> load_full_catalog(App& app);
 // Factory: creates a screen by id (used by Screen::push).
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id);
 
+// The shared `za` nav column state is per-screen and `make_screen` resets it
+// (JS `gk` ctor `collapse(0)`). A scene REBUILD (ScreenManager::pop returning
+// to the Dojo) must carry it across: the JS `za.instance` is a SINGLETON whose
+// `A6()` (`wa.mp` L933) rebuilds the content WITHOUT collapsing the column.
+// Capture before the rebuild, restore after.
+void za_nav_capture(ScreenId id);
+void za_nav_restore(ScreenId id);
+
 // --- quest live-action helpers (quest_engine.cpp) --------------------------
 // `Xn`/`Pa` catalog type lookup for `OpenShop Tab="?Purchase[X].Type"`
 // (tutorial_quests.xml L107): the item's list.xml Type, or "" when unknown.

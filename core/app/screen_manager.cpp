@@ -220,11 +220,40 @@ void ScreenManager::pop() {
     stack_.pop_back();
     // The screen beneath (the JS "caller") reactivates.
     if (!stack_.empty()) {
-        stack_.back()->set_state(kStateActive);
+        // [FIX stale Dojo on return — JS `wa.fLa` L933] The JS does NOT keep a
+        // covered scene alive: every `wa.mp` runs `fLa` -> `Zd.load(Tf)` which
+        // DESTROYS the old scene and CONSTRUCTS the destination fresh. The Dojo
+        // is a real `FightNone` scene (`Tf.init` L1015725 also `G.Qr(1355)`s an
+        // asset so the next mount reloads), so a Fight->Dojo return rebuilds
+        // the whole hub — no stale hub fighter/pose/quest state. The port kept
+        // the covered DojoScreen alive and merely reactivated it, so the user
+        // saw the hub "as if it had been managed the whole time". Rebuild it
+        // here (mirroring `push_impl`'s Dojo loader arm).
+        if (stack_.back()->id() == kScreenDojo) {
+            // The JS `za.instance` is a singleton: `wa.mp` -> `A6()` rebuilds
+            // the column content without collapsing it, so carry the nav state
+            // across the scene rebuild (the tours navigate the hub nav right
+            // after a return).
+            za_nav_capture(kScreenDojo);
+            stack_.back()->set_state(kStateDestroyed);
+            stack_.pop_back();
+            auto fresh = make_screen(*this, kScreenDojo);
+            za_nav_restore(kScreenDojo);
+            if (scene_data_cached_.count(kScreenDojo) == 0) app_.begin_scene_loader();
+            scene_data_cached_.erase(kScreenDojo);  // `G.Qr(1355)` on every init
+            std::fprintf(stdout, "[screen] Dojo scene REBUILT fresh on re-entry (nav preserved)\n");
+            std::fflush(stdout);
+            if (fresh != nullptr) {
+                fresh->set_state(kStateActive);
+                stack_.push_back(std::move(fresh));
+            }
+        } else {
+            stack_.back()->set_state(kStateActive);
+        }
         // Popping Results is not a JS scene change (see `push_impl`): skip the
         // spurious "Fight"->"Fight" ChangeTab/SceneLoaded. The real edge
         // (Fight->Map) still fires when the Fight itself is popped next.
-        if (popped_id != kScreenResults) {
+        if (popped_id != kScreenResults && !stack_.empty()) {
             quest_nav(app_, nav_from, stack_.back()->id());
         }
     }
