@@ -364,15 +364,20 @@ bool eval_distance(const Cond& c, const FightContext& ctx) {
     // getup). Resolve Nodes/Pivot/Wall through `ref_pos` too. JS `ee.Ij`: an
     // ABSENT `Player` -> "Null" (0) == `Me`, so a Player-less `To` must read
     // the OWNER, not the enemy.
-    const bool ref_objects =
-        c.from_obj == "COM" || c.to_obj == "COM" || c.from_obj == "Floor" ||
-        c.to_obj == "Floor" ||
-        // The getup orientation gate resolves BOTH ends as posed NODES
-        // (`<Distance Min="0" Axis="Y"><From Object="Nodes" Part="NPivot"/>
-        // <To Object="Nodes" Part="NNeck"/></Distance>`); a Nodes-vs-Nodes ref
-        // is the only extra shape routed through `ref_pos` here so no other
-        // move gate (single-end Nodes / Pivot / Wall attack ranges) shifts.
-        (c.from_obj == "Nodes" && c.to_obj == "Nodes");
+    // JS `qm.he` (L744) resolves BOTH ends through `ee.nt(a)` regardless of
+    // the `Object` code: Nodes=1 -> the posed node, Pivot=2 -> the fighter
+    // pivot, COM=6 -> the centroid, Floor=4 -> the world origin, Wall=3 ->
+    // `ee.q9a`. The port only routed COM/Floor (and the Nodes-vs-Nodes getup
+    // orientation gate) through `ref_pos`; every OTHER ref — a single-end
+    // `Nodes`, ANY `Pivot` — collapsed to the Me->Enemy root gap
+    // (`ctx.dist_x`), so e.g. a `<From Object="Pivot"/><To Object="Pivot"
+    // Player="2"/>` attack range read |enemy_x-me_x| instead of the posed
+    // bone positions. Route every COM/Floor/Nodes/Pivot ref through `ref_pos`
+    // (Wall keeps the existing `ref_x` path for its Axis-X semantics).
+    auto is_pos_obj = [](const std::string& o) {
+        return o == "COM" || o == "Floor" || o == "Nodes" || o == "Pivot";
+    };
+    const bool ref_objects = is_pos_obj(c.from_obj) && is_pos_obj(c.to_obj);
     if (ctx.ref_pos && ref_objects) {
         const int fp = c.from_player_set ? c.from_player : 1;
         const int tp = c.to_player_set ? c.to_player : 1;

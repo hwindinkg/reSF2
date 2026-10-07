@@ -1342,7 +1342,15 @@ int AiController::pqb(const AiFightState& st) {
         }
     }
     if (expected_wait < 1.0f) expected_wait = 1.0f;
-    XW_ = (1.0f - 1.0f / expected_wait) < roll01();
+    // JS `Pqb` (L607): `1-1/b<Da.jf()&&(this.XW=!0)`. The `Da.jf()` draw is
+    // ALWAYS consumed (it is the RHS of `<`), but a FAILED roll does NOT clear
+    // an XW latched on an earlier pass — the assignment is inside the `&&`, so
+    // XW is only ever SET here. It is cleared elsewhere: by a decision
+    // (`ia` L594 `if(0<b){this.XW=!1,...}`) or by the watch (`mW`, L594
+    // `else this.mW&&(this.XW=!1)`). The port previously ASSIGNED the boolean,
+    // so a failed roll on a later pass cleared a sticky XW early and the AI
+    // left the surprise branch sooner than the JS.
+    if ((1.0f - 1.0f / expected_wait) < roll01()) XW_ = true;
     dbg_.expected_wait = expected_wait;
     dbg_.xw = XW_;
 
@@ -1583,6 +1591,11 @@ std::string AiController::update(const AiFightState& st) {
         // move length. `this.model.hJa(!1)` is the animation hook (n/a).
         fk_ = -2;
         mW_ = true;
+        // JS `ia` (L594): `b<=0&&this.pH?this.dsb():this.oC=0;` runs dsb
+        // (which sets `mW=!0`) and then the tail `if(0<b){...}else
+        // this.mW&&(this.XW=!1);` clears the sticky XW in the SAME pass. The
+        // port returned here before the tail, so a watch left XW latched.
+        XW_ = false;
         eh_ = std::numeric_limits<int>::min();
         return "";
     }
