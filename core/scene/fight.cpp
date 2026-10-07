@@ -6027,6 +6027,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // winner may get up. The port never set this, so `Defeat` always read
         // true and `Victory`-gated moves (`Win_Fists`) never resolved.
         ectx.round_victory = me.is_winner;
+        // JS `Fm.he` context: `a.kh` (round-result latch) + `a.Iq` (end code).
+        ectx.round_result_set = me.kh;
+        ectx.round_end_timeout =
+            (rule_result_ == round_result::timeout_win ||
+             rule_result_ == round_result::ringout);
         // JS `Cm.he` reads `Al.frameCount` (the ragdoll physics frame) — the
         // `PhysicsFrameNumber` fallback in the recovery chain.
         ectx.physics_frame = me.fighter.ragdoll_frame_count();
@@ -6894,6 +6899,10 @@ void FightController::update(float dt) {
                     fill_ctx_geometry(esctx, *f, foe);
                     esctx.health_ratio = f->max_hp > 0.0f ? f->hp / f->max_hp : 0.0f;
                     esctx.round_victory = f->is_winner;
+                    esctx.round_result_set = f->kh;
+                    esctx.round_end_timeout =
+                        (rule_result_ == round_result::timeout_win ||
+                         rule_result_ == round_result::ringout);
                     const sf2::scene::MoveDef* es = f->fighter.end_stance_move(esctx);
                     if (es != nullptr && f->fighter.ai_start_move(*es, esctx)) {
                         std::fprintf(stdout, "[stance] F%d %s EndStance move=%s\n",

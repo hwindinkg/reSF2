@@ -458,17 +458,31 @@ bool eval_physics_frame(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `Fm.he`: RoundResult — Victory/Defeat + Timeout/Ringout.
+// JS `Fm.he` (L~385566): RoundResult — Victory/Defeat + Timeout/Ringout.
+//   ctor: `this.uc = Name=="Victory"?1 : Name=="Defeat"?2 : 0`;
+//         `this.uO = Type=="Timeout"?1 : Type=="Ringout"?2 : 0`;
+//   he:   `b=!1; !a.kh || (uc!=0 && !zd(a.zd)) || (uO!=0 && !n_a(a.Iq))
+//          || (b=!0); return this.cb ? !b : b`;
+//   zd(a):`a && uc==1 ? !0 : a ? !1 : uc==2`  (a.zd = this fighter WON);
+//   n_a(a):`a==3&&uO==1||a==4&&uO==1||a==2&&uO==1 ? !0 : a==5 ? uO==1 : !1`.
+// The `Not` attribute (`this.cb`) is applied by `eval_conditions`, so this
+// returns the RAW `b`. `a.kh` (round-result latch) gates the WHOLE test: while
+// the fight is live no RoundResult term passes, and at round end only the
+// winner (or a timeout) satisfies `<RoundResult Name="Defeat" Not="1"/>` /
+// `<RoundResult Type="Timeout"/>` — the KO'd loser must NOT Standup.
 bool eval_round_result(const Cond& c, const FightContext& ctx) {
-    // JS Fm: this.uc (1=Victory, 2=Defeat), this.uO (1=Timeout, 2=Ringout).
-    // Round result is "won/lost" + the way it ended. The native context
-    // exposes round_victory + round_timer as a simplification; the evaluator
-    // treats a matching Name (Victory/Defeat) as the primary check.
-    bool ok = false;
-    if (c.value_int == 1 && ctx.round_victory) ok = true;
-    else if (c.value_int == 2 && !ctx.round_victory) ok = true;
-    else if (c.value_int == 0) ok = true;  // no Name -> any result
-    return ok;
+    const int uc = c.value_int;  // Name: 1=Victory, 2=Defeat, 0=none
+    const int uO = c.subtype == "Timeout" ? 1
+                 : c.subtype == "Ringout" ? 2 : 0;  // Type
+    bool b = false;
+    if (ctx.round_result_set) {  // `a.kh`
+        bool zd_ok = true;
+        if (uc != 0) zd_ok = (ctx.round_victory == (uc == 1));  // `zd(a.zd)`
+        bool iq_ok = true;
+        if (uO != 0) iq_ok = (uO == 1) && ctx.round_end_timeout;  // `n_a(a.Iq)`
+        if (zd_ok && iq_ok) b = true;
+    }
+    return b;
 }
 
 // JS `lp.isEqual` (L673495): `b = this.Lh(a)` selects the fighter by the

@@ -200,6 +200,15 @@ struct FightContext {
     std::function<float()> roll01;
     int round_timer = 0;          // Fm.he RoundResult (zd/Jq = Victory/Defeat)
     bool round_victory = false;   // Fm.zd — "victory round" flag
+    // JS `Fm.he` reads `a.kh` (the round-result LATCH — set only once the round
+    // has ended; `E3a` L413 `a.kh=!0;b.kh=!0`) and `a.Iq` (the round-end code).
+    // The old port ignored both, so `<RoundResult Type="Timeout"/>` (which has
+    // no `Name`) evaluated `value_int==0 -> true` on EVERY frame — the getup
+    // `Standup` gate's `<Or><RoundResult Name="Defeat" Not="1"/><RoundResult
+    // Type="Timeout"/></Or>` was therefore always satisfied and a KO'd loser
+    // could snap upright instead of playing `Loss_fall`.
+    bool round_result_set = false;  // `a.kh`
+    bool round_end_timeout = false; // `a.Iq` in {2,3,4,5} (`Fm.n_a`)
     int screen = 0;               // Gm.he Screen (0=Fight,10=...)
     int bullets_me = 0;           // `lp` Bullets: my `bh` (`Lh(Ob==1).bh`)
     int bullets_enemy = 0;        // `lp` Bullets: enemy `bh` (`Lh(Ob==2).bh`)
