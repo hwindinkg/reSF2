@@ -670,6 +670,48 @@ struct MoveDef {
     };
     std::vector<IntervalEndEventDef> interval_end_events;
 
+    // JS `Im` (`kz.create` "AnimationEnd" -> type 10, L389797):
+    //   class Im extends tb {
+    //     constructor(){super(10)}
+    //     compare(a){
+    //       if(!super.compare(a))return!1;
+    //       let b=this.Ki;                       // tb.init Name attr
+    //       if(b==null||b=="")return!0;          // no filter -> any clip end
+    //       a=this.nR(tb.vQ(a.rb,this.Ob),this.Ki);// Name in the ENDED anim's name list
+    //       return this.cb?!a:a }                // Not
+    //   }
+    // `a.rb` = the ended animation; `tb.vQ` = its animation-name list (`xl`);
+    // `Ob` = the player slot. `this.Ki`/`this.cb` are `tb.init`'s Name/Not.
+    // The shipped user is `StandupAfterThrowFall`
+    // (moves.xml:43081, `Template="GetUp|AfterThrowFall"`,
+    // `<Events><AnimationEnd Name="ThrowFall"/></Events>`): the throw victim's
+    // getup, selected when the throw `…V` fall clip (whose name list carries
+    // the `ThrowFall` template) ends.
+    struct AnimEndEventDef {
+        std::string name;   // `Ki` (Name attr; "" = any clip end)
+        bool not_ = false;  // `cb` (Not attr)
+    };
+    std::vector<AnimEndEventDef> anim_end_events;
+
+    // JS `Im.compare`: does ANY of the move's `<AnimationEnd>` specs admit an
+    // ended animation whose name list contains the filter? An empty `Name`
+    // admits ANY clip end (`b=="" -> return!0`).
+    bool anim_end_matches(const std::vector<std::string>& ended_names) const {
+        for (const AnimEndEventDef& e : anim_end_events) {
+            bool a = false;
+            if (e.name.empty()) {
+                a = true;
+            } else {
+                for (const std::string& n : ended_names) {
+                    if (n == e.name) { a = true; break; }
+                }
+            }
+            if (e.not_) a = !a;  // `this.cb ? !a : a`
+            if (a) return true;
+        }
+        return false;
+    }
+
     // JS `Om.compare`: does ANY of the move's `<IntervalEnd>` specs admit an
     // interval-end event carrying `iv_name`/`iv_type`? (Type 13 membership is
     // already implied by `interval_end_events` being non-empty.)

@@ -1143,6 +1143,18 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
                               : 0;
                     ie.not_ = data::xml_attr_bool(ev, "Not", false);
                     def.interval_end_events.push_back(std::move(ie));
+                } else if (std::string(ev.name()) == "AnimationEnd") {
+                    // JS `Im.parse`/`tb.init` (L763/L389797): `Ki` = Name,
+                    // `cb` = Not. `Im.compare` matches `Ki` against the ended
+                    // animation's name list (`tb.vQ(a.rb,Ob)`) — the throw
+                    // victim's getup (`StandupAfterThrowFall`, moves.xml:43081)
+                    // fires on `<AnimationEnd Name="ThrowFall"/>` when the
+                    // `…V` fall clip ends.
+                    MoveDef::AnimEndEventDef ae;
+                    const char* n = ev.attribute("Name").value();
+                    ae.name = n != nullptr ? n : "";
+                    ae.not_ = data::xml_attr_bool(ev, "Not", false);
+                    def.anim_end_events.push_back(std::move(ae));
                 }
             }
         };

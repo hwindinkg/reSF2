@@ -6217,8 +6217,14 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // continuous walk. On release the Hold drops and no candidate
             // passes, so the fighter falls back to the stance idle. Same
             // PLAYER gate as the press-edge path (the AI has its own `de`).
-            if (me.ai == nullptr && !auto_attack_ &&
-                phase_ == fight_phase::fight) {
+            // JS `Gc.Gnb` (L672) runs the `Rwa`/`EZa` event pass for EVERY
+            // fighter (the `td` array), so the clip-end re-selection is NOT
+            // player-only: an AI throw victim selects its own getup
+            // (`StandupAfterThrowFall`) here. The main `<Conditions>` are
+            // re-tested with `gm` true (JS `EZa` only clears `gm` for the
+            // type-2 KeyPressed event on an AI fighter), so the AI's empty key
+            // buffer leaves every `<Keys>`-gated candidate false.
+            if (phase_ == fight_phase::fight) {
                 sf2::scene::FightContext ectx;
                 ectx.roll01 = [this]() { return draw01(); };
                 ectx.stage = static_cast<sf2::scene::round_stage>(phase_);
@@ -6246,8 +6252,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     ++me.moves_started;
                     me.last_decision = "end:" + again;
                     std::fprintf(stdout,
-                                 "[fight] player AnimationEnd -> %s (F%d)\n",
-                                 again.c_str(), frame_);
+                                 "[fight] F%d %s AnimationEnd -> %s\n",
+                                 frame_, me.name.c_str(), again.c_str());
                     std::fflush(stdout);
                 }
             }

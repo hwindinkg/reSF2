@@ -1455,16 +1455,18 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
             if (!m->interval_end_matches(iv_name, iv_type)) continue;
         } else {
             if (!m->has_event(ev)) continue;
-            // Clip-end gate (`Gc.kg` L671 -> `Ih(10)`): a candidate may only
-            // re-fire from `AnimationEnd` if it is ALSO key-triggered
-            // (`Gc.mS` L672 -> `Ih(2)`). A pure idle/`AnimationEnd`-loop move
-            // (`FistsStartStanceIdle`, `StanceIdle`) carries only
-            // `<AnimationEnd/>`; re-selecting it with no input keeps the
-            // fighter `Pe=true` with its `Uninterrupt` window live, which
-            // blocks the opponent AI (`Pqb` L604 via `de.Ycb` L620).
-            // `StepForward` also carries `<KeyPressed/>`, so the held re-fire
-            // is unaffected.
-            if (ev == "AnimationEnd" && !m->has_event("KeyPressed")) continue;
+            // JS `Im.compare` (L389797): an `AnimationEnd` candidate is
+            // admitted only when one of its `<AnimationEnd>` specs matches the
+            // ENDED animation's name list (`ctx.anims_me` = the ended move's
+            // `anim_names`, set by the caller). An empty `Name` admits any clip
+            // end; a named spec (`StandupAfterThrowFall` ->
+            // `<AnimationEnd Name="ThrowFall"/>`, moves.xml:43081) matches only
+            // the throw fall. The old port-only gate
+            // (`!has_event("KeyPressed") -> continue`) blocked EVERY
+            // `AnimationEnd`-only move, so the throw victim's getup never
+            // started and the victim snapped straight to the stance idle (the
+            // reported "instant getup").
+            if (ev == "AnimationEnd" && !m->anim_end_matches(ctx.anims_me)) continue;
         }
         std::string trace;
         // [TASK B DIAGNOSTIC] `SF2_TRACE_COND=1` dumps the failing condition
