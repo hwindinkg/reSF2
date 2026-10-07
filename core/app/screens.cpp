@@ -3020,7 +3020,20 @@ bool za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
         return false;
     }
     // `Nn.Qg` (L1117) / `eo.XHa` (L1119): the guided button fired -> unblock.
-    q.complete_guided(nav_id);
+    const bool guided = q.complete_guided(nav_id);
+    // `eo.dia` (sf2.502f0946.js L1119): using the guided nav closes the side
+    // bar (`Ib.txa()` L1119) BEFORE the scene switch, so the sensei Notification
+    // collapses the moment the player navigates instead of lingering for its
+    // ReadTime — the reported task-3 "the dialog collapses if you go to the
+    // menu yourself". The port never called the bar close here.
+    if (guided) {
+        if (const EngineDialog* bar = q.notification_top()) {
+            dialog_capture_closing(app, *bar);  // `Ib.close` L1911 (0.5 s collapse)
+            q.pop_notifications();
+            std::fprintf(stdout, "[quest] guided nav -> Ib.txa() closes side bar\n");
+            std::fflush(stdout);
+        }
+    }
     sf2::audio::AudioEngine::instance().play("snd_click_1");
     if (hit == 4) {  // Settings (JS `Vfb` L1981 -> `Xc.Shb()` L931)
         std::fprintf(stdout, "[za] nav %s -> settings dialog (no nav)\n", kZaNav[hit].label);
@@ -15677,11 +15690,12 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     oi.count = 1;
     shop_apply_slot(bw, bit.type, bit.name);
     oi.equipped = true;
-    const bool tut_buy =
-        bit.name == "WEAPON_KNIVES" &&
-        (bw.story_step() == "STEP_BUY_ITEM" ||
-         (bw.story_step() == "NotStarted" && bw.tutorial == "MOVE"));
-    if (tut_buy) bw.set_story_step("MAP");
+    // JS `Ao.Qg` (sf2.502f0946.js L1121) does NOT write the story step: the
+    // `SetStoryTutorialStep MAP` is the QUEST action (tutorial_quests.xml L109),
+    // run when `StoryTutorialBuyItem` fires on entering the Shop. An invented
+    // direct write here jumped a fresh profile (NotStarted+MOVE) straight to MAP
+    // on ANY knives buy — bypassing the shop beat and arming the Map guidance
+    // (dead menu) — the reported task-2 root.
     bw.items.push_back(oi);
     app.save().save(bw);
     seen_ = bw;
@@ -15693,10 +15707,9 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     backdrop_fig_ok_ = false;
     std::fprintf(stdout,
                  "[shop] Pi confirm Pa.iwa -> BOUGHT %s price=%lld -> money %lld"
-                 " + EQUIPPED ($o)%s\n",
+                 " + EQUIPPED ($o) (step untouched by Ao.Qg)\n",
                  bit.name.c_str(), static_cast<long long>(price),
-                 static_cast<long long>(bw.money),
-                 tut_buy ? ", step -> MAP (Ao)" : "");
+                 static_cast<long long>(bw.money));
     // `Pa.iwa` L1228: `c=d=Pa.gI(a,!0,!1)` truthy -> `p.o.Fr(b); p.o.save();
     // Pa.Wz(a)` fires `QUEST_EVENT_PURCHASE` AFTER the save (so a purchase
     // quest reading `?Purchase(_$Purchase).*` sees the committed state).
