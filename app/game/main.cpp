@@ -6565,8 +6565,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fprintf(stderr, "[place] no fight screen\n");
             return 1;
         }
+        // The step moves gate on `<RoundStage Name="Fight"/>` (JS `Am.he`:
+        // `a.Je==2`), so the MIRROR probes MUST run in the LIVE fight phase
+        // (port phase 2 = `fight_phase::fight`). The old `fight_frame()<140`
+        // wait stopped inside phase 1 (StartStance) — the FIGHT banner expires
+        // at F202 and the fight phase only opens at ~F240 — where that gate is
+        // FALSE and NO step move resolves. The unmirrored formula resolves
+        // nothing there either, so the "unmirrored would pick StepForward"
+        // claim did not hold and the probe measured the wrong state.
         int guard = 0;
-        while (guard < 6000 && fs->fight_frame() < 140) {
+        while (guard < 6000 && fs->probe_phase() < 2) {
             glfwPollEvents();
             app.run_one_frame();
             ++guard;
@@ -6606,6 +6614,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // The forward MOVE via the mirrored key: with `Wl<0` the `Back` key
         // (control 7) maps to the `Forward` requirement, so `StepForward` must
         // resolve and the fighter must travel TOWARD the enemy (dx < 0 here).
+        // With `Wl>0` the mirror is OFF, so the SAME key resolves the plain
+        // `StepBack` — the assertion must branch on the facing exactly like the
+        // first MIRROR check (the old fixed `StepForward`+`dx<0` expectation
+        // only held on the mirrored side).
         for (int i = 0; i < 90; ++i) app.run_one_frame();
         fs->reset_player_move();
         fs->place_fighters(place_me_x, place_enemy_x);
@@ -6616,7 +6628,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         for (int i = 0; i < 6; ++i) app.run_one_frame();
         const std::string fwd_mv = fs->player_current_move();
         const float fwd_x1 = fs->player_world_x();
-        const bool fwd_ok = (fwd_mv == "StepForward") && (fwd_x1 < fwd_x0);
+        const bool fwd_ok = (wl < 0.0f) ? (fwd_mv == "StepForward" && fwd_x1 < fwd_x0)
+                                        : (fwd_mv == "StepBack");
         std::fprintf(stdout,
                      "[place] MIRROR forward-move via Back key(7): '%s' x %.0f->%.0f dx=%+.0f "
                      "toward-enemy=%s %s\n",
@@ -6743,13 +6756,25 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         for (int i = 0; i < 2; ++i) app.run_one_frame();
         const int rs_after_second = fs->player_moves_started();
         const std::string rs_dec = fs->player_decision();
-        const bool rs_blocked = (rs_after_second == rs_after_first);
+        const std::string rs_post = fs->player_current_move();
+        // JS-exact: the re-press CANNOT restart StepForward — its
+        // `<CurrentAnimation Name="Step"/>` guard (with `anims_me` carrying the
+        // move's transitive template chain) evaluates TRUE and the `Not="1"`
+        // blocks it. But the buffer still holds the FIRST Forward tap
+        // (`zl.Sgb` keeps `sh` up to 2 entries and `zl.ia` only clears it after
+        // 15 idle frames), so the 2-key `DoubleStepForward` (Priority 20) is a
+        // LEGITIMATE new move, not a restart. "No restart" therefore means the
+        // current move is NOT StepForward — a bare `moves_started` compare
+        // mis-counts the JS-exact double-step as a restart.
+        const bool rs_blocked = (rs_post != "StepForward");
         std::fprintf(stdout,
                      "[place] INTERVAL restart: first='%s' started %d->%d, re-press in "
-                     "SelfUninterrupt[0,13] -> started=%d %s\n"
+                     "SelfUninterrupt[0,13] -> post='%s' started=%d %s\n"
                      "[place]   reject decision: %s\n",
-                     rs_mv.c_str(), rs_start, rs_after_first, rs_after_second,
-                     rs_blocked ? "PASS (no restart)" : "FAIL (restarted)",
+                     rs_mv.c_str(), rs_start, rs_after_first, rs_post.c_str(),
+                     rs_after_second,
+                     rs_blocked ? "PASS (StepForward not restarted)"
+                                : "FAIL (StepForward restarted)",
                      rs_dec.c_str());
         std::fflush(stdout);
         // ---- probe 4: HighPunch (control — its chain has no `Step`) --------
