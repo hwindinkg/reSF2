@@ -509,21 +509,11 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
 // the key EXISTS — `X.Xa(ra.xC,a)&&(...)`). `ra.xC` is keyed by the move
 // TEMPLATE names registered by `Fa.kxb` (L364000) AND by every move's own
 // name (`Fa.amb` L364134: `X.Xa(c,b.name)||(a=lh.B4a(b), c.set(a.name,a))`).
-//
-// [AI attack ROOT] The shipped `Standard`/`UseTables` tactic declares its
-// quick attack as `<QuickAttackChance Animation="ShortAttack" Base="0.2"/>`
-// and weights it `<Animation Name="ShortAttack" Base="1000"/>`. There is no
-// `ShortAttack` template OR move in moves.xml, so the literal `ra.xC` lookup
-// yields NOTHING and the Tabular enemy has no quick attack — which is exactly
-// the "non-boss AI never attacks" symptom: the only candidates left are the
-// `<CautiousMovements>` (Step) group, so every decision is `fk=5`.
-// `ShortAttack` is the tactic author's name for the fighter's basic weapon
-// swing; the shipped data comments it "ShortAttack ... probably does nothing"
-// because the ANIMATION was renamed, not because the slot is dead. Resolve the
-// tag to the AI's own `Weapon`-tagged moves (the basic attack of whatever
-// weapon the fighter holds) — the JS `ra.xC` key that the tactic MEANT.
-// The `v1` filter then keeps only the AI's own moves, so a Batons fighter gets
-// `BatonsSlash`/`BatonsDoubleSlash`/… and a Fists fighter the punch/kick set.
+// There is no `ShortAttack` template/move anywhere in the shipped moves.xml,
+// so `ra.b9a("ShortAttack")` returns null and the slot yields NO candidates.
+// The old port invented a `ShortAttack`->`Weapon` fallback; the shipped data
+// itself comments "ShortAttack ... probably does nothing" (tactic_settings.xml
+// L93), and the JS never references the literal "ShortAttack". Removed.
 std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
                                               const std::map<std::string, MoveDef>& moves) {
     std::vector<const MoveDef*> out;
@@ -533,12 +523,6 @@ std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
             std::find(m.anim_names.begin(), m.anim_names.end(), anim) !=
                 m.anim_names.end()) {
             out.push_back(&m);
-        }
-    }
-    if (out.empty() && anim == "ShortAttack") {
-        for (const auto& kv : moves) {
-            const MoveDef& m = kv.second;
-            if (m.template_tags.count("Weapon") > 0) out.push_back(&m);
         }
     }
     return out;
