@@ -659,44 +659,34 @@ const TacticRecord* AiController::find_record(const std::string& key_anim,
     //   `for(f of this.ds.Z0()[table]) if(this.OO==f.second){ for(g of
     //    f.first) if(this.OO==g.Tfa){c=g;break} break }`
     // — i.e. the group whose WEAPON (`f.second`) matches the AI's own weapon
-    // id `OO` and, within it, the WEAPON record (`g.Tfa`, the pool-B string
-    // the parser assigns at `F.Tfa=c[a.ie()]` L651) matching the same `OO`.
-    // BOTH keys are the weapon; the ANIMATION is NOT a key — it is the
-    // IMPLICIT scope of `this.ds.Z0()`: `ds` is the AI's OWN current clip
-    // (`de.LLa` L596 `this.ds=a.da.Ua`), so the table queried is the one for
-    // the AI's own animation. The port reproduces that scope with
-    // `r.anim == key_anim` where `key_anim = st.my_anim` (the AI's OWN move),
-    // NOT the opponent's (`st.enemy_anim`): the prior port keyed on the
-    // opponent's move, so the record it found was the stub row of the
-    // OPPONENT's animation (`HighKneeUp`, `hu=1`, 0 outcomes) and every table
-    // attack was empty. The AI's own record (`StanceIdle`, `hu=216`, 29
-    // outcome anims) is the real attack table.
+    // id `OO` and, within it, the WEAPON record (`g.Tfa`, the pool-B string)
+    // matching the same `OO`. Both keys are the RESPONDER weapon; the shipped
+    // per-anim Z0 entries group a move's `Il` branches by their `Tfa`, so the
+    // two checks collapse to `Il.Tfa == OO` — exactly `r.weapon == oo_`.
     //
-    // [verified, attacking-player wave] `this.ds` IS the OPPONENT's move:
-    // `de.jwb` L596 is invoked `this.nf.jwb(this.jb)` and `this.jb` is the
-    // opponent (`de.Ykb`/`HZa` hand `this.jb` to the AI as `a`, then read
-    // `a.da.yD(...)`), so the JS `ds.Z0()` clip scope is the OPPONENT's
-    // animation. The scope was TESTED with `find_record(st.enemy_anim, ...)`:
-    // the reactive branch still fires (--boss-hit-probe --fight-ordinal 2:
-    // 177 gate frames, 15 reactive/table-attack, 1 reactive/safe-attack) but
-    // every table outcome resolves to NO move (`dec=''`, wb>0) and the
-    // scripted player attack never lands (gate NO-HIT). The shipped `.dat`
-    // tables only resolve to real outcome moves under the AI's OWN animation
-    // (`StanceIdle`), so the port keeps `st.my_anim`; the `ds`-scope reading
-    // above is left as the open item for a data-level re-verification.
+    // The ANIMATION is the IMPLICIT scope of `this.ds.Z0()`: `ds` is set by
+    // `de.jwb` L596-597 (`var b=a.da,c=b.Ua; ... c=this.ds=d==null?c:d`) which
+    // `wd.mwb` L527 calls as `this.nf.jwb(this.jb)` — `this.jb` is THIS
+    // fighter's OPPONENT (`wd.wI` `this.jb=a.jb`; `wd.Zka` `this.jb=HB[0]`).
+    // So the JS queries the OPPONENT's current clip, and the .dat tables are
+    // authored that way: `<keyWeapon>_<responderWeapon>.dat` carries records
+    // KEYED BY THE KEY-WEAPON's animations whose `Il.Tfa` is the RESPONDER
+    // weapon (verified on the shipped data: `fists_knives` keys on the Fists
+    // anims `DoublePunch`/`FistsStartStanceIdle-Right`/… with `Tfa=Knives`,
+    // and `knives_fists` is the mirror). The port therefore keys on
+    // `st.enemy_anim` (the OPPONENT's clip) — NOT `st.my_anim`.
     //
     // `de.OO = P.dBa(b)` (L300046) where `b = this.parameters.Hd.Yb` = the
-    // equipped item's XML `SubType` (L163820); `P.dBa` (L320620) maps a
-    // SubType to its `<ItemEquivalents>` canonical Item SubType via `P.zqa`.
-    // The shipped `tactic_settings.xml` `<ItemEquivalents>` block is COMMENTED
-    // OUT (L379-383), so `P.zqa` is empty and `dBa` is the IDENTITY: `OO` is
-    // exactly the weapon SubType. The port's `oo_ = weapon` (= the SubType
-    // passed to `init`) is therefore JS-exact with no `dBa` step needed.
+    // equipped item's XML `SubType`; `P.dBa` maps a SubType to its
+    // `<ItemEquivalents>` canonical SubType. The shipped `tactic_settings.xml`
+    // `<ItemEquivalents>` block is COMMENTED OUT (L379-383), so `dBa` is the
+    // IDENTITY: `OO` is exactly the weapon SubType. The port's `oo_ = weapon`
+    // (= the SubType passed to `init`) is JS-exact with no `dBa` step.
     //
-    // The WEAPON match is EXACT (JS `g.Tfa==OO`); an empty-`weapon` record
-    // (the `default.dat` pair `$ua(e,'','')`) must NOT shadow the
-    // weapon-specific one. Prefer the exact weapon, fall back to the
-    // empty-weapon default only when none exists.
+    // The WEAPON match is EXACT; an empty-`weapon` record (the `default.dat`
+    // pair `$ua(e,'','')`) must NOT shadow the weapon-specific one. Prefer the
+    // exact weapon, fall back to the empty-weapon default only when none
+    // exists.
     const TacticRecord* fallback = nullptr;
     for (const TacticsFile& tf : tactics_) {
         if (tf.version != table_index) continue;  // JS `P.wO[table_index]`
@@ -712,9 +702,9 @@ const TacticRecord* AiController::find_record(const std::string& key_anim,
 int AiController::yaa(const AiFightState& st) {
     wb_.clear();
     Ao_ = (Fl_ % 5) != 0;  // P.sp (TablesReduction Step) = 5
-    if (st.my_anim.empty()) return 0;
+    if (st.enemy_anim.empty()) return 0;
 
-    const TacticRecord* rec = find_record(st.my_anim, /*safe=*/1);
+    const TacticRecord* rec = find_record(st.enemy_anim, /*safe=*/1);
     if (rec == nullptr) return 0;
 
     // JS `Q6a` (L609-611) is called as
@@ -780,14 +770,14 @@ int AiController::xaa(const AiFightState& st) {
         return 0;
     }
     Ao_ = false;
-    if (st.my_anim.empty()) return 0;
+    if (st.enemy_anim.empty()) return 0;
 
     // JS `XAa` (L611): `for(var b=this.Aea(this.Eqa),...)` then
     // `b=this.Fl+b` — the Ju-frame horizon = `Fl + Aea(Eqa)`. The draw is
     // consumed here so the shared `Da.pg` stream position matches.
     aea_ = aea_draw();
 
-    const TacticRecord* rec = find_record(st.my_anim, /*attack=*/0);
+    const TacticRecord* rec = find_record(st.enemy_anim, /*attack=*/0);
     if (rec == nullptr) return 0;
 
     // JS L611-612 (exact):
@@ -834,8 +824,8 @@ int AiController::xaa(const AiFightState& st) {
 int AiController::gea(const AiFightState& st, int variant) {
     (void)variant;
     wb_.clear();
-    if (st.my_anim.empty()) return 0;
-    const TacticRecord* rec = find_record(st.my_anim, /*throw=*/2);
+    if (st.enemy_anim.empty()) return 0;
+    const TacticRecord* rec = find_record(st.enemy_anim, /*throw=*/2);
     if (rec == nullptr) return 0;
     for (const TacticRow& row : rec->rows) {
         // JS `Gea` (L613-616, exact): `k=f.dw(); h=f.hd();
