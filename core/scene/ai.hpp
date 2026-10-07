@@ -567,6 +567,18 @@ public:
         float wea = 0.0f;
         float dw = 0.0f;
         int hd = 1;
+        // [AI audit] the base-slots surprise gate operands: the ExpectedWait
+        // lookup result (`F6a`, L639) and the `XW` latch (`1-1/b < Da.jf()`).
+        float expected_wait = 1.0f;
+        bool xw = false;
+        // The CautiousMovementsChance evaluated value (`Awa`) and the cached
+        // QJa roll (`Bpa`), the two operands of `nG = Bpa < Awa`.
+        float cm = 0.0f;
+        double bpa = 0.0;
+        // The QuickAttack slot fire counts (base `$E` fired / pushed moves).
+        int qfired = 0;
+        int qpushed = 0;
+        std::string qinfo;
     };
     const AiDebug& last_debug() const { return dbg_; }
 

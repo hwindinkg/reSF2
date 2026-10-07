@@ -6395,7 +6395,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          " strike{counter=%.3f xb=%.3f tf=%.3f} stream=%s"
                          " | branch=%s fk=%d aqa=%d gate=%d ycb=%d lbb=%d"
                          " pcb=%d rua=%d caa=%d nG=%d hcb=%d ef=%d x=%d"
-                         " ue=%d ae=%d wb=%d"
+                         " ue=%d ae=%d wb=%d ew=%.3f xw=%d cm=%.4f bpa=%.4f"
+                         " qf=%d qp=%d qi='%s'"
                          " wea{target=%.3f old=%.3f wea=%.3f dw=%.3f hd=%d"
                          " mu=%.3f my_facing=%d label='%s'} dec='%s'\n",
                          frame_, me.name.c_str(), st.ranged,
@@ -6409,6 +6410,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          d.caa ? 1 : 0, d.nG ? 1 : 0, d.hcb ? 1 : 0,
                          d.enemy_frame, d.x, d.enemy_uninterrupt_end,
                          d.enemy_attack_end, d.wb,
+                         static_cast<double>(d.expected_wait), d.xw ? 1 : 0,
+                         static_cast<double>(d.cm), d.bpa,
+                         d.qfired, d.qpushed,
+                         d.qinfo.c_str(),
                          d.target, st.my_facing * d.wea + d.mu, d.wea, d.dw,
                          d.hd, d.mu, st.my_facing, d.label.c_str(),
                          decision.c_str());
