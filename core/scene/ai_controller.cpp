@@ -658,14 +658,27 @@ const TacticRecord* AiController::find_record(const std::string& key_anim,
     // JS `de.XAa`/`de.Q6a`/`de.Gea` (L611/L609/L613) select the record with
     //   `for(f of this.ds.Z0()[table]) if(this.OO==f.second){ for(g of
     //    f.first) if(this.OO==g.Tfa){c=g;break} break }`
-    // — i.e. the entry whose ANIMATION (`f.second`) matches the AI's own
-    // animation id `OO` and, within it, the WEAPON record (`g.Tfa`) matching
-    // the same `OO`. `key_anim` is therefore the AI's OWN current animation
-    // (`st.my_anim`), NOT the opponent's (`st.enemy_anim`): the prior port
-    // keyed on the opponent's move, so the record it found was the stub row
-    // of the OPPONENT's animation (`HighKneeUp`, `hu=1`, 0 outcomes) and
-    // every table attack was empty. The AI's own record (`StanceIdle`,
-    // `hu=216`, 29 outcome anims) is the real attack table.
+    // — i.e. the group whose WEAPON (`f.second`) matches the AI's own weapon
+    // id `OO` and, within it, the WEAPON record (`g.Tfa`, the pool-B string
+    // the parser assigns at `F.Tfa=c[a.ie()]` L651) matching the same `OO`.
+    // BOTH keys are the weapon; the ANIMATION is NOT a key — it is the
+    // IMPLICIT scope of `this.ds.Z0()`: `ds` is the AI's OWN current clip
+    // (`de.LLa` L596 `this.ds=a.da.Ua`), so the table queried is the one for
+    // the AI's own animation. The port reproduces that scope with
+    // `r.anim == key_anim` where `key_anim = st.my_anim` (the AI's OWN move),
+    // NOT the opponent's (`st.enemy_anim`): the prior port keyed on the
+    // opponent's move, so the record it found was the stub row of the
+    // OPPONENT's animation (`HighKneeUp`, `hu=1`, 0 outcomes) and every table
+    // attack was empty. The AI's own record (`StanceIdle`, `hu=216`, 29
+    // outcome anims) is the real attack table.
+    //
+    // `de.OO = P.dBa(b)` (L300046) where `b = this.parameters.Hd.Yb` = the
+    // equipped item's XML `SubType` (L163820); `P.dBa` (L320620) maps a
+    // SubType to its `<ItemEquivalents>` canonical Item SubType via `P.zqa`.
+    // The shipped `tactic_settings.xml` `<ItemEquivalents>` block is COMMENTED
+    // OUT (L379-383), so `P.zqa` is empty and `dBa` is the IDENTITY: `OO` is
+    // exactly the weapon SubType. The port's `oo_ = weapon` (= the SubType
+    // passed to `init`) is therefore JS-exact with no `dBa` step needed.
     //
     // The WEAPON match is EXACT (JS `g.Tfa==OO`); an empty-`weapon` record
     // (the `default.dat` pair `$ua(e,'','')`) must NOT shadow the
