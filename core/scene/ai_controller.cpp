@@ -672,6 +672,19 @@ const TacticRecord* AiController::find_record(const std::string& key_anim,
     // attack was empty. The AI's own record (`StanceIdle`, `hu=216`, 29
     // outcome anims) is the real attack table.
     //
+    // [verified, attacking-player wave] `this.ds` IS the OPPONENT's move:
+    // `de.jwb` L596 is invoked `this.nf.jwb(this.jb)` and `this.jb` is the
+    // opponent (`de.Ykb`/`HZa` hand `this.jb` to the AI as `a`, then read
+    // `a.da.yD(...)`), so the JS `ds.Z0()` clip scope is the OPPONENT's
+    // animation. The scope was TESTED with `find_record(st.enemy_anim, ...)`:
+    // the reactive branch still fires (--boss-hit-probe --fight-ordinal 2:
+    // 177 gate frames, 15 reactive/table-attack, 1 reactive/safe-attack) but
+    // every table outcome resolves to NO move (`dec=''`, wb>0) and the
+    // scripted player attack never lands (gate NO-HIT). The shipped `.dat`
+    // tables only resolve to real outcome moves under the AI's OWN animation
+    // (`StanceIdle`), so the port keeps `st.my_anim`; the `ds`-scope reading
+    // above is left as the open item for a data-level re-verification.
+    //
     // `de.OO = P.dBa(b)` (L300046) where `b = this.parameters.Hd.Yb` = the
     // equipped item's XML `SubType` (L163820); `P.dBa` (L320620) maps a
     // SubType to its `<ItemEquivalents>` canonical Item SubType via `P.zqa`.
