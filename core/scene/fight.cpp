@@ -5285,6 +5285,13 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // admit themselves through their own `<Conditions>`
     // (`<CurrentInterval Type="Block"/>`). The old port ran `try_react` only
     // inside `!hit_blocked`, so a block never reacted.
+    // JS `wd.Kwb`/`strike` only STASH the hit (`this.Bb`) + arm `this.GM=!0`;
+    // the node impulse (`IH.strike` = `Bl.strike`) is applied LATER, by `Bva`,
+    // from exactly two callers: the physics-knockdown queue start
+    // (`Qnb`->`Mwb`->`Lwb`, `qs` set) or `RZa` (`this.GM && this.da.Ua.MS`).
+    // Capture the defender's queued-reaction kind here to reproduce that gate.
+    bool def_react_queued = false;   // a reaction was picked (`qs`/`Ml`)
+    bool def_react_physics = false;  // the pick is `MS` (`qs`, ragdoll)
     {
         sf2::scene::FightContext rctx;
         rctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
@@ -5334,6 +5341,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             // (`Fighter::start_move_impl`) calls `Al.stop` when the next clip
             // starts.
             const bool knockdown = def.fighter.last_react_physics();  // MS
+            def_react_queued = true;
+            def_react_physics = knockdown;
             // JS `jJa`/`Nsb` (L674) only QUEUE the pick; the start (and, for
             // `MS`, `Nd.start` via `Qnb`->`Lwb`) happens on the next
             // `wd.ia` (`Fighter::process_reaction_queues`, called at the top
@@ -5346,6 +5355,27 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             std::fflush(stdout);
         }
     }
+
+    // JS impulse gate (EXACT). `IH.strike` (`Bl.strike`) is reachable only via
+    // `Bva` (`wd.Bva` L260293), whose two callers are:
+    //   - `Lwb` (`Qnb`'s physics path): the queued reaction is `MS` (`qs`) ->
+    //     `Nd.start` then `Bva(this.Bb)` — the impulse IS applied;
+    //   - `RZa` (`wd.RZa` L270123): `this.GM && this.da.Ua.MS && Bva(...)` —
+    //     `GM` survives `ia`'s head ONLY when NO reaction was queued and `Bnb`
+    //     returned false; the defender's CURRENT clip must be `MS`.
+    // A queued NON-physics reaction (`Gc.Nsb` -> `Ml`) is started by `Bnb`,
+    // which clears `GM` (`this.Bnb() && (this.GM=!1)`) BEFORE `RZa` — so the
+    // impulse is NEVER applied to a non-physics reaction. The port applied
+    // `Bl.strike` unconditionally at hit time: for the HighBlock block
+    // reaction (no `Physics`) that wrote the split impulse (~646u) into the
+    // defender's solver `ma` one frame before `Te.Skb`, so `Te.qrb` (which
+    // seeds the two clip-start prepend slots from the CURRENT `ma`/`mf`)
+    // amplified it by (MidFrames+1)/2=1.5 — the reported whole-skeleton X spike
+    // (~1331u) for ~5 frames. The JS never writes `ma` there, so `qrb` reads
+    // the un-struck state.
+    const sf2::scene::MoveDef* def_move = def.fighter.current_move();
+    const bool def_physics = def_move != nullptr && def_move->physics;
+    const bool apply_strike = def_react_queued ? def_react_physics : def_physics;
 
     // Knockback (JS Kwb + bounds): interval impulse mirrored by facing,
     // scaled by the attacker JG (ChangeImpulse shapes FUTURE hits).
@@ -5366,7 +5396,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (!ch.kd_null) {
     // JS `Bl.strike` (L588) top: `this.s2a()` — midpoint-smooth every body
     // (`mf = (mf+ma)*0.5`) on the struck model before splitting the impulse.
-    def.fighter.strike_midpoint_smooth();
+    // Only when the gate above runs (`s2a` is INSIDE `Bl.strike`).
+    if (apply_strike) def.fighter.strike_midpoint_smooth();
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
@@ -5388,17 +5419,17 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         const float p1y = bag_probe && b1 >= 0 ? def.fighter.solver_ma_y(b1) : 0.0f;
         const float p2x = bag_probe && has2 ? def.fighter.solver_ma_x(b2) : 0.0f;
         const float p2y = bag_probe && has2 ? def.fighter.solver_ma_y(b2) : 0.0f;
-        if (b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
-        if (has2) def.fighter.strike_node(b2, imp.node2_vec);
+        if (apply_strike && b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
+        if (apply_strike && has2) def.fighter.strike_node(b2, imp.node2_vec);
         std::fprintf(stdout,
                      "[strike] F%d %s->%s ax=%.1f dx=%.1f imp=(%.2f,%.2f,%.2f) "
-                     "x1=%.2f x2=%.2f hd=%d fx=%d nk=%d frame=%d\n",
+                     "x1=%.2f x2=%.2f hd=%d fx=%d nk=%d frame=%d ap=%d\n",
                      frame, atk.name.c_str(), def.name.c_str(),
                      atk.fighter.world_x(), def.fighter.world_x(), impulse.x,
                      impulse.y, impulse.z, imp.node1_vec.x, imp.node2_vec.x,
                      atk.fighter.clip_mirror(), atk.fighter.facing(),
                      def.fighter.ragdoll_active() ? 1 : 0,
-                     def.fighter.ragdoll_frame_count());
+                     def.fighter.ragdoll_frame_count(), apply_strike ? 1 : 0);
         if (bag_probe) {
             const float q1x = b1 >= 0 ? def.fighter.solver_ma_x(b1) : 0.0f;
             const float q1y = b1 >= 0 ? def.fighter.solver_ma_y(b1) : 0.0f;
@@ -6404,7 +6435,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          " ue=%d ae=%d wb=%d ew=%.3f xw=%d cm=%.4f bpa=%.4f"
                          " qf=%d qp=%d qi='%s'"
                          " wea{target=%.3f old=%.3f wea=%.3f dw=%.3f hd=%d"
-                         " mu=%.3f my_facing=%d label='%s'} dec='%s'\n",
+                         " mu=%.3f my_facing=%d label='%s'"
+                         " rec=%d rows=%d jrows=%d fl=%d rda0=%d huf0=%d} dec='%s'\n",
                          frame_, me.name.c_str(), st.ranged,
                          me.ranged_available ? 1 : 0,
                          me.ranged_available ? 1 : -1,
@@ -6422,6 +6454,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          d.qinfo.c_str(),
                          d.target, st.my_facing * d.wea + d.mu, d.wea, d.dw,
                          d.hd, d.mu, st.my_facing, d.label.c_str(),
+                         d.rec ? 1 : 0, d.rows, d.jrows,
+                         d.fl, d.rda0, d.huf0,
                          decision.c_str());
             std::fflush(stdout);
             last_ai_log_ = decision;

@@ -705,7 +705,11 @@ int AiController::yaa(const AiFightState& st) {
     if (st.enemy_anim.empty()) return 0;
 
     const TacticRecord* rec = find_record(st.enemy_anim, /*safe=*/1);
+    dbg_.rec = rec != nullptr;
     if (rec == nullptr) return 0;
+    dbg_.rows = static_cast<int>(rec->rows.size());
+    dbg_.fl = Fl_;
+    if (!rec->rows.empty()) { dbg_.rda0 = rec->rows[0].rda; dbg_.huf0 = rec->rows[0].hu_frames; }
 
     // JS `Q6a` (L609-611) is called as
     //   `this.Q6a(a, this.cs, this.ds, this.Ji.dw(), a.da.dw(),
@@ -733,6 +737,7 @@ int AiController::yaa(const AiFightState& st) {
     for (const TacticRow& row : rec->rows) {
         const int k = ju_frame_index(f, row.rda, row.hu_frames);
         if (k < 0) continue;  // JS `L6a` -> null -> row contributes nothing
+        ++dbg_.jrows;
         // JS `Q6a` (L609-611, exact): the row target is
         //   n = f*(Wea(row.label, this.model, a) - e) + this.Mu
         // where f = `a.da.hd()` = the OPPONENT's clip mirror and e = `a.da.dw()`
@@ -778,7 +783,11 @@ int AiController::xaa(const AiFightState& st) {
     aea_ = aea_draw();
 
     const TacticRecord* rec = find_record(st.enemy_anim, /*attack=*/0);
+    dbg_.rec = rec != nullptr;
     if (rec == nullptr) return 0;
+    dbg_.rows = static_cast<int>(rec->rows.size());
+    dbg_.fl = Fl_;
+    if (!rec->rows.empty()) { dbg_.rda0 = rec->rows[0].rda; dbg_.huf0 = rec->rows[0].hu_frames; }
 
     // JS L611-612 (exact):
     //   b = this.Fl + this.Aea(this.Eqa)                 // horizon
@@ -802,6 +811,7 @@ int AiController::xaa(const AiFightState& st) {
     for (const TacticRow& row : rec->rows) {
         const int k = ju_frame_index(Fl_, row.rda, row.hu_frames);
         if (k < 0) continue;
+        ++dbg_.jrows;
         const float wv = wea(st, row.label);
         const float target = static_cast<float>(st.enemy_clip_mirror) *
                                  (wv - st.enemy_dw) +
@@ -826,7 +836,9 @@ int AiController::gea(const AiFightState& st, int variant) {
     wb_.clear();
     if (st.enemy_anim.empty()) return 0;
     const TacticRecord* rec = find_record(st.enemy_anim, /*throw=*/2);
+    dbg_.rec = rec != nullptr;
     if (rec == nullptr) return 0;
+    dbg_.rows = static_cast<int>(rec->rows.size());
     for (const TacticRow& row : rec->rows) {
         // JS `Gea` (L613-616, exact): `k=f.dw(); h=f.hd();
         //   n=h*(this.Wea(n,this.model,a.Kf())-k)+this.Mu` — the OPPONENT's

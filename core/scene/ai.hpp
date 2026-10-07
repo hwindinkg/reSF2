@@ -567,6 +567,14 @@ public:
         float wea = 0.0f;
         float dw = 0.0f;
         int hd = 1;
+        // [table audit] whether `find_record` found the enemy-anim record and
+        // how many of its rows passed the Hu-frame pick (`ju_frame_index>=0`).
+        bool rec = false;
+        int rows = 0;
+        int jrows = 0;
+        int fl = 0;
+        int rda0 = 0;
+        int huf0 = 0;
         // [AI audit] the base-slots surprise gate operands: the ExpectedWait
         // lookup result (`F6a`, L639) and the `XW` latch (`1-1/b < Da.jf()`).
         float expected_wait = 1.0f;
