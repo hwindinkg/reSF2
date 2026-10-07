@@ -3724,6 +3724,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             drv.tick(app);
             app.run_one_frame();
             if (drv.saw_lynx_dialog && drv.saw_shin && drv.saw_shop) break;
+            // [harness] The fresh `--quest-verify` chain is bounded after its
+            // first (training) fight: the shipped StoryTutorial* chain does not
+            // reach the Shop/Lynx beat in the verify window (verified: without
+            // this bound it loops the fight past 15k frames and trips the
+            // watchdog). The navflash/Shop/OpenShop/LynxDialog/ShinFight checks
+            // are therefore OUT OF SCOPE for the non-buy run and are reported
+            // `n/a` (not FAIL) below; the full path is covered by
+            // `--quest-verify-buy`, which seeds STEP_BUY_ITEM.
             if (!quest_verify_buy && drv.saw_fight && drv.frame > 600) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(6));  // pace the 60 Hz steps
         }
@@ -3821,15 +3829,23 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              ? (ok_chain && ok_change && ok_flash && ok_shop && ok_open &&
                                 ok_lynx && ok_shin && ok_story_advance)
                              : (ok_chain && ok_change && ok_fight);
+        // [harness] `navflash/Shop/OpenShop/LynxDialog/ShinFight/StoryAdvance`
+        // are driven ONLY by the `--quest-verify-buy` (STEP_BUY_ITEM) chain; the
+        // non-buy chain is bounded after its training fight and reports them
+        // `n/a` instead of a misleading FAIL.
+        const auto in_scope = [&](bool v, bool buy_only) {
+            if (buy_only && !quest_verify_buy) return "n/a";
+            return v ? "PASS" : "FAIL";
+        };
         std::fprintf(stdout,
                      "[qverify] RESULT chain=%s ChangeScene=%s navflash=%s Shop=%s "
                      "OpenShop=%s LynxDialog=%s ShinFight=%s trainingFight=%s "
                      "StoryAdvance=%s -> %s\n",
-                     ok_chain ? "PASS" : "FAIL", ok_change ? "PASS" : "FAIL",
-                     ok_flash ? "PASS" : "FAIL", ok_shop ? "PASS" : "FAIL",
-                     ok_open ? "PASS" : "FAIL", ok_lynx ? "PASS" : "FAIL",
-                     ok_shin ? "PASS" : "FAIL", ok_fight ? "PASS" : "FAIL",
-                     ok_story_advance ? "PASS" : "FAIL",
+                     in_scope(ok_chain, false), in_scope(ok_change, false),
+                     in_scope(ok_flash, true), in_scope(ok_shop, true),
+                     in_scope(ok_open, true), in_scope(ok_lynx, true),
+                     in_scope(ok_shin, true), in_scope(ok_fight, false),
+                     in_scope(ok_story_advance, true),
                      all ? "PASS" : "FAIL");
         std::fflush(stdout);
         app.shutdown();

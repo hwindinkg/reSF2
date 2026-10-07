@@ -497,9 +497,22 @@ constexpr float kOdBodyKc = 0.9f;
 // L920). Returns the localized text when the key is in the loaded table, else
 // `fallback` — never a raw key. The table ships as `res/lang/en.<hash>.xml`
 // and is loaded once by `ensure_lang`; a missing file/key falls back silently.
+// A title that carries `{0}`/`{br}` placeholders or a `%key` nested reference is
+// routed through `loc_na` = the JS `Cc.ln` formatter (defined below); a plain
+// title keeps the direct lookup so its text is byte-identical to before.
+std::string loc_na(App& app, const std::string& raw, const std::string& fallback);
 std::string loc(App& app, const std::string& key, const std::string& fallback) {
     if (key.empty()) return fallback;
-    return lang_text(app.res_root(), app.language(), key, fallback);
+    if (key.find('{') != std::string::npos ||
+        key.find('%') != std::string::npos) {
+        return loc_na(app, key, fallback);
+    }
+    const std::string t =
+        lang_text(app.res_root(), app.language(), key, fallback);
+    if (t.find('{') != std::string::npos || t.find('%') != std::string::npos) {
+        return loc_na(app, key, fallback);
+    }
+    return t;
 }
 
 // JS `qd(a,b)` (L3387): `a.indexOf(b)==0`.
@@ -562,9 +575,11 @@ std::string loc_na(App& app, const std::string& raw, const std::string& fallback
     const std::size_t brace = raw.find('{');
     const std::string base = brace == std::string::npos ? raw : raw.substr(0, brace);
     // `X.Xa(this.QU,b)` miss -> `Cc.p7`; the port keeps the caller fallback so
-    // an unknown key never surfaces a raw token.
+    // an unknown key never surfaces a raw token. (No `loc()` round-trip: `loc`
+    // now routes back into this formatter, so returning the fallback directly
+    // breaks the mutual recursion.)
     const std::string looked = lang_text(app.res_root(), app.language(), base, std::string());
-    if (looked.empty()) return loc(app, base, fallback);
+    if (looked.empty()) return fallback;
     std::string text = looked;
     // `Rc(Rc(Rc(b,"{br}","\n"),"&lt;","<"),"&gt;",">")`.
     {
