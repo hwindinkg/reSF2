@@ -374,6 +374,28 @@ const MoveDef* Fighter::stance_move(const std::vector<std::string>& templates,
     return unsuffixed != nullptr ? unsuffixed : group.front();
 }
 
+// JS `Gc` EndStance stage re-selection (`xF(3)` -> `Gj(..,1)`): pick the
+// max-`<Priority>` move of the `EndStance` template family whose own
+// `<Conditions>` pass (the `<RoundStage Name="EndStance"/>` plus
+// `<RoundResult Name="Victory"/>` -> `Win_Fists` for the winner, or
+// `<Health Max="0"/>` -> `Loss_fall` for the KO'd loser). `ctx.stage` must be
+// EndStance and `ctx.round_victory` set to this fighter's `is_winner`.
+const MoveDef* Fighter::end_stance_move(FightContext& ctx) {
+    std::vector<const MoveDef*> group;
+    for (const MoveDef* m : hb_) {
+        if (m == nullptr) continue;
+        if (m->template_tags.count("EndStance") == 0) continue;
+        if (!move_conditions_pass(*m, ctx, nullptr)) continue;
+        if (group.empty() || m->priority > group.front()->priority) {
+            group.clear();
+            group.push_back(m);
+        } else if (m->priority == group.front()->priority) {
+            group.push_back(m);
+        }
+    }
+    return group.empty() ? nullptr : group.front();
+}
+
 // JS `Pi.Ex` (L2301 region): the shop's try-on animation state is `LX=7`
 // (`iz.XBa("TryOn")=7`, L444). The move that plays is resolved by the normal
 // move machinery against the WORN items + the open shop screen: a move whose
@@ -1917,6 +1939,7 @@ void Fighter::advance_step() {
             ended_intervals_.emplace_back(ivn, interval_type(ivn));
         }
         ended_move_ = current_move_;
+        ++move_end_count_;  // clip-end edge (the EndStance gate)
         current_move_ = nullptr;
         current_clip_ = nullptr;
         active_intervals_.clear();
@@ -2121,6 +2144,15 @@ void Fighter::clear_move() {
     // reaction move never started, so the struck bones never returned to the
     // clip pose (the `[ragdoll] START` with no matching STOP).
     ragdoll_stop();
+    // [FIX round-reset stale pose] JS `Te.reset`/`Bnb` drops the pending
+    // reaction queue too: a `qs`/`Ml` pick stashed by the killing blow's
+    // `try_react` must NOT survive the round boundary. The old code kept it,
+    // so the next round's `update_fighter` re-started the previous round's
+    // `PhysicalFall` on top of the fresh spawn (`[ragdoll] F1 ... START
+    // 'PhysicalFall'`), and the stale ragdoll state corrupted the getup
+    // (RECOVER |d| ~ 3.5e4). Clearing here matches `Z2`'s full reset.
+    qs_move_ = nullptr;
+    ml_move_ = nullptr;
     current_move_ = nullptr;
     current_clip_ = nullptr;
     move_end_frame_ = 0;
@@ -3221,6 +3253,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         float max_d = 0.0f;
         double sum_d = 0.0;
         std::size_t moved = 0;
+        // [FIX getup freeze] The per-bone `RECOVER` dump printed up to ~300
+        // lines in a SINGLE frame at the ragdoll->clip transition (the getup).
+        // On a console/redirect that is a ~300-write burst in one tick — the
+        // reported "при вставании происходит фриз (лаг)". The JS has no such
+        // output. Keep the summary line always; the per-bone detail only under
+        // `SF2_RAGDOLL_VERBOSE`.
+        static const bool ragdoll_verbose =
+            std::getenv("SF2_RAGDOLL_VERBOSE") != nullptr;
         for (std::size_t i = 0; i < n; ++i) {
             const float dx = pos_[i * 2] - ragdoll_recover_from_[i * 2];
             const float dy =
@@ -3229,7 +3269,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             if (d > max_d) max_d = d;
             sum_d += d;
             if (d > 0.01f) ++moved;
-            if (d > 0.01f) {
+            if (ragdoll_verbose && d > 0.01f) {
                 std::fprintf(stdout,
                              "[ragdoll]   RECOVER %s d=(%.2f,%.2f) |d|=%.3f\n",
                              bones[i].name.c_str(), dx, dy, d);

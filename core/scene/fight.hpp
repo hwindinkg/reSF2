@@ -1130,6 +1130,11 @@ struct FightFighter {
     // the clip OCa() and never re-plays it). -1 = none; compared against
     // round_.number so each round plays the intro exactly once.
     int intro_played_round = -1;
+    // [FIX end-stance KO] The EndStance re-selection latch: `xF(3)` re-picks the
+    // fighter's move once (the `Loss_fall`/`Win_Fists` EndStance family). Set
+    // when the pick has been attempted, so a completed EndStance clip is not
+    // re-started forever. Reset in `enter_end_stance`.
+    bool end_stance_selected = false;
     std::set<std::string> prev_intervals;  // last tick's intervals (12/13 edge)
     // JS `Gc.GB` -> next-frame `Tu` (L672): the type-13 `EStopIntervalEvent`
     // queue. `tick_bus_side` records each interval that just ended here; the

@@ -209,6 +209,17 @@ public:
     const MoveDef* stance_move(const std::vector<std::string>& templates,
                                bool is_player) const;
 
+    // JS `Gc` stage re-selection (`xF(3)` -> `Gj(..,1)`): at the EndStance
+    // stage the model re-picks its move from the `EndStance`-template family by
+    // evaluating each candidate's own `<Conditions>` (the `<RoundStage
+    // Name="EndStance"/>` + `<RoundResult Name="Victory"/>` / `<Health Max="0"/>`
+    // gates resolve the winner's `Win_Fists` and the KO'd loser's `Loss_fall`).
+    // The port had no stage re-selection, so a fighter that died STANDING kept
+    // its previous clip ("he kept standing"). Returns the max-`<Priority>`
+    // passing candidate, or nullptr. `ctx.stage` must be EndStance and
+    // `ctx.round_victory` set to this fighter's `is_winner`.
+    const MoveDef* end_stance_move(sf2::scene::FightContext& ctx);
+
     // --- shop `TryOn` preview (JS `Pi.Ex` L2301; `iz.XBa("TryOn")=7` L444) --
     // The item's TryOn move from the loaded table: a move whose Template
     // carries "ShopTryOn" and whose locks pass for `shop_screen` + `worn`.
@@ -549,6 +560,10 @@ public:
     // `Cl` one-shot at EVERY move start, including a repeat of the same
     // move (whose pointer is unchanged).
     int move_start_count() const { return move_start_count_; }
+    // Incremented when a move's clip ends (JS `Te.lS` -> the `EStopAnimation
+    // Event`). The EndStance gate uses the edge to know the KO/lying chain (or
+    // the `Loss_fall`/`Win_Fists` clip) has finished.
+    int move_end_count() const { return move_end_count_; }
     // JS `Te.M2` — the anim controller move-frame counter. `Te.ia`
     // (L547-548) opens with `this.M2++` and later in the SAME call does
     // `this.Xh++`, so the two counters advance in LOCKSTEP: `M2 == Xh - 4`
@@ -961,6 +976,8 @@ private:
     int move_end_frame_ = 0;
     // Incremented in `start_move_impl` (JS `Te.Skb` L551 -> `x3` -> `hob`).
     int move_start_count_ = 0;
+    // Incremented when a clip ends (`ended_move_` set in `advance_step`).
+    int move_end_count_ = 0;
     // JS `Vu` (mu L249972) — the pending hit-reaction latch (`lrb`/`eob`).
     Reaction reaction_;
     // JS `wd.Cn` (tu L297387) + `wd.lU` (the strike-time clock).

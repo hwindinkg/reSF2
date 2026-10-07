@@ -3142,6 +3142,10 @@ void FightController::enter_end_stance() {
     round_.running = false;
     round_live_ = false;
     end_stance_frames_ = 0;
+    // [FIX end-stance KO] Fresh EndStance: let each fighter re-select its
+    // EndStance move (`Loss_fall`/`Win_Fists`) once the current clip ends.
+    player_.end_stance_selected = false;
+    enemy_.end_stance_selected = false;
     // JS `$_a` (L427) -> `onb()`/`pnb` (L828) -> `du.Iwb` (L898): the
     // ringout arrows are removed at the round-end cleanup and every active
     // rule is stopped. `rules_end_round` clears the marker + rule set.
@@ -5913,6 +5917,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // the final frames of the StartStance (the reported "plays a bit more").
     const bool intro = phase_ == fight_phase::start_stance;
     if (me.fighter.current_move() == nullptr && !stance_locked &&
+        phase_ != fight_phase::end_stance &&
         !(intro && me.intro_played_round == round_.number)) {
         // The mirror variant is picked from the direction to the enemy
         // (JS `wd.NS` L506: facing = sign(enemyX - myX); the move's
@@ -6003,7 +6008,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // sides every fight frame (as in the JS); an ordinary idle/attacking
     // fighter has no passing candidate — every recovery move gates on
     // `<CurrentAnimation Name="Physical..."/>`.
-    if (phase_ == fight_phase::fight || phase_ == fight_phase::start_stance) {
+    if (phase_ == fight_phase::fight || phase_ == fight_phase::start_stance ||
+        phase_ == fight_phase::end_stance) {
         sf2::scene::FightContext ectx;
         ectx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         ectx.stage = static_cast<sf2::scene::round_stage>(phase_);
@@ -6015,6 +6021,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         }
         fill_ctx_geometry(ectx, me, foe);
         ectx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+        // JS `Fm.zd` — the round-result flag the `<RoundResult Name="Defeat"
+        // Not="1"/>` getup gate reads. During the EndStance a KO'd loser is NOT
+        // the round winner, so `Standup` fails (the loser stays lying) while a
+        // winner may get up. The port never set this, so `Defeat` always read
+        // true and `Victory`-gated moves (`Win_Fists`) never resolved.
+        ectx.round_victory = me.is_winner;
         // JS `Cm.he` reads `Al.frameCount` (the ragdoll physics frame) — the
         // `PhysicsFrameNumber` fallback in the recovery chain.
         ectx.physics_frame = me.fighter.ragdoll_frame_count();
@@ -6246,7 +6258,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // deliberately left UNSET here: `eval_random` then uses the pinned
     // independent stream (`conditions.cpp`'s private `DaPrng`, the documented
     // probe/demo fallback), so the demo's rolls stay off `draw01()`.
-    if (auto_attack_ && me.is_player && me.fighter.current_move() == nullptr) {
+    if (auto_attack_ && me.is_player && phase_ == fight_phase::fight &&
+        me.fighter.current_move() == nullptr) {
         const float dist = std::fabs(foe.fighter.world_x() - me.fighter.world_x());
         const std::string move_name =
             dist > 160.0f ? "StepForward" : "HighPunch";
@@ -6857,11 +6870,44 @@ void FightController::update(float dt) {
             ++end_stance_frames_;
             bool stance_ended = false;
             for (FightFighter* f : {&player_, &enemy_}) {
-                if (f->fighter.current_move() == nullptr) stance_ended = true;
-                f->fighter.advance(dt);
-                // JS `Te.lS` (L553) -> `wd.kg` (L387) `eu==3 && animEnded`
-                // -> `h4a` (`JJ=!0`). The ended move is the clip-end edge.
-                if (f->fighter.take_ended_move() != nullptr) stance_ended = true;
+                FightFighter& foe = (f == &player_) ? enemy_ : player_;
+                // JS `ca.Hnb` (L389) runs `wd.ia` — the reaction-queue drain
+                // (`Qnb`/`Bnb`) AND the `<EveryFrame/>` recovery chain — in
+                // EVERY phase; only the AI (`Anb`) is gated on `!kh`. Running
+                // the full per-fighter update here (with the AI/input/auto-
+                // attack/idle paths phase-gated) lets a KO'd loser play its
+                // knockdown chain (`PhysicalFall` -> `PhysicalGroundHit` ->
+                // `PhysicalLying`) instead of standing on its last attack clip.
+                update_fighter(*f, foe, dt);
+                // JS `xF(3)` -> `Gc` stage re-selection: when the fighter has no
+                // move, pick the EndStance family move (`Loss_fall` for the KO'd
+                // loser, `Win_Fists` for the winner) so a fighter that died
+                // STANDING still plays its KO/victory clip. Attempted once.
+                if (!f->end_stance_selected && f->fighter.current_move() == nullptr) {
+                    f->end_stance_selected = true;
+                    sf2::scene::FightContext esctx;
+                    esctx.roll01 = [this]() { return draw01(); };
+                    esctx.stage = sf2::scene::round_stage::end_stance;
+                    esctx.qb = f->is_player;
+                    esctx.anims_me = anim_names_of(f->fighter);
+                    esctx.anims_enemy = anim_names_of(foe.fighter);
+                    fill_ctx_geometry(esctx, *f, foe);
+                    esctx.health_ratio = f->max_hp > 0.0f ? f->hp / f->max_hp : 0.0f;
+                    esctx.round_victory = f->is_winner;
+                    const sf2::scene::MoveDef* es = f->fighter.end_stance_move(esctx);
+                    if (es != nullptr && f->fighter.ai_start_move(*es, esctx)) {
+                        std::fprintf(stdout, "[stance] F%d %s EndStance move=%s\n",
+                                     frame_, f->name.c_str(), es->name.c_str());
+                        std::fflush(stdout);
+                    }
+                }
+                // JS `kg` (L387) `eu==3 && animEnded` -> `h4a` (`JJ=!0`): the
+                // clip-end edge of the EndStance move / knockdown chain. Once
+                // the EndStance pick has been attempted and the fighter holds no
+                // move, its KO/victory animation is done.
+                if (f->end_stance_selected && f->fighter.current_move() == nullptr) {
+                    stance_ended = true;
+                }
             }
             rebuild_body(player_, enemy_);
             rebuild_body(enemy_, player_);

@@ -13658,16 +13658,28 @@ void FightScreen::render_impl(App& app) {
             int tw = 0, th = 0;
             unsigned int gl = 0;
             if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && tw > 0 && th > 0) {
+                // [FIX style fill] JS `Nx.Oka` -> `Y.wl(vc.ho(mode, fill))` is
+                // the `EFilled` draw mode: it fills `fill` of the node WIDTH
+                // (left `Jc.io` / right `Jc.TU`), NOT a UV crop. The BarImage
+                // frames are 1 px wide (fight/ui.json), so a UV crop on the
+                // stretched quad draws the WHOLE bar one solid colour (the
+                // reported "залита цветом целиком"). Clip the destination quad
+                // width instead and sample the full 1-px column.
+                const float fw = base_w * fill;
+                const float fx = reverse ? x + base_w - fw : x;
+                float qxy[8] = {fx, plate_y, fx + fw, plate_y,
+                                fx, plate_y + base_h, fx + fw, plate_y + base_h};
+                for (int c = 0; c < 4; ++c) {
+                    qxy[c * 2] += skew_tan * (qxy[c * 2 + 1] - yc);
+                }
                 const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
                 const float u1 =
                     static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
                 const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
                 const float v1 =
                     static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
-                const float ua = reverse ? u1 - (u1 - u0) * fill : u0;
-                const float ub = reverse ? u1 : u0 + (u1 - u0) * fill;
-                const float uv[8] = {ua, v0, ub, v0, ua, v1, ub, v1};
-                ren.draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+                const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+                ren.draw_textured_quad(frame, qxy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
                 return;
             }
             const float fw = base_w * fill;
@@ -13694,6 +13706,52 @@ void FightScreen::render_impl(App& app) {
                                                  : static_cast<float>(sm_e.frac),
                                 true);
             }
+        }
+        // JS `Fr.izb` (L1076276): the level NAME label `Rp` (an image from the
+        // callouts atlas, `E.get(1310)`) shows `v.hu.lfa(bn).dma` — the
+        // `<StyleLevels>` `TextImage` ("Hard".."Fantastic"; level 0 `Start` is
+        // "" -> hidden). `Rp.la(.6)` scale, `D(50)` y; player `C(10)` x, enemy
+        // `C(width - Rp.za() - 10)` (right-aligned). `load_callouts_atlas`
+        // registers the frames.
+        static const char* const kStyleNames[6] = {
+            "", "Hard", "Brutal", "Aggressive", "Crazy", "Fantastic"};
+        {
+            // [style] trace — the live meter level/frac + the level name.
+            static int last_p = -1, last_e = -1;
+            static int last_pf = -1, last_ef = -1;
+            const int pf = static_cast<int>(sm_p.frac * 10.0f);
+            const int ef = static_cast<int>(sm_e.frac * 10.0f);
+            if (sm_p.level != last_p || sm_e.level != last_e || pf != last_pf ||
+                ef != last_ef) {
+                last_p = sm_p.level;
+                last_e = sm_e.level;
+                last_pf = pf;
+                last_ef = ef;
+                std::fprintf(stdout,
+                             "[style] P lvl=%d frac=%.3f name=%s | E lvl=%d "
+                             "frac=%.3f name=%s\n",
+                             sm_p.level, sm_p.frac, kStyleNames[sm_p.level],
+                             sm_e.level, sm_e.frac, kStyleNames[sm_e.level]);
+                std::fflush(stdout);
+            }
+        }
+        if (load_callouts_atlas(app)) {
+            auto draw_style_name = [&](const char* nm, float left_x,
+                                       bool right_align) {
+                if (nm == nullptr || nm[0] == '\0') return;
+                sf2::data::atlas_frame nfr;
+                int ntw = 0, nth = 0;
+                unsigned int ngl = 0;
+                if (!app.get_atlas_frame(nm, &nfr, &ntw, &nth, &ngl)) return;
+                const float nw = static_cast<float>(nfr.source_w) * 0.6f * hud_c;
+                const float nh = static_cast<float>(nfr.source_h) * 0.6f * hud_c;
+                const float x = right_align
+                                    ? left_x + base_w - nw - 10.0f * hud_c
+                                    : left_x + 10.0f * hud_c;
+                app.draw_atlas_rect(nm, x, plate_y + 50.0f * hud_c, nw, nh, 1.0f);
+            };
+            draw_style_name(kStyleNames[sm_p.level], base_x_player, false);
+            draw_style_name(kStyleNames[sm_e.level], base_x_enemy, true);
         }
     }
     for (int i = 0; i < rounds_total; ++i) {
