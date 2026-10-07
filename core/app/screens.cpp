@@ -12514,11 +12514,13 @@ void draw_global_achievement_toast(App& app) {
         if (last_drawn != a.name) {
             last_drawn = a.name;
             std::fprintf(stdout,
-                         "[achievement] TOAST DRAW %s panel=%dx%d alpha=%.2f "
-                         "state=%d\n",
+                         "[achievement] TOAST DRAW %s panel=%dx%d rect=%.0fx%.0f "
+                         "cx=%.0f cy=%.0f scale=%.3f alpha=%.2f state=%d\n",
                          a.name.c_str(), static_cast<int>(pf.w),
-                         static_cast<int>(pf.h), static_cast<double>(alpha),
-                         g_achiev_state);
+                         static_cast<int>(pf.h), static_cast<double>(rect_w),
+                         static_cast<double>(ph_px), static_cast<double>(panel_cx),
+                         static_cast<double>(panel_cy), static_cast<double>(scale),
+                         static_cast<double>(alpha), g_achiev_state);
             std::fflush(stdout);
         }
     }
@@ -12527,21 +12529,43 @@ void draw_global_achievement_toast(App& app) {
     const std::string text = loc_na(app, a.name, a.name);  // `Y.na(a.name)`
     const sf2::data::font* fnt = app.menu_font();
     const float cy = panel_cy;
-    const float tscale = 0.5f;
+    // JS `ur.aa` (L969568): `this.node.la((a.N-a.J)/this.Qa.fa.x)` scales the
+    // WHOLE `ur` node — the panel AND its `icon`/`info` children. `scale`
+    // (rect_w / panel frame width) IS that node scale. The prior wave scaled
+    // ONLY the panel (`draw_atlas_rect("panel", .., rect_w, ..)`), leaving the
+    // icon at its native 162 px and the text at a fixed 0.5 — so the icon
+    // dwarfed the 277 px panel and pushed the composition LEFT (the reported
+    // "too big and shifted left of centre"). Everything now rides `node_scale`.
+    const float node_scale = scale;
+    // `this.info.ua(this.Qa.qa()*.5)` (L968929/L829275): the JS font size is
+    // half the panel frame height (`qa()` = `fa.y*|Rm|` = 214 -> 107),
+    // node-scaled. The port font's base size is `fnt->size`, so the per-glyph
+    // scale is `(pf.h*.5*node_scale)/fnt->size`.
+    const float tscale = fnt != nullptr && fnt->size > 0
+                             ? (pf.h * 0.5f * node_scale) / static_cast<float>(fnt->size)
+                             : node_scale;
     float text_w = 0.0f;
     if (fnt != nullptr) text_w = app.measure_text(*fnt, text, tscale);
     sf2::data::atlas_frame ic{};
     int iw = 0, ih = 0;
     unsigned int itex = 0;
-    if (app.get_atlas_frame(icon_frame, &ic, &iw, &ih, &itex) && ic.w > 0.0f) {
-        // `this.icon.C(65); this.icon.D(25)` then re-centred left of the text
-        // (`this.icon.C(this.icon.ya+this.icon.fa.x+10)`), native px units.
-        const float ix = panel_cx - text_w * 0.5f - ic.w - 10.0f;
-        app.draw_atlas_rect(icon_frame, ix, cy - ic.h * 0.5f, ic.w, ic.h, alpha);
+    const bool has_icon =
+        app.get_atlas_frame(icon_frame, &ic, &iw, &ih, &itex) && ic.w > 0.0f;
+    // `this.icon.C(65); this.icon.D(25)` then the info box at
+    // `icon.ya+icon.fa.x+10`, node-scaled; the JS re-centres the icon about
+    // the info box, so centre the whole icon+gap+text group on the panel.
+    const float icon_w = has_icon ? ic.w * node_scale : 0.0f;
+    const float icon_h = has_icon ? ic.h * node_scale : 0.0f;
+    const float gap = has_icon ? 10.0f * node_scale : 0.0f;
+    const float group_w = icon_w + gap + text_w;
+    const float gx = panel_cx - group_w * 0.5f;
+    if (has_icon) {
+        app.draw_atlas_rect(icon_frame, gx, cy - icon_h * 0.5f, icon_w, icon_h, alpha);
     }
     if (fnt != nullptr) {
         // `info.La(Z.sc)` = the dark-brown achievement text colour.
-        app.draw_text_centered(*fnt, app.font_texture(), panel_cx,
+        app.draw_text_centered(*fnt, app.font_texture(),
+                               gx + icon_w + gap + text_w * 0.5f,
                                cy - static_cast<float>(fnt->size) * tscale * 0.5f,
                                text, tscale, 0.184f, 0.145f, 0.106f, alpha);
     }
@@ -14242,7 +14266,14 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
 //   FightBeaten  -> `Ysb(record)` when `RI(counter.T3a/U3a)` matches
 //                   `Fight`/`Fight2` (L189533).
 //   Losses       -> `zrb()` on a lost fight (`Bq("Losses")`, L188930).
-//   MaximumLevel -> `Psb()` when the player reaches a new maximum level.
+//   MaximumLevel -> `Psb()` ONLY when THIS fight's exp grant pushes the
+//                   player TO the max level (`x_a` L219096: `b=p.o.rs`,
+//                   `c=p.o.Oz()`, `a=v.S6a(this.Da,a)` (the reward row exp),
+//                   `d=p.o.bb()`; `b+a>=c && d+1==v.$0() && this.fe.Psb()`).
+//                   The old port fired it on ANY level-up (`leveled_up`), so
+//                   the Monkey tutorial fight's 1->2 level-up unlocked the
+//                   level-cap achievement `Achievement_Name_Level_Cap`
+//                   ("Повелитель Теней").
 // ShockWin  -> `JZa(a)` (L420) on a WIN: `this.m$ && this.fe.vsb()`, where
 //              `m$` (L397) = the player was shocked by an enemy hit in the
 //              final round. Only the shipped `ShockWin` (EclipseMode="0") row
@@ -14255,7 +14286,7 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
 // matching achievement in the shipped achievements.xml (their counter rows are
 // inert), so they are SKIPPED (no invention).
 static std::map<std::string, int> fight_result_counter_deltas(
-    const std::string& ids, bool player_won, bool leveled_up,
+    const std::string& ids, bool player_won, bool reached_max_level,
     bool player_shocked) {
     std::map<std::string, int> deltas;
     for (const AchievementCounterDef& d : load_achievement_counter_defs()) {
@@ -14283,7 +14314,7 @@ static std::map<std::string, int> fight_result_counter_deltas(
         } else if (d.type == "Losses") {
             deltas[d.name] += 1;  // `zrb`
         }
-        if (leveled_up && d.type == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
+        if (reached_max_level && d.type == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
     }
     return deltas;
 }
@@ -14464,8 +14495,12 @@ bool apply_fight_reward(App& app) {
     // achievements they cross. Runs BEFORE the save so the counters persist.
     {
         const std::string cids = pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
+        // JS `x_a` L219096: `d+1==v.$0()` — the NEW level equals the max
+        // level (the level-up loop above ran, so `b+a>=c` holds). Any other
+        // level-up must NOT touch the `MaximumLevel` counter.
+        const bool reached_max_level = leveled_up && w.level == max_level;
         const std::map<std::string, int> deltas =
-            fight_result_counter_deltas(cids, player_won, leveled_up,
+            fight_result_counter_deltas(cids, player_won, reached_max_level,
                                         pb.player_shocked);
         std::vector<PendingBattle::AchievementToastRow>& toasts =
             pb.achievement_toasts;
@@ -16464,6 +16499,11 @@ void ShopScreen::update_impl(float dt) {
                 const bool ok = on_gem ? purchase_gem_price_plate(app(), bit)
                                        : purchase_price_plate(app(), bit);
                 if (ok) {
+                    // JS `Ao.Qg` (L574833): the guided buy completes ->
+                    // `Sb.F().kk(!1)` + `this.sa()` — resume the parked
+                    // `StoryTutorialBuyItem` tail (step -> MAP + the
+                    // `tutorial_buy_knives` dialog + the Map guidance).
+                    app().quest_engine().resume_buy_item(app());
                     buy_armed_ = -1;
                 }
                 return;
@@ -21499,7 +21539,7 @@ int run_shell_probe(App& app) {
         const std::size_t ul_before = w.achievement_unlocks.size();
         const std::map<std::string, int> deltas =
             fight_result_counter_deltas("ZONE_1|Survival|1", /*player_won=*/true,
-                                        /*leveled_up=*/false,
+                                        /*reached_max_level=*/false,
                                         /*player_shocked=*/false);
         const int unlocked = flush_achievement_counters(app, w, deltas, nullptr);
         app.save().save(w);
@@ -21525,11 +21565,11 @@ int run_shell_probe(App& app) {
         WarriorSave w = app.save().load();
         const std::map<std::string, int> no_shock =
             fight_result_counter_deltas("ZONE_1|Training|1", /*player_won=*/true,
-                                        /*leveled_up=*/false,
+                                        /*reached_max_level=*/false,
                                         /*player_shocked=*/false);
         const std::map<std::string, int> with_shock =
             fight_result_counter_deltas("ZONE_1|Training|1", /*player_won=*/true,
-                                        /*leveled_up=*/false,
+                                        /*reached_max_level=*/false,
                                         /*player_shocked=*/true);
         const bool no_delta = no_shock.find("ShockWin") == no_shock.end();
         const bool has_delta = with_shock.find("ShockWin") != with_shock.end() &&

@@ -3787,7 +3787,49 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 fx.lock_targets.push_back("ProfileMove");
                 fx.tab_selects.push_back(QuestTabSelect{"Moves", "", 11, 7});
             } else if (t == "StoryTutorialBuyItem") {
+                // JS `Ao.S()` (sf2.502f0946.js L574833):
+                //   `var a=v.su.Pca; p.o.xa.Qj(a)!=null && this.sa();`
+                // — the chain CONTINUES (`sa()`) ONLY when the player ALREADY
+                // owns WEAPON_KNIVES; otherwise `Ao` arms the buy plate
+                // (`a.tk=!0`, `a.pa.addListener(Qg)`) and WAITS (`Qg` -> `sa()`).
+                // The port ran the tail unconditionally, so `SetStoryTutorialStep
+                // MAP` + the `NextScene=Map` guidance fired BEFORE the buy: the
+                // shop left its guided-buy state and the Map lock replaced the
+                // buy lock (the reported "the sensei skipped the knives and
+                // talked about the Lynx, and the menu died"). Park when the
+                // player does not yet own the knives.
                 fx.lock_targets.push_back("ShopBuy");
+                bool owns_knives = false;
+                try {
+                    const WarriorSave w = app.save().load();
+                    for (const auto& oi : w.items) {
+                        if (oi.name == "WEAPON_KNIVES") { owns_knives = true; break; }
+                    }
+                } catch (const std::exception&) {
+                }
+                if (!owns_knives && depth == 0 && tutorial_live(app) &&
+                    !tutorial_gate_.active) {
+                    tutorial_gate_.active = true;
+                    tutorial_gate_.beat = 6;  // BuyItem (`Ao`)
+                    tutorial_gate_.remaining = kTutorialStepTimeoutSec;  // no timer
+                    tutorial_gate_.rest.assign(acts.begin() + i + 1, acts.end());
+                    tutorial_gate_.journal = journal;
+                    tutorial_gate_.locals = locals;
+                    tutorial_gate_.quest = quest;
+                    try {
+                        tutorial_gate_.step_at_park = app.save().load().story_step();
+                    } catch (const std::exception&) {
+                    }
+                    std::fprintf(stdout,
+                                 "[quest] StoryTutorialBuyItem: chain parked until the "
+                                 "WEAPON_KNIVES buy (%zu tail actions)\n",
+                                 tutorial_gate_.rest.size());
+                    std::fflush(stdout);
+                    ActionRest parked;
+                    parked.suspended = true;
+                    parked.frames = 0;
+                    return parked;
+                }
             } else if (t == "StoryTutorialMove" || t == "StoryTutorialPunchbag" ||
                        t == "StoryTutorialDoubleSweep") {
                 fx.nav_lock = true;
@@ -5268,7 +5310,7 @@ bool QuestEngine::resume_tutorial_gate(App& app) {
     // `Sb.F().kk(!1)` (clear the input overlay); `Co` `Qg` (L1127) also runs
     // `Sb.F().kk(!1)` (the learn-button completion). Both precede the tail
     // resume.
-    if (gate.beat == 4 || gate.beat == 5) {
+    if (gate.beat == 4 || gate.beat == 5 || gate.beat == 6) {
         unlock_controls();
     } else {
         unlock_nav();
@@ -5318,6 +5360,19 @@ bool QuestEngine::resume_learn_perk(App& app) {
     return true;
 }
 
+// JS `Ao.Qg` (StoryTutorialBuyItem, L574833): the armed `M8` buy plate fired ->
+// `Sb.F().kk(!1)` + `this.sa()`. Resumes the parked BuyItem tail (beat 6); the
+// tail runs `SetStoryTutorialStep MAP` + the `tutorial_buy_knives` dialog + the
+// `StoryTutorialOpenScene` `NextScene=Map` guidance. Returns true when a parked
+// BuyItem gate resumed.
+bool QuestEngine::resume_buy_item(App& app) {
+    if (!tutorial_gate_.active || tutorial_gate_.beat != 6) return false;
+    std::fprintf(stdout, "[quest] buy-item plate -> chain resumes\n");
+    std::fflush(stdout);
+    resume_tutorial_gate(app);  // beat 6 -> unlock_controls() + run the tail
+    return true;
+}
+
 // Test hook (`--tutorial-showblock-probe`): mirror the `Fo` park site
 // (quest_engine.cpp ~L3527) at beat 4 with an EMPTY tail, so the resume is
 // observable as `tutorial_gate_.active` clearing. The `EquipmentScreen`
@@ -5346,7 +5401,8 @@ bool QuestEngine::tutorial_gate_tick(App& app, float dt) {
     // absent (`aDa()==null` -> `Cxa`). The port's timeout here made the "view
     // the block" step auto-complete after 15 s without the player watching the
     // animation.
-    if (tutorial_gate_.beat == 4 || tutorial_gate_.beat == 5) return false;
+    if (tutorial_gate_.beat == 4 || tutorial_gate_.beat == 5 ||
+        tutorial_gate_.beat == 6) return false;
     tutorial_gate_.remaining -= dt;
     if (tutorial_gate_.remaining > 0.0f) return false;
     std::fprintf(stdout, "[quest] tutorial lesson beat %d done -> chain resumes\n",
@@ -6340,7 +6396,8 @@ std::vector<std::string> QuestEngine::fire(App& app, const std::string& event,
     // (beat 4) registers NO `LE` listener (nor a timer), so it is excluded;
     // `Co` (beat 5, LearnPerk) likewise registers NEITHER (L1127), so it too is
     // excluded — only the learn-button press resumes it.
-    if (tutorial_gate_.active && tutorial_gate_.beat != 4 && tutorial_gate_.beat != 5) {
+    if (tutorial_gate_.active && tutorial_gate_.beat != 4 && tutorial_gate_.beat != 5 &&
+        tutorial_gate_.beat != 6) {
         std::string live;
         try {
             live = app.save().load().story_step();

@@ -1301,6 +1301,8 @@ struct QuestVerifyDriver {
     bool saw_shin = false;        // the boss fight carries BOSS_LYNX
     bool saw_fight = false;       // the Fight screen launched
     bool go_map = false;          // post-OpenShop: navigate to the Map
+    bool bought_knives = false;   // the guided `Ao` buy completed
+    int shop_buy_phase = 0;       // 0 = TRY plate, 1 = price plate
 
     // Queue an internal click at the view coordinate (no OS input).
     void tap(sf2::app::App& app, int x, int y, int cd = 8) {
@@ -1367,6 +1369,31 @@ struct QuestVerifyDriver {
         // 3. Results -> back (pops to the caller).
         if (cur == kScreenResults) {
             if (cooldown == 0) tap(app, 640, 360);
+            return;
+        }
+        // 3b. `StoryTutorialBuyItem` (`Ao`, L574833): the guided buy. JS parks
+        //     the chain until `p.o.xa.Qj("WEAPON_KNIVES")!=null` (the player
+        //     owns the knives), then `Qg` -> `sa()`. Perform the buy so the
+        //     parked tail (step -> MAP + the Lynx beat) can run.
+        if (cur == kScreenShop && !bought_knives) {
+            bool owns = false;
+            try {
+                for (const auto& oi : app.save().load().items) {
+                    if (oi.name == "WEAPON_KNIVES") { owns = true; break; }
+                }
+            } catch (const std::exception&) {
+            }
+            if (owns) {
+                bought_knives = true;
+            } else if (cooldown == 0) {
+                if (shop_buy_phase == 0) {
+                    shop_buy_phase = 1;
+                    tap(app, 305, 199);  // the TRY plate (arms the `Pi` panel)
+                } else {
+                    shop_buy_phase = 0;
+                    tap(app, 934, 460);  // the `M8` price plate (buy+equip)
+                }
+            }
             return;
         }
         // 4. `MenuBtnFlashing` guidance: expand the collapsed `za` column,
@@ -2918,8 +2945,23 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // `StoryTutorialShop` arm the Shop nav flash at boot, so the
                 // driver verifies the LIVE `OpenShop` execution.
                 w.set_story_step("STEP_BUY_ITEM");
+                // The JS `Ao` (StoryTutorialBuyItem) PARKS the chain until the
+                // player owns WEAPON_KNIVES (`p.o.xa.Qj(a)!=null && this.sa()`),
+                // so the driver must actually buy it; the `Pa.iwa` price gate
+                // needs a coin float (the shipped profile is Money=0). Drop any
+                // owned WEAPON_KNIVES so the guided buy runs deterministically
+                // regardless of the ambient (gate-mutated) save.
+                w.money = 200;
+                {
+                    std::vector<sf2::app::WarriorSave::OwnedItem> kept;
+                    for (const auto& oi : w.items) {
+                        if (oi.name != "WEAPON_KNIVES") kept.push_back(oi);
+                    }
+                    w.items.swap(kept);
+                }
+                if (w.weapon == "WEAPON_KNIVES") w.weapon = "Fists";
                 ss.save(w);
-                std::fprintf(stdout, "[qverify] seeded story step -> STEP_BUY_ITEM\n");
+                std::fprintf(stdout, "[qverify] seeded story step -> STEP_BUY_ITEM (money=200)\n");
                 std::fflush(stdout);
             } else if (tutorial_block_shop_probe) {
                 w.set_story_step("SHOW_BLOCK");

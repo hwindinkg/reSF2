@@ -921,6 +921,12 @@ public:
     // resumed. The chain tail then runs `SetStoryTutorialStep SHOW_DOUBLE_SWEEP`
     // + the `StoryTutorialOpenScene` `tutorial_dojo_new_move` notification.
     bool resume_learn_perk(App& app);
+    // JS `Ao.Qg` (StoryTutorialBuyItem, sf2.502f0946.js L574833/L574900): the
+    // armed `M8` buy plate fired -> `Sb.F().kk(!1)` + `this.sa()` (resume the
+    // parked tail). Returns true when a parked BuyItem gate (beat 6) resumed.
+    // The tail then runs `SetStoryTutorialStep MAP` + the `tutorial_buy_knives`
+    // dialog + the `NextScene=Map` guidance.
+    bool resume_buy_item(App& app);
     // JS `Bo`/`Do`/`Eo` `Pf` (sf2.502f0946.js L1121/L1123/L1125 <- the model
     // `Pf` L386): the player fighter STARTED the animation `name` (its JS
     // `zY` type `type`, "EAnimationMove"/"EAnimationAttack"). Runs the JS
