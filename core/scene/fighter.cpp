@@ -1004,7 +1004,12 @@ bool Fighter::try_start_move(const MoveDef& move, FightContext& ctx) {
 // `<Conditions>` tree runs via `a.Yz(...)`.
 bool Fighter::move_conditions_pass(const MoveDef& move, FightContext& ctx,
                                   std::string* trace) const {
-    ctx.candidate_moves = {move.name};
+    // JS `Gc.EZa` L677: `this.Ek[d].xK = f.xl` — the candidate's FULL
+    // animation-name list (own name + transitive `<Template>` chain), NOT just
+    // its name. `lg.he`'s `$Move` compares the current animation's name
+    // against exactly this list (conditions.cpp). Passing `{move.name}` made
+    // `$Move` miss every template-tag match.
+    ctx.candidate_moves = move.anim_names;
     ctx.keys.clear();
     for (const auto& k : keys_) {
         ctx.keys.push_back({k.key, k.press});

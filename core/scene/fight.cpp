@@ -1693,6 +1693,7 @@ FightFighter FightController::make_fighter(
         };
         f.fighter.build_move_list_locks(*moves_, implicit, /*include_universal=*/true,
                                        subtype);
+        f.owned_items = implicit;  // the `ra.Hza` item set (disarm rebuild)
     } else {
         // The app layer's `owned_items` list carries the NAME of every owned
         // item (JS `Hm.he` L758 `this.Ba == b.name`), so both the direct boot
@@ -1700,6 +1701,7 @@ FightFighter FightController::make_fighter(
         // build the IDENTICAL move list from the same save.
         f.fighter.build_move_list_locks(*moves_, owned, /*include_universal=*/true,
                                        subtype);
+        f.owned_items = owned;  // the `ra.Hza` item set (disarm rebuild)
     }
     f.fighter.set_world_pos(x, y);
     f.fighter.set_enemy_x(x);  // patched each frame
@@ -6102,6 +6104,27 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             me.shock.shocked_vc = true;
             me.fighter.set_shock_latch(true);  // `oa.vc` (Al.sk/jE gate)
             me.params.attributes[gfp.shock_set_attr] = gfp.shock_set_value;
+            // JS `$o(b,!0,!0,!1)` (L268225) -> `jmb()` (L255...):
+            //   `this.me.length=0; ra.Hza(this,!0); this.Su.xKa();
+            //    this.Su.FT(this.me); this.x6();`
+            // — the item swap REBUILDS the fighter's move set `me` from the
+            // NEW weapon (`v.Ub.Au`, the config `<Weapon Name>` = shipped
+            // "Fists"). The port swapped `me.weapon` but never re-ran
+            // `ra.Hza`, so the dropped weapon's TacticWeapon moves (and its
+            // stance idle) stayed live: after a Batons disarm the enemy still
+            // idled on `BatonsStartStanceIdle` (the reported "idle stance
+            // still shows the old weapon"). Mirror `jmb`: swap the Weapon row
+            // and re-run the Locks/TacticWeapon build.
+            for (sf2::scene::OwnedItem& oi : me.owned_items) {
+                if (oi.type == "Weapon") {
+                    oi.subtype = gfp.shock_weapon;
+                    oi.name = gfp.shock_weapon;
+                    break;
+                }
+            }
+            me.fighter.build_move_list_locks(*moves_, me.owned_items,
+                                             /*include_universal=*/true,
+                                             gfp.shock_weapon);
             // JS `this.oa.vc=!0; this.parameters.P2a(); <impulse loop>`.
             // `P2a` (`xc.P2a` L417709) deactivates the wielded item; the
             // weapon MESH is NOT hidden — the weapon's `Shock="1"` nodes are

@@ -159,8 +159,27 @@ bool eval_current_animation(const Cond& c, const FightContext& ctx) {
         // Physics flag match (JS d7a). Not exercised by moves.xml.
         result = true;  // conservative: no anim constraint
     } else if (name == "$Move") {
-        for (const std::string& m : ctx.candidate_moves) {
-            if (!m.empty()) { result = true; break; }
+        // JS `lg.he` (L378489): `"$Move"==this.Ba ? 0<c.length && (b=lg.xEa(
+        // c[0], a.xK))` where `c = tb.vQ(a.rb, this.Ob)` is the CURRENT
+        // animation name list (`ctx.anims_me` for the default Me slot) and
+        // `a.xK = Ek[d].xK = f.xl` is the CANDIDATE move's `anim_names`
+        // (`ctx.candidate_moves`). The old port test returned true whenever
+        // the candidate carried ANY animation name — ALWAYS true — so the
+        // stance-idle Or-condition `{StanceLeft, StanceRight, Win, $Move}`
+        // (moves.xml L166920/L167871/L173987 ...) admitted `FistsStartStanceIdle-*`
+        // / `BatonsStartStanceIdle` after EVERY clip: after the dynamic
+        // `StanceIdle` (the reported "goes to the default idle"), after a held
+        // `StepForward` (the priority-10 one-shot beat the step — the reported
+        // "idle interrupts the walk"), and after any attack. JS-exact, `$Move`
+        // is `anims_me[0] ∈ candidate.anim_names`, i.e. the current clip's
+        // move IS the candidate (a self-loop guard). The same wrong value also
+        // poisoned the ubiquitous `<CurrentAnimation Name="$Move" Not="1"/>`
+        // guards.
+        const std::vector<std::string>& cur = anim_list_for(ctx, c.player);
+        if (!cur.empty() && !cur[0].empty()) {
+            for (const std::string& m : ctx.candidate_moves) {
+                if (m == cur[0]) { result = true; break; }
+            }
         }
     } else if (name == "$NoAnimation$") {
         result = anim_list_for(ctx, c.player).empty();

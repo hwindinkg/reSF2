@@ -1147,6 +1147,12 @@ struct FightFighter {
                                                 // mapping lands)
     std::vector<sf2::scene::ActiveMod> dots;  // ticking DoTs/HoTs
     std::string weapon = "Fists";  // wielded weapon (disarm identity)
+    // The fighter's item list (`OwnedItem` triples) as `ra.Hza` (L684-685)
+    // tests it. Kept so the `wd.Wqb`/`$o` disarm can REBUILD the move list
+    // (`jmb` L268... -> `ra.Hza(this,!0)`) after the Weapon slot is swapped to
+    // the config Fists item — without it the dropped weapon's TacticWeapon
+    // moves (and its stance idle) stayed live.
+    std::vector<sf2::scene::OwnedItem> owned_items;
     // [weapon drop] The wielded weapon's models.dat entry (the `Hd` slot's
     // `<Item Model>`, e.g. `mdl_weapon_kunai`). The `wd.Wqb` (L268496) drop
     // RELEASES the weapon's `Shock="1"` body nodes and flings them
