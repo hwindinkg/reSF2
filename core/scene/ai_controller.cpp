@@ -42,16 +42,18 @@
 //     `Ju.$_(Fl)`; the outcome window pick now follows `Gu.acb`/`Gu.n0`
 //     (L610-612) exactly (`NDa[i-1]`, lower edge gated). `yaa` now uses the
 //     JS `Q6a` frame source `g=this.Fl`, the Hu pick `L6a(f)`, and the
-//     `f!=g -> wait(f-g)` tail (L609-611). `gea` (throw, `Z0()[2]`) still
-//     passes `hu_pick=-1` and skips the `gcb`/`Uea` structure — cited
-//     divergence (throws only).
+//     `f!=g -> wait(f-g)` tail (L609-611). `gea` (throw, `Z0()[2]`) now uses
+//     the JS `ld` source `ra.nAa(P.t$a(), ld)` (the `<MovementsTables>`
+//     `<MovementsMainIterations>` group children) with the label `n0` removal
+//     filter, the `bma`/`Pcb` filters, the `P.G9a()` fallback and the final
+//     `p0(true)-Fl+1` wait; only the `cs` branch and the `b==1` (`VAa`) path
+//     remain cited divergences (see `gea`).
 //   - the table target (NOW JS-EXACT): JS `Wea` (L600) returns the FIGHTER
 //     BONE named `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`, resolved on
 //     MY fighter); `XAa` then forms `n = a.da.hd()*(Wea - a.da.dw()) + Mu`.
 //     The port now computes exactly that (opponent clip mirror, opponent
 //     root world-x, bone world-x) — see `xaa`. `yaa` (Q6a) still drops the
-//     `xea` sub-frame term; `gea` (throw, `Z0()[2]`) still passes `hu_pick=-1`
-//     and skips the `gcb`/`Uea` structure — cited divergences (safe/throw).
+//     `xea` sub-frame term — a cited divergence (safe only).
 // Exact since this wave (no oracle needed — pure JS math):
 //   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
 //     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
@@ -69,6 +71,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 
@@ -675,6 +679,101 @@ int pba_append(const TacticRow& row, float dist, std::vector<AiCandidate>& out,
     }
     return added;
 }
+
+// JS `Gu.n0(a)` (L634): the outcome id of the window containing `a`
+// (`NDa[i-1]` for the first edge `> a`), or -1 when `a` is outside the
+// window / no edge fits. Shared by `de.Gea`'s label filter (L313), which
+// REMOVES the outcome anim when `0 < n0(target)`.
+int window_outcome_at(const TacticOutcome& oc, float dist) {
+    if (oc.window_edges.size() < 2) return -1;
+    if (!(oc.window_edges.front() <= dist && dist < oc.window_edges.back())) {
+        return -1;
+    }
+    int idx = -1;
+    for (std::size_t i = 1; i < oc.window_edges.size(); ++i) {
+        if (dist < oc.window_edges[i]) {
+            idx = static_cast<int>(i);
+            break;
+        }
+    }
+    if (idx < 1) return -1;
+    const std::size_t wi = static_cast<std::size_t>(idx - 1);
+    if (wi >= oc.window_outcomes.size()) return -1;
+    return static_cast<int>(oc.window_outcomes[wi]);
+}
+
+// The `<Animation Name="X"/>` names directly under `<tag>...</tag>` in a
+// shipped XML. Used for the `de.Gea` (L313) group lists: `P.esa`/`P.$ra`
+// (computer_settings.xml `<MovementsTables>`/`<MissileTables>` ->
+// `<MovementsMainIterations>`, JS L317641/L317980) and `P.F$a()`/`P.G9a()`
+// (`P.Zoa`/`P.Woa` = tactic_settings.xml `<SafeDodges>`/`<EmergencyDodges>`,
+// JS L319585/L319635) — read from the SAME files the JS reads.
+std::vector<std::string> xml_animation_names(const std::string& xml,
+                                             const std::string& open,
+                                             const std::string& close) {
+    std::vector<std::string> out;
+    const std::size_t p = xml.find("<" + open + ">");
+    if (p == std::string::npos) return out;
+    std::size_t end = xml.find("</" + close + ">", p);
+    if (end == std::string::npos) end = xml.size();
+    const std::string block = xml.substr(p, end - p);
+    std::size_t k = 0;
+    const std::string key = "Name=\"";
+    while ((k = block.find(key, k)) != std::string::npos) {
+        k += key.size();
+        const std::size_t e = block.find('"', k);
+        if (e == std::string::npos) break;
+        out.push_back(block.substr(k, e - k));
+        k = e + 1;
+    }
+    return out;
+}
+
+// The nested section: `<outer>` then `<inner>...</inner>`.
+std::vector<std::string> xml_animation_names_nested(const std::string& xml,
+                                                    const std::string& outer,
+                                                    const std::string& inner) {
+    const std::size_t p = xml.find("<" + outer + ">");
+    if (p == std::string::npos) return {};
+    return xml_animation_names(xml.substr(p), inner, inner);
+}
+
+std::string read_res_file(const char* rel) {
+    std::ifstream in(rel, std::ios::binary);
+    if (!in) return {};
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+}
+
+// JS `P.t$a()` -> `P.esa` (computer_settings.xml L317641).
+const std::vector<std::string>& gea_movements_main() {
+    static const std::vector<std::string> v = [] {
+        return xml_animation_names_nested(
+            read_res_file("reference/extracted/xml/res/computer_settings.xml"),
+            "MovementsTables", "MovementsMainIterations");
+    }();
+    return v;
+}
+
+// JS `P.G9a()` -> `P.Woa` = `<EmergencyDodges>` (tactic_settings.xml).
+const std::vector<std::string>& gea_emergency_dodges() {
+    static const std::vector<std::string> v = [] {
+        return xml_animation_names(
+            read_res_file("reference/extracted/xml/res/tactic_settings.xml"),
+            "EmergencyDodges", "EmergencyDodges");
+    }();
+    return v;
+}
+
+// JS `P.F$a()` -> `P.Zoa` = `<SafeDodges>` (tactic_settings.xml).
+const std::vector<std::string>& gea_safe_dodges() {
+    static const std::vector<std::string> v = [] {
+        return xml_animation_names(
+            read_res_file("reference/extracted/xml/res/tactic_settings.xml"),
+            "SafeDodges", "SafeDodges");
+    }();
+    return v;
+}
 }  // namespace
 
 // Finds the record for the current enemy animation in the tactics table
@@ -910,59 +1009,154 @@ int AiController::xaa(const AiFightState& st) {
 // looks up the throw table records the same way. The target is the same
 // `Wea` bone world-x.
 int AiController::gea(const AiFightState& st, int variant) {
-    (void)variant;
+    const int b = variant;
     wb_.clear();
-    if (st.enemy_anim.empty()) return 0;
-    const TacticRecord* rec = find_record(st.enemy_anim, /*throw=*/2);
-    dbg_.rec = rec != nullptr;
-    if (rec == nullptr) return 0;
-    dbg_.rows = static_cast<int>(rec->rows.size());
-    for (const TacticRow& row : rec->rows) {
-        // JS `Gea` (L613-616, exact): `k=f.dw(); h=f.hd();
-        //   n=h*(this.Wea(n,this.model,a.Kf())-k)+this.Mu` — the OPPONENT's
-        // `dw()`/`hd()`, the same distance shell as `XAa`. The port used
-        // `my_facing*Wea + Mu` (dropped `-e`, wrong mirror).
-        const float wv = wea(st, row.label);
-        const float target = static_cast<float>(st.enemy_clip_mirror) *
-                                 (wv - st.enemy_dw) +
-                             static_cast<float>(Mu_);
-        dbg_.target = target;
-        dbg_.mu = static_cast<float>(Mu_);
-        dbg_.label = row.label;
-        dbg_.wea = wv;
-        dbg_.dw = st.enemy_dw;
-        dbg_.hd = st.enemy_clip_mirror;
-        pba_append(row, target, wb_);
+    // JS `de.Gea(a,1)` (the `VAa` dodge path, L313) needs `a.da.Qda` (the
+    // enemy's THROW move) and `a.da.M2`; the port models neither, and `vaa`
+    // (the only `Gea(...,1)` caller) is itself a stub. BLOCKED (reported).
+    if (b != 0) return 0;
+    if (st.enemy_anim.empty() || st.enemy_move == nullptr || moves_ == nullptr)
+        return 0;
+
+    const int c = Fl_;  // b==0 -> `c = this.Fl`
+    if (c % 5 != 0) {
+        Ao_ = true;
+        return 0;
     }
-    // JS `Gea` (L613-616, exact): the STORED wait is `c = d.p0(!0)-this.Fl+1`
-    // where `d = a.da.Ua` (the ENEMY's current move) and `p0(!0)` is the
-    // Attack end in animation sub-frames (`i0(p0(!1)+1)-1`). It is the SAME
-    // wait for every candidate and is NOT the `Gu.n0` window outcome — the
-    // JS uses `n0` only as the `0<t.n0(n)` filter. `XAa` stores `$I()`
-    // (Strict); `Gea` stores the enemy's Attack end.
-    // REMAINDER (reported, not fixed here): the JS `ld` SOURCE is
-    // `ra.nAa(g, this.ld)` with `g = P.t$a()` (b==0) / `P.p$a()` (b==1) —
-    // the fixed `<UnexpectedMoves>`-family group lists — then filtered by
-    // each `ju` label's `n0`; it does NOT enumerate the throw record's
-    // outcomes the way `pba_append` does. The `ld` source still needs the
-    // `P.esa`/`P.$ra` group lists ported (`TacticsFile`/`TacticDef`), so only
-    // the wait is JS-exact below.
-    if (st.enemy_move != nullptr) {
-        const int c = attack_end_full(*st.enemy_move) - Fl_ + 1;
-        for (AiCandidate& cand : wb_) cand.wait = c;
-    }
-    // JS `Gea` (L613-616): the candidate list is filtered by `bma`
-    // (`this.bma(n,this.model,a)` — the displaced NPivot must stay in MY
-    // arena). Applied to the resolved move names.
-    if (moves_ != nullptr) {
-        std::vector<AiCandidate> keep;
-        keep.reserve(wb_.size());
-        for (const AiCandidate& c : wb_) {
-            auto it = moves_->find(c.animation);
-            if (it == moves_->end() || bma(it->second, st)) keep.push_back(c);
+    Ao_ = false;
+
+    const MoveDef& d = *st.enemy_move;  // `d = a.da.Ua`
+    // JS `e = d.Z0()[2]` — the single throw-table record (the JS returns 0
+    // unless the group and weapon lists are each exactly one entry; the port
+    // resolves the single weapon-matching record).
+    const TacticRecord* e = find_record(st.enemy_anim, /*throw=*/2);
+    dbg_.rec = e != nullptr;
+    if (e == nullptr) return 0;
+
+    // REMAINDER (blocked): the JS `cs` branch (`this.Ji.Pe && this.cs!=null`
+    // -> `gcb` -> `e.aCa(k.va.align.CK)` -> `Uea` -> `q.frames[r].Ny[].n0` ->
+    // the `p0(true)` wait) needs MY OWN current move (`this.cs`), its
+    // `va.align.CK` chain and the `q7`/`dw`/`hd` pose; not modeled here.
+
+    // this.ld.length=0; ra.nAa(P.t$a(), this.ld) — the group CHILDREN
+    // (`ra.xC.get(tpl).children` = every move whose name/transitive template
+    // chain carries `tpl`, i.e. `resolve_candidate`).
+    std::vector<std::string> ld;
+    for (const std::string& tpl : gea_movements_main()) {
+        for (const MoveDef* m : resolve_candidate(tpl, *moves_)) {
+            if (m != nullptr) ld.push_back(m->name);
         }
-        wb_ = std::move(keep);
     }
+    // bma filter (`this.bma(n,this.model,a)`).
+    {
+        std::vector<std::string> keep;
+        keep.reserve(ld.size());
+        for (const std::string& n : ld) {
+            auto it = moves_->find(n);
+            if (it == moves_->end() || bma(it->second, st)) keep.push_back(n);
+        }
+        ld = std::move(keep);
+    }
+    std::size_t gsz = ld.size();
+
+    // JS label loop (L313): for each throw-record row resolve the Hu frame
+    // (`q.$_(this.Uea(c))`; `Uea(Fl)==Fl` because Fl%5==0), form the window
+    // target and REMOVE every outcome anim with `0 < Gu.n0(target)`. A row
+    // whose Hu frame is out of range clears the whole list (`else g=0`).
+    {
+        const int hd = st.enemy_clip_mirror;
+        const float dw = st.enemy_dw;
+        for (const TacticRow& q : e->rows) {
+            const int r = ju_frame_index(Fl_, q.rda, q.hu_frames);
+            if (r < 0) {
+                gsz = 0;  // `else g=0`
+                continue;
+            }
+            const float wv = wea(st, q.label);
+            const float target = static_cast<float>(hd) * (wv - dw) +
+                                 static_cast<float>(Mu_);
+            const int frame = (r < q.hu_frames) ? r : 0;  // `t=q.frames[r]||[0]`
+            for (const TacticOutcome& oc : q.outcomes) {
+                if (oc.hu_index != frame) continue;
+                if (window_outcome_at(oc, target) <= 0) continue;
+                for (std::size_t A = 0; A < gsz; ++A) {
+                    if (ld[A] == oc.anim) {  // `this.ld[A]==t.animation`
+                        --gsz;
+                        ld[A] = ld[gsz];
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    ld.resize(gsz);
+
+    // `in_group(name, list)` = JS `Pcb(a)` (`a.$k(c)` for a `c` in the list:
+    // name or transitive template match).
+    auto in_group = [&](const std::string& name,
+                        const std::vector<std::string>& group) -> bool {
+        for (const std::string& c : group) {
+            if (name == c) return true;
+            auto it = moves_->find(name);
+            if (it != moves_->end()) {
+                if (it->second.template_tags.count(c) > 0) return true;
+                if (std::find(it->second.anim_names.begin(),
+                              it->second.anim_names.end(),
+                              c) != it->second.anim_names.end())
+                    return true;
+            }
+        }
+        return false;
+    };
+    // `y0(this.ld)` (L600-601) = the V1 filter.
+    auto filter_v1 = [&](std::vector<std::string> v) -> std::vector<std::string> {
+        std::vector<std::string> out;
+        out.reserve(v.size());
+        for (const std::string& n : v) {
+            auto it = moves_->find(n);
+            if (it == moves_->end() || v1(it->second, st)) out.push_back(n);
+        }
+        return out;
+    };
+
+    // JS `if(f.yD(2)!=null && a!=null && c)` (c = `f.Pe`, the enemy playing):
+    // drop every move whose Uninterrupt end >= the enemy move's, unless it is
+    // a `<SafeDodges>` member (P.F$a()=P.Zoa).
+    if (st.enemy_playing) {
+        const int thresh = uninterrupt_end_full(d) - Fl_;
+        std::vector<std::string> keep;
+        keep.reserve(ld.size());
+        for (const std::string& n : ld) {
+            auto it = moves_->find(n);
+            const bool drop =
+                it != moves_->end() &&
+                thresh <= uninterrupt_end_full(it->second) &&
+                !in_group(n, gea_safe_dodges());
+            if (!drop) keep.push_back(n);
+        }
+        ld = std::move(keep);
+    }
+
+    // `0<this.ld.length && this.y0(this.ld)` — the V1 filter.
+    ld = filter_v1(std::move(ld));
+
+    // `if(this.ld.length==0 && b==0)` — the `P.G9a()` (`<EmergencyDodges>`)
+    // fallback, then `y0(this.ld,null,!0)` (the `Vcb` filter; the port's
+    // `v1` is the shared approximation — cited divergence).
+    if (ld.empty()) {
+        for (const std::string& tpl : gea_emergency_dodges()) {
+            for (const MoveDef* m : resolve_candidate(tpl, *moves_)) {
+                if (m != nullptr) ld.push_back(m->name);
+            }
+        }
+        ld = filter_v1(std::move(ld));
+    }
+    // `a=this.ld.length; 0<a && (a=this.y0(this.ld))`.
+    ld = filter_v1(std::move(ld));
+
+    // Final: `c = d.p0(!0)-this.Fl+1` for every survivor.
+    const int wait = attack_end_full(d) - Fl_ + 1;
+    for (const std::string& n : ld) wb_.push_back({n, wait});
     return static_cast<int>(wb_.size());
 }
 
