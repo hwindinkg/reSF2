@@ -19437,6 +19437,28 @@ void EquipmentScreen::render_impl(App& app) {
                     profile_anim_phase_ ? perk_op_min + da : perk_op_max - da;
             }
         }
+        // JS `uk.animate` (L2204): `if(this.L$){ a=this.Joa-this.eqa;
+        // a>0&&this.CM>0&&(a=a/this.CM*this.kN, this.GH.wa(this.GX?
+        // this.eqa+a : this.Joa-a)) }` — the SELECT highlight glow
+        // (`pieces/icons_kick_glow`, `Ed.GH` L2202) ramps between
+        // `zc.yka.min/max` (SelectOpacity/255, joa=min -> eqa) over
+        // `zc.qva` (AnimationSpeed) frames on the SAME shared `kN`/`GX`
+        // clock the icon uses. Visible only while `L$` (the `vb.uj`
+        // selection, `tL` L2203).
+        const float sel_op_max =
+            static_cast<float>(fprof.profile_select_opacity_max) / 255.0f;
+        const float sel_op_min =
+            static_cast<float>(fprof.profile_select_opacity_min) / 255.0f;
+        float sel_glow_alpha = sel_op_max;
+        {
+            float da = sel_op_max - sel_op_min;
+            if (da > 0.0f && fprof.profile_animation_speed > 0.0) {
+                da = da / static_cast<float>(fprof.profile_animation_speed) *
+                     static_cast<float>(profile_anim_frame_);
+                sel_glow_alpha =
+                    profile_anim_phase_ ? sel_op_min + da : sel_op_max - da;
+            }
+        }
         // The `tk` is symmetric about the seam the `Rx` group docks to: the
         // cell centre = `cell.ce.x/2` (L2218) in native px inside the `Gg`
         // list rect.
@@ -19555,6 +19577,15 @@ void EquipmentScreen::render_impl(App& app) {
             }
             if (!r.available) {
                 (void)try_draw_atlas_button(app, "pieces/icons_kick_off", icx, cy, ico, ico, 0.9f);
+            }
+            // JS `Ed.GH` (L2202) `pieces/icons_kick_glow` + `Ed.animate`
+            // (L2204): the select-highlight glow is the LAST child of the `uk`
+            // node (created after `perkback`/icon/`kick_blocked`/`kick_off`),
+            // so it draws on TOP; visible while the cell is selected
+            // (`vb.uj == this`, `vb.hqb` L2198 -> `tL(!0)`).
+            if (perk_sel_ == static_cast<int>(i)) {
+                (void)try_draw_atlas_button(app, "pieces/icons_kick_glow", icx, cy, ico,
+                                            ico, sel_glow_alpha);
             }
             // `uk.Dy` badge (`uk.vca`/`i9a` L2225): `i9a()` = "pieces/level"+
             // `PQ()`, `la(.8)`, `C(FH.x/2 - za()*1.15)`, `D(FH.y/2 - qa()*1.15)`.

@@ -2567,11 +2567,20 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             return true;
         }
         // `Bj` L962: `case "_$InEclipseMode": a.Fb.result = p.o.Yh?"1":"0"`.
-        // `p.o.Yh` is the profile's `EclipseMode` attr (profile ctor L248:
-        // `this.Yh=(b!=null?b:"Off")=="On"`); the port models no EclipseMode,
-        // so the ctor default "Off" -> false -> "0".
+        // `p.o.Yh` is the LIVE profile flag (ctor char 125468:
+        // `this.Yh=(a.attributes.get("EclipseMode")??"Off")=="On"`), read from
+        // the WARRIOR save node. Read the save here (the same
+        // `app.save().load()` the offer scan uses) so a profile carrying
+        // `EclipseMode="On"` reports "1"; the shipped seeds carry no attr ->
+        // "Off" -> "0".
         if (token == "_$InEclipseMode") {
-            out = "0";
+            bool on = false;
+            try {
+                const WarriorSave w = app.save().load();
+                on = w.eclipse_mode;
+            } catch (const std::exception&) {
+            }
+            out = on ? "1" : "0";
             return true;
         }
         // `Bj` L962: `case "_$InLottery": a.Fb.result = this.ta.Dab?"1":"0"`.

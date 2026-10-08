@@ -90,6 +90,11 @@ struct WarriorSave {
     // false)` on the WARRIOR node — a save attribute (`users_default.xml`
     // ships "0"). Gates the shop upgrade plates (`k9 && p.o.qC`, L2255).
     bool show_upgrades = false;
+    // JS `p.o.Yh` (world/profile ctor char 125468): `b=a.attributes.get(
+    // "EclipseMode"); this.Yh=(b!=null?b:"Off")=="On"` on the WARRIOR node.
+    // The `_$InEclipseMode` token (L493856: `p.o.Yh?"1":"0"`) and every
+    // EclipseMode quest branch read it. Absent -> "Off" -> false.
+    bool eclipse_mode = false;
     // JS `xc.voice` (the WARRIOR `Voice` attr, `users_default.xml`/the seed
     // ship `Voice="Male"`). Read-only in the port (the writer patches known
     // attrs and leaves `Voice` verbatim); it feeds the `Pi` try-on preview's

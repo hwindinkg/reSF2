@@ -183,6 +183,9 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("Tactic")) out.tactic = warrior.attribute("Tactic").value();
     if (warrior.attribute("CurrentZone")) out.current_zone = warrior.attribute("CurrentZone").value();
     out.show_upgrades = sf2::data::xml_attr_bool(warrior, "ShowUpgrades", false);
+    // `p.o.Yh` (char 125468): the WARRIOR `EclipseMode` attr, default "Off"
+    // when absent, true only for the literal "On".
+    out.eclipse_mode = std::string(warrior.attribute("EclipseMode").value()) == "On";
     if (warrior.attribute("Voice")) out.voice = warrior.attribute("Voice").value();
     // `p.o.kq`/`p.o.Vf` (JS world ctor L124074/L124...) — the Denomination
     // save attrs (`On` -> `xtb`/`mtb`). Absent in the seed -> 0/"".
