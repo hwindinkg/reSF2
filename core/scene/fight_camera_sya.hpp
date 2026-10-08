@@ -63,6 +63,39 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     // re-fill the view -> the ~200 px top/bottom black bars at max separation.
     const float n_w = n_c / cam.arena_w;                // mwa: NW = nC/Lb.width
     cam.zoom_layer = std::max(1.0f, n_w);               // Ut.Al: Kga?NW:max(1,NW)
+    // JS `Ut.Al` (L826) maxWidth / `kJa` pan branch. The pre-override `this.Bj`
+    // is `e>0 ? e : this.xCa()` (the intro `e` or the span-dependent `xCa`);
+    // the branch fires only when that value is below `NW / (maxWidth /
+    // Lb.width)` — i.e. once the fighters separate past `maxWidth` world px.
+    // Inside it the layer zoom is locked to that bound but then DISCARDED by
+    // the `this.Bj=1; max(this.Bj,NW)` override (the port's `zoom_layer`); the
+    // lasting effect is the focus pan `kJa(limit, h$x - focus, Xia)`. `h$` is
+    // the PLAYER node (`la.Gf(model, qb=isPlayer,...)` -> `b?h$=...:i$=...`,
+    // L370) and `Xia=1`; the enemy `i$` weight `X3=0` in the shipped build
+    // (`Ut.init` L823), so its term multiplies to 0. `kJa` (L827):
+    //   `|v|+Vva>limit ? -(sign v)*(|v|-limit+Vva)*w : 0`.
+    // `BindingNode` (shipped "NPivot", `v.LC.sba`) is proxied by the player
+    // COM world x (`ax`); at the calibrated close-span states the branch is
+    // inert (xCa == 1 >= bound).
+    const float xca = std::min(n_c / (span + 300.0f), 1.0f);
+    const float max_width = sf2::scene::FightParams::defaults().camera_max_width;
+    const float binding_len =
+        sf2::scene::FightParams::defaults().camera_binding_length;
+    float focus_x = cam.go_x_;
+    if (max_width > 0.0f && cam.arena_w > 0.0f) {
+        const float bj_pre =
+            cam.zoom_effect_active_ ? cam.zoom_effect_current_ : xca;
+        const float bound = n_w / (max_width / cam.arena_w);
+        if (bj_pre < bound) {
+            const float limit = n_c / bound / 2.0f;  // nC/Bj/2 with Bj = bound
+            const float val = ax - focus_x;
+            if (std::fabs(val) + binding_len > limit) {
+                const float k = std::fabs(val) - limit + binding_len;
+                // Io += kJa ; Io = arena_w/2 - focus -> focus -= kJa.
+                focus_x += (val > 0.0f ? 1.0f : -1.0f) * k;
+            }
+        }
+    }
     // JS `ql.c3a` (L365): `ia.Al(..., this.IJ ? this.Bf.currentScale : 0)` —
     // while the intro lens is live (`IJ`) it supplies the layer scale in
     // place of `Bj` (the intro `e > 0` path; Al then overrides `Bj` with the
@@ -150,9 +183,14 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
         sf2::scene::FightParams::defaults().camera_max_width_delta;
     const float d_io = (cam.arena_w - max_width_delta) * 0.5f * cam.zoom_layer - n_c * 0.5f;
     const float center = cam.arena_w * 0.5f;
-    cam.center_x = cam.go_x_ < center - d_io   ? center - d_io
-                : cam.go_x_ > center + d_io ? center + d_io
-                                        : cam.go_x_;
+    // JS `Ut.Al` (L826-827): `Io = Lb.width/2 - focus`; the shipped `X3==0`
+    // build ALWAYS scales it by `Bj` (`if($z(Xia,0)||$z(X3,0)) this.Io*=Bj`),
+    // then clamps to [-d,d]. The native `center_x` is the focus equivalent
+    // (`Io = center - center_x`), so invert after the clamp.
+    float io = (center - focus_x) * cam.zoom_layer;
+    if (io < -d_io) io = -d_io;
+    else if (io > d_io) io = d_io;
+    cam.center_x = center - io;
     // JS `N.Ta.K4` (L85) resets the camera position to (0,0) each frame and
     // `Sya` never writes position.y (only the aspect<1 portrait `b.D`). The
     // smoothed `go_y_` stays as chase state but must NOT feed the render

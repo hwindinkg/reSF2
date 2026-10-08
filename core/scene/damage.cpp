@@ -456,10 +456,147 @@ void load_fight_params_from_settings(const std::string& xml_text) {
             v.lottery_reroll_prices.push_back(r.attribute("Value").as_int());
         }
     }
-    // `v.LC` (L593864) = `<Camera><CameraSettings .../>` -> `oGa`.
+    // `v.LC` (L593864) = `<Camera><CameraSettings .../>`: `Ov.parse` (L1180-1181)
+    // reads `BindingNode` (default "NPivot" -> `sba`), `BindingLength` (`Vva`),
+    // `MaxWidth` (default -1 -> `maxWidth`) and `MaxWidthDelta` (`oGa`). All
+    // four feed `Ut.Al` (L826-827): `oGa` the pano clamp, the rest the `kJa`
+    // pan branch. `CameraNode` is read then discarded by the JS.
     if (const pugi::xml_node cs = root.child("Camera").child("CameraSettings")) {
+        if (cs.attribute("CameraNode"))
+            v.camera_node = cs.attribute("CameraNode").value();
+        if (cs.attribute("BindingNode"))
+            v.camera_binding_node = cs.attribute("BindingNode").value();
+        if (cs.attribute("BindingLength"))
+            v.camera_binding_length = cs.attribute("BindingLength").as_float();
+        if (cs.attribute("MaxWidth"))
+            v.camera_max_width = cs.attribute("MaxWidth").as_float(-1.0f);
         if (cs.attribute("MaxWidthDelta"))
             v.camera_max_width_delta = cs.attribute("MaxWidthDelta").as_float();
+    }
+    // `Jj.parse(a.A("GUI").A("Fight"))` (L594330) -> `Nb.parse(a.A("PerkIcons"))`
+    // (L1278/L1282-1283): the fight-HUD perk-icon spec. `iy(node)` = the
+    // {In,Out} pair (`u.H` per component; fallback 0). `RowCapacity` and
+    // `FontScale` are read then dropped by the JS.
+    if (const pugi::xml_node pc =
+            root.child("GUI").child("Fight").child("PerkIcons")) {
+        const auto in_out = [](const pugi::xml_node& n, float& x, float& y) {
+            if (!n) return;
+            x = n.attribute("In").as_float(0.0f);
+            y = n.attribute("Out").as_float(0.0f);
+        };
+        in_out(pc.child("FadeFrames"), v.perk_icons.fade_in, v.perk_icons.fade_out);
+        in_out(pc.child("PulseAccel"), v.perk_icons.pulse_accel_in,
+               v.perk_icons.pulse_accel_out);
+        in_out(pc.child("PulseFrames"), v.perk_icons.pulse_frames_in,
+               v.perk_icons.pulse_frames_out);
+        if (pc.child("PulseAmp").attribute("Value"))
+            v.perk_icons.pulse_amp =
+                pc.child("PulseAmp").attribute("Value").as_float();
+        if (pc.child("Spacing").attribute("X"))
+            v.perk_icons.spacing_x = pc.child("Spacing").attribute("X").as_float();
+        if (pc.child("Spacing").attribute("Y"))
+            v.perk_icons.spacing_y = pc.child("Spacing").attribute("Y").as_float();
+        if (pc.child("ExpirationOpacity").attribute("Value"))
+            v.perk_icons.expiration_opacity =
+                pc.child("ExpirationOpacity").attribute("Value").as_float();
+        if (pc.child("StackShiftX").attribute("Value"))
+            v.perk_icons.stack_shift_x =
+                pc.child("StackShiftX").attribute("Value").as_float();
+        if (pc.child("StackShiftY").attribute("Value"))
+            v.perk_icons.stack_shift_y =
+                pc.child("StackShiftY").attribute("Value").as_float();
+        if (pc.child("FontScale").attribute("Value"))
+            v.perk_icons.font_scale = pc.child("FontScale").attribute("Value").as_float();
+        std::fprintf(stdout,
+                     "[fx] PerkIcons fade=%.0f/%.0f pulseAmp=%.2f "
+                     "pulseAccel=%.0f/%.0f pulseFrames=%.0f/%.0f spacing=%.0f/%.0f "
+                     "expOpacity=%.2f stack=%.0f/%.0f (shipped XML)\n",
+                     static_cast<double>(v.perk_icons.fade_in),
+                     static_cast<double>(v.perk_icons.fade_out),
+                     static_cast<double>(v.perk_icons.pulse_amp),
+                     static_cast<double>(v.perk_icons.pulse_accel_in),
+                     static_cast<double>(v.perk_icons.pulse_accel_out),
+                     static_cast<double>(v.perk_icons.pulse_frames_in),
+                     static_cast<double>(v.perk_icons.pulse_frames_out),
+                     static_cast<double>(v.perk_icons.spacing_x),
+                     static_cast<double>(v.perk_icons.spacing_y),
+                     static_cast<double>(v.perk_icons.expiration_opacity),
+                     static_cast<double>(v.perk_icons.stack_shift_x),
+                     static_cast<double>(v.perk_icons.stack_shift_y));
+        std::fflush(stdout);
+    }
+    // `zc.parse(a.A("GUI").A("Profile"))` (L594331, g="2A8"): the perk grid
+    // opacity/select animation (`u.I(AnimationSpeed,1)`, `ip.parse(PerkOpacity,
+    // 1,1)` / `ip.parse(SelectOpacity,1,1)` -> min/max via `u.H`) and the
+    // achievement scroll speed (`u.H(SpeedScrollAchievements)/60`).
+    if (const pugi::xml_node pr = root.child("GUI").child("Profile")) {
+        if (pr.child("AnimationSpeed").attribute("Value"))
+            v.profile_animation_speed =
+                pr.child("AnimationSpeed").attribute("Value").as_double(1.0);
+        if (const pugi::xml_node po = pr.child("PerkOpacity")) {
+            v.profile_perk_opacity_min = po.attribute("Min").as_float(1.0f);
+            v.profile_perk_opacity_max = po.attribute("Max").as_float(1.0f);
+        }
+        if (const pugi::xml_node so = pr.child("SelectOpacity")) {
+            v.profile_select_opacity_min = so.attribute("Min").as_float(1.0f);
+            v.profile_select_opacity_max = so.attribute("Max").as_float(1.0f);
+        }
+        if (pr.child("SpeedScrollAchievements").attribute("Value"))
+            v.profile_scroll_achievements_speed =
+                pr.child("SpeedScrollAchievements").attribute("Value").as_float() / 60.0f;
+    }
+    // `Mb.parse(a.A("GUI").A("Map"))` (L594329, g="2A5"): the reward-line
+    // oscillation (`LKa.yib/xib`), the Challenge fade (`challenge.yza`/
+    // `transitionDuration`/`Fya`) and the zone-switch fade (`Gm.tGa`/`H_`/`c_`/
+    // `RY` BattleType names).
+    if (const pugi::xml_node mp = root.child("GUI").child("Map")) {
+        if (const pugi::xml_node rl = mp.child("RewardLine")) {
+            v.map_reward_oscillation_period =
+                rl.child("OscillationPeriod").attribute("Value").as_float(28.0f);
+            v.map_reward_oscillation_factor =
+                rl.child("OscillationFactor").attribute("Value").as_float(0.022f);
+        }
+        if (const pugi::xml_node ch = mp.child("Challenge")) {
+            v.map_challenge_fade_delay =
+                ch.child("FadeDelay").attribute("Value").as_float(3.0f);
+            v.map_challenge_transition_duration =
+                ch.child("TransitionDuration").attribute("Value").as_float(1.5f);
+            v.map_challenge_difficulty_first_frame =
+                ch.child("DifficultyIsFirstFrame").attribute("Value").as_int(1);
+        }
+        if (const pugi::xml_node zs = mp.child("ZoneSwitch")) {
+            v.map_zone_min_opacity =
+                zs.child("MinOpacity").attribute("Value").as_int(122);
+            v.map_zone_fade_speed = zs.child("FadeSpeed").attribute("Value").as_int(30);
+            v.map_zone_delay_before_fade =
+                zs.child("DelayBeforeFade").attribute("Value").as_int(30);
+            v.map_zone_battle_types.clear();
+            for (const pugi::xml_node bt : zs.child("BattleTypes").children("BattleType")) {
+                const char* n = bt.attribute("Name").value();
+                v.map_zone_battle_types.push_back(n != nullptr ? n : "");
+            }
+        }
+        std::fprintf(stdout,
+                     "[fx] Profile animSpeed=%.0f perkOpacity=%.0f..%.0f "
+                     "selectOpacity=%.0f..%.0f scroll=%.4f (shipped XML)\n",
+                     v.profile_animation_speed,
+                     static_cast<double>(v.profile_perk_opacity_min),
+                     static_cast<double>(v.profile_perk_opacity_max),
+                     static_cast<double>(v.profile_select_opacity_min),
+                     static_cast<double>(v.profile_select_opacity_max),
+                     static_cast<double>(v.profile_scroll_achievements_speed));
+        std::fprintf(stdout,
+                     "[fx] Map rewardOsc=%.0f/%.3f challengeFade=%.1f/%.1f/%d "
+                     "zoneMinOpacity=%d fadeSpeed=%d delayFade=%d battleTypes=%zu "
+                     "(shipped XML)\n",
+                     static_cast<double>(v.map_reward_oscillation_period),
+                     static_cast<double>(v.map_reward_oscillation_factor),
+                     static_cast<double>(v.map_challenge_fade_delay),
+                     static_cast<double>(v.map_challenge_transition_duration),
+                     v.map_challenge_difficulty_first_frame, v.map_zone_min_opacity,
+                     v.map_zone_fade_speed, v.map_zone_delay_before_fade,
+                     v.map_zone_battle_types.size());
+        std::fflush(stdout);
     }
     // `v.hu` (L1197-1198, `v.hu.parse(a.A("StyleLevels"))` L1159): the style
     // meter. `u.H` reads StylePerHit/DecreaseSpeed/Penalty + one `<Style>`

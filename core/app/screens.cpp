@@ -13894,6 +13894,90 @@ void FightScreen::render_impl(App& app) {
                  +kPipTan25);
     }
 
+    // --- Fight-HUD perk icons (JS `Hr`/`Ir`/`Jr`, L2041-2048) --------------
+    // `lk.U0a` (L2031) appends `Hr(type==0?0:1)` to the panel; `lk.Pub` ->
+    // `Hr.fWa` -> `Ir.init` adds one icon per fired `ModIcon` action. `Hr`
+    // node = panel-local (type==0?185:-185, 140) scaled by `hud_c`; its stacks
+    // run horizontally per `Vnb` (`a += spacing.x*.2 (+ stack width)`, sign
+    // `type==0?1:-1`). `Ir.l4` pulses `la(g*.5)` (`PulseAmp/Accel/Frames`),
+    // `Kab`/`t2a` fade (`FadeFrames`, alpha `Pk`), `TI` is the expiry-overlay
+    // opacity, `StackShiftX/Y` shifts a stacked icon. The action `Image`
+    // (`Icons01.IconAvenger` style) is the atlas-246 frame with dots->slashes
+    // (`Ye.qI`). Drawn only for the states the sim produced (`perk_icons`).
+    {
+        const sf2::scene::FightParams::PerkIconParams& pip =
+            sf2::scene::FightParams::defaults().perk_icons;
+        const float spacing_step = pip.spacing_x * 0.2f * hud_c;  // `wVa.x`
+        int traced = 0;
+        for (int side = 0; side < 2; ++side) {
+            const std::vector<sf2::scene::FightController::PerkIconView>& icons =
+                fight_->perk_icons(side);
+            if (icons.empty()) continue;
+            const float panel_x = (side == 0) ? panel_player_x : panel_enemy_x;
+            const float dir = (side == 0) ? 1.0f : -1.0f;  // `TTa==0?1:-1`
+            const float base_x = panel_x + (side == 0 ? 185.0f : -185.0f) * hud_c;
+            const float base_y = panel_y + 140.0f * hud_c;
+            float cursor = 0.0f;
+            float prev_w = 0.0f;
+            std::string last_stack;
+            bool first_stack = true;
+            for (const auto& ic : icons) {
+                if (first_stack || ic.stack != last_stack) {
+                    if (!first_stack) cursor += dir * (spacing_step + prev_w);
+                    last_stack = ic.stack;
+                    first_stack = false;
+                }
+                std::string frame = ic.image;
+                for (char& ch : frame) {
+                    if (ch == '.') ch = '/';  // `Ye.qI`
+                }
+                sf2::data::atlas_frame fr;
+                int tw = 0, th = 0;
+                unsigned int gl = 0;
+                if (!app.get_atlas_frame(frame, &fr, &tw, &th, &gl) || tw <= 0 ||
+                    th <= 0) {
+                    continue;
+                }
+                const float iw = static_cast<float>(fr.source_w) * ic.scale * hud_c;
+                const float ih = static_cast<float>(fr.source_h) * ic.scale * hud_c;
+                const float cx = base_x + cursor;
+                const float cy = base_y;
+                (void)try_draw_atlas_button(app, frame, cx, cy, iw, ih, ic.alpha);
+                prev_w = iw;
+                // `Ir.stack` (L2043): the `sC` count label while `V5>0`.
+                if (ic.stack_count > 1) {
+                    const sf2::data::font* pf = app.menu_font();
+                    const unsigned int pt = app.font_texture();
+                    if (pf != nullptr && pt != 0) {
+                        app.draw_text_centered(*pf, pt, cx, cy - ih * 0.5f,
+                                               std::to_string(ic.stack_count),
+                                               pip.font_scale / 100.0f * 0.5f, 1.0f,
+                                               1.0f, 1.0f, ic.alpha);
+                    }
+                }
+                // `Ir.ss` (L2042-2043): the expiry overlay at `TI * Pk`.
+                if (ic.show_expiration) {
+                    const float ex = pip.expiration_opacity * ic.alpha;
+                    const float q[] = {cx - iw * 0.5f, cy - ih * 0.5f,
+                                       cx + iw * 0.5f, cy - ih * 0.5f,
+                                       cx + iw * 0.5f, cy + ih * 0.5f,
+                                       cx - iw * 0.5f, cy - ih * 0.5f,
+                                       cx + iw * 0.5f, cy + ih * 0.5f,
+                                       cx - iw * 0.5f, cy + ih * 0.5f};
+                    ren.draw_triangles(q, 6, 1.0f, 0.1f, 0.1f, ex);
+                }
+                if (traced++ < 6) {
+                    std::fprintf(stdout,
+                                 "[perkicon] side=%d frame=%s alpha=%.2f scale=%.2f "
+                                 "stack=%d\n",
+                                 side, frame.c_str(), static_cast<double>(ic.alpha),
+                                 static_cast<double>(ic.scale), ic.stack_count);
+                }
+            }
+        }
+        if (traced > 0) std::fflush(stdout);
+    }
+
     // --- Combo counter (JS `Gr` g="40E" / `Hx` g="40D" / `Ix` g="410"): the
     // HUD consumer of the `iu` combo signal the previous run ported ------
     // `wd.Vx.Jt` (the `iu` ladder, g="C5") is forwarded by `wd.sHa`

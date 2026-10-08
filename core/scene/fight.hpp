@@ -1748,6 +1748,89 @@ public:
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
+    // --- Fight-HUD perk icons (JS `Ir`/`Hr`/`Jr`, sf2.502f0946.js L2041-2048)
+    // `lk.U0a` (L2031) appends `Hr(type)`; `lk.Pub(action)` -> `Hr.fWa` ->
+    // `Ir.init` adds one icon per fired `ModIcon` (type 1) action; `nab`
+    // removes it, `Maa` updates the stack. `Ir.l4` pulses (`la(g*.5)`,
+    // PulseAmp/Accel/Frames), `Kab`/`t2a` fade (FadeFrames), `TI` is the
+    // expiry-overlay opacity, `StackShiftX/Y` shifts a stacked icon.
+    struct PerkIconView {
+        std::string image;        // action `Image` (dot->slash at draw time)
+        std::string stack;        // action `Name` grouping key (`Jr.stack`)
+        bool show_expiration = false;  // action `ShowExpiration` (`jp.kx`)
+        int ttl_frames = 0;       // port display lifetime before fade-out
+        int stack_count = 0;      // `Ir.V5`
+        float alpha = 0.0f;       // `Pk` (0..1)
+        int pulse_left = 0;       // `ZS`
+        int pulse_frame = 0;      // `IA`
+        bool pulse_phase = false; // `$S`
+        bool fading_in = true;    // `yta`
+        float scale = 0.5f;       // last `g*.5`
+    };
+    const std::vector<PerkIconView>& perk_icons(int side) const {
+        return perk_icons_[side & 1];
+    }
+    // Advance every live icon's fade (`Kab`/`t2a`, `Ir` L2042-2043) and pulse
+    // (`l4`, L2043) by one 60 Hz frame. Called from `update` (never the
+    // uncapped render loop).
+    void advance_perk_icons() {
+        const FightParams::PerkIconParams& p = FightParams::defaults().perk_icons;
+        for (int side = 0; side < 2; ++side) {
+            std::vector<PerkIconView>& list = perk_icons_[side];
+            for (std::size_t i = 0; i < list.size();) {
+                PerkIconView& ic = list[i];
+                // fade in (`Kab`) then, past the lifetime, fade out (`t2a`)
+                if (ic.fading_in && ic.alpha < 1.0f) {
+                    ic.alpha += p.fade_in > 0.0f ? 1.0f / p.fade_in : 1.0f;
+                    if (ic.alpha >= 1.0f) {
+                        ic.alpha = 1.0f;
+                        ic.fading_in = false;
+                    }
+                } else if (!ic.fading_in) {
+                    if (ic.ttl_frames > 0) --ic.ttl_frames;
+                    if (ic.ttl_frames <= 0) {
+                        ic.alpha -= p.fade_out > 0.0f ? 1.0f / p.fade_out : 1.0f;
+                    }
+                }
+                // pulse (`Ir.l4`, L2043)
+                if (ic.pulse_left > 0) {
+                    const int f = ic.pulse_phase
+                                      ? static_cast<int>(p.pulse_frames_in)
+                                      : static_cast<int>(p.pulse_frames_out);
+                    float g = ic.pulse_phase ? 1.0f : p.pulse_amp;
+                    if (ic.pulse_frame > f) {
+                        ic.pulse_phase = !ic.pulse_phase;
+                        ic.pulse_frame = 0;
+                    }
+                    if (ic.pulse_frame <= f) {
+                        const float ia = static_cast<float>(ic.pulse_frame);
+                        if (ic.pulse_phase) {
+                            g = 1.0f + (p.pulse_amp - 1.0f) / p.pulse_frames_in *
+                                           (p.pulse_accel_in * ia * ia /
+                                                p.pulse_frames_in +
+                                            (1.0f - p.pulse_accel_in) * ia);
+                        } else {
+                            g = p.pulse_amp -
+                                (p.pulse_amp - 1.0f) / p.pulse_frames_out *
+                                    (p.pulse_accel_out * ia * ia /
+                                         p.pulse_frames_out +
+                                     (1.0f - p.pulse_accel_out) * ia);
+                            if (g <= 1.0f) --ic.pulse_left;
+                        }
+                    }
+                    ic.scale = g * 0.5f;
+                    ++ic.pulse_frame;
+                }
+                if (ic.alpha <= 0.0f && !ic.fading_in) {
+                    list[i] = list.back();
+                    list.pop_back();
+                } else {
+                    ++i;
+                }
+            }
+        }
+    }
+    std::vector<PerkIconView> perk_icons_[2];
     // Drains the pending HUD callout signals recorded by the `Gr` producers
     // (`apply_hit`'s `Sf.strike` flags + the hot-ground rule tick). The
     // fight screen appends one `Gr.Gu` element per signal (JS `addElement`).

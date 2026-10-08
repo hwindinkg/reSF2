@@ -326,10 +326,73 @@ struct FightParams {
     float aspect_limit = 0.0f;           // `lha` (Limit)
 
     // `v.LC` (JS `Ov` g="25A" L605559, `v.LC.parse(a.A("Camera"))` L593864):
-    // internal_settings `<Camera><CameraSettings ... MaxWidthDelta="50"/>`. The
-    // `Ut.Al` panorama clamp reads `v.LC.oGa` (L421356). Data-driven (the port
-    // previously used a compile-time 50); the shipped file resolves to 50.
+    // internal_settings `<CameraSettings CameraNode="COM" BindingNode="NPivot"
+    // MaxWidth="1100" BindingLength="100" MaxWidthDelta="50"/>`. `Ut.Al`
+    // (L826-827) reads ALL of them: `oGa` (MaxWidthDelta) shrinks the pano
+    // clamp `d=(Lb.width-oGa)*Bj*.5-nC*.5`; `maxWidth` gates the `kJa` pan
+    // branch; `Vva` (BindingLength) is that branch's slack; `sba` (BindingNode,
+    // default "NPivot") names the pivot node (shipped NPivot). Data-driven (the
+    // port previously hardcoded 50/100/1100 in location_scene.hpp).
     float camera_max_width_delta = 50.0f;  // `oGa` (MaxWidthDelta)
+    float camera_max_width = 1100.0f;      // `maxWidth` (default -1)
+    float camera_binding_length = 100.0f;  // `Vva` (BindingLength)
+    std::string camera_binding_node = "NPivot";  // `sba` (BindingNode)
+    std::string camera_node;               // `CameraNode` (read, discarded by JS)
+
+    // `Nb` (JS L1282-1283, g="2A6"): `Nb.parse(a.A("PerkIcons"))` — the
+    // `<GUI><Fight><PerkIcons>` fight-HUD perk-icon geometry/animation (the
+    // `Hr`/`Ir`/`Jr` renderer, L2041-2048). `iy(node)` = `{x:In, y:Out}`
+    // (2-vector, `u.H` per component); the shipped rows:
+    // FadeFrames In=60 Out=30, PulseAmp=1.75, PulseAccel In=1 Out=0,
+    // PulseFrames In=15 Out=30, RowCapacity=5 (UNUSED), Spacing X=60 Y=60,
+    // ExpirationOpacity=0.5, StackShiftX=-6 StackShiftY=6, FontScale=50
+    // (UNUSED). The port had NO perk-icon HUD; this is the spec.
+    struct PerkIconParams {
+        float fade_in = 60.0f;          // `zza.x` (FadeFrames In)
+        float fade_out = 30.0f;         // `zza.y` (FadeFrames Out)
+        float pulse_accel_in = 1.0f;    // `GJa.x` (PulseAccel In)
+        float pulse_accel_out = 0.0f;   // `GJa.y` (PulseAccel Out)
+        float pulse_frames_in = 15.0f;  // `l4.x` (PulseFrames In)
+        float pulse_frames_out = 30.0f; // `l4.y` (PulseFrames Out)
+        float spacing_x = 60.0f;        // `spacing.x`
+        float spacing_y = 60.0f;        // `spacing.y`
+        float pulse_amp = 1.75f;        // `HJa` (PulseAmp)
+        float expiration_opacity = 0.5f; // `TI` (ExpirationOpacity)
+        float stack_shift_x = -6.0f;    // `yNa` (StackShiftX)
+        float stack_shift_y = 6.0f;     // `zNa` (StackShiftY)
+        float font_scale = 50.0f;       // `FontScale` (unused by JS)
+    };
+    PerkIconParams perk_icons;
+
+    // `zc` (JS L1284, g="2A8"): `zc.parse(a.A("GUI").A("Profile"))`. The perk
+    // grid opacity/select pulse (`Ed.vy/bO`, `Ed.Joa/eqa`, `uk.vy/bO`,
+    // L2202-2224; `Ed.animate`/`qja` L2203) ramp over `qva` frames between the
+    // `<PerkOpacity>`/`<SelectOpacity>` min..max; `tNa` is the achievement
+    // scroll speed (`vLa(zc.tNa)` L2199, value/60). Shipped: 50, 127..255,
+    // 127..255, 30.
+    double profile_animation_speed = 50.0;   // `qva` (AnimationSpeed, default 1)
+    float profile_perk_opacity_min = 127.0f; // `RE.min` (PerkOpacity Min)
+    float profile_perk_opacity_max = 255.0f; // `RE.max` (PerkOpacity Max)
+    float profile_select_opacity_min = 127.0f; // `yka.min` (SelectOpacity Min)
+    float profile_select_opacity_max = 255.0f; // `yka.max` (SelectOpacity Max)
+    float profile_scroll_achievements_speed = 0.5f; // `tNa` (value/60)
+
+    // `Mb` (JS L1281-1282, g="2A5"): `Mb.parse(a.A("GUI").A("Map"))`. The map
+    // node reward-line oscillation (`Mb.LKa` `Cw`, L1280) + the Challenge fade
+    // (`Mb.challenge` `Bw`, L1280: `yza`/`transitionDuration`/`Fya`) + the
+    // zone-switch fade (`Mb.Gm` `Dw`, L1280-1281: `tGa`/`H_`/`c_`/`RY`).
+    // Shipped: RewardLine 28/0.022; Challenge FadeDelay=3 TransitionDuration=1.5
+    // DifficultyIsFirstFrame=1; ZoneSwitch MinOpacity=122 FadeSpeed=30
+    // DelayBeforeFade=30 BattleTypes {Tournament, Challenge, ...}.
+    float map_reward_oscillation_period = 28.0f;   // `yib` (OscillationPeriod)
+    float map_reward_oscillation_factor = 0.022f;  // `xib` (OscillationFactor)
+    float map_challenge_fade_delay = 3.0f;         // `yza` (FadeDelay)
+    float map_challenge_transition_duration = 1.5f; // `transitionDuration`
+    int map_challenge_difficulty_first_frame = 1;  // `Fya`
+    int map_zone_min_opacity = 122;                // `Gm.tGa` (MinOpacity)
+    int map_zone_fade_speed = 30;                  // `Gm.H_` (FadeSpeed)
+    int map_zone_delay_before_fade = 30;           // `Gm.c_` (DelayBeforeFade)
+    std::vector<std::string> map_zone_battle_types; // `Gm.RY` (BattleType names)
 
     // `v.hu` (JS `lw` g="26D" L1197-1198; `v.hu.parse(a.A("StyleLevels"))`
     // L1159): the HUD style meter. `<StyleLevels StylePerHit DecreaseSpeed

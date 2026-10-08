@@ -3921,6 +3921,43 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         const auto it = a.str.find(key);
         return it != a.str.end() ? it->second : std::string();
     };
+    // Fight-HUD perk icon (JS `lF` case 1 `ModIcon` -> `U4`/`cka` -> `lk.Pub`,
+    // L392/L2031). The icon image + stack + expiry come from the action
+    // (`jp.image`/`jp.stack`/`jp.kx`); `ShowExpiration`/`Name`/`Value` are the
+    // action attributes. A repeat fire of the same (image, stack) bumps the
+    // stack counter (`Hr.Maa` cmd 2) and restarts the pulse.
+    if (type == "ModIcon") {
+        const std::string img = str("Image");
+        if (!img.empty()) {
+            const std::string stack = str("Name");
+            std::vector<PerkIconView>& list = perk_icons_[owner_side & 1];
+            PerkIconView* found = nullptr;
+            for (PerkIconView& ic : list) {
+                if (ic.image == img && ic.stack == stack) {
+                    found = &ic;
+                    break;
+                }
+            }
+            const int frames = static_cast<int>(num("Frames", 180.0));
+            if (found == nullptr) {
+                PerkIconView ic;
+                ic.image = img;
+                ic.stack = stack;
+                ic.show_expiration = num("ShowExpiration", 0.0) != 0.0;
+                ic.ttl_frames = frames > 0 ? frames : 180;
+                ic.stack_count = static_cast<int>(num("Value", 1.0));
+                if (ic.stack_count < 1) ic.stack_count = 1;
+                ic.pulse_left = 1;   // `Jr.eWa` seeds one pulse (`sj[last].ZS++`)
+                ic.fading_in = true;
+                list.push_back(std::move(ic));
+            } else {
+                ++found->stack_count;
+                found->ttl_frames = frames > 0 ? frames : 180;
+                found->pulse_left = 1;
+                found->pulse_frame = 0;
+            }
+        }
+    }
     const int uf = static_cast<int>(num("Frames", 0.0));
     if (type == "ModAttributes") {
         // `VKa`: instant ±attr adds on the target + mod entry for `JNa`.
@@ -6758,6 +6795,11 @@ void FightController::update(float dt) {
     // The idle lead-in (the ROUND plate, before phase 1) keeps it at 0 so
     // `frame_ == 0` coincides with phase 1 (`enter_start_stance` resets it).
     if (phase_ != fight_phase::idle) ++frame_;
+    // Fight-HUD perk icons (JS `Sf.ia` -> `Id.ia`/`je.ia` -> `Hr.ia` -> `Ir.ia`
+    // -> `Kab`/`t2a`/`l4`, L2035/L2042-2043): advance the fade + pulse once per
+    // 60 Hz sim frame. Stepping here (not in the uncapped render loop) keeps
+    // the fade/pulse period frame-exact.
+    advance_perk_icons();
     // [fx] The particle pool + the hit judder/hit-stop tick (presentation
     // only — runs even after the battle ends so the KO burst finishes and
     // the camera kick settles back to 0; neither touches the simulation).
