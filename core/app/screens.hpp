@@ -29,8 +29,11 @@
 //     base_/active_/locked_/locked_active_/pressed_ (`Lc.*` L2482), Icon the
 //     Battle Icon attr (default "training", L205).
 //     There is NO zone tab strip and no BRACKET button in the JS map
-//     (PORT_AUDIT_UI §2.3/§2.4): zone nav is the `Vr` scroller + the `Rr`
-//     info panel / `Xr` status list (OPEN — not ported).
+//     (PORT_AUDIT_UI §2.3/§2.4): zone nav is the `Ur`/`Vr` zone strip + the
+//     `Rr` info panel / `Xr` status pip list — all PORTED (`draw_map_info_panel`
+//     draws the `Xr` pips + the `Rr` body; `MapScreen::update_impl` hit-tests
+//     the `Ur` dots). The only remaining `Vr` part is the animated strip
+//     SCROLL (the `dA.x` slide); the port snaps the selection.
 //
 // The misc/menu/controller/fight-ui atlases are KTX ASTC — the data layer
 // CPU-decodes them (core/data/ktx.cpp) and App::init registers their frames,

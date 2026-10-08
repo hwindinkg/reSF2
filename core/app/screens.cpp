@@ -918,7 +918,8 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
 // `NoAvatar`->340 `Ve`, `ShowLoot`->370 `vn`, `Notification`->the `Ib` bar.
 //
 // --- `od.aa` L1895 open/close tween (0.25 s) -------------------------------
-// `ed(.25)` normalizes the 0.25 s timer. OPEN: `node.wa(dc.Ln()(t))` +
+// `ed(.25)` normalizes the 0.25 s timer. PORTED below (`dialog_anim_at`):
+// `node.wa(dc.Ln()(t))` +
 // `node.la(node.Eb + (-.2+.2*dc.kYa()(t)))` — alpha 0->1, scale 0.8->1.0.
 // CLOSE: `node.wa(1-dc.KK()(t))` + `node.D(node.ra + 1000*dc.KK()(t))` — alpha
 // 1->0, slide +1000 design px — then `n_()` at t==1. `dc.Ln()` =
@@ -9465,8 +9466,10 @@ void MapScreen::update_impl(float dt) {
         return;
     }
     // JS `Ya` has no zone tab strip (PORT_AUDIT_UI 2.3): zone navigation is
-    // the `Vr` scroller + `Rr` info panel / `Xr` status list (OPEN - not
-    // ported). `tab_hover_` stays for the header field but is never set.
+    // the `Ur`/`Vr` zone strip + `Rr` info panel / `Xr` status pip list — all
+    // PORTED (the dots below + `draw_map_info_panel`). The only remaining `Vr`
+    // part is the animated strip SCROLL; the port snaps. `tab_hover_` stays
+    // for the header field but is never set.
     tab_hover_ = -1;
     // BACK (top-left) -> the previous screen (the Dojo home hub — the
     // loop's map -> dojo / map -> equipment legs; the JS map has a
@@ -9964,6 +9967,112 @@ float map_battle_rating_cached(App& app, const std::string& battle_name,
     return r;
 }
 
+// The map info-panel reward badge (`bi`, L2133/L2150). `bi`'s third arg is
+// the SELECTED `<Fight>` `b`; its ctor takes that fight's LAST `<Reward>`
+// (`c.wi[c.wi.length-1]`) and `bm(p.o.bb())` resolves the level rows, so the
+// badge shows THAT fight's last-reward Money — not the battle's first fight
+// (the port's old `Node::reward_money`). `owned` is `bi.Fga` (L2150): the
+// same reward's first `<Item ShowReward>` entry. The JS also requires the
+// item to exist in the `p.items.$b` catalog; the port has no such name
+// catalog, so the `ShowReward` attr is the load-bearing term (every shipped
+// ShowReward entry names a real item). Cached (the panel draws per frame).
+void map_reward_badge_cached(App& app, const std::string& battle_name,
+                             const std::string& zone, int fight_index,
+                             std::int64_t& money, std::int64_t& exp, bool& owned) {
+    struct Badge {
+        std::int64_t money = 0;
+        std::int64_t exp = 0;
+        bool owned = false;
+    };
+    static std::map<std::string, Badge> cache;
+    int level = 1;
+    try {
+        level = app.save().load().level;
+    } catch (const std::exception&) {
+    }
+    const std::string sig = zone + "|" + battle_name + "|" +
+                            std::to_string(fight_index) + "|" +
+                            std::to_string(level);
+    const auto hit = cache.find(sig);
+    if (hit != cache.end()) {
+        money = hit->second.money;
+        exp = hit->second.exp;
+        owned = hit->second.owned;
+        return;
+    }
+    Badge b;
+    std::int64_t bonus = 0, prize = -1;
+    battle_rewards(battle_name, zone, fight_index, level, b.money, b.exp, bonus,
+                   prize, /*row_from_end=*/0);
+    // `Fga` (L2150): the selected fight's LAST `<Reward>` (merged with its
+    // `<NormalModeReward>`) first `<Item ShowReward>`.
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (in) {
+            std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()),
+                      data.size());
+            const pugi::xml_node root = doc.root().first_child();
+            const pugi::xml_node zones =
+                root ? root.child("Zones") : pugi::xml_node();
+            pugi::xml_node battle;
+            if (zones) {
+                for (const pugi::xml_node z : zones.children("Zone")) {
+                    if (!zone.empty() &&
+                        std::string(z.attribute("Name").value()) != zone)
+                        continue;
+                    for (const pugi::xml_node bb : z.children("Battle")) {
+                        if (std::string(bb.attribute("Name").value()) ==
+                            battle_name) {
+                            battle = bb;
+                            break;
+                        }
+                    }
+                    if (battle || !zone.empty()) break;
+                }
+            }
+            pugi::xml_node fight;
+            if (battle) {
+                int fi = 0;
+                for (const pugi::xml_node f : battle.children("Fight")) {
+                    if (fi++ == fight_index) {
+                        fight = f;
+                        break;
+                    }
+                }
+            }
+            if (fight) {
+                const pugi::xml_node rewards = fight.child("Rewards");
+                if (rewards) {
+                    pugi::xml_node last;
+                    for (const pugi::xml_node r : rewards.children("Reward"))
+                        last = r;
+                    const auto first_shown = [](const pugi::xml_node& n) {
+                        for (const pugi::xml_node it : n.children("Item")) {
+                            if (sf2::data::xml_attr_bool(it, "ShowReward", false))
+                                return true;
+                        }
+                        return false;
+                    };
+                    if (last) {
+                        b.owned = first_shown(last);
+                        const pugi::xml_node mode = last.child("NormalModeReward");
+                        if (!b.owned && mode) b.owned = first_shown(mode);
+                    }
+                }
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    cache[sig] = b;
+    money = b.money;
+    exp = b.exp;
+    owned = b.owned;
+}
+
 // Defined below; the probe reports the tier each ratio lands in.
 int map_difficulty_level(float rating_ratio);
 
@@ -10216,15 +10325,28 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // Body `pk` rect (L2102): `gb(d, f, d+(c-2*d), f+(e-f))`.
     const float body_x = cx + d;
     const float body_w = cw - 2.0f * d;
-    // --- `pk.wy` replay label (`pk.Rma` L1112022) -------------------------
-    // `Rma(a){ a.type!="FightReplayable"&&a.type!="FightBossesReplayable"
-    //   ? this.wy.R(!1)
-    //   : (this.wy.V(Y.na("^replays^: "+a.ffa())), this.wy.R(!0)) }`
-    // `a.ffa()` (L1414) = the battle record's `ob.zH` (`ReplayCount`). Only
-    // the replayable families show it; it occupies the top body row
-    // (`ok.ba` L2150 `this.wy.Fa(a, a*.16)`) and the plate stacks below.
+    // JS `Rr.Whb` (L2107) body-class selection: the switch builds `ok` for
+    // `FightFinal`/`FightFinalReplayable` and for a boss-ladder fight whose
+    // selected index is the LAST (`b.index != a.ag-1 ? new pk : new ok`);
+    // every other fight body is `pk`. `mk_fi` = the selected `<Fight>` index
+    // (`b.index`), `node->fight_count` = `a.ag`.
+    const int mk_fi = map_fight_index(app, node->name, node->fight_count);
+    const bool boss_family = node->type == "BOSSES" ||
+                             node->type == "BOSSES_REPLAYABLE" ||
+                             node->type == "FINAL_BATTLE_TITAN";
+    const bool body_ok =
+        node->type == "FINAL_BATTLE" || node->type == "FINAL_BATTLE_REPLAYABLE" ||
+        (boss_family && mk_fi == node->fight_count - 1);
+    // --- `wy` replay label (`Rma`) ----------------------------------------
+    // `ok.Rma` (L2150): the label shows ONLY for `FightFinalReplayable`.
+    // `pk.Rma` (L2162): the label shows for `FightReplayable` /
+    // `FightBossesReplayable`. The port previously applied the `pk` rule to
+    // EVERY node, so the last boss-ladder fight (an `ok` body) wrongly showed
+    // it. `a.ffa()` (L1414) = the battle record's `ReplayCount`.
     const bool replay_label =
-        node->type == "REPLAYABLE" || node->type == "BOSSES_REPLAYABLE";
+        body_ok ? node->type == "FINAL_BATTLE_REPLAYABLE"
+                : (node->type == "REPLAYABLE" ||
+                   node->type == "BOSSES_REPLAYABLE");
     const float wy_h = replay_label ? body_w * 0.16f : 0.0f;
     const float body_y = cy + f + wy_h;
     const float body_h = ch - f - wy_h;
@@ -10257,7 +10379,6 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // the FIGHT's `GD()` — stages.xml `BOSS_TITAN` ships 6 locked fights
     // (fight 1 `Description="fight_locked_chapter2"`), so the port previously
     // drew the full body + FIGHT plate where JS draws the locked description.
-    const int mk_fi = map_fight_index(app, node->name, node->fight_count);
     const bool active_fight_locked =
         static_cast<std::size_t>(mk_fi) < node->fight_locked.size() &&
         node->fight_locked[static_cast<std::size_t>(mk_fi)];
@@ -10293,6 +10414,29 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         }
         return;
     }
+    float wy = 0.0f;  // the reward badge's y offset (`ty.D`), per body class
+    if (body_ok) {
+        // JS `ok` (L2150): NO `Xr` pips and NO `Wc` difficulty. The body is
+        // the `Sb` description (`Fa(a, a*.5)`, `ua(a*.16)`, multiline,
+        // centred), then the reward badge at `Sb.Oj().W + a*.2`. For the boss
+        // families `Sb` is `"^"+a.k6+"^ ^challengeBoss^"`; otherwise the
+        // battle description.
+        std::string sb_text;
+        if (boss_family) {
+            const std::string tk = node->title.empty() ? node->name : node->title;
+            sb_text = loc(app, tk, node->name) + " " +
+                      loc(app, "challengeBoss", "CHALLENGE BOSS");
+        } else {
+            sb_text = loc(app, node->description, node->description);
+        }
+        const float sb_h = body_h * 0.5f;  // `Sb.Fa(a, a*.5)`
+        if (sb_h > 0.0f && !sb_text.empty()) {
+            draw_ui_wrapped(app, body_x, body_y, body_w, sb_h, sb_text,
+                            body_w * 0.16f / 100.0f, UiAlign::Center, 0.184f,
+                            0.145f, 0.106f, 0.6f);
+        }
+        wy = sb_h + body_w * 0.2f;  // `this.ty.D(b + a*.2)`
+    } else {
     // --- `Xr` status pips (L2133-2136, `pk.ba` L2161 `aUa.ba(a, b*.3)`) ---
     const float xr_h = body_h * 0.3f;
     const float pip_label_h = body_w * 0.16f;  // `Xr.ba` `c = a*.16`
@@ -10371,7 +10515,7 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         md_op = (fade->rG == 0) ? fade->out_op : fade->in_op;
         lm_op = (fade->rG == 1) ? fade->out_op : fade->in_op;
     }
-    float wy = body_h * 0.35f + body_h * 0.05f;  // `c = b*.05`, `b*.35 + c`
+    wy = body_h * 0.35f + body_h * 0.05f;  // `c = b*.05`, `b*.35 + c`
     {
         float fw = 0.0f, fh = 0.0f;
         const float bar_h = map_frame_size(app, "difficulty_empty", fw, fh) && fw > 0.0f
@@ -10416,25 +10560,38 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         }
         wy += bar_h + lab_h;
     }
-    // --- reward gold (JS `pk.ty` = `bi` -> `ci`/`Ig`, L2133/L2148) ---
+    }  // !body_ok
+    // --- reward badge (`ty` = `bi` -> `ci`/`Ig`, L2133/L2150) -------------
+    // `bi`'s third arg is the SELECTED `<Fight>`; its ctor reads that fight's
+    // LAST `<Reward>` (`c.wi[c.wi.length-1].bm(p.o.bb())`), so the badge shows
+    // the SELECTED fight's last-reward Money — not the battle's first fight
+    // (the old `Node::reward_money`). For the boss families the badge's
+    // Money/Exp are zeroed when `Fga` (a `ShowReward` item on the same
+    // reward), so nothing is drawn.
     {
-        float gw = 0.0f, gh = 0.0f;
-        const float icon_h = body_w * 0.15f;
-        const float icon_w = (map_frame_size(app, "gold", gw, gh) && gh > 0.0f)
-                                 ? icon_h * (gw / gh)
-                                 : icon_h;
-        const std::string amount = std::to_string(node->reward_money);
-        const float txt_scale = body_w * 0.16f / 100.0f;
-        const sf2::data::font* mfont = app.menu_font();
-        const float txt_w = mfont != nullptr
-                                ? app.measure_text(*mfont, amount, txt_scale)
-                                : icon_h;
-        const float total = icon_w + txt_w;
-        const float gx = body_x + (body_w - total) * 0.5f;
-        try_draw_atlas_button(app, "gold", gx + icon_w * 0.5f, body_y + wy + icon_h * 0.5f,
-                              icon_w, icon_h, 1.0f);
-        draw_ui_label(app, gx + icon_w, body_y + wy, txt_w, icon_h, amount, txt_scale,
-                      UiAlign::Left, 0.184f, 0.145f, 0.106f);
+        std::int64_t badge_money = 0, badge_exp = 0;
+        bool badge_owned = false;
+        map_reward_badge_cached(app, node->name, node->zone, mk_fi, badge_money,
+                                badge_exp, badge_owned);
+        if (!(boss_family && badge_owned) && badge_money > 0) {
+            float gw = 0.0f, gh = 0.0f;
+            const float icon_h = body_w * 0.15f;
+            const float icon_w = (map_frame_size(app, "gold", gw, gh) && gh > 0.0f)
+                                     ? icon_h * (gw / gh)
+                                     : icon_h;
+            const std::string amount = std::to_string(badge_money);
+            const float txt_scale = body_w * 0.16f / 100.0f;
+            const sf2::data::font* mfont = app.menu_font();
+            const float txt_w = mfont != nullptr
+                                    ? app.measure_text(*mfont, amount, txt_scale)
+                                    : icon_h;
+            const float total = icon_w + txt_w;
+            const float gx = body_x + (body_w - total) * 0.5f;
+            try_draw_atlas_button(app, "gold", gx + icon_w * 0.5f,
+                                  body_y + wy + icon_h * 0.5f, icon_w, icon_h, 1.0f);
+            draw_ui_label(app, gx + icon_w, body_y + wy, txt_w, icon_h, amount,
+                          txt_scale, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+        }
     }
     // --- FIGHT button `tj` = `Bb("EButtonWhite")` (L2099/L2102) ------------
     // `tj.Pb(c*.2)` -> node scale `c*.2/112`; `Bb` is 600 wide x 112 tall
