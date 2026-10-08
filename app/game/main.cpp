@@ -79,6 +79,10 @@ void print_usage(const char* argv0) {
                  "                   (dojo -> map -> BOSS_LYNX fight -> results -> shop\n"
                  "                    buy+equip WEAPON_KNIVES -> profile viewer\n"
                  "                    -> map -> BOSS_LYNX fight -> results)\n"
+                 "  --tour-walk N    run the map -> ZONE_1 Tournament node -> fight ->\n"
+                 "                   results -> map loop N times (default 3), then exit\n"
+                 "  --tour-walk-start K  seed K Tournament wins so the first walk\n"
+                 "                   launches <Fight> ordinal K+1 (e.g. 3 -> IRON)\n"
                  "  --fight          boot DIRECTLY into the dojo fight (skip menu/map):\n"
                  "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n"
                  "  --dump-pose N    (with --fight) dump the first N fight frames as JSONL to\n"
@@ -418,6 +422,119 @@ struct HeadlessLoopDriver {
                              before_moves, after_moves);
             }
         }
+    }
+};
+
+// `--tour-walk N` driver: the in-game map -> tournament node -> fight ->
+// Results -> map loop, repeated N times (the crash-hunt harness for the
+// ZONE_1 tournament). TEST DRIVER only: hidden + watchdog, no OS input, no
+// gameplay change. Every step is a REAL input:
+//   - the tournament node is selected by its real screen centre
+//     (`MapScreen::node_center` -> the same rect `qe.X0a` L2144 paints);
+//   - the fight starts on the real `Rr` FIGHT button
+//     (`MapScreen::fight_button_center`, JS `tj` L2099/L2102);
+//   - the fight is won by the demo auto-attack (`App::set_auto_attack`,
+//     the same harness the headless-loop uses);
+//   - Results is advanced with the two real presses (JS `kk.Efb` L1060361
+//     fast-forward, then the OK plate).
+// Because `map_fight_index` (recorded `<Fights>` wins) launches the ladder's
+// next opponent, each iteration naturally faces the next `<Fight>`.
+struct TourWalkDriver {
+    int iterations = 3;
+    int done = 0;
+    int phase = 0;        // 0 select node, 1 FIGHT, 2 wait Results, 3 Results
+    int phase_frame = 0;
+    int guard = 0;
+    bool finished = false;
+    bool failed = false;
+    int last_screen = -1;
+
+    void frame_tick(sf2::app::App& app) {
+        const int cur = app.screens().current_id();
+        if (cur != last_screen) {
+            last_screen = cur;
+            std::fprintf(stdout, "[walk] screen %d (iter %d/%d phase %d)\n", cur,
+                         done + 1, iterations, phase);
+            std::fflush(stdout);
+        }
+        sf2::app::Screen* top = app.screens().top();
+        switch (phase) {
+            case 0:  // on the map: select the Tournament node
+                if (cur == sf2::app::kScreenMap && top != nullptr) {
+                    float nx = 0.0f, ny = 0.0f;
+                    if (!static_cast<sf2::app::MapScreen*>(top)->node_center(
+                            "Tournament", nx, ny)) {
+                        std::fprintf(stderr,
+                                     "[walk] no 'Tournament' node in the selected zone\n");
+                        std::fflush(stderr);
+                        failed = true;
+                        finished = true;
+                        return;
+                    }
+                    std::fprintf(stdout,
+                                 "[walk] iter %d select Tournament node @(%.0f,%.0f)\n",
+                                 done + 1, nx, ny);
+                    std::fflush(stdout);
+                    app.inject_click(nx, ny);
+                    phase = 1;
+                    phase_frame = 0;
+                }
+                break;
+            case 1:  // click the `Rr` FIGHT button
+                if (cur == sf2::app::kScreenMap && top != nullptr && phase_frame >= 3) {
+                    float fx = 0.0f, fy = 0.0f;
+                    static_cast<sf2::app::MapScreen*>(top)->fight_button_center(fx, fy);
+                    std::fprintf(stdout, "[walk] iter %d FIGHT button @(%.0f,%.0f)\n",
+                                 done + 1, fx, fy);
+                    std::fflush(stdout);
+                    app.inject_click(fx, fy);
+                    phase = 2;
+                    phase_frame = 0;
+                }
+                break;
+            case 2:  // wait for the fight to end -> Results
+                if (cur == sf2::app::kScreenFight && top != nullptr) {
+                    // Deterministic win assist: the demo auto-attack's idle
+                    // gate can stall on a stance clip, so the walk forces each
+                    // live round to a KO exactly like `--mode-enemy-probe`
+                    // (`probe_set_hp`, a probe-only hook). The flow under test
+                    // (map -> fight -> Results -> map) is unchanged.
+                    auto* fs = static_cast<sf2::app::FightScreen*>(top);
+                    if (fs->probe_phase() == 2 && fs->fight_frame() >= 145) {
+                        fs->probe_set_hp(100.0f, 0.0f);
+                    }
+                } else if (cur == sf2::app::kScreenResults) {
+                    std::fprintf(stdout, "[walk] iter %d -> Results\n", done + 1);
+                    std::fflush(stdout);
+                    phase = 3;
+                    phase_frame = 0;
+                }
+                break;
+            case 3:  // two real presses: fast-forward the reveal, then OK
+                if (cur != sf2::app::kScreenResults) {
+                    // The OK press popped Results AND the dead Fight screen;
+                    // the map is current again.
+                    ++done;
+                    phase = 0;
+                    phase_frame = 0;
+                    if (done >= iterations) {
+                        finished = true;
+                        std::fprintf(stdout, "[walk] ALL %d ITERATIONS DONE\n", iterations);
+                        std::fflush(stdout);
+                    }
+                    break;
+                }
+                if (phase_frame == 2 || phase_frame == 5) {
+                    std::fprintf(stdout, "[walk] iter %d results press (%s)\n", done + 1,
+                                 phase_frame == 2 ? "fast-forward" : "OK");
+                    std::fflush(stdout);
+                    app.inject_click(640.0f, 360.0f);
+                }
+                break;
+            default:
+                break;
+        }
+        ++phase_frame;
     }
 };
 
@@ -1574,6 +1691,9 @@ int main(int argc, char** argv) {
     int headless = 0;
     bool auto_click = false;
     bool headless_loop = false;
+    bool tour_walk = false;        // --tour-walk N: map->tournament->results loop
+    int tour_walk_iters = 3;       // --tour-walk N (number of cycles)
+    int tour_walk_start = 0;       // --tour-walk-start K (seed K wins)
     bool flow_verify = false;  // --flow-verify: the repaired map/menu/ladder flows
     bool rating_perk_probe_mode = false;  // --rating-perk-probe
     bool perk_trigger_probe_mode = false;  // --perk-trigger-probe
@@ -1783,6 +1903,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             za_nav_verify = true;
         } else if (arg == "--headless-loop") {
             headless_loop = true;
+        } else if (arg == "--tour-walk") {
+            tour_walk = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                tour_walk_iters = std::atoi(argv[++i]);
+            }
+        } else if (arg == "--tour-walk-start") {
+            if (i + 1 < argc) tour_walk_start = std::atoi(argv[++i]);
         } else if (arg == "--ui-tour") {
             ui_tour = true;
         } else if (arg == "--tutorial-real-verify") {
@@ -3029,6 +3156,72 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
     }
 
+    if (tour_walk) {
+        // `--tour-walk` seed: the shipped default save records ONLY
+        // `ZONE_1|BOSS_LYNX`, so the Tournament node has no record and is not
+        // visible (`recompute_node_states` / JS `WDa` L256). Mirror the quest
+        // ShowBattle write (`WarriorSave::battle_unlock`, JS `J1a` L259) so
+        // the node is real, skip the tutorial (story END), fund the player,
+        // and seed `tour_walk_start` Tournament wins so the ladder launches at
+        // the requested `<Fight>` ordinal (`map_fight_index` = recorded wins).
+        std::string def = res_root + "/users_default.xml";
+        if (!std::filesystem::exists(def)) {
+            const std::string hashed = res_root + "/users_default.b7da2019.xml";
+            if (std::filesystem::exists(hashed)) {
+                def = hashed;
+            } else {
+                const std::string extracted = "reference/extracted/xml/res/users_default.xml";
+                if (std::filesystem::exists(extracted)) def = extracted;
+            }
+        }
+        try {
+            std::filesystem::remove(save_path);
+        } catch (const std::exception&) {
+        }
+        try {
+            sf2::app::SaveSystem ss(save_path, def);
+            sf2::app::WarriorSave w = ss.load();  // template (save was removed)
+            w.set_story_step("END");
+            w.money = 100000;
+            w.level = 52;
+            w.power = 1000;
+            w.experience = 0;
+            w.current_zone = "ZONE_1";
+            // Equip a real weapon so the player's move list + damage are not
+            // the bare Fists default (the walk must WIN each ladder fight).
+            w.weapon = "WEAPON_KNIVES";
+            {
+                bool has_knives = false;
+                for (const sf2::app::WarriorSave::OwnedItem& it : w.items) {
+                    if (it.name == "WEAPON_KNIVES") has_knives = true;
+                }
+                if (!has_knives) {
+                    sf2::app::WarriorSave::OwnedItem kn;
+                    kn.name = "WEAPON_KNIVES";
+                    kn.count = 1;
+                    kn.equipped = true;
+                    w.items.push_back(kn);
+                }
+            }
+            w.battle_unlock("ZONE_1", "Tournament");
+            for (int k = 1; k <= tour_walk_start; ++k) {
+                const std::string ids = "ZONE_1|Tournament|" + std::to_string(k);
+                sf2::app::WarriorSave::FightWins& fr = w.fight_record_or_create(ids);
+                fr.wins = 1;
+                fr.level = w.level;
+            }
+            ss.save(w);
+            std::fprintf(stdout,
+                         "[walk] seeded save '%s': money=%lld level=%d zone=%s "
+                         "Tournament unlocked, start wins=%d\n",
+                         save_path.c_str(), static_cast<long long>(w.money), w.level,
+                         w.current_zone.c_str(), tour_walk_start);
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[walk] seed failed: %s\n", e.what());
+        }
+    }
+
     sf2::app::App app;
     if (!app.init(res_root, save_path, std::string(), /*hidden=*/driver_mode)) {
         std::fprintf(stderr, "game: app init failed\n");
@@ -3206,6 +3399,41 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         if (!driver.finished) {
             return 1;
         }
+    } else if (tour_walk) {
+        // `--tour-walk`: the in-game map -> ZONE_1 Tournament node -> fight ->
+        // Results -> map loop, repeated. Hidden + watchdog (driver_mode); no OS
+        // input. Boots the map directly (the Dojo hub is irrelevant to the
+        // tournament flow), wins each fight with the demo auto-attack, and
+        // returns to the map between fights. A crash anywhere in the scene
+        // push/pop loop is the crash-hunt target.
+        TourWalkDriver driver;
+        driver.iterations = tour_walk_iters;
+        app.set_auto_attack(true);
+        app.set_headless_frames(1);
+        // Boot the map (stack: Dojo beneath, Map on top), mirroring the
+        // Dojo->Map nav edge the player takes.
+        app.screens().push(sf2::app::make_screen(app.screens(), kScreenMap));
+        std::fprintf(stdout, "[walk] booted map, %d iterations (start wins=%d)\n",
+                     driver.iterations, tour_walk_start);
+        std::fflush(stdout);
+        while (!driver.finished && driver.guard < 400000) {
+            glfwPollEvents();
+            driver.frame_tick(app);
+            app.run_one_frame();
+            ++driver.guard;
+        }
+        std::fprintf(stdout, "[walk] guard=%d finished=%d done=%d/%d failed=%d\n",
+                     driver.guard, driver.finished ? 1 : 0, driver.done,
+                     driver.iterations, driver.failed ? 1 : 0);
+        std::fflush(stdout);
+        if (!driver.finished || driver.failed) {
+            std::fprintf(stderr, "[walk] did not complete %d iterations\n",
+                         driver.iterations);
+            app.shutdown();
+            return 1;
+        }
+        app.shutdown();
+        return 0;
     } else if (ui_tour) {
         // UI screenshot tour: visit each screen, capture ui/port_*.png.
         TourDriver driver;

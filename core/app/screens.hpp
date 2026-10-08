@@ -394,6 +394,13 @@ public:
     // The headless-loop/tour's battle-start step clicks this.
     void fight_button_center(float& x, float& y) const;
 
+    // TEST-DRIVER QUERY (no gameplay effect): the screen-space centre of the
+    // first node named `name` in the selected zone, if any. Used by the
+    // `--tour-walk` harness to click a REAL map node; the node is only
+    // pickable when its save record makes it visible (`recompute_node_states`
+    // / JS `WDa` L256 + `Qr.lla` L2094). Pure read of the layout state.
+    bool node_center(const std::string& name, float& cx, float& cy) const;
+
     // `Ur` zone-dot strip geometry (JS L2112-2116, `qk.layout` L2137): the
     // centre of the dot drawn for zone `zi`, or false when that zone renders
     // none (`Vr.HXa` L2123-2124). The draw AND the click hit-test both read

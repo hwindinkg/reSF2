@@ -8865,6 +8865,18 @@ void MapScreen::fight_button_center(float& x, float& y) const {
     y = r.cy;
 }
 
+bool MapScreen::node_center(const std::string& name, float& cx, float& cy) const {
+    if (zone_sel_ < 0 || static_cast<std::size_t>(zone_sel_) >= zones_.size()) return false;
+    for (const Node& n : zones_[zone_sel_].nodes) {
+        if (n.name == name) {
+            cx = n.x;
+            cy = n.y;
+            return true;
+        }
+    }
+    return false;
+}
+
 // JS `Ya.Uw` (L2129) + `ue.tea()`: focus the `Rr` panel on the node named in
 // a MapFocus string. The shipped tutorial focus is `ZONE_1|BOSS_LYNX|1`
 // (tutorial_quests.xml L155) and only the visible (record-backed) nodes are
