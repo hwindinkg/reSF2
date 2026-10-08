@@ -193,11 +193,11 @@ void FightCamera::tick_zoom_effect() {
 }
 
 void FightCamera::framing(float ax, float ay, float bx, float by, float view_w,
-                          float view_h) {
+                          float view_h, float pnx) {
     // Wired: the exact JS camera chain lives in fight_camera_sya.hpp
     // (ql.tyb L363 + ql.dZa L363-365 + Ut.Al L826 + ma.Sya L1833) —
     // framing_sya_impl runs it against this camera's live state.
-    framing_sya_impl(*this, ax, ay, bx, by, view_w, view_h);
+    framing_sya_impl(*this, ax, ay, bx, by, view_w, view_h, pnx);
 }
 
 // duplicate of framing() body kept for reference — REMOVED (dead code guard):
@@ -482,7 +482,8 @@ void FightController::init_locks(
     camera_.start_x_ = (player_.fighter.world_x() + enemy_.fighter.world_x()) * 0.5f;
     camera_.start_y_ = (player_.fighter.world_y() + enemy_.fighter.world_y()) * 0.5f;
     camera_.framing(player_.fighter.world_x(), player_.fighter.world_y(),
-                    enemy_.fighter.world_x(), enemy_.fighter.world_y(), 1280.0f, 720.0f);
+                    enemy_.fighter.world_x(), enemy_.fighter.world_y(), 1280.0f, 720.0f,
+                    player_.fighter.world_x());
 
     // The fight start (JS ggb L383): round 0 -> the first round init.
     round_.number = 0;
@@ -838,9 +839,26 @@ void FightController::dispatch_move_actions(
             continue;
         }
         // --- StopEffect (`gm` L735 -> `wd.Svb` L519 -> `tl.Ot` L843) -------
+        // `wd.Svb(a)` (L519): `a.model=this.ef(a.pe); this.Ot.Z(a);
+        // a.model=null`. `ef` (L262140) resolves the target model from the
+        // action's `Player`: Me(1)/Parent(3)->this.lb (null on a top-level
+        // fighter), Enemy(2)->jb, Child(4)->this.vd (owner side),
+        // EnemyChild(6)->jb.vd (foe side). The port's effects are keyed by the
+        // emitting SIDE, so a child target maps to its side's container. An
+        // empty `<Name>` (`cv.LNa` L838 `a==f.effect.name || a==""`) stops the
+        // FIRST effect on that model — the shipped GATEKEEPER_SHILED
+        // `<StopEffect Player="EnemyChild" Frame="1"/>` has no Name.
+        const auto ef_side = [&](int player) -> int {
+            switch (player) {
+                case 1: case 4: return (&owner == &player_) ? 0 : 1;
+                case 2: case 6: return (&owner == &player_) ? 1 : 0;
+                default: return -1;  // Parent(3)/Null -> no model on a top fighter
+            }
+        };
         if (act->kind == "StopEffect") {
-            if (!act->name.empty()) {
-                magic_fx_.stop(act->name, (&owner == &player_) ? 0 : 1);
+            const int side = ef_side(act->player);
+            if (side >= 0) {
+                magic_fx_.stop(act->name, side);
                 std::fprintf(stdout, "[fx] F%d %s %s StopEffect name=%s\n", frame_,
                              owner.name.c_str(), why, act->name.c_str());
                 std::fflush(stdout);
@@ -848,9 +866,11 @@ void FightController::dispatch_move_actions(
             continue;
         }
         // --- StopFollowEffect (`hm` L736 -> `wd.Uvb` L519 -> `tl.Pt` L843) -
+        // `wd.Uvb(a){a.model=this.ef(a.pe); this.Pt.Z(a); a.model=null}`.
         if (act->kind == "StopFollowEffect") {
-            if (!act->name.empty()) {
-                magic_fx_.stop_follow(act->name, (&owner == &player_) ? 0 : 1);
+            const int side = ef_side(act->player);
+            if (side >= 0) {
+                magic_fx_.stop_follow(act->name, side);
                 std::fprintf(stdout, "[fx] F%d %s %s StopFollowEffect name=%s\n",
                              frame_, owner.name.c_str(), why, act->name.c_str());
                 std::fflush(stdout);
@@ -3953,8 +3973,11 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
                 ic.image = img;
                 ic.stack = stack;
                 ic.show_expiration = num("ShowExpiration", 0.0) != 0.0;
-                ic.stack_count = static_cast<int>(num("Value", 1.0));
-                if (ic.stack_count < 1) ic.stack_count = 1;
+                // JS `Ir` ctor (L1051222): `this.V5=0` — a ModIcon does NOT
+                // seed a stack count (`Up.parse` L715869 reads only
+                // Image/MarkUsed/ShowExpiration/ExpirationVer). `V5` is set
+                // solely by `Hr.Maa` (an `ApplyModEffect Type="Stack"`).
+                ic.stack_count = 0;
                 ic.pulse_left = 1;   // `Jr.eWa` seeds one pulse (`sj[last].ZS++`)
                 ic.fading_in = true;
                 list.push_back(std::move(ic));
@@ -4066,7 +4089,44 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         bus_.retime_mod(owner_side, str("Name"), static_cast<int>(num("Frames", -1.0)),
                         static_cast<int>(num("Interval", -1.0)), str("Namespace"));
     } else if (type == "ApplyModEffect") {
-        bus_.log("perknoop ApplyModEffect " + str("Name") + " (U4 OPEN)");
+        // JS `Ip` (perk action type 11, L713207) parse: `pi`=Name, `L2`=
+        // `w6a(Type)` (Pulse=1, Stack=2, else 0), `W5`=StackCount expression.
+        // On fire `bc.cpb` (L664...) resolves the owning `ModIcon` action by
+        // Name+Namespace (`bc.Y4a(pi,Jd)` / the active-list Name match) and
+        // calls `wd.U4` -> `Hr.Maa` (L1053828):
+        //   `b=b.action; c=b.L2; for f in sj: f.action==a && (c==1 && f.ZS++,
+        //    c==2 && (f.V5=b.W5.Wb().Wn()))`.
+        // The port keys icons by the owning ModIcon `<Name>` (`ic.stack`), the
+        // same key the `ModIcon` branch and `perk_icon_remove` use.
+        const std::string ame = str("Name");
+        const std::string atyp = str("Type");
+        const int l2 = atyp == "Pulse" ? 1 : atyp == "Stack" ? 2 : 0;
+        if (l2 != 0 && !ame.empty()) {
+            for (PerkIconView& ic : perk_icons_[owner_side & 1]) {
+                if (ic.stack != ame) continue;   // `f.action == a`
+                if (l2 == 1) {
+                    ++ic.pulse_left;             // `f.ZS++`
+                } else {
+                    // `f.V5 = b.W5.Wb().Wn()` — evaluate StackCount now.
+                    double v = 0.0;
+                    const auto nv = a.num.find("StackCount");
+                    if (nv != a.num.end()) {
+                        v = nv->second;
+                    } else {
+                        const auto sv = a.str.find("StackCount");
+                        if (sv != a.str.end()) {
+                            const sf2::scene::CondCtx oc = cond_ctx(tgt);
+                            const sf2::scene::CondCtx fc = cond_ctx(1 - tgt);
+                            const auto ev =
+                                sf2::scene::eval_operand(sv->second, oc, fc);
+                            if (ev) v = *ev;
+                        }
+                    }
+                    ic.stack_count = static_cast<int>(v);
+                }
+                break;   // one icon per owning action (`f.action == a`)
+            }
+        }
     } else if (type == "ClearMods") {
         bus_.clear_mods(owner_side, str("Name"), str("Namespace"));
     } else if (type == "SetModVariable") {
@@ -7219,8 +7279,19 @@ void FightController::update(float dt) {
     // midpoint of the two fighters' Center-Of-Mass BODY (`Eu.ma`, the
     // mass-weighted centroid computed by `Dl.v6` L577), NOT the render root
     // (`Fe().ma` = the NPivot anchor fed to `dv.ia`). Feed the COM.
+    // The `c3a` (L185830) pan branch additionally feeds the camera `Al` the
+    // PLAYER's BindingNode (`v.LC.sba`, shipped "NPivot") world x (`h$`),
+    // resolved by name here — NOT the COM.
+    float pnx = player_.fighter.world_x();
+    {
+        const std::string& bn =
+            sf2::scene::FightParams::defaults().camera_binding_node;
+        float nx = 0.0f, ny = 0.0f;
+        if (player_.fighter.node_world_xy(bn, false, nx, ny)) pnx = nx;
+    }
     camera_.framing(player_.fighter.com_x(), player_.fighter.com_y(),
-                    enemy_.fighter.com_x(), enemy_.fighter.com_y(), 1280.0f, 720.0f);
+                    enemy_.fighter.com_x(), enemy_.fighter.com_y(), 1280.0f, 720.0f,
+                    pnx);
 
     // The HUD state.
     hud_.set_hp(player_.hp, player_.max_hp, enemy_.hp, enemy_.max_hp);

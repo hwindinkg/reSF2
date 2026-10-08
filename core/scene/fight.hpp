@@ -1392,7 +1392,11 @@ struct FightCamera {
     // comment); `ay`/`by` are the CoM y's, and `ql.tyb` (L363) makes the
     // vertical target their midpoint (`Du.ma = wd.mea(Rw, pF)`). The render
     // camera y is always 0 (`N.Ta.K4` L85 + `Sya`), so it stays chase state.
-    void framing(float ax, float ay, float bx, float by, float view_w, float view_h);
+    // `pnx` is the PLAYER's binding node (`BindingNode`, shipped "NPivot")
+    // world x fed to the `kJa` pan branch (`c3a` L185830 -> `Al`); the focus
+    // midpoint stays the COM.
+    void framing(float ax, float ay, float bx, float by, float view_w, float view_h,
+                 float pnx);
 };
 
 // The fight HUD (JS `Ar` L2016-2019 + `Sf` L2032-2040): HP bars, the round

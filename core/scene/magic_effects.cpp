@@ -298,13 +298,19 @@ void MagicEffects::stop(const std::string& name, int owner) {
         if (owner < 0) {
             v.erase(std::remove_if(v.begin(), v.end(),
                                    [this, &name](const MagicInstance& in) {
-                                       return descs_[in.desc].name == name;
+                                       return name.empty() ||
+                                              descs_[in.desc].name == name;
                                    }),
                     v.end());
             return;
         }
         for (std::size_t i = 0; i < v.size(); ++i) {
-            if (descs_[v[i].desc].name == name && v[i].owner == owner) {
+            // JS `cv.LNa` (L838): `b==f.model && (a==f.effect.name || a=="")`
+            // — an empty `<Name>` (`StopEffect Player=...` with no Name, e.g.
+            // the shipped GATEKEEPER_SHILED) stops the FIRST effect on the
+            // model, whatever its name.
+            if ((name.empty() || descs_[v[i].desc].name == name) &&
+                v[i].owner == owner) {
                 v.erase(v.begin() + static_cast<std::ptrdiff_t>(i));
                 return;  // JS `break` — first match only
             }
@@ -319,7 +325,8 @@ void MagicEffects::stop_follow(const std::string& name, int owner) {
     // match, `break`ing. `tl.Pt` (L843) runs it for both `Gq` and `Hq`.
     const auto latch = [this, &name, owner](std::vector<MagicInstance>& v) {
         for (MagicInstance& in : v) {
-            if (descs_[in.desc].name == name && in.owner == owner) {
+            if ((name.empty() || descs_[in.desc].name == name) &&
+                in.owner == owner) {
                 in.detached = true;  // JS `e.Yla = !0`
                 return;
             }

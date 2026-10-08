@@ -27,8 +27,13 @@ namespace sf2::scene {
 // framing_sya_impl — exact JS camera pipeline, called from
 // FightCamera::framing(). ax/ay = player world COM, bx/by = enemy world COM,
 // view_w/h = viewport px.
+// `pnx` = the PLAYER's binding node (`v.LC.sba`, shipped "NPivot") world x.
+// JS `c3a` (L185830) feeds the camera `Al` the two named-node positions
+// (`h$`/`i$` = `a.oa.Ic(v.LC.sba)` set in `la.Gf`, L187830), NOT the COM: the
+// kJa pan term uses the player's NPivot x. The focus smoothing (`Du.ma`) stays
+// on the COM midpoint.
 inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, float by,
-                             float view_w, float view_h) {
+                             float view_w, float view_h, float pnx) {
     // JS `ql.tyb` (L363) feeds BOTH axes: `Du.ma = wd.mea(Rw, pF)` is the
     // midpoint of the two fighters' WORLD positions, so `ay`/`by` (the CoM
     // y's) are the JS vertical target — there is no invented vertical anchor.
@@ -74,9 +79,11 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     // L370) and `Xia=1`; the enemy `i$` weight `X3=0` in the shipped build
     // (`Ut.init` L823), so its term multiplies to 0. `kJa` (L827):
     //   `|v|+Vva>limit ? -(sign v)*(|v|-limit+Vva)*w : 0`.
-    // `BindingNode` (shipped "NPivot", `v.LC.sba`) is proxied by the player
-    // COM world x (`ax`); at the calibrated close-span states the branch is
-    // inert (xCa == 1 >= bound).
+    // `BindingNode` (shipped "NPivot", `v.LC.sba`) is the PLAYER node `h$`
+    // world x (`pnx`, resolved by the caller from the live skeleton); the
+    // enemy node `i$` weight `X3` is 0 in the shipped build, so its term is
+    // inert. At the calibrated close-span states the branch is inert
+    // (xCa == 1 >= bound).
     const float xca = std::min(n_c / (span + 300.0f), 1.0f);
     const float max_width = sf2::scene::FightParams::defaults().camera_max_width;
     const float binding_len =
@@ -88,7 +95,10 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
         const float bound = n_w / (max_width / cam.arena_w);
         if (bj_pre < bound) {
             const float limit = n_c / bound / 2.0f;  // nC/Bj/2 with Bj = bound
-            const float val = ax - focus_x;
+            // JS `kJa(a,b,c)`: `|b|+Vva>a ? -(sign b)*(|b|-a+Vva)*c : 0`.
+            // The player term passes `c.x - Lb.width/2 - b` = `h$.ma.x - focus`
+            // (`Xia=1`); `h$` is the NPivot node, NOT the COM.
+            const float val = pnx - focus_x;
             if (std::fabs(val) + binding_len > limit) {
                 const float k = std::fabs(val) - limit + binding_len;
                 // Io += kJa ; Io = arena_w/2 - focus -> focus -= kJa.
