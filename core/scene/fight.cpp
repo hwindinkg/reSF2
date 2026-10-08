@@ -3746,6 +3746,12 @@ void FightController::setup_bus(const PerkSetup& perks) {
         f->dots.clear();
     }
     bus_.clear();
+    // Live timed mods do NOT persist across rounds (see the L2957 per-round
+    // re-register), so the `ModIcon` HUD icons they own clear with them
+    // (JS `Hr.J2a`/`vKa` L1054338 clears every `Ir`; a per-round `reset()`
+    // drops the actions, and every icon is `MMa(!1)`-removed).
+    perk_icons_[0].clear();
+    perk_icons_[1].clear();
     bus_.log = [](const std::string& line) {
         std::fprintf(stdout, "[perk] %s\n", line.c_str());
         std::fflush(stdout);
@@ -3926,6 +3932,10 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
     // (`jp.image`/`jp.stack`/`jp.kx`); `ShowExpiration`/`Name`/`Value` are the
     // action attributes. A repeat fire of the same (image, stack) bumps the
     // stack counter (`Hr.Maa` cmd 2) and restarts the pulse.
+    // [FIX] The JS `Ir` has NO lifetime timer: the icon persists until its
+    // `ModIcon` action leaves the active list (`bLa(a,!0)` L665575 ->
+    // `cka(...,true)` -> `Hr.nab` -> `Ir.MMa(!1)`), removed in `tick_mods`
+    // below. The old `Frames/180` ttl was an invention.
     if (type == "ModIcon") {
         const std::string img = str("Image");
         if (!img.empty()) {
@@ -3938,13 +3948,11 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
                     break;
                 }
             }
-            const int frames = static_cast<int>(num("Frames", 180.0));
             if (found == nullptr) {
                 PerkIconView ic;
                 ic.image = img;
                 ic.stack = stack;
                 ic.show_expiration = num("ShowExpiration", 0.0) != 0.0;
-                ic.ttl_frames = frames > 0 ? frames : 180;
                 ic.stack_count = static_cast<int>(num("Value", 1.0));
                 if (ic.stack_count < 1) ic.stack_count = 1;
                 ic.pulse_left = 1;   // `Jr.eWa` seeds one pulse (`sj[last].ZS++`)
@@ -3952,7 +3960,6 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
                 list.push_back(std::move(ic));
             } else {
                 ++found->stack_count;
-                found->ttl_frames = frames > 0 ? frames : 180;
                 found->pulse_left = 1;
                 found->pulse_frame = 0;
             }
@@ -4366,6 +4373,10 @@ void FightController::tick_mods(int side) {
     side &= 1;
     sf2::scene::ModTickCtx ctx = mod_tick_ctx();
     ctx.on_expire = [this](int s, const sf2::scene::ModState& m) {
+        // JS `bLa(a,!0)` (L665575, on action removal) -> `cka(...,true)` ->
+        // `Hr.nab` -> `Ir.MMa(!1)`: a `ModIcon`'s HUD icon starts its
+        // fade-out when the owning mod expires.
+        if (s >= 0 && m.kind == "ModIcon") perk_icon_remove(s, m.name);
         // `JNa→Gj(d,14)`: vars carry ModExpires/Namespace/ParentPerk.
         sf2::scene::TrigVars v;
         v.str["ModExpires"] = m.name;
@@ -4420,6 +4431,10 @@ void FightController::tick_bus_side(int side) {
         sf2::scene::ModTickCtx ctx = mod_tick_ctx();
         for (const auto& fm : flushed) {
             sf2::scene::revert_mod(fm.second, fm.first, ctx, bus_.log);
+            // `qw`-flushed `ModIcon` actions remove their HUD icon too
+            // (`bLa(a,!0)` -> `Hr.nab`, same as the `ia` expiry path).
+            if (fm.first >= 0 && fm.second.kind == "ModIcon")
+                perk_icon_remove(fm.first, fm.second.name);
             sf2::scene::TrigVars ev;
             ev.str["ModExpires"] = fm.second.name;
             ev.str["Namespace"] = fm.second.namespc;

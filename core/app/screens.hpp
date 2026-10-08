@@ -1537,6 +1537,14 @@ private:
     std::vector<PerkCellHit> perk_cell_hits_;
     int perk_sel_ = -1;    // `vb.uj` (`hqb` L2198): the selected `uk` cell
     int perk_hover_ = -1;
+    // JS `Ed.kN`/`Ed.GX` (L2203/L2206): the shared `uk`/`is` opacity-pulse
+    // clock. `Ed.aa` (L2206) bumps `kN` every rendered frame and flips `GX`
+    // once `kN > zc.qva` (AnimationSpeed); `Ed.qja` (L2203) ramps the icon
+    // alpha between `zc.RE.min/max` (PerkOpacity/255) and `Ed.animate`
+    // (L2203) the select highlight between `zc.yka.min/max`
+    // (SelectOpacity/255).
+    int profile_anim_frame_ = 0;      // `kN`
+    bool profile_anim_phase_ = true;  // `GX`
     int player_level_ = 1;  // `p.o.bb()` (the `uk.zo` level gate, L2223)
     int achiev_hover_ = -1;
     // `Bt.L1a`/`Qua` (L306-307): is the selected row buyable (JS `Be==0`

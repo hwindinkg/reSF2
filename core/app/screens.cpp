@@ -9142,40 +9142,21 @@ struct UrBlinkCfg {
 };
 
 const UrBlinkCfg& ur_blink_cfg() {
+    // [FIX — consumed] The `Mb.Gm` (`Dw`) fields are parsed ONCE by
+    // `FightParams::defaults()` (`damage.cpp` L567-578, the SAME
+    // `Settings/GUI/Map/ZoneSwitch` path `Mb.parse` is handed: L594320
+    // `ge.parse(a.A("GUI").A("Basic")); Mb.parse(a.A("GUI").A("Map"))`). The
+    // old local re-parse is gone: this consumer now reads the process-wide
+    // settings (`load_fight_params_from_settings` at `app.cpp` L881), exactly
+    // like the fight/camera consumers. `ur_zone_red` (JS `Ya.VEa` L2131-2132)
+    // matches `Mb.Gm.RY` = `map_zone_battle_types`.
     static const UrBlinkCfg cfg = [] {
         UrBlinkCfg c;
-        try {
-            std::ifstream in("reference/extracted/xml/res/internal_settings.xml",
-                             std::ios::binary);
-            if (!in) return c;
-            std::vector<char> data((std::istreambuf_iterator<char>(in)),
-                                   std::istreambuf_iterator<char>());
-            sf2::data::xml_doc doc;
-            doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
-            const pugi::xml_node root = doc.root().first_child();
-            if (!root) return c;
-            // JS `Mb.parse` is handed `a.A("GUI").A("Map")` (L594320:
-            // `ge.parse(a.A("GUI").A("Basic")); Mb.parse(a.A("GUI").A("Map"))`),
-            // so `<ZoneSwitch>` lives at `Settings/GUI/Map/ZoneSwitch` — NOT a
-            // root child. Reading `root.child("ZoneSwitch")` returned NULL and
-            // left `battle_types` EMPTY, so `ur_zone_red` (JS `Ya.VEa`
-            // L2131-2132, invoked L2116) never matched Tournament/Challenge and
-            // the whole red-bulb/selected-slot blink stayed off.
-            const pugi::xml_node zs =
-                root.child("GUI").child("Map").child("ZoneSwitch");
-            if (!zs) return c;
-            c.battle_types.clear();
-            for (const pugi::xml_node b : zs.child("BattleTypes").children("BattleType")) {
-                const std::string name = b.attribute("Name").value();
-                if (!name.empty()) c.battle_types.push_back(name);
-            }
-            c.min_opacity = zs.child("MinOpacity").attribute("Value").as_int(122);
-            c.fade_speed = zs.child("FadeSpeed").attribute("Value").as_int(30);
-            c.delay_before_fade =
-                zs.child("DelayBeforeFade").attribute("Value").as_int(30);
-        } catch (const std::exception&) {
-            // Degrade to the shipped defaults; the dots still draw.
-        }
+        const sf2::scene::FightParams& mp = sf2::scene::FightParams::defaults();
+        c.battle_types = mp.map_zone_battle_types;
+        c.min_opacity = mp.map_zone_min_opacity;
+        c.fade_speed = mp.map_zone_fade_speed;
+        c.delay_before_fade = mp.map_zone_delay_before_fade;
         return c;
     }();
     return cfg;
@@ -18613,6 +18594,42 @@ void EquipmentScreen::achiev_claim(int index) {
         std::fprintf(stdout, "[profile] achievement claim %s (+%d money +%d bonus)\n",
                      r.name.c_str(), r.money_prize, r.bonus_prize);
         std::fflush(stdout);
+        // [FIX — consumed] JS `vb.exb` (L2199) ends `this.Zr.vLa(zc.tNa)`:
+        // scroll the `fs` slider to the FIRST still-rewardable row
+        // (`vLa` L2199: `if(this.El[e].first.yj){b=e;break}` then
+        // `this.Pa.jj(b, a)`) at speed `zc.tNa` = SpeedScrollAchievements/60
+        // (`Gg.jj` L1886 — `b==0` jumps, else the state-2 spring). Before the
+        // port dropped the call, so the list never followed a claim.
+        const double speed =
+            sf2::scene::FightParams::defaults().profile_scroll_achievements_speed;
+        int target_row = -1;
+        for (int i = 0; i < static_cast<int>(achiev_rows_.size()); ++i) {
+            if (achiev_rows_[i].reward_available) { target_row = i; break; }
+        }
+        if (target_row >= 0) {
+            const ShopRect v = profile_layout().viewer;
+            const float cell_h = profile_cell_h(v, 400.0f, 130.0f);
+            const float pitch = cell_h + 10.0f;              // `fs.init` spacing
+            const float list_h = profile_scroll_h(v);
+            const float uz = std::max(0.0f, (list_h - cell_h) * 0.5f);  // `Gg.ba`
+            const float hi = uz;
+            const float lo =
+                std::min(hi, uz - static_cast<float>(
+                                         static_cast<int>(achiev_rows_.size()) - 1) * pitch);
+            const float tgt = std::clamp(uz - static_cast<float>(target_row) * pitch,
+                                         lo, hi);            // `Gg.jj` targetY
+            ListScroll& s = list_scroll_[kProfileTabAchiev];
+            if (speed == 0.0) {                              // `jj` b==0 -> oNa
+                s.y = tgt;
+                s.target = tgt;
+                s.vel = 0.0f;
+                s.state = 0;
+            } else {                                         // `jj` b!=0 -> state 2
+                s.vel = 0.0f;
+                s.target = tgt;
+                s.state = 2;
+            }
+        }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[profile] achievement claim failed: %s\n", e.what());
     }
@@ -18854,6 +18871,19 @@ void EquipmentScreen::probe_list_scroll(int tab, double y0, double y1) {
 
 void EquipmentScreen::update_impl(float dt) {
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // [FIX — consumed] JS `Ed.aa` (L2206): `this.kN++; this.kN > this.CM &&
+    // (this.kN = 0, this.GX = !this.GX)` with `CM = zc.qva`
+    // (AnimationSpeed, `internal_settings.xml` Profile/@AnimationSpeed). The
+    // shared `uk`/`is` opacity-pulse clock; the render reads it via
+    // `profile_perk_opacity_min/max` + `profile_select_opacity_min/max`.
+    {
+        const double cm = sf2::scene::FightParams::defaults().profile_animation_speed;
+        ++profile_anim_frame_;
+        if (cm > 0.0 && static_cast<double>(profile_anim_frame_) > cm) {
+            profile_anim_frame_ = 0;
+            profile_anim_phase_ = !profile_anim_phase_;
+        }
+    }
     // D3: `Wb` is a GLOBAL overlay — a dialog queued on ANY screen blocks that
     // screen's input (the Profile tab strip included).
     if (quest_modal_consume(app())) return;
@@ -19386,6 +19416,27 @@ void EquipmentScreen::render_impl(App& app) {
                               kLevelSrcW * kFlagScale * 1.15f) * bdg_unit;
         const float bdg_dy = (kPerkbackSrc * 0.5f -
                               kLevelSrcH * kFlagScale * 1.15f) * bdg_unit;
+        // [FIX — consumed] JS `Ed.qja` (L2203): the `uk` icon opacity ramps
+        // between `zc.RE.min/max` (PerkOpacity/255) over `zc.qva`
+        // (AnimationSpeed) frames with `GX` the up/down phase. Only the
+        // AVAILABLE cell (`Be==0`) animates (`uk.animate` L2224 guards on
+        // `nb.Be==0`); learned cells sit at `max` (`uk.ao` L2222
+        // `Fs.wa(this.vy)`) and locked cells hide the icon (`Syb`).
+        const sf2::scene::FightParams& fprof = sf2::scene::FightParams::defaults();
+        const float perk_op_max =
+            static_cast<float>(fprof.profile_perk_opacity_max) / 255.0f;
+        const float perk_op_min =
+            static_cast<float>(fprof.profile_perk_opacity_min) / 255.0f;
+        float perk_icon_alpha = perk_op_max;
+        {
+            float da = perk_op_max - perk_op_min;
+            if (da > 0.0f && fprof.profile_animation_speed > 0.0) {
+                da = da / static_cast<float>(fprof.profile_animation_speed) *
+                     static_cast<float>(profile_anim_frame_);
+                perk_icon_alpha =
+                    profile_anim_phase_ ? perk_op_min + da : perk_op_max - da;
+            }
+        }
         // The `tk` is symmetric about the seam the `Rx` group docks to: the
         // cell centre = `cell.ce.x/2` (L2218) in native px inside the `Gg`
         // list rect.
@@ -19494,7 +19545,8 @@ void EquipmentScreen::render_impl(App& app) {
             if (perk_locked) {
                 (void)try_draw_atlas_button(app, "pieces/icons_kick_blocked", icx, cy, ico, ico,
                                             0.95f);
-            } else if (!draw_cell_icon(app, r.image, icx, cy, ico * 0.92f, ico * 0.92f, 1.0f)) {
+            } else if (!draw_cell_icon(app, r.image, icx, cy, ico * 0.92f, ico * 0.92f,
+                                       r.state == 0 ? perk_icon_alpha : perk_op_max)) {
                 const float isz = ico * 0.22f;
                 const float iq[] = {icx - isz, cy - isz, icx + isz, cy - isz,
                                     icx + isz, cy + isz, icx - isz, cy - isz,

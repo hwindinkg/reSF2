@@ -1758,15 +1758,29 @@ public:
         std::string image;        // action `Image` (dot->slash at draw time)
         std::string stack;        // action `Name` grouping key (`Jr.stack`)
         bool show_expiration = false;  // action `ShowExpiration` (`jp.kx`)
-        int ttl_frames = 0;       // port display lifetime before fade-out
         int stack_count = 0;      // `Ir.V5`
         float alpha = 0.0f;       // `Pk` (0..1)
         int pulse_left = 0;       // `ZS`
         int pulse_frame = 0;      // `IA`
         bool pulse_phase = false; // `$S`
-        bool fading_in = true;    // `yta`
+        bool fading_in = true;    // `yta` (true = fade-in phase, `MMa(!0)`)
+        bool removing = false;    // `Ir.ia` L2043: `MMa(!1)` started `t2a`
         float scale = 0.5f;       // last `g*.5`
     };
+    // JS `Hr.Nmb` (L1054236 `nab`) -> `Ir.MMa(!1)` (L1051): start the icon's
+    // fade-out (`t2a`, `Ir.ia` L2043); it removes itself at `Pk==0`. Fired when
+    // the owning `ModIcon` action leaves the active list (JS `bLa(a,!0)`,
+    // L665575 -> `cka(...,true)` -> `nab`). The JS `Ir` has NO lifetime timer -
+    // the old port `Frames/180` ttl was an invention.
+    void perk_icon_remove(int side, const std::string& stack) {
+        for (PerkIconView& ic : perk_icons_[side & 1]) {
+            if (ic.stack == stack) {   // `Nmb`: first `action == a` match
+                ic.removing = true;
+                ic.fading_in = false;
+                break;
+            }
+        }
+    }
     const std::vector<PerkIconView>& perk_icons(int side) const {
         return perk_icons_[side & 1];
     }
@@ -1779,17 +1793,22 @@ public:
             std::vector<PerkIconView>& list = perk_icons_[side];
             for (std::size_t i = 0; i < list.size();) {
                 PerkIconView& ic = list[i];
-                // fade in (`Kab`) then, past the lifetime, fade out (`t2a`)
-                if (ic.fading_in && ic.alpha < 1.0f) {
+                // JS `Ir.ia` (L2043): `iI && (yta ? Kab() : t2a(), ..., Pk==0 &&
+                // B())`. Fade in (`Kab`, `yta`) until `Pk>=1` (then idle), or
+                // fade out (`t2a`) once `MMa(!1)` set `removing`; remove at 0.
+                if (ic.removing) {
+                    ic.alpha -= p.fade_out > 0.0f ? 1.0f / p.fade_out : 1.0f;
+                    if (ic.alpha <= 0.0f) {
+                        ic.alpha = 0.0f;
+                        list[i] = list.back();
+                        list.pop_back();
+                        continue;
+                    }
+                } else if (ic.fading_in && ic.alpha < 1.0f) {
                     ic.alpha += p.fade_in > 0.0f ? 1.0f / p.fade_in : 1.0f;
                     if (ic.alpha >= 1.0f) {
                         ic.alpha = 1.0f;
                         ic.fading_in = false;
-                    }
-                } else if (!ic.fading_in) {
-                    if (ic.ttl_frames > 0) --ic.ttl_frames;
-                    if (ic.ttl_frames <= 0) {
-                        ic.alpha -= p.fade_out > 0.0f ? 1.0f / p.fade_out : 1.0f;
                     }
                 }
                 // pulse (`Ir.l4`, L2043)
@@ -1821,12 +1840,7 @@ public:
                     ic.scale = g * 0.5f;
                     ++ic.pulse_frame;
                 }
-                if (ic.alpha <= 0.0f && !ic.fading_in) {
-                    list[i] = list.back();
-                    list.pop_back();
-                } else {
-                    ++i;
-                }
+                ++i;   // removal happens in the `removing` branch above
             }
         }
     }

@@ -25,16 +25,17 @@ struct Texture;
 
 namespace sf2::scene {
 
-// JS `v.LC` (`Ov`, L605559) — internal_settings `<CameraSettings
+// JS `v.LC` (`Ov`, L605559) - internal_settings `<CameraSettings
 // CameraNode="COM" BindingNode="NPivot" MaxWidth="1100" BindingLength="100"
 // MaxWidthDelta="50">`. `oGa` (MaxWidthDelta) shrinks the `Ut.Al` L826
 // pano-clamp bound `d=(Lb.width-oGa)*Bj*.5-nC*.5`; `Vva` (BindingLength) is
 // the binding slack of the `maxWidth` pan branch (`kJa`, L827); `maxWidth`
-// (1100 > 0) gates that branch (port does not run it — see OPEN note in
-// `framing_sya_impl`).
-constexpr float kMaxWidthDelta = 50.0f;   // v.LC.oGa (MaxWidthDelta)
-constexpr float kBindingLength = 100.0f;  // v.LC.Vva (BindingLength)
-constexpr float kCameraMaxWidth = 1100.0f; // v.LC.maxWidth
+// (1100 > 0) gates that branch. Every consumer reads the parsed
+// `FightParams` fields (`damage.hpp`: `camera_max_width_delta`/
+// `camera_max_width`/`camera_binding_length`; `location_scene.cpp` L1169,
+// `fight_camera_sya.hpp` L81-83/182-183), so the old hardcoded
+// `kMaxWidthDelta`/`kBindingLength`/`kCameraMaxWidth` constexprs were dead
+// and are removed.
 
 // One live particle — JS `Cv` (L1152) wrapping the `Dv` view (L1649):
 // `ca` = position, `ub` = velocity, `force` = spawn-time force vector,
