@@ -474,6 +474,11 @@ public:
         // the `YL` status-1 threshold (`c.no >= a.repeat`, L220). Parallel to
         // `fight_names`.
         std::vector<int> fight_replays;
+        // JS `hl.zH` (`Battle` record `ReplayCount`) rendered by `pk.wy`
+        // (`pk.Rma` L1112022: `Y.na("^replays^: "+a.ffa())`, only for
+        // `FightReplayable`/`FightBossesReplayable`). `ffa()` (L1414) returns
+        // the battle record's `ob.zH`; 0 when no record.
+        int replay_count = 0;
         std::vector<bool> pip_beaten;
         float x = 0.0f;  // screen pos (center; JS `qe.X0a` L2144)
         float y = 0.0f;

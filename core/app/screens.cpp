@@ -8725,6 +8725,10 @@ void MapScreen::recompute_node_states(const WarriorSave& w) {
             // (`Lc.tt()` L1406 -> `hl.tt` L278). The button then picks
             // `BattleBtnLock/locked_<icon>` over `BattleBtnBase/base_<icon>`.
             n.locked = has_rec && rec->locked;
+            // `pk.wy` (`pk.Rma` L1112022): `a.ffa()` (L1414) =
+            // `this.ob!=null ? this.ob.zH : 0` — the battle record's
+            // `ReplayCount`.
+            n.replay_count = has_rec ? rec->replay_count : 0;
             // [expiry evidence] the JS `hl.c$a` verdict for an EndTime-bearing
             // record: `l$a()=this.D9-p.Dc` (offset ~141307), `c$a()=this.D9!=-1
             // ? this.l$a()<=0 : !1` (~141063), `li()=this.d9?!0:this.c$a()`
@@ -9582,7 +9586,14 @@ void MapScreen::update_impl(float dt) {
         // The `tj` FIGHT plate is drawn ONLY for the `Sr`/`Whb` body (the
         // `mk` LOCKED/Fake branch never calls `Cyb`, L2103/L2161) — a locked
         // record / `FightFake` node has NO fight trigger.
-        const bool has_fight_btn = !n.locked && n.type != "FAKE";
+        // Branch 2 of `Rr` (L1083413): a locked ACTIVE `<Fight>` also takes
+        // the `mk` description panel and never builds `tj` (`Cyb`).
+        const int hfb_fi = map_fight_index(app(), n.name, n.fight_count);
+        const bool hfb_fight_locked =
+            static_cast<std::size_t>(hfb_fi) < n.fight_locked.size() &&
+            n.fight_locked[static_cast<std::size_t>(hfb_fi)];
+        const bool has_fight_btn =
+            !n.locked && n.type != "FAKE" && !hfb_fight_locked;
         if (n.visible && has_fight_btn &&
             p.x >= fb.cx - fb.w * 0.5f && p.x <= fb.cx + fb.w * 0.5f &&
             p.y >= fb.cy - fb.h * 0.5f && p.y <= fb.cy + fb.h * 0.5f) {
@@ -10204,9 +10215,25 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     f += pv_w * 0.5f + 20.0f;  // `Wu.qa()` = pv_w * (200/400)
     // Body `pk` rect (L2102): `gb(d, f, d+(c-2*d), f+(e-f))`.
     const float body_x = cx + d;
-    const float body_y = cy + f;
     const float body_w = cw - 2.0f * d;
-    const float body_h = ch - f;
+    // --- `pk.wy` replay label (`pk.Rma` L1112022) -------------------------
+    // `Rma(a){ a.type!="FightReplayable"&&a.type!="FightBossesReplayable"
+    //   ? this.wy.R(!1)
+    //   : (this.wy.V(Y.na("^replays^: "+a.ffa())), this.wy.R(!0)) }`
+    // `a.ffa()` (L1414) = the battle record's `ob.zH` (`ReplayCount`). Only
+    // the replayable families show it; it occupies the top body row
+    // (`ok.ba` L2150 `this.wy.Fa(a, a*.16)`) and the plate stacks below.
+    const bool replay_label =
+        node->type == "REPLAYABLE" || node->type == "BOSSES_REPLAYABLE";
+    const float wy_h = replay_label ? body_w * 0.16f : 0.0f;
+    const float body_y = cy + f + wy_h;
+    const float body_h = ch - f - wy_h;
+    if (replay_label) {
+        const std::string wy_text =
+            loc(app, "replays", "REPLAYS") + ": " + std::to_string(node->replay_count);
+        draw_ui_label(app, body_x, cy + f, body_w, wy_h, wy_text, wy_h / 100.0f,
+                      UiAlign::Left, 0.184f, 0.145f, 0.106f);
+    }
     // `Rr` (L2103) — the LOCKED/Fake DESCRIPTION panel. `mk` replaces the
     // whole body (`Ah`); the `else` chain (`Sr`/`Whb`) is the fight body and
     // the ONLY path that shows the `tj` FIGHT button (`Whb` -> `Cyb`). So a
@@ -10220,27 +10247,47 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // `mk` (L2103) layout: `Lu.ua(body_w*.16)`, `Lu.D(body_w*.1)`,
     // `Lu.Fa(body_w, body_h-2*body_w*.1)`, multiline (`rd(!0)`, `Kc(.65)`),
     // centred (`Ia(2)`), color `Z.sc` (0.184/0.145/0.106).
-    const bool desc_panel = node->locked || node->type == "FAKE";
+    // JS `Rr` (L1083413): `d=a.ob; if(d!=null&&d.tt()||a.type=="FightFake")
+    //   c(new mk(a.description));
+    // else if(b!=null&&b.locked) c(new mk(b.GD()));`
+    // `a` = the battle (`a.eJ()` L1405, `a.type`, `a.description`), `b` = the
+    // ACTIVE `<Fight>` (`b.locked` = the `<Fight Locked>` attr; `b.GD()`
+    // L727376 = `g8 ?? Sb` = the fight's `<Rules><Description Alias>` else
+    // `<Fight Description>`). Branch 1 uses the BATTLE description; branch 2
+    // the FIGHT's `GD()` — stages.xml `BOSS_TITAN` ships 6 locked fights
+    // (fight 1 `Description="fight_locked_chapter2"`), so the port previously
+    // drew the full body + FIGHT plate where JS draws the locked description.
+    const int mk_fi = map_fight_index(app, node->name, node->fight_count);
+    const bool active_fight_locked =
+        static_cast<std::size_t>(mk_fi) < node->fight_locked.size() &&
+        node->fight_locked[static_cast<std::size_t>(mk_fi)];
+    const bool battle_desc = node->locked || node->type == "FAKE";
+    const bool desc_panel = battle_desc || active_fight_locked;
+    std::string desc_text = node->description;
+    if (!battle_desc && active_fight_locked) {
+        desc_text = app.quest_engine().fight_description(
+            node->zone + "|" + node->name + "|" + std::to_string(mk_fi + 1));
+    }
     {
         static std::string last_key;
         const std::string key = node->name + "|" + (desc_panel ? "mk" : "body");
         if (key != last_key) {
             last_key = key;
             std::fprintf(stdout,
-                         "[map] info panel %s type=%s locked=%d desc=%s text='%s' "
-                         "branch=%s\n",
+                         "[map] info panel %s type=%s locked=%d fight_locked=%d "
+                         "desc=%s text='%s' branch=%s\n",
                          node->name.c_str(), node->type.c_str(), node->locked ? 1 : 0,
-                         node->description.c_str(),
-                         loc(app, node->description, node->description).c_str(),
+                         active_fight_locked ? 1 : 0, desc_text.c_str(),
+                         loc(app, desc_text, desc_text).c_str(),
                          desc_panel ? "mk" : "body");
             std::fflush(stdout);
         }
     }
     if (desc_panel) {
         const float desc_h = body_h - 2.0f * body_w * 0.1f;
-        if (desc_h > 0.0f && !node->description.empty()) {
+        if (desc_h > 0.0f && !desc_text.empty()) {
             draw_ui_wrapped(app, body_x, body_y + body_w * 0.1f, body_w, desc_h,
-                            loc(app, node->description, node->description),
+                            loc(app, desc_text, desc_text),
                             body_w * 0.16f / 100.0f, UiAlign::Center, 0.184f, 0.145f,
                             0.106f, /*line_factor=*/0.65f);
         }
@@ -10306,7 +10353,7 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // `dc.KK`). `md` is the ACTIVE fight's `GD()` (`b.GD()`, `zyb` L1113392),
     // shown only for challenge/replayable types while the fight is not locked
     // (`md.R(!b&&c)`); every other type hides `md` and pins `Lm` at opacity 1.
-    const int md_fi = map_fight_index(app, node->name, node->fight_count);
+    const int md_fi = mk_fi;  // `map_fight_index` computed above (desc panel)
     const std::string md_triple =
         node->zone + "|" + node->name + "|" + std::to_string(md_fi + 1);
     const bool challenge_type = node->type == "CHALLENGE" || node->type == "REPLAYABLE";
