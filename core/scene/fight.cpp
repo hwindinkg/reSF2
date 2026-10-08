@@ -3187,6 +3187,24 @@ void FightController::enter_end_stance() {
     // ringout arrows are removed at the round-end cleanup and every active
     // rule is stopped. `rules_end_round` clears the marker + rule set.
     rules_end_round();
+    // JS `ca.Pf` (L386): the `Pf` listener (`a.Pf.addListener(w(this,this.Pf))`
+    // L419; the signal is fired by `x3` L258379 `this.Pf.Z(this.Vb)` when the
+    // fighter's stage becomes `eu==3`) runs `Cr.GZ`/`uca`/`rca` (`fu(1.166)`)
+    // — the KO/PERFECT/GREAT/TIMESUP/RINGOUT plate is raised AT THE PHASE-3
+    // START and counts down INDEPENDENTLY while the end-stance animation
+    // plays. It is gated `!A && !B` (`A` = a type-2 ROUND plate already up,
+    // `B` = a non-player winner outside PVP): an ENEMY win (non-PVP) and a
+    // player win that took >10% HP (`result_plate_ == none`) raise NO plate.
+    // The port used to raise the plate at the END-STANCE GATE and hold an
+    // extra `fu(1.166)` before the ROUND plate, so a `none` round left the
+    // hidden 3-D view blank/dark for 1.166 s (the reported round-change
+    // "darkening") and a real plate shifted the whole break late. Raise it
+    // here, display-only (`vhb` has no case for the GZ type), and let the
+    // end-stance gate advance the round directly (JS `Onb` `ZK(); NA(); Z2()`).
+    if (result_plate_ != banner_kind::none) {
+        banner_show(result_plate_, kJsBannerHoldSeconds, banner_action::none,
+                    false);
+    }
     // Root `<Triggers>` `RoundStageStart Name="EndStance"` (`Tm` L772,
     // stage code 3) — 3 of the 4 shipped RoundStageStart triggers use it.
     dispatch_global_triggers("RoundStageStart", "RoundStageStart", "EndStance");
@@ -6713,19 +6731,11 @@ void FightController::banner_expire() {
             enter_fight();
             break;
         case banner_action::next_round:
-            // The port's stand-in for the JS end-stance gate
-            // (`kg` L387 -> `h4a` L413 -> `Ewb` L404 -> `h9` -> `Onb`
-            // L411): `ZK(); NA(); Z2()` � the round AUTO-advances.
-            between_rounds_recover();
-            // JS `mfb` (L205855): the wave spawn runs AFTER `NA()` and before
-            // `this.xF(0); this.tx()` (the port's `round_start`). Only a
-            // PLAYER round-win in a multi-wave fight (or ANY win when `!c`)
-            // armed this in `apply_round_result`.
-            if (wave_advance_pending_) {
-                wave_advance_pending_ = false;
-                spawn_next_enemy_wave();
-            }
-            round_start();
+            // RETIRED: the round-end result plate no longer holds the round.
+            // JS `Onb` (L411) raises the result plate at the PHASE-3 START
+            // (`enter_end_stance` -> `Pf` -> `Cr.GZ`) and advances directly at
+            // the end-stance gate (`Ta.XF(!1); ZK(); NA(); Z2()`), so no
+            // banner carries this action any more. Kept for enum stability.
             break;
         case banner_action::end_battle:
             // JS `bea`/`kD` (L413/L415): the result plate's `fu(1.166)` hold
@@ -7043,22 +7053,40 @@ void FightController::update(float dt) {
             if (end_stance_pending_ && stance_ended) {
                 end_stance_pending_ = false;
                 set_scene_visible(false);  // JS `Ta.XF(!1)`
-                // JS `Pf` (L196253) chose the plate in `apply_round_result`
-                // (`result_plate_`): perfect/great/none for the `ey=0` default,
-                // timesup/ringout for the rules. `none` still raises the
-                // countdown (the JS round transition is driven by the `h9`->
-                // `Onb` chain, not the plate art), so the round advances with
-                // no visible callout.
-                const banner_kind result_plate = result_plate_;
-                const char* plate_name =
-                    result_plate == banner_kind::victory ? "PERFECT"
-                    : result_plate == banner_kind::defeat ? "GREAT"
-                    : result_plate == banner_kind::timesup ? "TIMESUP"
-                    : result_plate == banner_kind::ringout ? "RINGOUT" : "none";
-                banner_show(result_plate, kJsBannerHoldSeconds,
-                            banner_action::next_round, false);
-                std::fprintf(stdout, "[fight] banner: %s (F%d)\n", plate_name,
-                             frame_);
+                // JS `ZK()` (L206859 `c.L4()` -> `wd.reset()` + `oL(position)`):
+                // reset each fighter's animator and re-seat it at its spawn
+                // WHILE THE VIEW IS HIDDEN, before `Z2` raises the ROUND plate.
+                // The port used to reposition only in `enter_start_stance`
+                // (`FNa`, AFTER the plate): the camera chase then glided from
+                // the previous round's framing to the spawn framing on VISIBLE
+                // frames (the reported "camera changes back" after a round).
+                // Repositioning here lets the hidden ROUND-plate window absorb
+                // the glide, so the view is already at the JS spawn framing
+                // when `FNa` re-shows it.
+                player_.fighter.clear_move();
+                enemy_.fighter.clear_move();
+                player_.fighter.teleport(battle_.player_spawn_x,
+                                         battle_.player_spawn_y);
+                enemy_.fighter.teleport(battle_.enemy_spawn_x,
+                                        battle_.enemy_spawn_y);
+                sample_idle(player_);
+                sample_enemy_idle();
+                rebuild_body(player_, enemy_);
+                rebuild_body(enemy_, player_);
+                // JS `Onb` (L411) `!a` branch: `this.Ta.XF(!1); this.ZK();
+                // this.NA(); this.Z2()` — hide, reset the fighters, recover,
+                // and raise the ROUND break plate. The result plate (if any)
+                // was ALREADY raised at the phase-3 start (`enter_end_stance`
+                // -> JS `Pf` -> `Cr.GZ`) and has been counting down under the
+                // end-stance animation; the round advance adds NO second hold.
+                // `Z2`'s ROUND plate (`Cr.tca`, `fu(1.666)`) then holds the
+                // reset (invisible) until `FNa` (`XF(!0)`) re-shows the view.
+                between_rounds_recover();  // JS `NA()` (L414)
+                if (wave_advance_pending_) {
+                    wave_advance_pending_ = false;
+                    spawn_next_enemy_wave();  // JS `mfb` wave swap
+                }
+                round_start();  // JS `Z2()` (L408) -> the ROUND plate
                 std::fflush(stdout);
             }
             break;
@@ -7107,8 +7135,10 @@ void FightController::update(float dt) {
             emv != pemv || pmv != ppmv) {
             std::fprintf(stdout,
                          "[rprobe] F%d phase=%d banner=%d vis=%d round=%d rw=%d "
-                         "px=%.1f py=%.1f ex=%.1f ey=%.1f hpP=%.1f hpE=%.1f P=%s E=%s\n",
+                         "cx=%.1f px=%.1f py=%.1f ex=%.1f ey=%.1f hpP=%.1f "
+                         "hpE=%.1f P=%s E=%s\n",
                          frame_, ph, bn, vv, round_.number, rw,
+                         static_cast<double>(camera_.center_x),
                          static_cast<double>(player_.fighter.world_x()),
                          static_cast<double>(player_.fighter.world_y()),
                          static_cast<double>(enemy_.fighter.world_x()),
