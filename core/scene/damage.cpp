@@ -461,6 +461,31 @@ void load_fight_params_from_settings(const std::string& xml_text) {
         if (cs.attribute("MaxWidthDelta"))
             v.camera_max_width_delta = cs.attribute("MaxWidthDelta").as_float();
     }
+    // `v.hu` (L1197-1198, `v.hu.parse(a.A("StyleLevels"))` L1159): the style
+    // meter. `u.H` reads StylePerHit/DecreaseSpeed/Penalty + one `<Style>`
+    // row (Name/StyleMultiplier/TextImage/BarImage) per level. The port
+    // previously hardcoded the StyleTable (fight.hpp) + the frame/name arrays
+    // (screens.cpp); data-driven here, JS-exact.
+    if (const pugi::xml_node sl = root.child("StyleLevels")) {
+        v.style_per_hit = sl.attribute("StylePerHit").as_double(0.5);
+        v.style_decrease_speed = sl.attribute("DecreaseSpeed").as_double(0.08);
+        v.style_penalty = sl.attribute("Penalty").as_double(2.0);
+        v.style_levels.clear();
+        for (const pugi::xml_node s : sl.children("Style")) {
+            FightParams::StyleLevelRow row;
+            row.name = s.attribute("Name").value();
+            row.multiplier = s.attribute("StyleMultiplier").as_double(1.0);
+            row.text_image = s.attribute("TextImage").value();
+            row.bar_image = s.attribute("BarImage").value();
+            v.style_levels.push_back(std::move(row));
+        }
+        std::fprintf(stdout,
+                     "[fx] StyleLevels PerHit=%.3f DecreaseSpeed=%.3f Penalty=%.1f "
+                     "levels=%zu (shipped XML)\n",
+                     v.style_per_hit, v.style_decrease_speed, v.style_penalty,
+                     v.style_levels.size());
+        std::fflush(stdout);
+    }
     // `v.wDa` (L1158) = `<HitEffects>`: every `<HitEffect Type PauseTime
     // EffectTime AmplitudeX FrequencyX AmplitudeY FrequencyY/>` (JS `em`
     // L660438 `parse`). Document order is load-bearing: `ZAa` returns the

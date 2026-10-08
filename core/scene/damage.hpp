@@ -331,6 +331,23 @@ struct FightParams {
     // previously used a compile-time 50); the shipped file resolves to 50.
     float camera_max_width_delta = 50.0f;  // `oGa` (MaxWidthDelta)
 
+    // `v.hu` (JS `lw` g="26D" L1197-1198; `v.hu.parse(a.A("StyleLevels"))`
+    // L1159): the HUD style meter. `<StyleLevels StylePerHit DecreaseSpeed
+    // Penalty>` + one `<Style Name StyleMultiplier TextImage BarImage>` per
+    // level (shipped 6: Start/Hard/Brutal/Aggressive/Crazy/Fantastic). The
+    // port previously hardcoded these (the `StyleTable` in fight.hpp + the
+    // frame/name arrays in screens.cpp); read them from the XML here instead.
+    double style_per_hit = 0.5;          // `TNa` (StylePerHit)
+    double style_decrease_speed = 0.08;  // `tya` (DecreaseSpeed)
+    double style_penalty = 2.0;          // `ZIa` (Penalty)
+    struct StyleLevelRow {
+        std::string name;         // `name`
+        double multiplier = 1.0;  // `SNa` (StyleMultiplier)
+        std::string text_image;   // `dma` (TextImage)
+        std::string bar_image;    // `Nva` (BarImage)
+    };
+    std::vector<StyleLevelRow> style_levels;
+
     // --- LOTTERY model data (shipped JS: loaded, but INERT) ----------------
     // `Je` (L655748, static class, g="29F"): `Je.parse(a.A("GUI").A("Lottery"))`
     // (L594419) reads `<Shake Time PosInfluenceX PosInfluenceY Magnitude

@@ -1092,6 +1092,25 @@ inline void style_vma(StyleMeter& st, double credit, int levels) {
 inline void style_decay(StyleMeter& st, double tya) {
     st.frac = std::max(0.0, st.frac - tya / 60.0);
 }
+// Build the live `StyleTable` from the internal_settings.xml `<StyleLevels>`
+// rows (JS `v.hu` L1197-1198). The shipped values (0.5 / 0.08 / 2.0, six
+// StyleMultiplier="1" levels) resolve identically to the old compile-time
+// defaults; this just stops hardcoding them. `FightParams::defaults()` is
+// populated at boot before any fight, so a function-local static is safe.
+inline StyleTable style_table_from_params() {
+    StyleTable t;
+    const FightParams& p = FightParams::defaults();
+    t.tna = p.style_per_hit;
+    t.tya = p.style_decrease_speed;
+    t.zia = p.style_penalty;
+    if (!p.style_levels.empty()) {
+        t.sna.clear();
+        for (const FightParams::StyleLevelRow& r : p.style_levels) {
+            t.sna.push_back(r.multiplier);
+        }
+    }
+    return t;
+}
 
 // The per-fighter live state the fight controller owns (JS: the `wd`
 // fighter + its `parameters` + the AiController).

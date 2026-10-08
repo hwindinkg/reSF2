@@ -13748,9 +13748,22 @@ void FightScreen::render_impl(App& app) {
     // RIGHT for the enemy (`Jc.TU` EHorizontalReverse). The port drew only the
     // empty `Mx` plate — the reported "style bar does not work".
     {
-        static const char* const kStyleFrames[6] = {
+        // `<StyleLevels>` `BarImage`/`TextImage` from internal_settings.xml
+        // (JS `v.hu.pk[i].Nva`/`.dma`, L1197-1198). The previous compile-time
+        // arrays were the shipped values; read them from the XML instead.
+        static const char* const kStyleFramesDefault[6] = {
             "CrazyBar_0_Start", "CrazyBar_1_Hard", "CrazyBar_2_Brutal",
             "CrazyBar_3_Aggressive", "CrazyBar_4_Crazy", "CrazyBar_5_Fantastic"};
+        const std::vector<sf2::scene::FightParams::StyleLevelRow>& style_rows =
+            sf2::scene::FightParams::defaults().style_levels;
+        const char* kStyleFrames[6];
+        for (int lvl = 0; lvl < 6; ++lvl) {
+            kStyleFrames[lvl] =
+                (static_cast<std::size_t>(lvl) < style_rows.size() &&
+                 !style_rows[lvl].bar_image.empty())
+                    ? style_rows[lvl].bar_image.c_str()
+                    : kStyleFramesDefault[lvl];
+        }
         auto draw_style_cell = [&](const char* frame, float x, float skew_tan,
                                    float fill, bool reverse) {
             if (fill <= 0.0f) return;
@@ -13820,8 +13833,17 @@ void FightScreen::render_impl(App& app) {
         // "" -> hidden). `Rp.la(.6)` scale, `D(50)` y; player `C(10)` x, enemy
         // `C(width - Rp.za() - 10)` (right-aligned). `load_callouts_atlas`
         // registers the frames.
-        static const char* const kStyleNames[6] = {
+        // `TextImage` per level (JS `v.hu.pk[bn].dma`). Level 0 ships "" ->
+        // the label is hidden; the fallback array is the shipped value.
+        static const char* const kStyleNamesDefault[6] = {
             "", "Hard", "Brutal", "Aggressive", "Crazy", "Fantastic"};
+        const char* kStyleNames[6];
+        for (int lvl = 0; lvl < 6; ++lvl) {
+            kStyleNames[lvl] =
+                (static_cast<std::size_t>(lvl) < style_rows.size())
+                    ? style_rows[lvl].text_image.c_str()
+                    : kStyleNamesDefault[lvl];
+        }
         {
             // [style] trace — the live meter level/frac + the level name.
             static int last_p = -1, last_e = -1;

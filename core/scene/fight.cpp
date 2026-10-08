@@ -5298,10 +5298,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // prize b6): every landed hit credits the ATTACKER's meter with the
     // attack move's RNa (blocked or not — `ha.Gzb` runs unconditionally).
     {
-        static const StyleTable kStyle;
+        static const StyleTable kStyle = sf2::scene::style_table_from_params();
         const double credit =
             style_credit(kStyle, atk.style, move.name, move.style_factor);
-        style_vma(atk.style, credit, 6);
+        style_vma(atk.style, credit, static_cast<int>(kStyle.sna.size()));
         if (atk.style.best > prize_fh_.b6) prize_fh_.b6 = atk.style.best;
     }
 
@@ -6211,7 +6211,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             std::fflush(stdout);
         }
         // HUD style decay `ia()` (L2092): bar-only drain, levels never drop.
-        static const StyleTable kStyleDecay;
+        static const StyleTable kStyleDecay =
+            sf2::scene::style_table_from_params();
         style_decay(me.style, kStyleDecay.tya);
     }
 
