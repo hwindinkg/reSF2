@@ -466,6 +466,12 @@ struct AiFightState {
     // models no pose) `wea` falls back to the pre-fix `enemy_x` proxy so the
     // ai_demo/golden paths stay byte-identical.
     std::function<float(const std::string&, int)> my_bone_world_x;
+    // JS `Te.yu`/`Te.zu` (set by `Te.zLa` L279707 via `qMa`): MY arena walls.
+    // Read by `de.oxb` (L618 `b.da.zu` / `b.da.yu` with b = this.model = me).
+    // Set by the fight from the fighter's arena bounds; 0/0 in pose-less
+    // probes (where `oxb` short-circuits on the missing bone resolver).
+    float my_wall_min = 0.0f;
+    float my_wall_max = 0.0f;
     // Cautious-movements condition: whether the enemy is playing a
     // cautious animation (JS `fCa` - body-part anim in `P.nG`).
     bool enemy_cautious = false;
@@ -720,6 +726,16 @@ private:
     // JS `Wea` (L600): `b.da.Ic(label, t0(me, foe)).ma.x` — MY fighter's
     // named-bone world x, or `Fighter::kNoBoneX` (`3.4028234663852886E38`).
     float wea(const AiFightState& st, const std::string& label) const;
+    // JS `de.oxb` (L618): `d=a.zD(!0); d<0&&(d=0);
+    //   a=b.oa.Ic("NPivot").ma.x + this.t0(b,c)*a.aU.xea(d,"NPivot");
+    //   c=b.da.zu; return !(a<b.da.yu || c<a)` with b = `this.model` (ME).
+    // The candidate move's NPivot sub-frame displacement (at its Uninterrupt
+    // end) must keep MY NPivot inside MY arena walls. `c` = the opponent
+    // (`a.Kf()`; the port passes the fight state's facing via `t0`).
+    bool oxb(const MoveDef& cand, const AiFightState& st) const;
+    // JS `de.bma` (L618): `this.oxb(a,b,c.Kf())` — the `XAa`/`Gea` candidate
+    // filter (the move's displaced pivot must stay in the arena).
+    bool bma(const MoveDef& cand, const AiFightState& st) const;
     // Whether the fighter is "watching" (JS `hcb` L598-599): no active
     // NoDecision intervals/moves and not in a NoDecision enemy anim.
     bool hcb(const AiFightState& st) const;

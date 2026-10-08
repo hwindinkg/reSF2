@@ -278,6 +278,34 @@ float AiController::wea(const AiFightState& st, const std::string& label) const 
     return st.my_bone_world_x(label, t0(st));
 }
 
+// JS `de.oxb(a,b,c)` (L618): the arena-containment test for a candidate move.
+//   `let d=a.zD(!0); d<0&&(d=0);
+//    a=b.oa.Ic("NPivot").ma.x + this.t0(b,c)*a.aU.xea(d,"NPivot");
+//    c=b.da.zu; return !(a<b.da.yu || c<a)`
+// `a` = the candidate move (`jc`), `b` = `this.model` = ME, `c` = `a.Kf()`
+// (the opponent; `Kf` returns `this` when `lb` is null, i.e. the enemy itself
+// in a 1v1 — so `t0(b,c)` is exactly the port's `t0(st)`).
+// `a.zD(!0)` is the move's Uninterrupt end in SUB-FRAMES (`i0(b+1)-1`, L698);
+// `a.aU.xea(d,"NPivot")` is the move's own per-frame NPivot offset (the `Jl`
+// sub-frame table, `Si.cxb` v=7). `b.da.yu`/`b.da.zu` are MY arena walls.
+bool AiController::oxb(const MoveDef& cand, const AiFightState& st) const {
+    // No pose resolver (ai_demo / golden / probe harnesses that model no
+    // skeleton): the JS quantity cannot be computed, so keep the previous
+    // no-filter behaviour for those byte-identical paths.
+    if (!st.my_bone_world_x) return true;
+    int d = uninterrupt_end_full(cand);
+    if (d < 0) d = 0;
+    const int facing = t0(st);
+    const float pivot_x = st.my_bone_world_x("NPivot", facing);
+    const float x = pivot_x + static_cast<float>(facing) * cand.aU.xea(d, "NPivot");
+    return !(x < st.my_wall_min || st.my_wall_max < x);
+}
+
+// JS `de.bma(a,b,c)` (L618): `return this.oxb(a,b,c.Kf())`.
+bool AiController::bma(const MoveDef& cand, const AiFightState& st) const {
+    return oxb(cand, st);
+}
+
 // JS `mQ` (L620): build the feature state from the fight snapshot.
 // Field semantics (exact):
 //   o1/q1 = NORMALIZED hp (`this.model.parameters.gd` / `b.parameters.gd`).
@@ -843,6 +871,18 @@ int AiController::xaa(const AiFightState& st) {
         dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_, k, horizon);
     }
+    // JS `XAa` (L612): after `y0` the candidates are filtered by `bma`
+    // (`this.bma(g,this.model,a)` — the displaced NPivot must stay in MY
+    // arena). The port applies it to the resolved move names.
+    if (moves_ != nullptr) {
+        std::vector<AiCandidate> keep;
+        keep.reserve(wb_.size());
+        for (const AiCandidate& c : wb_) {
+            auto it = moves_->find(c.animation);
+            if (it == moves_->end() || bma(it->second, st)) keep.push_back(c);
+        }
+        wb_ = std::move(keep);
+    }
     return static_cast<int>(wb_.size());
 }
 
@@ -874,6 +914,18 @@ int AiController::gea(const AiFightState& st, int variant) {
         dbg_.dw = st.enemy_dw;
         dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_);
+    }
+    // JS `Gea` (L613-616): the candidate list is filtered by `bma`
+    // (`this.bma(n,this.model,a)` — the displaced NPivot must stay in MY
+    // arena). Applied to the resolved move names.
+    if (moves_ != nullptr) {
+        std::vector<AiCandidate> keep;
+        keep.reserve(wb_.size());
+        for (const AiCandidate& c : wb_) {
+            auto it = moves_->find(c.animation);
+            if (it == moves_->end() || bma(it->second, st)) keep.push_back(c);
+        }
+        wb_ = std::move(keep);
     }
     return static_cast<int>(wb_.size());
 }

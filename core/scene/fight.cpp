@@ -6615,6 +6615,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.my_bone_world_x = [&me](const std::string& label, int facing) {
             return me.fighter.bone_world_x(label, facing);
         };
+        // JS `de.oxb` (L618 `b.da.yu`/`b.da.zu`, b = this.model = ME): MY
+        // arena walls (`Te.zLa` via `qMa`). The candidate-filter `bma`.
+        st.my_wall_min = me.fighter.arena_wall_min();
+        st.my_wall_max = me.fighter.arena_wall_max();
 
         const std::string decision = me.ai->update(st);
         me.last_decision = decision;

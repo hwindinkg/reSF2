@@ -758,6 +758,9 @@ public:
         arena_wall_min_ = min_x;
         arena_wall_max_ = max_x;
     }
+    // JS `Te.yu`/`Te.zu` getters (read by `de.oxb` L618 `b.da.yu`/`b.da.zu`).
+    float arena_wall_min() const { return arena_wall_min_; }
+    float arena_wall_max() const { return arena_wall_max_; }
     // [probe, authorised] Max x-extent of the rendered pose (`pos_`) — the
     // "stretched across the arena" metric for `--wall-probe`.
     float debug_bone_span_x() const {
