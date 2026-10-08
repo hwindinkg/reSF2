@@ -116,8 +116,10 @@ struct FighterParams {
     // `Wk()` (L413727) restricted to the perks the rating sum reads: the
     // equipped `<Perks>` (`AK`/`TE`) + the equipped items' perks (`Oa`).
     // EMPTY for the fresh save (no `<Rating>` perk equipped), so the `xc.JBa`
-    // perk loops are no-ops there. Resolving `AK` from the save's `<Perks>`
-    // against perks.xml is the OPEN perk-equip mapping (`PERKS_STATIC` 5.1).
+    // perk loops are no-ops there. The `AK` from the save's `<Perks>` against
+    // perks.xml IS wired by the callers (`screens.cpp equipped_rating_perks`/
+    // `enemy_rating_perks` — see the RatingEvaluation block below); this
+    // vector is the side input they fill.
     std::vector<PerkModel> perks;
 
     // JS `ud.get(name, out)` — returns the attribute value (0 if absent).
@@ -655,8 +657,12 @@ inline bool shock_tick(ShockState& st, float frame_reduction) {
 //   `ecb->true` (`ecb=false`, L2475); `vc->false`;
 //   `b=Zi/atk.so`; `c=Orb(ws?0:b)`; `e=f=false`;
 //   `se&&(e=a*b>RJa)`; `Uq&&!block&&(f=d*b>RJa)`; return `(c||f)?true:e`.
-// `crit_term` = `iya*hya`-attribute, `head_term` = `pDa*oDa`-attribute
-// (both `Base + attr` per the `p8a` pattern; OPEN exact formula).
+// `crit_term` = `iya*hya`-attribute, `head_term` = `pDa*oDa`-attribute.
+// JS `p8a` (L605976): `attributes.get(name) ? first*attr.G : first` — i.e.
+// the chance is `Base * attr` when the attribute is PRESENT and `Base`
+// alone otherwise (NOT `Base + attr`); an absent attr is not the same as
+// attr=0. The port applies `base * attr` (`fight.cpp` `crit_term`/
+// `head_term`), with a missing attr reading 0 via `FighterParams::attr`.
 // `crit_roll`/`head_roll` are `uf.RJa()` draws (port: the fight stream).
 // The decomposition mirrors combat_golden.js `r8a()` (S8 vectors).
 struct R8aOut {

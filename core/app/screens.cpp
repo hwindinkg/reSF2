@@ -9977,10 +9977,17 @@ float map_battle_rating_cached(App& app, const std::string& battle_name,
 // frame).
 void map_reward_badge_cached(App& app, const std::string& battle_name,
                              const std::string& zone, int fight_index,
-                             std::int64_t& money, std::int64_t& exp, bool& owned) {
+                             std::int64_t& money, std::int64_t& bonus,
+                             bool& owned) {
     struct Badge {
         std::int64_t money = 0;
-        std::int64_t exp = 0;
+        // JS `bi` (L2133) feeds `ci` the fight's `c.h4`/`c.g4`, set by
+        // `$L(level)` (L730950) from the LAST `<Reward>`'s `bm(level)`:
+        // `h4 = a.Tb` (Money), `g4 = a.Uo` (Bonus). `ci` (L1104923) then
+        // draws `Ig(p.o.Vf, d)` (gold + Money) and `Ig(Z.Ur, e)`
+        // (ruby + Bonus). So the SECOND badge is the reward's `Bonus`
+        // field, NOT its `Exp`.
+        std::int64_t bonus = 0;
         bool owned = false;
     };
     static std::map<std::string, Badge> cache;
@@ -9995,13 +10002,13 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
     const auto hit = cache.find(sig);
     if (hit != cache.end()) {
         money = hit->second.money;
-        exp = hit->second.exp;
+        bonus = hit->second.bonus;
         owned = hit->second.owned;
         return;
     }
     Badge b;
-    std::int64_t bonus = 0, prize = -1;
-    battle_rewards(battle_name, zone, fight_index, level, b.money, b.exp, bonus,
+    std::int64_t exp = 0, prize = -1;
+    battle_rewards(battle_name, zone, fight_index, level, b.money, exp, b.bonus,
                    prize, /*row_from_end=*/0);
     // `Fga` (L2150): the selected fight's LAST `<Reward>` (merged with its
     // `<NormalModeReward>`) first `<Item ShowReward>`.
@@ -10084,7 +10091,7 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
     }
     cache[sig] = b;
     money = b.money;
-    exp = b.exp;
+    bonus = b.bonus;
     owned = b.owned;
 }
 
@@ -10584,28 +10591,58 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // Money/Exp are zeroed when `Fga` (a `ShowReward` item on the same
     // reward), so nothing is drawn.
     {
-        std::int64_t badge_money = 0, badge_exp = 0;
+        std::int64_t badge_money = 0, badge_bonus = 0;
         bool badge_owned = false;
         map_reward_badge_cached(app, node->name, node->zone, mk_fi, badge_money,
-                                badge_exp, badge_owned);
-        if (!(boss_family && badge_owned) && badge_money > 0) {
-            float gw = 0.0f, gh = 0.0f;
-            const float icon_h = body_w * 0.15f;
-            const float icon_w = (map_frame_size(app, "gold", gw, gh) && gh > 0.0f)
-                                     ? icon_h * (gw / gh)
-                                     : icon_h;
-            const std::string amount = std::to_string(badge_money);
-            const float txt_scale = body_w * 0.16f / 100.0f;
+                                badge_bonus, badge_owned);
+        if (!(boss_family && badge_owned) &&
+            (badge_money > 0 || badge_bonus > 0)) {
+            // JS `ci` (L1104923): a horizontal row of `Ig` icon+value badges,
+            // appended in order and laid out by `ci.ba` (L1105400): spacing
+            // `c = a*.05`, each `Ig.ba` returns `icon_w + text_w`, and the row
+            // is centred (`a = (width - (sum + (n-1)*c))/2`). `bi` (L2133)
+            // constructs it as `ci(d, e, reward, ...)` with `d` = the reward's
+            // Money (`h4`) and `e` = its Bonus (`g4`), so the badges are
+            // gold+Money then ruby+Bonus (`Z.Ur = "ruby"`, L1274529).
+            struct Badge { const char* icon; std::int64_t value; };
+            Badge badges[2] = {{"gold", badge_money}, {"ruby", badge_bonus}};
+            int n = 0;
+            float icon_w[2] = {0.0f, 0.0f};
+            float txt_w[2] = {0.0f, 0.0f};
+            std::string texts[2];
+            const float icon_h = body_w * 0.15f;   // `Ig.ba` icon height
+            const float txt_scale = body_w * 0.16f / 100.0f;  // `label.ua(a*.16)`
             const sf2::data::font* mfont = app.menu_font();
-            const float txt_w = mfont != nullptr
-                                    ? app.measure_text(*mfont, amount, txt_scale)
-                                    : icon_h;
-            const float total = icon_w + txt_w;
-            const float gx = body_x + (body_w - total) * 0.5f;
-            try_draw_atlas_button(app, "gold", gx + icon_w * 0.5f,
-                                  body_y + wy + icon_h * 0.5f, icon_w, icon_h, 1.0f);
-            draw_ui_label(app, gx + icon_w, body_y + wy, txt_w, icon_h, amount,
-                          txt_scale, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+            for (const Badge& bd : badges) {
+                if (bd.value <= 0) continue;
+                float gw = 0.0f, gh = 0.0f;
+                icon_w[n] = (map_frame_size(app, bd.icon, gw, gh) && gh > 0.0f)
+                                ? icon_h * (gw / gh)
+                                : icon_h;
+                texts[n] = std::to_string(bd.value);
+                txt_w[n] = mfont != nullptr
+                               ? app.measure_text(*mfont, texts[n], txt_scale)
+                               : icon_h;
+                ++n;
+            }
+            if (n > 0) {
+                const float gap = body_w * 0.05f;  // `c = a*.05`
+                float total = gap * static_cast<float>(n - 1);
+                for (int i = 0; i < n; ++i) total += icon_w[i] + txt_w[i];
+                float x = body_x + (body_w - total) * 0.5f;
+                int bi = 0;
+                for (const Badge& bd : badges) {
+                    if (bd.value <= 0) continue;
+                    try_draw_atlas_button(app, bd.icon, x + icon_w[bi] * 0.5f,
+                                          body_y + wy + icon_h * 0.5f, icon_w[bi],
+                                          icon_h, 1.0f);
+                    draw_ui_label(app, x + icon_w[bi], body_y + wy, txt_w[bi],
+                                  icon_h, texts[bi], txt_scale, UiAlign::Left,
+                                  0.184f, 0.145f, 0.106f);
+                    x += icon_w[bi] + txt_w[bi] + gap;
+                    ++bi;
+                }
+            }
         }
     }
     // --- FIGHT button `tj` = `Bb("EButtonWhite")` (L2099/L2102) ------------

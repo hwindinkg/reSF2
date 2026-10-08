@@ -5236,7 +5236,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // `R8a(e)` receives the attacker only for its `Shock*Chance` attrs, so
     // `this.Orb(this.ws?0:b)` gates the TARGET's pain (`this.ws`, L521). Set
     // by the Invulnerability/Combo/Crazy `kZ` pass (`ola(!b)`, L902).
-    // crit/head terms = Base + attr (`p8a` pattern, OPEN exact formula).
+    // crit/head terms = `p8a` (L605976): `Base * attr` when the attribute is
+    // present, else `Base` (NOT `Base + attr`).
     rec.head_hit = hit_cap.body_part == "Head";
     {
         const sf2::scene::FightParams& gfp = sf2::scene::FightParams::defaults();

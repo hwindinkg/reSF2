@@ -871,6 +871,25 @@ int AiController::xaa(const AiFightState& st) {
         dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_, k, horizon);
     }
+    // JS `XAa` (L611-612, exact): the STORED wait is the move's `$I()` (the
+    // Strict end), NOT the `Gu.n0(n)` window outcome. The JS inline loop is
+    //   `0<r&&k.animation!=null&&r<=b&&(this.ld.push(k.animation),
+    //    this.vs.push(k.animation.$I()))`
+    // — `r = Gu.n0(n)` is used ONLY as the `0<r && r<=b` filter (applied
+    // inside `pba_append`), while the wait pushed is `k.animation.$I()` =
+    // `vBa(P.s$a())` (the max Strict move-length finish). `PBa` (the SAFE
+    // table `Q6a`, L617) stores the raw `n0` outcome, so the shared
+    // `pba_append` pushes the outcome; `XAa` overwrites it here.
+    // `$I()` is computed on the RESOLVED move (JS `k.animation`); when the
+    // name does not resolve (a probe with no move map) the `n0` outcome is
+    // kept as the fallback.
+    if (moves_ != nullptr) {
+        for (AiCandidate& c : wb_) {
+            auto it = moves_->find(c.animation);
+            if (it != moves_->end())
+                c.wait = vba_full(it->second, strict_end(it->second));
+        }
+    }
     // JS `XAa` (L612): after `y0` the candidates are filtered by `bma`
     // (`this.bma(g,this.model,a)` — the displaced NPivot must stay in MY
     // arena). The port applies it to the resolved move names.
@@ -914,6 +933,23 @@ int AiController::gea(const AiFightState& st, int variant) {
         dbg_.dw = st.enemy_dw;
         dbg_.hd = st.enemy_clip_mirror;
         pba_append(row, target, wb_);
+    }
+    // JS `Gea` (L613-616, exact): the STORED wait is `c = d.p0(!0)-this.Fl+1`
+    // where `d = a.da.Ua` (the ENEMY's current move) and `p0(!0)` is the
+    // Attack end in animation sub-frames (`i0(p0(!1)+1)-1`). It is the SAME
+    // wait for every candidate and is NOT the `Gu.n0` window outcome — the
+    // JS uses `n0` only as the `0<t.n0(n)` filter. `XAa` stores `$I()`
+    // (Strict); `Gea` stores the enemy's Attack end.
+    // REMAINDER (reported, not fixed here): the JS `ld` SOURCE is
+    // `ra.nAa(g, this.ld)` with `g = P.t$a()` (b==0) / `P.p$a()` (b==1) —
+    // the fixed `<UnexpectedMoves>`-family group lists — then filtered by
+    // each `ju` label's `n0`; it does NOT enumerate the throw record's
+    // outcomes the way `pba_append` does. The `ld` source still needs the
+    // `P.esa`/`P.$ra` group lists ported (`TacticsFile`/`TacticDef`), so only
+    // the wait is JS-exact below.
+    if (st.enemy_move != nullptr) {
+        const int c = attack_end_full(*st.enemy_move) - Fl_ + 1;
+        for (AiCandidate& cand : wb_) cand.wait = c;
     }
     // JS `Gea` (L613-616): the candidate list is filtered by `bma`
     // (`this.bma(n,this.model,a)` — the displaced NPivot must stay in MY
