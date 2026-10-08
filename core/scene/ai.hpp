@@ -309,6 +309,11 @@ struct TacticDef {
     // extra wiring; `hcb` (L598-599) reads them.
     std::vector<std::string> no_decision_intervals;
     std::vector<std::string> no_decision_moves;
+    // `<UnexpectedMoves>` (JS `P.mua` = `P.T$a()`, filled by `P.PE` L627
+    // `b=a.A("UnexpectedMoves"); P.PE(b,P.mua,"Move")`). GLOBAL, copied onto
+    // every tactic; read by `de.icb` (L598) from `de.iwb` (L596). Shipped:
+    // {Physical, Hit, ThrowFall}.
+    std::vector<std::string> unexpected_moves;
 };
 
 // The `<TacticsSettings>`-level AI lists (JS `P` statics, filled by
@@ -317,6 +322,8 @@ struct TacticDef {
 struct AiGlobalLists {
     std::vector<std::string> no_decision_intervals;
     std::vector<std::string> no_decision_moves;
+    // `<UnexpectedMoves>` (JS `P.mua` = `P.T$a()`) — read by `de.icb` (L598).
+    std::vector<std::string> unexpected_moves;
     // `<CautiousMovements>` / `<EvadeThrowDodges>` (JS `P.nG`/`P.Bqa`).
     std::vector<std::string> cautious_movements;
     std::vector<std::string> evade_throw_dodges;
@@ -484,6 +491,9 @@ public:
             set_memory(tactic_->memory_strikes, tactic_->memory_round_factor);
             set_no_decision(tactic_->no_decision_intervals,
                             tactic_->no_decision_moves);
+            if (!tactic_->unexpected_moves.empty()) {
+                unexpected_moves_ = tactic_->unexpected_moves;
+            }
         }
     }
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
@@ -671,6 +681,13 @@ private:
     std::vector<std::string> no_decision_intervals_{"Uninterrupt",
                                                     "SemiUninterrupt"};
     std::vector<std::string> no_decision_moves_{"Physical"};
+    // `<UnexpectedMoves>` (JS `P.mua` = `P.T$a()`); read by `de.icb` (L598)
+    // from `de.iwb` (L596). Shipped defaults; overwritten by the parse.
+    std::vector<std::string> unexpected_moves_{"Physical", "Hit", "ThrowFall"};
+    // MY OWN move pointer from the previous frame — the animation-START event
+    // proxy for `de.iwb` (L596, invoked from `wd.mwb` L527 `x3`), the mirror
+    // of the enemy `last_enemy_move_` used for `jwb`.
+    const MoveDef* last_my_move_ = nullptr;
     // `<IgnoredEnemyAnimations>` (JS `P.Xoa`) / `<RandomizingEnemyAnimation>`
     // (JS `P.Vsa`); empty in the shipped settings.
     std::vector<std::string> ignored_enemy_anims_;

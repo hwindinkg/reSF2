@@ -442,6 +442,20 @@ std::vector<std::string> parse_anim_names(const pugi::xml_node& node) {
     return out;
 }
 
+// JS `P.PE` (L622, `b=a.A("UnexpectedMoves"); P.PE(b,P.mua,"Move")`): the
+// `<Move Name="X"/>` name list of a node (a DIFFERENT child tag than the
+// `<Animation>` lists). Read by `de.icb` (L598).
+std::vector<std::string> parse_move_names(const pugi::xml_node& node) {
+    std::vector<std::string> out;
+    if (node.empty()) return out;
+    for (const pugi::xml_node& c : node.children()) {
+        if (std::strcmp(c.name(), "Move") != 0) continue;
+        const char* n = c.attribute("Name").value();
+        if (n != nullptr && n[0] != '\0') out.push_back(n);
+    }
+    return out;
+}
+
 // JS `Hl.parse` (L629/L633): one `<Animations>`/`<BotAnimation>` slot. The
 // `Names` ("A|B") list carries the slot's animations; `Priority` the bqb
 // order. The `<Conditions>` tree is NOT parsed here — the port's existing
@@ -512,6 +526,7 @@ void parse_tactic_settings(const std::string& xml_text,
     // (JS `P.Xsa`/`P.tpa`, read by `k_a`/`Nwa` L594/L603). All GLOBAL (JS
     // `P` statics); collected once, then copied onto every tactic.
     std::vector<std::string> g_nd_intervals, g_nd_moves;
+    std::vector<std::string> g_unexpected;
     std::vector<std::string> g_cautious, g_evade_throw;
     std::vector<std::string> g_ignored_enemy, g_randomizing_enemy;
     std::vector<std::pair<std::string, std::vector<AiAnimSlot>>> g_cond_player;
@@ -530,6 +545,9 @@ void parse_tactic_settings(const std::string& xml_text,
         }
         g_cautious = parse_anim_names(root.child("CautiousMovements"));
         g_evade_throw = parse_anim_names(root.child("EvadeThrowDodges"));
+        // JS `P.PE` (L627): `<UnexpectedMoves><Move Name/>...` — read by
+        // `de.icb` (L598).
+        g_unexpected = parse_move_names(root.child("UnexpectedMoves"));
         // JS `P.PE` (L622): a bare `<Animation Name="X"/>` NAME list (NOT
         // resolved to a group) — read by `mcb` (L596-597).
         g_ignored_enemy = parse_anim_names(root.child("IgnoredEnemyAnimations"));
@@ -542,6 +560,7 @@ void parse_tactic_settings(const std::string& xml_text,
     if (lists != nullptr) {
         lists->no_decision_intervals = g_nd_intervals;
         lists->no_decision_moves = g_nd_moves;
+        lists->unexpected_moves = g_unexpected;
         lists->cautious_movements = g_cautious;
         lists->evade_throw_dodges = g_evade_throw;
         lists->ignored_enemy_animations = g_ignored_enemy;
@@ -638,6 +657,7 @@ void parse_tactic_settings(const std::string& xml_text,
         // tactic so the AI needs no extra wiring (JS `P` statics).
         def.no_decision_intervals = g_nd_intervals;
         def.no_decision_moves = g_nd_moves;
+        def.unexpected_moves = g_unexpected;
         def.cautious_movements = g_cautious;
         def.evade_throw_dodges = g_evade_throw;
         def.ignored_enemy_animations = g_ignored_enemy;

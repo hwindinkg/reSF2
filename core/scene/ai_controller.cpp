@@ -33,9 +33,11 @@
 //     controller's frame count) are derived from the fields it DOES expose
 //     (current anim name, move frame, intervals, positions, HP).
 //   - enemy-move-change detection uses the enemy ANIM NAME as a proxy for
-//     the JS move-object change (`mwb`->`jwb`); `iwb`'s `eh=1` reset on my
-//     move change is not ported (OPEN — needs a live trace to confirm the
-//     `mwb` call context).
+//     the JS move-object change (`mwb`->`jwb`); `iwb`'s `eh=1` reset on MY
+//     move start is now PORTED (JS `de.iwb` L596 + `de.icb` L598: MY current
+//     move matching the shipped `<UnexpectedMoves>` {Physical, Hit,
+//     ThrowFall} resets `eh` to 1), using MY move pointer as the same
+//     animation-start proxy.
 //   - `xaa` applies the Ju-frame horizon `b=Fl+Aea` and the Hu frame pick
 //     `Ju.$_(Fl)`; the outcome window pick now follows `Gu.acb`/`Gu.n0`
 //     (L610-612) exactly (`NDa[i-1]`, lower edge gated). `yaa` now uses the
@@ -220,6 +222,10 @@ void AiController::init(const std::string& weapon,
         // `P.Xoa` / `P.Vsa`), copied onto every tactic at parse.
         set_ignored_enemy_animations(tactic_->ignored_enemy_animations);
         set_randomizing_enemy_animation(tactic_->randomizing_enemy_animation);
+        // `<UnexpectedMoves>` (JS `P.mua` = `P.T$a()`), read by `icb` (L598).
+        if (!tactic_->unexpected_moves.empty()) {
+            unexpected_moves_ = tactic_->unexpected_moves;
+        }
     }
     moves_ = moves;
     // The `OO` weapon id (JS `P.dBa` L629-630): the weapon subtype, or the
@@ -1500,6 +1506,36 @@ std::string AiController::update(const AiFightState& st) {
             qja_done_ = true;
             if (!mcb(*st.enemy_move)) {
                 x_ = gfa_draw();
+            }
+        }
+    }
+
+    // JS `de.iwb` (L596), invoked from `wd.mwb` (L527) — i.e. from `wd.x3`
+    // (L508 `a=this.jb; ... a.mwb(this.da.Ua)`) when MY fighter STARTS a move
+    // — so the de OWNER's `cs` becomes MY OWN current move (the sibling
+    // `jwb` fills `ds` = the opponent's):
+    //   `iwb(a){if(this.R0()){if(this.Ji.Pe&&a!=null){let b=a.PX;
+    //     this.cs=b!=null?b:a}else this.cs=null;
+    //     this.icb(this.cs)&&(this.eh=1)}}`
+    //   `icb(a){if(this.Ji.Pe&&a!=null){c=P.T$a();for(...)if(a.$k(c[b++]))
+    //     return!0}return!1}` (L598).
+    // `P.T$a()` = `P.mua` = the shipped `<UnexpectedMoves>` {Physical, Hit,
+    // ThrowFall}: starting one of those (while MY clip plays) resets the
+    // decision wait to 1, so the AI re-decides on the very next frame. The
+    // port tracks MY move pointer as the animation-start event proxy (the
+    // mirror of `last_enemy_move_` used for `jwb`); the move change draws
+    // nothing, so the `Da.pg` stream position is unaffected.
+    {
+        const bool my_changed = st.current_move != last_my_move_;
+        last_my_move_ = st.current_move;
+        if (my_changed && st.playing && st.current_move != nullptr) {
+            for (const std::string& n : unexpected_moves_) {
+                if (n.empty()) continue;
+                if (st.current_move->name == n ||
+                    st.current_move->template_tags.count(n) > 0) {
+                    eh_ = 1;
+                    break;
+                }
             }
         }
     }

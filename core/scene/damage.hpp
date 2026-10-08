@@ -87,7 +87,14 @@ struct FighterParams {
     float m_ = 1.0f;          // `M_` — FistsDamageMod (armor for Fists)
     float pp = 0.0f;          // `PP` — Difficulty
     float dta = 1.0f;         // `wd.dta` — the fighter's damage scaling (1)
-    float so = 1.0f;          // `wd.so` — the fighter's damage scaling (1)
+    // `wd.so` — the fighter's damage scaling. PROVABLY 1 in the shipped game:
+    // the ONLY writes in sf2.502f0946.js are the `wd` ctor `this.so=1` (L490),
+    // `TT(a){this.so=a}` (L494), the clone copy `e.TT(a.so)` (L536), and the
+    // save/restore round-trip `Z2` L408 (`this.Pm.AP=this.yb.so` /
+    // `this.vo.AP=this.pb.so`) → `TT(this.Pm.AP)` (L402/L415). No item/perk/
+    // armour/XML attribute ever feeds `AP`, so `so` never leaves 1 and the
+    // `a.model.jb.so/c.model.so` ratio (`apb` L1294, `udb` L403) is exactly 1.
+    float so = 1.0f;
     float ly = 0.0f;          // `wd.Ly` — extra base damage (0 by default)
     // Attribute map (JS `attributes` = the `ud` map).
     std::map<std::string, float> attributes;

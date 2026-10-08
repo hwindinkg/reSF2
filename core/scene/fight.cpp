@@ -5229,7 +5229,9 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     blocked = rec.blocked;
     critical = rec.critical;
     // JS `wd.R8a` shock decider on the target (L531-532 + L511):
-    // `Uq` = head-zone hit; `b = Zi/atk.so` (`so` OPEN -> 1.0); `ws`
+    // `Uq` = head-zone hit; `b = Zi/atk.so` (`so` provably 1 — see damage.hpp
+    // `FighterParams::so`: only the ctor/`TT`/clone writes, `AP` round-trips
+    // `so`, no item/perk feeds it, so the ratio is exactly 1.0); `ws`
     // (weapon strike) is the TARGET's flag — `strike` runs on the target and
     // `R8a(e)` receives the attacker only for its `Shock*Chance` attrs, so
     // `this.Orb(this.ws?0:b)` gates the TARGET's pain (`this.ws`, L521). Set
