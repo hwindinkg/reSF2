@@ -4349,6 +4349,9 @@ void FightController::reset_magic_fighter(FightFighter& f) {
 }
 
 void FightController::la_normalize(FightFighter& f) {
+    // JS `wd.LA` (L505) is unconditional — see `damage.hpp::la_normalize`.
+    // `no_bullets_replenish_` is a retired marker (the rule is JS-inert) and
+    // is deliberately not consulted.
     const sf2::scene::LaNorm r =
         sf2::scene::la_normalize(f.bullets, f.charge, no_bullets_replenish_);
     f.bullets = r.bh;

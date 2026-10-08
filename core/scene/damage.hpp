@@ -568,8 +568,15 @@ inline float magic_aq(float base, const std::string& attr, const FighterParams& 
 
 // Ranged/magic state ops (JS `hZ`/`Hwa`/`LA`, lb==null branch):
 // `hZ(n)` = zL(bh+n); `Hwa(v)` = bh==0 && yL(my+v) (my clamped [0,1]);
-// `LA` = my>=1 converts to a bullet + reset (skipped under
-// `ERuleNoBulletsReplenishment`), bullets cap at 1.
+// `LA` = my>=1 converts to a bullet + reset, bullets cap at 1.
+//
+// JS-EXACT: `wd.LA` (L505) has NO rule gate — `1<=a&&(this.hZ(1),a=0,
+// this.yL(0))` runs unconditionally. The `ERuleNoBulletsReplenishment` rule
+// (`cj`, L869) is INERT in the shipped build: its `Ib()` is a bare `debugger`
+// no-op, its ctor never calls `Zf` (so `Gqa`/`eg` stay empty and `Rka` never
+// files it into a group), and no other site reads its `Li`/`Au`. The old port
+// gated the my->bullet conversion on that rule (a port-only invention); the
+// flag is kept only for API compatibility and is IGNORED here.
 inline int bullets_add(int bh, int n) { return bh + n; }
 inline double charge_add(int bh, double my, double v) {
     if (bh != 0) return my;
@@ -582,8 +589,8 @@ struct LaNorm {
     int bh = 0;
     double my = 0.0;
 };
-inline LaNorm la_normalize(int bh, double my, bool no_replenish) {
-    if (my >= 1.0 && !no_replenish) {
+inline LaNorm la_normalize(int bh, double my, bool /*no_replenish*/) {
+    if (my >= 1.0) {
         bh += 1;
         my = 0.0;
     }

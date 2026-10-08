@@ -1699,11 +1699,13 @@ public:
     // player steps toward the enemy when far and punches when in reach.
     // Uses the same move-start path as the AI (bypasses the key buffer).
     void set_auto_attack(bool on) { auto_attack_ = on; }
-    // Fight-rule marker (`ERuleNoBulletsReplenishment`, cj L18E): skips the
-    // my->bullet conversion in `la_normalize`. Stream 2 verdict: `replenish`
-    // has 0 JS hits (no refill path exists statically; likely a round-start
-    // refill in the native-driven flow, or a dead marker — Survival-only).
-    // Kept as a plumbed default-off hook.
+    // Fight-rule marker (`ERuleNoBulletsReplenishment`, `cj` L869). JS-EXACT:
+    // the rule is INERT in the shipped build (its `Ib()` is a bare `debugger`
+    // no-op, its ctor never calls `Zf` so it belongs to no group, and nothing
+    // reads its `Li`). `wd.LA` (L505) therefore converts my->bullet
+    // UNCONDITIONALLY. This setter is retained for API compatibility only; it
+    // no longer alters `la_normalize` (the previous skip was a port-only
+    // invention).
     void set_no_bullets_replenish(bool on) { no_bullets_replenish_ = on; }
 
     // Suppresses the fight-entry gong (`rb.Wkb` -> `snd_gong`). The JS fires
