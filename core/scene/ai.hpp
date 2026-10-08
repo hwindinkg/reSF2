@@ -150,8 +150,12 @@ struct TacticsSet {
 struct TacticsFile {
     std::string weapon_a;   // first weapon (may be "" = unarmed)
     std::string weapon_b;   // second weapon (== weapon_a for single files)
-    int version = 0;        // JS table index (0/1/2; 7 = per-anim, skipped)
+    int version = 0;        // JS table index (0/1/2; 7 = per-move `aU`)
     TacticsSet set;
+    // v=7 only (JS `Si.cxb` L654): the per-MOVE sub-frame offset tables,
+    // keyed by move name (`f=ra.Jea(cstr)` -> `f.aU`). Attached to the
+    // global move map by the app (app.cpp) — `aU` lives on `MoveDef`.
+    std::map<std::string, SubFrameTable> subframes;
 };
 std::vector<TacticsFile> tactics_parse_file(const std::uint8_t* data,
                                             std::size_t size,

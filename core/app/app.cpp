@@ -998,6 +998,44 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             }
         }
 
+        // v=7 `aU` sub-frame offset tables (JS `Si.cxb` L654): `default.dat`
+        // carries a v=7 block mapping each MOVE name to its `Jl` table
+        // (`$R` labels + `bv` float rows). Attach them to the global move map
+        // so the AI `Q6a` distance window can read `b.aU.xea(f,r)` (the port
+        // previously skipped the v=7 block entirely).
+        {
+            std::string def_file;
+            const std::string tdir = res + "/tactics";
+            std::error_code dec;
+            for (const auto& entry : std::filesystem::directory_iterator(tdir, dec)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind("default.", 0) == 0 &&
+                    name.substr(name.size() - 4) == ".dat") {
+                    def_file = entry.path().string();
+                    break;
+                }
+            }
+            if (!def_file.empty()) {
+                const std::vector<std::uint8_t> bytes = read_file_bytes(def_file);
+                std::vector<sf2::scene::TacticsFile> parsed =
+                    sf2::scene::tactics_parse_file(bytes.data(), bytes.size(),
+                                                   /*pair=*/false);
+                std::size_t attached = 0;
+                for (sf2::scene::TacticsFile& tf : parsed) {
+                    for (auto& kv : tf.subframes) {
+                        auto it = fight_assets_->moves.find(kv.first);
+                        if (it != fight_assets_->moves.end()) {
+                            it->second.aU = std::move(kv.second);
+                            ++attached;
+                        }
+                    }
+                }
+                std::fprintf(stdout, "[tactics] v7 aU sub-frame tables attached: %zu\n",
+                             attached);
+                std::fflush(stdout);
+            }
+        }
+
         std::fprintf(stdout, "[assets] merged fighter bones=%zu tris=%zu, moves=%zu, clips=%zu, tactics=%zu groups\n",
                      fight_assets_->merged.bones.size(),
                      fight_assets_->merged.resolved_tris.size(),

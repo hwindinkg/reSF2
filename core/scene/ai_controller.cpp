@@ -752,9 +752,21 @@ int AiController::yaa(const AiFightState& st) {
         // the raw bone world-x, ~800, instead of the range-appropriate gap) and
         // used the wrong mirror (my own facing, not the opponent's `hd()`), so
         // every safe-table window selected the wrong band. Same shell as `XAa`.
+        // JS `Q6a` L610 (exact):
+        //   l*(t + (b.aU.xea(f,r) - b.aU.xea(g,r))*d - e) + h
+        // `b` = `this.cs` (MY current move), `d` = `this.Ji.hd()` (MY clip
+        // mirror = `st.my_facing`), and the two `xea` reads are the sub-frame
+        // offset of the row's label at the ROUNDED frame `f` and at `g=Fl_`
+        // (0 when the label/frame is out of range).
+        float xea_term = 0.0f;
+        if (st.current_move != nullptr && !st.current_move->aU.empty()) {
+            const SubFrameTable& au = st.current_move->aU;
+            xea_term = (au.xea(f, row.label) - au.xea(g, row.label)) *
+                       static_cast<float>(st.my_facing);
+        }
         const float wv = wea(st, row.label);
         const float target = static_cast<float>(st.enemy_clip_mirror) *
-                                 (wv - st.enemy_dw) +
+                                 (wv + xea_term - st.enemy_dw) +
                              static_cast<float>(Mu_);
         dbg_.target = target;
         dbg_.mu = static_cast<float>(Mu_);

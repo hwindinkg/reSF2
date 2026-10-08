@@ -73,6 +73,14 @@ public:
         const std::uint8_t a = u8(), b = u8(), c = u8(), d = u8();
         return static_cast<std::uint32_t>(a | (b << 8) | (c << 16) | (d << 24));
     }
+    // f32: little-endian IEEE-754 (JS `Kb.$lb` L323982, used only by the
+    // `Jl.Gdb` sub-frame float pool).
+    float f32() {
+        const std::uint32_t bits = u32();
+        float f = 0.0f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+    }
     std::vector<std::uint8_t> bytes(std::size_t n) {
         if (remaining() < n) {
             throw std::runtime_error("tactics: read past end (bytes)");
@@ -250,11 +258,45 @@ std::vector<TacticsFile> tactics_parse_file(const std::uint8_t* data,
             throw std::runtime_error("tactics: blob size exceeds payload");
         }
         if (tf.version == 7) {
-            // v=7: per-animation record-id sets (JS `Si.cxb` L654: u32 count
-            // then per-entry cstr + nested blob). These feed the
-            // RandomizingEnemyAnimation / shift-table merges — out of scope
-            // for the decision loop; skip.
+            // v=7: the per-move `aU` sub-frame offset tables (JS `Si.cxb`
+            // L654: `b=Kb.tl(c)` size, `Kb.ek(c,b)` sub-reader, `d=Kb.tl(b)`
+            // count, then per entry `f=ra.Jea(sb.fJ(b))` + `f.aU.DFa(f,b)`).
+            // `DFa` (L323779): u32 size, then `Gdb`: `gkb` reads a u32 name
+            // count + cstrings (returns 4+sum(len+1) bytes), then
+            // `(size-stringBytes)/4` f32, chunked into rows of `$R.length`.
+            BinReader br(r.pos(), blob_size);
+            const std::uint32_t count = br.u32();
+            for (std::uint32_t i = 0; i < count; ++i) {
+                const std::string move_name = br.cstr();  // JS `sb.fJ`
+                const std::uint32_t bsz = br.u32();       // JS `Kb.tl(b)` in DFa
+                SubFrameTable t;
+                if (bsz > 0) {
+                    BinReader jr(br.pos(), bsz);
+                    const std::uint32_t nlabels = jr.u32();  // JS `gkb` count
+                    std::size_t string_bytes = 4;            // JS `gkb` b=4
+                    for (std::uint32_t k = 0; k < nlabels; ++k) {
+                        const std::string s = jr.cstr();
+                        string_bytes += s.size() + 1;
+                        t.labels.push_back(s);
+                    }
+                    const std::size_t nfloats =
+                        bsz > string_bytes ? (bsz - string_bytes) / 4 : 0;
+                    std::vector<float> fl(nfloats);
+                    for (std::size_t k = 0; k < nfloats; ++k) fl[k] = jr.f32();
+                    const std::size_t e = t.labels.size();
+                    if (e > 0) {
+                        for (std::size_t a = 0; a + e <= nfloats; a += e) {
+                            std::vector<float> row(e);
+                            for (std::size_t q = 0; q < e; ++q) row[q] = fl[a + q];
+                            t.rows.push_back(std::move(row));
+                        }
+                    }
+                }
+                tf.subframes[move_name] = std::move(t);
+                br.skip(bsz);
+            }
             r.skip(blob_size);
+            out.push_back(std::move(tf));
             continue;
         }
 

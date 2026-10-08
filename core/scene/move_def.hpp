@@ -521,8 +521,38 @@ struct SetDirectionDef {
 };
 
 // A move definition (JS `jc`).
+// JS `Jl` (sf2.502f0946.js @323594, g="EA"): the per-move sub-frame offset
+// table (`jc.aU`) built from the tactics .dat v=7 block (`Si.cxb` L654).
+//   `$R` (`labels`) = the offset-label list (e.g. NHeel_2/NHeel_1/NPivot);
+//   `bv` (`rows`)   = one float row per frame (`bv[frame][labelIndex]`).
+// `xea(frame, label)` (JS @324123): `frame<this.bv.length && (b=M7a(label),
+// -1<b) ? bv[frame][b] : 0` — `M7a` is the `$R.indexOf` (@323794).
+struct SubFrameTable {
+    std::vector<std::string> labels;       // JS `$R`
+    std::vector<std::vector<float>> rows;  // JS `bv`
+    bool empty() const { return labels.empty() || rows.empty(); }
+    int label_index(const std::string& s) const {  // JS `M7a`
+        for (std::size_t i = 0; i < labels.size(); ++i) {
+            if (labels[i] == s) return static_cast<int>(i);
+        }
+        return -1;
+    }
+    float xea(int frame, const std::string& label) const {  // JS `xea`
+        if (frame < 0 || static_cast<std::size_t>(frame) >= rows.size()) return 0.0f;
+        const int j = label_index(label);
+        if (j < 0) return 0.0f;
+        const std::vector<float>& row = rows[static_cast<std::size_t>(frame)];
+        return static_cast<std::size_t>(j) < row.size() ? row[static_cast<std::size_t>(j)]
+                                                        : 0.0f;
+    }
+};
+
 struct MoveDef {
     std::string name;
+    // JS `jc.aU` (a `Jl`): the sub-frame offset table for this move, filled
+    // from the tactics .dat v=7 block (`Si.cxb` L654 `f.aU.DFa(f,b)`). Read
+    // by the AI `Q6a`/`bma` distance windows (`b.aU.xea(f,r)` @310868).
+    SubFrameTable aU;
     std::set<std::string> template_tags;  // Template "A|B|C" split on '|'
     // JS `jc.xl` (`lg.vQ` slot selection -> `XH`): the animation-NAME list the
     // `<CurrentAnimation Name=".."/>` gate matches against (`lg.he` L749:
