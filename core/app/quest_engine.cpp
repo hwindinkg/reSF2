@@ -4958,9 +4958,9 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
         }
         // `On` `Denomination` (`S` L534501): `xtb`/`mtb` write the save attrs
         // (`DenominationDigits`/`CoinIcon`), then `Bya(old)` (L137565) rescales
-        // `Tb`/`hC` by `10^(new-old)`. `hC` (PaidMoney) is not modelled -> only
-        // `money` (Tb) is rescaled. `p.items.hz` (item price propagation) has no
-        // port-side denomination model.
+        // `Tb`/`hC` by `10^(new-old)`. Both currencies are rescaled: `Tb`
+        // (`money`) and `hC` (`paid_money`, the JS `PaidMoney`). `p.items.hz`
+        // (item price propagation) has no port-side denomination model.
         for (const QuestSideEffects::DenominationWrite& dw : fx.denominations) {
             const int old_kq = w.denomination_digits;
             const int new_kq = dw.digits;
@@ -4969,24 +4969,29 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
             if (new_kq != old_kq) {
                 // `a = Math.pow(10, this.kq - a)`; `c = Tb/a`;
                 // `if (a>1){b=trunc(Tb%a); if(b>0)++c;}` `Tb=trunc(c)`.
+                // Then the SAME shell for `hC` (L137565).
                 const double scale = std::pow(10.0, new_kq - old_kq);
-                if (scale > 1.0) {
-                    double c = static_cast<double>(w.money) / scale;
-                    const double rem =
-                        std::fmod(static_cast<double>(w.money), scale);
-                    if (rem > 0.0) c += 1.0;
-                    w.money = static_cast<std::int64_t>(std::trunc(c));
-                } else if (scale > 0.0 && scale < 1.0) {
-                    w.money = static_cast<std::int64_t>(
-                        std::trunc(static_cast<double>(w.money) / scale));
-                }
+                const auto rescale = [scale](std::int64_t& v) {
+                    if (scale > 1.0) {
+                        double c = static_cast<double>(v) / scale;
+                        const double rem = std::fmod(static_cast<double>(v), scale);
+                        if (rem > 0.0) c += 1.0;
+                        v = static_cast<std::int64_t>(std::trunc(c));
+                    } else if (scale > 0.0 && scale < 1.0) {
+                        v = static_cast<std::int64_t>(
+                            std::trunc(static_cast<double>(v) / scale));
+                    }
+                };
+                rescale(w.money);
+                rescale(w.paid_money);
             }
             dirty = true;
             std::fprintf(stdout,
                          "[quest] Denomination digits %d->%d icon=%s "
-                         "money=%lld\n",
+                         "money=%lld paid=%lld\n",
                          old_kq, new_kq, w.coin_icon.c_str(),
-                         static_cast<long long>(w.money));
+                         static_cast<long long>(w.money),
+                         static_cast<long long>(w.paid_money));
         }
         // `hl` battle-record writes (JS `J1a` L259 / `Iaa` L260-261 /
         // `Eja` L261 / `Ho` L1106) — the `WDa` unlock bit `Qr.lla` reads.

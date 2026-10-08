@@ -56,6 +56,13 @@ struct WarriorSave {
     // the int64 reward flow. JS default 0: `this.vl(xb(a.attributes.get(
     // "Bonus"),0),0)` (X+x) — `xb(x,b)` returns `b` (0) for an absent/NaN attr.
     std::int64_t bonus = 0;
+    // `p.o.hC` (PaidMoney, JS world ctor char 124803:
+    // `this.hC=xb(a.attributes.get("PaidMoney"))`). The SECOND denomination
+    // balance `Bya` (L137565) rescales alongside `Tb`:
+    //   `c=this.hC/a; a>1&&(b=trunc(this.hC%a)); 0<b&&++c; this.hC=trunc(c)`.
+    // Written by `IMa` (L127907: `this.hC=a; this.hL("PaidMoney",a*b)`).
+    // Absent from the shipped seed -> 0. int64 to match the JS number.
+    std::int64_t paid_money = 0;
     // JS does NOT read `<Warrior Strength>`/`<Warrior Stamina>` at all: the
     // `ur` attribute loop reads only `v.eo.attributes` (internal_settings.xml
     // `<Attributes>`: HeadDefense/BodyDefense/... — no Strength/Stamina), and

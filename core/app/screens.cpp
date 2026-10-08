@@ -9972,10 +9972,9 @@ float map_battle_rating_cached(App& app, const std::string& battle_name,
 // (`c.wi[c.wi.length-1]`) and `bm(p.o.bb())` resolves the level rows, so the
 // badge shows THAT fight's last-reward Money — not the battle's first fight
 // (the port's old `Node::reward_money`). `owned` is `bi.Fga` (L2150): the
-// same reward's first `<Item ShowReward>` entry. The JS also requires the
-// item to exist in the `p.items.$b` catalog; the port has no such name
-// catalog, so the `ShowReward` attr is the load-bearing term (every shipped
-// ShowReward entry names a real item). Cached (the panel draws per frame).
+// same reward's first `<Item ShowReward>` entry, resolved in the list.xml
+// catalog (`p.items.$b` == `load_full_catalog`). Cached (the panel draws per
+// frame).
 void map_reward_badge_cached(App& app, const std::string& battle_name,
                              const std::string& zone, int fight_index,
                              std::int64_t& money, std::int64_t& exp, bool& owned) {
@@ -10050,17 +10049,33 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
                     pugi::xml_node last;
                     for (const pugi::xml_node r : rewards.children("Reward"))
                         last = r;
-                    const auto first_shown = [](const pugi::xml_node& n) {
-                        for (const pugi::xml_node it : n.children("Item")) {
-                            if (sf2::data::xml_attr_bool(it, "ShowReward", false))
-                                return true;
-                        }
-                        return false;
-                    };
                     if (last) {
-                        b.owned = first_shown(last);
-                        const pugi::xml_node mode = last.child("NormalModeReward");
-                        if (!b.owned && mode) b.owned = first_shown(mode);
+                        // JS `tt.bm(level)` -> `Yg.items[0]`: the FIRST direct
+                        // `<Item>` of the base reward (`Z_.npa` items precede
+                        // the merged `NormalModeReward`; `EclipseModeReward`
+                        // only when `p.o.Yh`, off in the shipped save). Then
+                        // `Fga` (L2150) verbatim:
+                        //   `a=a.items[0]; return a.HF ? p.items.$b(a.name)!=null : !1`
+                        // — the item must carry `ShowReward` (`HF`, `Kd.parse`
+                        // L117399) AND resolve in the list.xml catalog
+                        // (`p.items.$b` == `load_full_catalog`). The old port
+                        // tested ANY `<Item ShowReward>` and skipped the catalog
+                        // term, so a reward whose first item is absent from
+                        // list.xml still showed the badge.
+                        pugi::xml_node it0 = last.child("Item");
+                        if (!it0) {
+                            const pugi::xml_node mode = last.child("NormalModeReward");
+                            if (mode) it0 = mode.child("Item");
+                        }
+                        if (it0 &&
+                            sf2::data::xml_attr_bool(it0, "ShowReward", false)) {
+                            const std::string nm = it0.attribute("Name").value();
+                            if (!nm.empty()) {
+                                for (const CatalogItem& ci : load_full_catalog(app)) {
+                                    if (ci.name == nm) { b.owned = true; break; }
+                                }
+                            }
+                        }
                     }
                 }
             }

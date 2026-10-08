@@ -166,6 +166,9 @@ WarriorSave SaveSystem::load() {
     if (warrior.attribute("FirstName")) out.first_name = warrior.attribute("FirstName").value();
     out.money = warrior.attribute("Money") ? warrior.attribute("Money").as_llong() : 0;
     out.bonus = warrior.attribute("Bonus") ? warrior.attribute("Bonus").as_llong() : 0;  // `xb(..,0)`
+    // `this.hC=xb(a.attributes.get("PaidMoney"))` (JS world ctor char 124803).
+    out.paid_money =
+        warrior.attribute("PaidMoney") ? warrior.attribute("PaidMoney").as_llong() : 0;
     out.strength = sf2::data::xml_attr_int(warrior, "Strength", 3);
     out.stamina = sf2::data::xml_attr_int(warrior, "Stamina", 3);
     out.level = sf2::data::xml_attr_int(warrior, "Level", 0);       // `u.I(attr)`
@@ -638,6 +641,15 @@ void SaveSystem::save(const WarriorSave& w) {
     }
 
     warrior.attribute("Money").set_value(w.money);
+    // `IMa` (L127907) writes `PaidMoney` via `hL`; the seed carries no attr, so
+    // append only when the field is set (a present-but-zero attr is preserved).
+    {
+        pugi::xml_attribute pm = warrior.attribute("PaidMoney");
+        if (pm || w.paid_money != 0) {
+            if (!pm) pm = warrior.append_attribute("PaidMoney");
+            pm.set_value(w.paid_money);
+        }
+    }
     warrior.attribute("Bonus").set_value(w.bonus);
     warrior.attribute("Strength").set_value(w.strength);
     warrior.attribute("Stamina").set_value(w.stamina);
