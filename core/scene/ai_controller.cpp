@@ -732,10 +732,11 @@ int AiController::yaa(const AiFightState& st) {
     // For each condition row, the target distance (JS `Wea` L600 + L610:
     // the row label's bone world-x) and the frame window:
     //   l*(t + (b.aU.xea(f,r) - b.aU.xea(g,r))*d - e) + h
-    // where t = `Wea(label, my, enemy)` = MY fighter's bone world-x, l = my
-    // facing, d = my facing, e = the enemy's dw, h = the DistanceError draw.
-    // The port keeps the `l*t + h` shell; the `xea` and `-e` terms are still
-    // dropped (no move `xea` table / enemy `dw` on this path).
+    // where t = `Wea(label, my, enemy)` = MY fighter's bone world-x, l = the
+    // OPPONENT's clip mirror (`a.da.hd()`), d = MY clip mirror (`this.Ji.hd()`
+    // = `st.my_facing`), e = the enemy's dw, h = the DistanceError draw.
+    // All terms are now applied JS-exact, including the `xea` sub-frame
+    // difference (`b.aU`, MY current move's v=7 table) and the `-e` term.
     // The Hu frame pick is JS `PBa`'s `L6a(c)` (L617 + L628):
     // `a=this.$_(c); return -1<a ? frames[a] : null` — the single Hu frame
     // at the ROUNDED frame `f`, or NO outcomes when `-1`. Previously the
