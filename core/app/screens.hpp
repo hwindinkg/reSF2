@@ -381,6 +381,20 @@ struct UrBlink {
     bool N7 = false; // selected-pulse phase (`N7`)
 };
 
+// JS `pk` (L1112022) map challenge/fight-node plate fade cycle. `sy` = [md
+// (the fight `GD()` challenge text), Lm.node (the `Wc` difficulty bar)]; `rG`
+// selects the item shown at full opacity; the `Mb.challenge` hold (`yza`) +
+// cross-fade (`transitionDuration`, ease-out `(1-p)^2` / ease-in `p^2`,
+// `dc.Ln`/`dc.KK`) alternate it. `Fya` (`DifficultyIsFirstFrame`) seeds `rG`.
+struct PkFade {
+    std::string key;      // node identity the state belongs to
+    int be = 1;           // `pk.Be`: 1 = hold, 2 = cross-fade
+    float time = 0.0f;    // `pk.time`
+    int rG = 0;           // `pk.rG` (0 = md, 1 = Lm)
+    float out_op = 1.0f;  // `Aa.wa` (current item)
+    float in_op = 0.0f;   // `msa.wa` (next item)
+};
+
 class MapScreen : public Screen {
 public:
     explicit MapScreen(ScreenManager& mgr);
@@ -509,6 +523,9 @@ private:
     // `Ur` red-bulb / selected-slot blink (`sZa`/`rZa` L2116-2117), ticked in
     // `update_impl` and read by the dot draw.
     UrBlink ur_blink_;
+    // The `pk` (L1112022) challenge/difficulty cross-fade, ticked in
+    // `update_impl` and read by the `Rr` info-panel draw.
+    PkFade pk_fade_;
     // Tournament-series progress (save Fights/yc win counts, cached at
     // construction; the Map remounts every visit so it stays fresh).
     std::vector<WarriorSave::FightWins> fight_wins_;

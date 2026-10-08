@@ -1154,6 +1154,15 @@ public:
     // focus landing after the map's construction still takes effect.
     const std::string& last_map_focus() const { return last_map_focus_; }
 
+    // JS `dl.GD()` (L727376) for a `zone|battle|fight` triple: the fight's
+    // `<Rules><Description Alias>` (`g8`/`o7a`) if present, else the `<Fight
+    // Description>` (`Sb`). The map `pk.md` challenge label + the locked `mk`
+    // panel read it (`Whb`/`zyb` L1085087/L1113392).
+    std::string fight_description(const std::string& triple) const {
+        const auto it = fight_description_.find(triple);
+        return it != fight_description_.end() ? it->second : std::string();
+    }
+
     // --- `He` pager (L1042-1062) ------------------------------------------
     // A `Regular` dialog with several `<Line>` rows shows one row per page;
     // the page's `ButtonText` labels the advance plate and only the LAST

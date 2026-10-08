@@ -9344,6 +9344,58 @@ void MapScreen::update_impl(float dt) {
     // `Ur.m4a` (L2115): advance the red-bulb / selected-slot blink once per
     // frame (the JS `aa` update loop). The draw pass reads `ur_blink_`.
     ur_blink_tick(ur_blink_, ur_blink_cfg());
+    // JS `pk.aa` (L1111443): the challenge/difficulty cross-fade. `sy` =
+    // [md, Lm.node]; `rG` shows one at full opacity; the `Mb.challenge` hold
+    // (`yza`) then a `transitionDuration` cross-fade (`Aa.wa(1-Ln(p))`,
+    // `msa.wa(KK(p))` = `(1-p)^2`/`p^2`) alternate them, advancing `rG` on
+    // completion (`UGa`). Reset whenever the selected `Rr` node changes (JS
+    // builds a fresh `pk` per selection).
+    {
+        const Node* sel = nullptr;
+        if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size() &&
+            hover_ >= 0 &&
+            static_cast<std::size_t>(hover_) < zones_[zone_sel_].nodes.size()) {
+            sel = &zones_[zone_sel_].nodes[static_cast<std::size_t>(hover_)];
+        }
+        const std::string key = sel != nullptr ? sel->name : std::string();
+        const bool challenge = sel != nullptr && (sel->type == "CHALLENGE" ||
+                                                  sel->type == "REPLAYABLE");
+        if (!challenge) {
+            pk_fade_ = PkFade{};
+        } else {
+            const sf2::scene::FightParams& mp = sf2::scene::fight_params();
+            if (pk_fade_.key != key) {
+                pk_fade_.key = key;
+                pk_fade_.be = 1;
+                pk_fade_.time = 0.0f;
+                // `wbb` L1113392: `rG = Mb.challenge.Fya==0 ? 1 : 0`.
+                pk_fade_.rG = mp.map_challenge_difficulty_first_frame == 0 ? 1 : 0;
+                pk_fade_.out_op = 1.0f;
+                pk_fade_.in_op = 0.0f;
+            }
+            pk_fade_.time += dt;
+            if (pk_fade_.be == 1) {
+                // `ed(yza)` = min(1, time/yza); hold until it reaches 1.
+                if (pk_fade_.time >= mp.map_challenge_fade_delay) {
+                    pk_fade_.time = 0.0f;
+                    pk_fade_.be = 2;
+                }
+            } else {
+                const float dur = mp.map_challenge_transition_duration;
+                const float p = dur == 0.0f ? 1.0f
+                                            : std::min(1.0f, pk_fade_.time / dur);
+                pk_fade_.out_op = (1.0f - p) * (1.0f - p);  // `1 - Ln(p)`
+                pk_fade_.in_op = p * p;                     // `KK(p)`
+                if (p >= 1.0f) {
+                    pk_fade_.time = 0.0f;
+                    pk_fade_.be = 1;
+                    pk_fade_.rG = (pk_fade_.rG + 1) % 2;  // `UGa`
+                    pk_fade_.out_op = 1.0f;
+                    pk_fade_.in_op = 0.0f;
+                }
+            }
+        }
+    }
     // `SetMapFocus` focus refresh (`qo` L1086 = `p.o.m5(battle)` + the `Ya`
     // focus refresh): StoryTutorialBossFight fires on THIS map's SceneLoaded
     // (tutorial_quests.xml L143-155), i.e. AFTER the ctor read the save, so
@@ -10120,7 +10172,8 @@ void draw_map_preview(App& app, const std::string& stem, float x, float y, float
 }
 
 // The `Rr` info panel body. `node` may be null (empty panel: title only).
-void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics& mm) {
+void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics& mm,
+                         const PkFade* fade) {
     draw_map_paper_panel(app, mm);
     const float cx = mm.panel_x + mm.rail;  // `wc.content.C(rail)`
     const float cy = mm.panel_y;
@@ -10247,26 +10300,73 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
                                   pip, pip, 1.0f);
         }
     }
-    // --- `Wc` difficulty (L2161 `b = b*.35 + c`, `Lm.D(b)`, `Lm.ba(a,
-    // a*.25)`; L2163) ---
+    // --- `Wc` difficulty (`Lm`) + the `pk.md` challenge text (L1112022) ---
+    // `pk` holds `md` and `Lm.node` in `sy=[md, Lm.node]` and cross-fades
+    // between them (`Mb.challenge.yza`/`transitionDuration`, ease `dc.Ln`/
+    // `dc.KK`). `md` is the ACTIVE fight's `GD()` (`b.GD()`, `zyb` L1113392),
+    // shown only for challenge/replayable types while the fight is not locked
+    // (`md.R(!b&&c)`); every other type hides `md` and pins `Lm` at opacity 1.
+    const int md_fi = map_fight_index(app, node->name, node->fight_count);
+    const std::string md_triple =
+        node->zone + "|" + node->name + "|" + std::to_string(md_fi + 1);
+    const bool challenge_type = node->type == "CHALLENGE" || node->type == "REPLAYABLE";
+    std::string md_text;
+    if (challenge_type) {
+        md_text = app.quest_engine().fight_description(md_triple);
+        const bool fl =
+            static_cast<std::size_t>(md_fi) < node->fight_locked.size() &&
+            node->fight_locked[static_cast<std::size_t>(md_fi)];
+        if (fl) md_text.clear();  // `md.R(!b && c)`
+    }
+    float md_op = 0.0f;
+    float lm_op = 1.0f;
+    if (challenge_type && fade != nullptr && !md_text.empty()) {
+        md_op = (fade->rG == 0) ? fade->out_op : fade->in_op;
+        lm_op = (fade->rG == 1) ? fade->out_op : fade->in_op;
+    }
     float wy = body_h * 0.35f + body_h * 0.05f;  // `c = b*.05`, `b*.35 + c`
     {
         float fw = 0.0f, fh = 0.0f;
         const float bar_h = map_frame_size(app, "difficulty_empty", fw, fh) && fw > 0.0f
                                 ? body_w * (fh / fw)
                                 : body_w * 0.1f;
-        try_draw_atlas_button(app, "difficulty_empty", body_x + body_w * 0.5f,
-                              body_y + wy + bar_h * 0.5f, body_w, bar_h, 1.0f);
-        const int lvl = map_difficulty_level(map_battle_rating_cached(
-            app, node->name, node->zone,
-            map_fight_index(app, node->name, node->fight_count)));
-        try_draw_atlas_button(app, kMapDiffFill[lvl], body_x + body_w * 0.5f,
-                              body_y + wy + bar_h * 0.5f, body_w, bar_h, 1.0f);
-        // `Wc.ba` label: `ua(a*.16)`, `Fa(a, ua)`, `D(bar_h)`.
-        const float lab_h = body_w * 0.16f;
-        draw_ui_label(app, body_x, body_y + wy + bar_h, body_w, lab_h,
-                      loc(app, kMapDiffLevels[lvl].key, kMapDiffLevels[lvl].key),
-                      lab_h / 100.0f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        const int lvl = map_difficulty_level(
+            map_battle_rating_cached(app, node->name, node->zone, md_fi));
+        const float lab_h = body_w * 0.16f;  // `Wc.ba` `ua(a*.16)`
+        const char* lab_key = kMapDiffLevels[lvl].key;
+        if (lm_op > 0.0f) {
+            try_draw_atlas_button(app, "difficulty_empty", body_x + body_w * 0.5f,
+                                  body_y + wy + bar_h * 0.5f, body_w, bar_h, lm_op);
+            try_draw_atlas_button(app, kMapDiffFill[lvl], body_x + body_w * 0.5f,
+                                  body_y + wy + bar_h * 0.5f, body_w, bar_h, lm_op);
+            if (lm_op >= 1.0f) {
+                // `Wc.ba` label: `ua(a*.16)`, `Fa(a, ua)`, `D(bar_h)`.
+                draw_ui_label(app, body_x, body_y + wy + bar_h, body_w, lab_h,
+                              loc(app, lab_key, lab_key), lab_h / 100.0f,
+                              UiAlign::Center, 0.184f, 0.145f, 0.106f);
+            } else {
+                const sf2::data::font* pf = app.menu_font();
+                const unsigned int pt = app.font_texture();
+                if (pf != nullptr && pt != 0) {
+                    app.draw_text_centered(*pf, pt, body_x + body_w * 0.5f,
+                                           body_y + wy + bar_h,
+                                           loc(app, lab_key, lab_key),
+                                           lab_h / 100.0f, 0.184f, 0.145f, 0.106f,
+                                           lm_op);
+                }
+            }
+        }
+        // `pk.md`: the challenge text, same slot as `Lm`.
+        if (md_op > 0.0f && !md_text.empty()) {
+            const sf2::data::font* pf = app.menu_font();
+            const unsigned int pt = app.font_texture();
+            if (pf != nullptr && pt != 0) {
+                app.draw_text_centered(*pf, pt, body_x + body_w * 0.5f,
+                                       body_y + wy + bar_h * 0.5f,
+                                       loc(app, md_text, md_text), lab_h / 100.0f,
+                                       0.184f, 0.145f, 0.106f, md_op);
+            }
+        }
         wy += bar_h + lab_h;
     }
     // --- reward gold (JS `pk.ty` = `bi` -> `ci`/`Ig`, L2133/L2148) ---
@@ -10578,7 +10678,7 @@ void MapScreen::render_impl(App& app) {
         static_cast<std::size_t>(hover_) < zones_[zone_sel_].nodes.size()) {
         sel = &zones_[zone_sel_].nodes[static_cast<std::size_t>(hover_)];
     }
-    draw_map_info_panel(app, sel, mm);
+    draw_map_info_panel(app, sel, mm, &pk_fade_);
 
     // Boss-intro `jk` roster (`ai.aa` case 0 L2007 -> `lca` -> `Ws=new jk`):
     // the row-a `bQ` at the state-machine `scroll_x`, the state-0 fade-in and
@@ -13925,8 +14025,9 @@ void FightScreen::render_impl(App& app) {
                 const float cy = base_y;
                 (void)try_draw_atlas_button(app, frame, cx, cy, iw, ih, ic.alpha);
                 prev_w = iw;
-                // `Ir.stack` (L2043): the `sC` count label while `V5>0`.
-                if (ic.stack_count > 1) {
+                // `Ir.stack` (L1052823 `stack()`): the `sC` count label is
+                // shown while `V5 > 0` (not `>1`); `sC.V(K.T(V5))`.
+                if (ic.stack_count > 0) {
                     const sf2::data::font* pf = app.menu_font();
                     const unsigned int pt = app.font_texture();
                     if (pf != nullptr && pt != 0) {

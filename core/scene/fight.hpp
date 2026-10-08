@@ -1762,7 +1762,18 @@ public:
     // expiry-overlay opacity, `StackShiftX/Y` shifts a stacked icon.
     struct PerkIconView {
         std::string image;        // action `Image` (dot->slash at draw time)
-        std::string stack;        // action `Name` grouping key (`Jr.stack`)
+        // `Jr.stack` (L1053011): `a.stack` — JS `Up.parse`/`Up` ctor NEVER set
+        // it (`jp.stack` stays ""), so `Hr.T0a` (`c=a.stack; if(c!="")…`) never
+        // finds an existing group and each `ModIcon` action gets its OWN `Jr`
+        // (per-icon grouping). The port therefore gives every icon a unique
+        // grouping token; the render advances the cursor per icon.
+        std::string stack;
+        // The owning `ModIcon` action identity. JS `Hr.Nmb`/`Hr.Maa` match
+        // `d.action == a` (the action OBJECT, L1054338/L1053963), not the
+        // name; the port's bus carries the action `<Name>` in `ModState`, so
+        // this is the closest stable identity. `perk_icon_remove` and the
+        // `ApplyModEffect` handler key on it.
+        std::string action_name;
         bool show_expiration = false;  // action `ShowExpiration` (`jp.kx`)
         int stack_count = 0;      // `Ir.V5`
         float alpha = 0.0f;       // `Pk` (0..1)
@@ -1778,9 +1789,9 @@ public:
     // the owning `ModIcon` action leaves the active list (JS `bLa(a,!0)`,
     // L665575 -> `cka(...,true)` -> `nab`). The JS `Ir` has NO lifetime timer -
     // the old port `Frames/180` ttl was an invention.
-    void perk_icon_remove(int side, const std::string& stack) {
+    void perk_icon_remove(int side, const std::string& name) {
         for (PerkIconView& ic : perk_icons_[side & 1]) {
-            if (ic.stack == stack) {   // `Nmb`: first `action == a` match
+            if (ic.action_name == name) {   // `Nmb`: first `action == a` match
                 ic.removing = true;
                 ic.fading_in = false;
                 break;

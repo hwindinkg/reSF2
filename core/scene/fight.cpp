@@ -3959,19 +3959,27 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
     if (type == "ModIcon") {
         const std::string img = str("Image");
         if (!img.empty()) {
-            const std::string stack = str("Name");
+            const std::string aname = str("Name");
             std::vector<PerkIconView>& list = perk_icons_[owner_side & 1];
             PerkIconView* found = nullptr;
             for (PerkIconView& ic : list) {
-                if (ic.image == img && ic.stack == stack) {
+                // One icon per owning action (`Hr.T0a` L1053963: JS never
+                // merges by `Jr.stack` because `a.stack` is always ""). The
+                // port fires per trigger, so it dedupes by the action identity
+                // (`action_name`) + image instead of the old `stack` key.
+                if (ic.action_name == aname && ic.image == img) {
                     found = &ic;
                     break;
                 }
             }
             if (found == nullptr) {
+                static unsigned long long s_icon_seq = 0;
                 PerkIconView ic;
                 ic.image = img;
-                ic.stack = stack;
+                ic.action_name = aname;
+                // `Jr.stack` is always "" in JS -> one group per icon; a
+                // unique token makes the render advance the cursor per icon.
+                ic.stack = aname + "#" + std::to_string(s_icon_seq++);
                 ic.show_expiration = num("ShowExpiration", 0.0) != 0.0;
                 // JS `Ir` ctor (L1051222): `this.V5=0` — a ModIcon does NOT
                 // seed a stack count (`Up.parse` L715869 reads only
@@ -3982,7 +3990,8 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
                 ic.fading_in = true;
                 list.push_back(std::move(ic));
             } else {
-                ++found->stack_count;
+                // A repeat fire only restarts the pulse (`Jr.eWa` `ZS++`); it
+                // must NOT touch `V5` — `Hr.Maa` is the only writer.
                 found->pulse_left = 1;
                 found->pulse_frame = 0;
             }
@@ -4096,14 +4105,15 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         // calls `wd.U4` -> `Hr.Maa` (L1053828):
         //   `b=b.action; c=b.L2; for f in sj: f.action==a && (c==1 && f.ZS++,
         //    c==2 && (f.V5=b.W5.Wb().Wn()))`.
-        // The port keys icons by the owning ModIcon `<Name>` (`ic.stack`), the
-        // same key the `ModIcon` branch and `perk_icon_remove` use.
+        // The port keys icons by the owning ModIcon action identity
+        // (`ic.action_name`), the same identity `perk_icon_remove` uses;
+        // JS `Hr.Maa` matches `f.action == a` (the action object).
         const std::string ame = str("Name");
         const std::string atyp = str("Type");
         const int l2 = atyp == "Pulse" ? 1 : atyp == "Stack" ? 2 : 0;
         if (l2 != 0 && !ame.empty()) {
             for (PerkIconView& ic : perk_icons_[owner_side & 1]) {
-                if (ic.stack != ame) continue;   // `f.action == a`
+                if (ic.action_name != ame) continue;   // `f.action == a`
                 if (l2 == 1) {
                     ++ic.pulse_left;             // `f.ZS++`
                 } else {
