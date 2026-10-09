@@ -10419,11 +10419,23 @@ void draw_map_paper_panel(App& app, const MapMetrics& mm) {
 }
 
 // The `Me` battle preview image (L2110-2111): `res/map/images/<stem>.img`
-// (the stem of the stages.xml `Preview` attr), a standalone 400x200 texture.
-bool load_map_preview(App& app, const std::string& stem) {
+// (the stem of the stages.xml `Preview` attr), a STANDALONE texture. JS `Me`
+// ctor (L2110) `this.hy.qg(E.get(b))` -> `R.qg` -> `R.hIa` (L1614) sets
+// `fa.x = a.width * a.ij`, `fa.y = a.height * a.ij` — the frame size IS the
+// decoded image's own header dimensions (ij=1 for these assets), never a
+// literal. `Wu` then draws it at `w x w*(fa.y/fa.x)`. So the port must read
+// the texture's w/h from its header, not hardcode 768x384.
+bool load_map_preview(App& app, const std::string& stem, int* out_w, int* out_h) {
     if (stem.empty()) return false;
     const std::string tex_name = "map_preview_" + stem;
-    if (app.renderer().texture_lookup(tex_name) != 0) return true;
+    static std::map<std::string, std::pair<int, int>> sizes;
+    const auto cached = sizes.find(tex_name);
+    if (cached != sizes.end()) {
+        if (out_w) *out_w = cached->second.first;
+        if (out_h) *out_h = cached->second.second;
+        return true;
+    }
+    if (app.renderer().texture_lookup(tex_name) != 0) return false;  // no dims cached
     const std::string dir = app.res_root() + "/map/images";
     try {
         for (const auto& entry : std::filesystem::directory_iterator(dir)) {
@@ -10434,6 +10446,9 @@ bool load_map_preview(App& app, const std::string& stem) {
             sf2::data::Texture tex;
             if (!sf2::data::decode_texture(entry.path().string(), tex)) continue;
             app.renderer().texture_for(tex_name, tex);
+            sizes[tex_name] = {tex.w, tex.h};
+            if (out_w) *out_w = tex.w;
+            if (out_h) *out_h = tex.h;
             std::fprintf(stdout, "[map] preview %s: %dx%d\n", stem.c_str(), tex.w, tex.h);
             std::fflush(stdout);
             return true;
@@ -10445,8 +10460,10 @@ bool load_map_preview(App& app, const std::string& stem) {
 }
 
 void draw_map_preview(App& app, const std::string& stem, float x, float y, float w) {
-    if (!load_map_preview(app, stem)) return;
-    constexpr float kSrcW = 768.0f, kSrcH = 384.0f;  // res/map/images/lynx.dds
+    int src_w = 0, src_h = 0;
+    if (!load_map_preview(app, stem, &src_w, &src_h) || src_w <= 0 || src_h <= 0) return;
+    const float kSrcW = static_cast<float>(src_w);  // JS `fa.x` = image header width
+    const float kSrcH = static_cast<float>(src_h);  // JS `fa.y` = image header height
     sf2::scene::Sprite s;
     s.texture_name = "map_preview_" + stem;
     s.frame_x = 0.0f;
@@ -15727,14 +15744,26 @@ ShopLayout shop_layout(int tab) {
 // `this.Up=new Bb("EButtonWhite")`, docked in the `jP` container over the
 // LEFT slot). `Oa.layout` (L2295, verbatim):
 //   this.jP.C((b.J+b.N)*.5*.9);
-//   this.Up.kf(b.N-b.J);            // node scale = width / btnWhite.fa.x
+//   this.Up.kf(b.N-b.J);            // node scale = width / Up.Y.za()
 //   this.jP.D(b.P+this.Up.qa());    // Bb.qa() = 112*Eb (L1843)
 // so the button spans the left slot width at the slot's TOP; the old
 // native put it in the right detail panel (invented).
+//
+// EXACT divisor (verified from the JS, NOT a guess): `Bb.kf` is inherited
+// from `db.kf` (L1839) `this.node.la(a / this.Y.za())`. `Y.za()` (L1843) =
+// `fa.x * |Eb|`. The `Bb` ctor (L1841) runs `this.xc(600)`, and `Bb.xc`
+// (L1843) calls `this.Y.xc(600)` = `Y.Rh(600 / Y.fa.x)` (L1846), so
+// `Y.Eb = 600 / fa.x` and `Y.za() = fa.x * 600 / fa.x = 600` — the button's
+// DEFAULT WIDTH, independent of the 300x222 `fa` (atlas scale is 1: the
+// ui/sliced meta.scale = "1" and `createTexture`'s `-2x`/`ZUa` factor is 1
+// for asset 244). `Oa.layout` never re-`xc`s `Up`, so the divisor is exactly
+// the `xc(600)` literal. (The old comment mislabelled it "fa.x (2x
+// sourceSize)" — fa.x is 300; the 600 is `Y.za()` after `xc(600)`.)
+constexpr float kBtnBbDefaultWidth = 600.0f;  // `Bb` ctor `xc(600)` L1841
 ShopRect shop_try_rect(const ShopLayout& l) {
     const ShopRect& b = l.left_panel;
     const float w = b.width();
-    const float sc = w / 600.0f;          // btnWhite runtime fa.x (2x sourceSize)
+    const float sc = w / kBtnBbDefaultWidth;  // `db.kf` -> `node.la(w / Y.za())`
     const float h = 112.0f * sc;          // Bb.qa() L1843
     const float cx = (b.J + b.N) * 0.5f * 0.9f;  // L2295
     const float cy = b.P + h;             // jP.D(b.P+Up.qa()) L2295
