@@ -1177,6 +1177,12 @@ struct SettingsLayout {
     float restart_cx = 0.0f, restart_cy = 0.0f;
     float btn_w = 0.0f, btn_h = 0.0f;
     float notice_y = 0.0f;
+    // `od` divider rails (`un` ctor L1928: `this.Cy=R.$(E.get(254),y.pB,..)` and
+    // `this.Rx=R.$(E.get(254),y.pB,..)` — BOTH `stripe_top` (984x22), natural
+    // size, `Ga()`-centred). `od.layout` (L1898) `Cy.D(Vc.ra-25)` /
+    // `Rx.D(Cd.node.ra+b)`; drawn as sprite centres, size = frame * panel.c.
+    float rail_top_y = 0.0f, rail_bot_y = 0.0f;
+    float rail_w = 0.0f, rail_h = 0.0f;
 };
 
 SettingsLayout settings_layout() {
@@ -1190,7 +1196,11 @@ SettingsLayout settings_layout() {
     s.title_w = 1560.0f * p.c;
     s.title_h = 160.0f * p.c;
     s.title_x = cx - s.title_w * 0.5f;
-    s.title_y = cy - 535.0f * p.c - s.title_h * 0.5f;
+    // `od.layout` L1898: `Vc.D(-(a+Vc.pfa().y))` with `a=Md/2=375` and
+    // `Vc.pfa().y = effect.height = 160` (`$T` L1930 `Vc.Fa(1560,160)`) sets
+    // the title node's TOP edge (`Ke` ctor anchor 0,0) to -535. The old
+    // `- title_h*0.5` double-counted the half-height (title 37.6 px high).
+    s.title_y = cy - 535.0f * p.c;
     // `un` rows (L1917): 170x170 tile, step 170*1.25 = 212.5, icon x
     // -170*0.9 = -153; content node anchor D(-375) (od.layout, Md=750).
     constexpr float kIcon = 170.0f;
@@ -1224,17 +1234,37 @@ SettingsLayout settings_layout() {
     // language row changed (`t9`), when `un.rHa` case 4 (L1931) reveals it and
     // splits BACK/RESTART by `width*.6` (`Kb.C(-w*.6)` / `Km.C(w*.6)`).
     // `un` ctor: `this.Kb=new Bb("EButtonDark"); ... this.Kb.Pb(150)` with the
-    // `Bb` ctor `this.xc(600)` (L1842) — the plate is 600 design wide, 150 tall
-    // (`Pb(150)`), NOT 320. The oracle `settings` BACK plate measures ~270 px
-    // (600*0.4706 = 282, less the transparent bevel edges); the old 320 gave a
-    // ~150 px plate (drawn ~101 with the caps shrunk).
-    s.btn_w = 600.0f * p.c;
-    s.btn_h = 150.0f * p.c;
+    // `Bb` ctor `this.xc(600)` (L1842). The `Bb` SPRITE (`Y`, L1842) is a
+    // child of the button node, so it is drawn at its NATURAL size times the
+    // accumulated scale: `xc(600)` sets `Y.Eb = 600/300 = 2` (so 600 wide) and
+    // `Y.Rm = 1` (so 222 tall, the untrimmed frame), then `Pb(150)` sets the
+    // node scale `150/112` (`Bb.qa() = 112*node.Eb`, L1844) on BOTH axes. The
+    // plate is therefore 600*(150/112)=803.6 x 222*(150/112)=297.3 design —
+    // NOT the logical 600x150 (`112` is the button's LOGICAL box; the btnDark
+    // art is the middle ~110 px of the 222 frame, so the sprite overflows the
+    // box top/bottom). The old 600x150 drew the sprite's full 222-frame height
+    // into 70.6 px -> only the art's middle ~34 px read bright (oracle ~70).
+    constexpr float kNodeScale = 150.0f / 112.0f;  // `Pb(150)` on `qa()=112*Eb`
+    const float sprite_w = 600.0f * kNodeScale;    // `Y` drawn width
+    const float sprite_h = 222.0f * kNodeScale;    // `Y` drawn height
+    s.btn_w = sprite_w * p.c;
+    s.btn_h = sprite_h * p.c;
     const float split = g_settings_restart_visible ? s.btn_w * 0.6f : 0.0f;
     s.back_cx = cx - split;
     s.restart_cx = cx + split;
-    // `od.layout` (L1898) D: the button container centre.
-    s.back_cy = s.restart_cy = cy + 500.0f * p.c;
+    // `od.layout` (L1898): `Cd.D(a + Cd.node.qa()/2)`, `a=Md/2=375`; the button
+    // container `Cd`'s height is the button sprite's bounds height `sprite_h`,
+    // and the buttons are centred on `Cd`'s origin (`Ga()` sprite, node y=0),
+    // so the plate centre is `375 + sprite_h/2` = 523.66 design.
+    const float cd_y = 375.0f + sprite_h * 0.5f;  // 523.66
+    s.back_cy = s.restart_cy = cy + cd_y * p.c;
+    // `od.layout` (L1898): `Cy.D(Vc.ra-25)` (`Vc.ra=-535`) -> centre -560;
+    // `Rx.D(Cd.node.ra+b)` with `b=Cd.node.qa()/2` -> `Cd.ra + sprite_h/2`
+    // = 523.66 + 148.66 = 672.32. Both `stripe_top` (984x22) at natural size.
+    s.rail_top_y = cy + (-535.0f - 25.0f) * p.c;
+    s.rail_bot_y = cy + (cd_y + sprite_h * 0.5f) * p.c;
+    s.rail_w = 984.0f * p.c;
+    s.rail_h = 22.0f * p.c;
     // Notice `Nm`: `C(-750)`, `D(250)`, `Fa(1500,50)` (L1929).
     s.notice_y = cy + 250.0f * p.c;
     return s;
@@ -20819,6 +20849,18 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
                            s.restart_cy - 14.0f, s.btn_w, 28.0f,
                            loc_lang(app, lang, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
                            kSettingsTextR, kSettingsTextG, kSettingsTextB);
+    }
+    // `od` divider rails (`un` ctor L1928 + `od.layout` L1898): both
+    // `stripe_top` (E.get(254) = ui/scroll, `y.pB`), natural 984x22 size,
+    // `Ga()`-centred — drawn ON TOP of the panel/buttons (added after `Cd`).
+    // `Cy` sits under the title (`Vc.ra-25`), `Rx` at the button container's
+    // bottom edge (`Cd.node.ra + Cd.node.qa()/2`). The oracle `settings`
+    // divider measures y92-100 (top) and y673-679 (bottom), x411-868.
+    if (load_scroll_atlas(app)) {
+        try_draw_atlas_button(app, "stripe_top", s.panel.px + s.panel.pw * 0.5f, s.rail_top_y,
+                              s.rail_w, s.rail_h, 1.0f, /*fill=*/true, /*flip_x=*/false);
+        try_draw_atlas_button(app, "stripe_top", s.panel.px + s.panel.pw * 0.5f, s.rail_bot_y,
+                              s.rail_w, s.rail_h, 1.0f, /*fill=*/true, /*flip_x=*/false);
     }
     // `xh` credits overlay (L1854-1857): drawn over the settings surface,
     // exactly as `xh.show` appends to the root above the `Wb` dialog.
