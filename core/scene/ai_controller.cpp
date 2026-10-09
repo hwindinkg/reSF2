@@ -46,14 +46,23 @@
 //     the JS `ld` source `ra.nAa(P.t$a(), ld)` (the `<MovementsTables>`
 //     `<MovementsMainIterations>` group children) with the label `n0` removal
 //     filter, the `bma`/`Pcb` filters, the `P.G9a()` fallback and the final
-//     `p0(true)-Fl+1` wait; only the `cs` branch and the `b==1` (`VAa`) path
-//     remain cited divergences (see `gea`).
+//     `p0(true)-Fl+1` wait; the `cs` branch is now PORTED (see `gea`); only
+//     the `b==1` (`VAa`) sub-fighter path remains a cited divergence
+//     (BLOCKED on `vd`, reported).
 //   - the table target (NOW JS-EXACT): JS `Wea` (L600) returns the FIGHTER
 //     BONE named `row.label` (`da.Ic(label, t0(me,enemy)).ma.x`, resolved on
 //     MY fighter); `XAa` then forms `n = a.da.hd()*(Wea - a.da.dw()) + Mu`.
 //     The port now computes exactly that (opponent clip mirror, opponent
-//     root world-x, bone world-x) — see `xaa`. `yaa` (Q6a) still drops the
-//     `xea` sub-frame term — a cited divergence (safe only).
+//     root world-x, bone world-x) - see `xaa`; `yaa` (Q6a) now applies the
+//     `xea` sub-frame term too (see `yaa`).
+//   - JS `de.V1` (L601-602) additionally rejects a candidate when a
+//     HIGHER-`Priority` move sharing its `<Keys>` signature (`a.M7.$Q`, the
+//     port's `MoveDef::mirror_exclusive`) is in `me` and its conditions pass
+//     (`f.Yz(this.model,null,a.FQ(2))`). The port applies `mirror_exclusive`
+//     in the Random-tactic path (`update_random`/`Pkb`) but NOT in `v1`; the
+//     sibling condition re-eval needs the `Ql.Hc`/`FQ(2)` type-2 context
+//     (`Yz`'s `c.rb=g` chaining), so `v1` remains a cited divergence
+//     (key-combo moves only).
 // Exact since this wave (no oracle needed — pure JS math):
 //   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
 //     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
