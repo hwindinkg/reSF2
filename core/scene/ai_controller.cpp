@@ -329,7 +329,8 @@ bool AiController::bma(const MoveDef& cand, const AiFightState& st) const {
 //     so feed the ratio (clamped, matching `du`).
 //   xY = enemy `kJ()` (per-sub-step played steps; `zk.xY=a.da.kJ()` L302908)
 //     — now fed `st.enemy_kj`, the sub-step counter, NOT the Xh domain.
-//   pZ = `Tba` (max M2 part frames) — `enemy_max_part_frames` ✓.
+//   pZ = `Tba` (max `M2` over the enemy's `vd` CHILD models; 0 when none)
+//     — `enemy_max_part_frames`, computed over `children_` (fight.cpp).
 //   counter/Xb/tf = strike-memory accumulators (`Cn.d0`, JS `tu` L297387):
 //     the enemy's remembered damage/count/hits for the current move, decayed
 //     to the model's strike time by the tactic's `<Memory Strikes>`

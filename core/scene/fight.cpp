@@ -6587,7 +6587,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         for (const std::string& n : foe.fighter.active_intervals()) {
             st.enemy_intervals.push_back({n, foe.fighter.interval_type(n)});
         }
-        st.enemy_max_part_frames = foe.fighter.m2();  // JS `Tba` (max `M2`)
+        // JS `Tba` (L595): `b=0,c=a.vd.length; for(d=0;d<c;){e=a.vd[d++];
+        // e!=null&&(e=e.da.M2,e>b&&(b=e))} return b`. `a.vd` is the fighter's
+        // SPAWNED CHILD-MODEL list (`wd.zWa` L520 / `wd.fya` L535-536) — it
+        // NEVER contains the fighter itself, so a single-part fighter has an
+        // empty `vd` and `Tba` returns 0. The port's `children_` carry the
+        // child's clip cursor (`ChildModel::clip_frame`, the `Te.Xh` playhead
+        // analog) with `M2 == Xh-4` (see `Fighter::m2`), and `Tba` floors at
+        // 0. Shipped fights spawn no child -> 0. (The previous
+        // `foe.fighter.m2()` mapped the MAIN body into `Tba`, which the JS
+        // never does; `ChildFramesFactor` is 0 in every shipped fight tactic,
+        // so this is behaviour-neutral for the shipped set.)
+        {
+            int tba = 0;
+            for (const sf2::scene::ChildModel& c : children_) {
+                if (!c.active || c.is_player != foe.is_player) continue;
+                const int m2 = c.clip_frame - 4;
+                if (m2 > tba) tba = m2;
+            }
+            st.enemy_max_part_frames = tba;
+        }
         // JS `wd.K0` (L505): NoRanged item equipped -> +1, else -1.
         st.ranged = me.ranged_available ? -1 : 1;
         // JS `Ji.Pe` (`Te.Pe`): a hit reaction forces it FALSE. `wd.Qnb`

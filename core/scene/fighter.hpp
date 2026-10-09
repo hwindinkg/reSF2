@@ -592,7 +592,9 @@ public:
     // `this.Xh++`, so the two counters advance in LOCKSTEP: `M2 == Xh - 4`
     // (`Xqb` L282808 seats `M2 = -4`, `Skb` L280606 seats `Xh = 0`). `Xh` is
     // this port's `playhead_`. `Tba` (L595) = the max `M2` over the enemy's
-    // body parts; the port's single body maps to this. NOTE the shipped
+    // spawned CHILD models (`a.vd`, filled by `zWa`/`fya`); a single-part
+    // fighter's `vd` is empty so `Tba` is 0 (computed in fight.cpp, not from
+    // this body's `M2`). NOTE the shipped
     // `Xqb` guards the `M2=-4` seat with `yra` (`this.yra||(...)`) and `yra`
     // is never re-armed, so a literal reading would make `M2` a
     // model-lifetime counter; the port re-seats it per move start (the only
