@@ -1126,7 +1126,18 @@ void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
             // `h.C(e+b/2*c)` with `e=XN[0].fa.x/2`, `b=d.w` -> the cap centre
             // offset is `(cap_w + body_w)/2`; cap width `bg_edge.fa.x*c`,
             // height = body height, right cap `Hr(!0)` -> flip_x.
-            constexpr float kOdEdgeW = 219.0f;  // scroll.json bg_edge 219x1536
+            // `XN[0].fa.x` is the `bg_edge` frame's UNTRIMMED `sourceSize`
+            // width (scroll.json 219x1536) - read it from the atlas instead of
+            // the shipped constant (the JS reads `fa`, never a literal).
+            sf2::data::atlas_frame edge_fr;
+            int edge_tw = 0, edge_th = 0;
+            unsigned int edge_gl = 0;
+            const float kOdEdgeW =
+                (app.get_atlas_frame("bg_edge", &edge_fr, &edge_tw, &edge_th,
+                                     &edge_gl) &&
+                 edge_fr.source_w > 0)
+                    ? static_cast<float>(edge_fr.source_w)
+                    : 219.0f;
             const float cap_w = kOdEdgeW * p.c;
             const float off = (cap_w + p.pw) * 0.5f;
             const float cx = p.px + p.pw * 0.5f;
@@ -16566,9 +16577,12 @@ int shop_owned_tier(const WarriorSave& w, const CatalogItem& it) {
 // Bottom tab strip (JS `ss`/`Eg` L1851-1853, L2283-2284): a full-width bar
 // `height = za.Sp*1.2` with `Le` buttons (id 248 shop atlas) scaled to the
 // bar height and laid left->right (spacing factor 1.2 at lc>1.2), centred.
-// `buttons/Weapon` sourceSize is 200x190.
-constexpr float kShopTabSrcW = 200.0f;
-constexpr float kShopTabSrcH = 190.0f;
+// `Eg.aa` (L1852) sizes the strip from `this.buttons[0].Y.fa` — the FIRST
+// button's UNTRIMMED `sourceSize` (`d=c.x`, `c=this.height/c.y`), i.e.
+// `buttons/Weapon` 200x190 in the shipped shop atlas. Read it from the atlas
+// (the JS reads `fa`, never a literal); fall back to the shipped size.
+constexpr float kShopTabSrcWFallback = 200.0f;
+constexpr float kShopTabSrcHFallback = 190.0f;
 // JS `Eg` ctor (L1851): `this.background=R.Ed(-13034231,1,1,this.node)` — the
 // full-width tab-strip background quad (`Eg.aa` L1852 `background.zm(w,height)`).
 // -13034231 = ARGB 0xFF391D09 = RGB(57,29,9), a warm dark brown. The oracle
@@ -16623,12 +16637,25 @@ struct ShopTabLayout {
     float cy = 0.0f;
 };
 
-ShopTabLayout shop_tab_layout() {
+ShopTabLayout shop_tab_layout(App& app) {
     ShopTabLayout l;
     const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.Sp (L1975)
     l.bar_h = sp * kShopTabBarK;
     l.btn_h = l.bar_h;
-    l.btn_w = kShopTabSrcW * (l.bar_h / kShopTabSrcH);
+    // `Eg.aa` L1852: `c=this.buttons[0].Y.fa` -> the first button frame's
+    // untrimmed `sourceSize` (JS reads `fa`, not a literal).
+    sf2::data::atlas_frame tab_fr;
+    int tab_tw = 0, tab_th = 0;
+    unsigned int tab_gl = 0;
+    const bool tab_have = app.get_atlas_frame("buttons/Weapon", &tab_fr, &tab_tw,
+                                              &tab_th, &tab_gl);
+    const float src_w =
+        (tab_have && tab_fr.source_w > 0) ? static_cast<float>(tab_fr.source_w)
+                                          : kShopTabSrcWFallback;
+    const float src_h =
+        (tab_have && tab_fr.source_h > 0) ? static_cast<float>(tab_fr.source_h)
+                                          : kShopTabSrcHFallback;
+    l.btn_w = src_w * (l.bar_h / src_h);
     l.step = l.btn_w * kShopTabSpread;
     // `Eg.aa` packs/sizes the ACTIVE buttons only, so the row width is the
     // visible `Tw` subset, not `kShopTabCount`.
@@ -16925,7 +16952,7 @@ void ShopScreen::update_impl(float dt) {
     // Bottom tab strip (JS `ss`/`Eg`; geometry mirrors render_impl).
     tab_hover_ = -1;
     {
-        const ShopTabLayout tl = shop_tab_layout();
+        const ShopTabLayout tl = shop_tab_layout(app());
         const std::vector<int> vis = shop_visible_tabs();
         for (std::size_t k = 0; k < vis.size(); ++k) {
             const int t = vis[k];
@@ -17428,7 +17455,7 @@ void ShopScreen::render_impl(App& app) {
     // bar + `Le` buttons (id 248 shop atlas `buttons/<Category>[_active]`),
     // scaled to the bar height; flat fallback only on a real frame miss.
     {
-        const ShopTabLayout tl = shop_tab_layout();
+        const ShopTabLayout tl = shop_tab_layout(app);
         const float bar[] = {0, kViewH - tl.bar_h, kViewW, kViewH - tl.bar_h, kViewW, kViewH,
                              0, kViewH - tl.bar_h, kViewW, kViewH, 0, kViewH};
         ren.draw_triangles(bar, 6, kTabBarBgR, kTabBarBgG, kTabBarBgB, 1.0f);
