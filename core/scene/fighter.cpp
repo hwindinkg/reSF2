@@ -1602,10 +1602,14 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
 //   `f.length>0 && (e = f[uf.sja(f.length)])`   // UNIFORM pick via Math.random
 //   `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)`
 // `uf.sja(n)` = `Math.floor(Math.random()*n)` (L57426 -> `at.RGa` ->
-// `Math.random`). The JS later feeds `e` into the `Pkb` weighted roulette
-// (tactic weights at reaction time are not ported — documented OPEN), so the
-// port starts the uniformly picked move directly. `rng` is the injected
-// `Math.random` analog (`FightController::math_random01`), never `Da.pg`.
+// `Math.random`). The `Pkb` weighted roulette is UNREACHABLE on this path: the
+// reaction event is `this.Bg.Ih(6,a)` (L201588), which leaves `eb` FALSE, so
+// `Gc.DK`'s `d` list (`c||!h.eb||h.animation.Rha||d.push(h)`) stays EMPTY and
+// the tail starts `e = f[uf.sja(f.length)]` directly (L674) — JS-exact, no
+// roulette needed. (Only the AI's `Gc.Vkb` -> `Ih(2,a,!0)` `eb=true` path,
+// reached from `de.ia`, calls `Pkb`; see `combat_decide.hpp` + `fighter.hpp`.)
+// `rng` is the injected `Math.random` analog (`FightController::math_random01`),
+// never `Da.pg`.
 std::string Fighter::try_react(FightContext& ctx,
                                const std::function<float()>& rng) {
     // JS `Gc.DK` tail (L674): record which branch the pick ran (`MS ? jJa :

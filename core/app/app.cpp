@@ -1409,9 +1409,31 @@ void App::draw_boot_splash(bool force_loader) {
     // `Ev` (@596053) pass `ap(241),cp(244),$o(240),bp(243),dp(245)` feeding
     // `gMa(Ev.x$a(),95,100)` = 95,96,97,98,99,100 (one module per frame);
     // `ad.kp` (@1014756) then holds "Loading 100%" for `aHa>30` frames.
-    // Still OPEN (PORT_AUDIT_UI §4.12): the Ev module side effects are
-    // synchronous in native `init`/`boot` (no async load completion drives
-    // `oi.kp()`), so phase 0 is a timed ramp rather than real byte progress.
+    // DOCUMENTED NATIVE APPROXIMATION (PORT_AUDIT_UI §4.12) — the JS DOES
+    // gate on async completion, but the native model has no async to gate on:
+    //   * `Rg.Ea` kd==0 (sf2.502f0946.js @1014081) shows `gMa(oi.V0(),0,95)`
+    //     and only advances to kd==1 when `oi.kp()` is true. `oi` is the
+    //     shared `ay` loader (@1229038 `kp()`: true once every queued asset id
+    //     has data; @1229054 `V0()`: monotonic round(If.z0(Mf)*100)). In the
+    //     browser those ids are fetched by XHR (`vz.load` @1233948), i.e. the
+    //     0->95 phase is real, asynchronous byte progress.
+    //   * kd==1 runs the `Ev` queue (@596053); `Ev.update` advances `PZ` ONLY
+    //     when the current module sets `Kg`. Two modules set `Kg` from async
+    //     callbacks: `$o` (@595699) via `mz.mpb(ha.F(), cb)` (@595774) and
+    //     `bp` (@596402) via `a.LU(new pg(!0), cb)` (@596646) -> `bpb` sets
+    //     `Kg`. `ap`/`cp` take start+update (2 frames each); `dp` sets `Kg`
+    //     inside `start`.
+    //   * `ad.kp` (@1014410) = `super.kp() && this.aHa>30`: the Loader holds
+    //     "Loading 100%" for 30 frames AFTER the resources are in.
+    // Native loads every asset SYNCHRONOUSLY in `init` (before `boot()`), so
+    // at the first splash frame `oi.kp()` is already true and `V0()`==100:
+    // the JS-exact kd==0 result is a single frame showing 95%. There is no
+    // async I/O, no XHR, and no callback queue to reproduce the real wait, so
+    // the port substitutes a fixed `kPreloadRampFrames` 0->95 ramp for phase 0
+    // and one Ev step per frame for phase 1. The per-step PERCENT VALUES are
+    // JS-exact (`gMa`); only the timing of the 0->95 phase is substituted. The
+    // Ev module SIDE EFFECTS (ApplicationStart/SessionStart ordering) are NOT
+    // timing-dependent and are fired JS-exact in `boot()` below.
     //   - the `ad` view `tr` art (id 816/817, L1867-1868) IS drawn below
     //     (loader branch); the Preloader `Tk` branch is the `!loader` path.
     const bool loader = force_loader || boot_splash_frames_ <= kBootLoaderFrames;
