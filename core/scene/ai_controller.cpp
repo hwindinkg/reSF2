@@ -1011,9 +1011,15 @@ int AiController::xaa(const AiFightState& st) {
 int AiController::gea(const AiFightState& st, int variant) {
     const int b = variant;
     wb_.clear();
-    // JS `de.Gea(a,1)` (the `VAa` dodge path, L313) needs `a.da.Qda` (the
-    // enemy's THROW move) and `a.da.M2`; the port models neither, and `vaa`
-    // (the only `Gea(...,1)` caller) is itself a stub. BLOCKED (reported).
+    // JS `de.Gea(a,b=1)` (L613, reached only from `de.VAa(a,1)` L604/617):
+    //   `c = a.da.M2` (the sub-fighter's `Tba`-style max `M2` frame count),
+    //   `d = a.da.Qda` (its THROW move), `f = d.Z0()[2]` (its throw table),
+    //   then the same label loop but `k=f.dw(); b==1&&(k=f.Iha)` and
+    //   `r = b==1 ? c : q.$_(...)`. The ONLY caller `VAa` iterates the
+    //   fight's `vd` SUB-FIGHTERS (`a.vd[e]`, each `g.da` a full `wd`), which
+    //   the port does not model (see ai.hpp "body-part anims `vd`"); `vaa`
+    //   below is a placeholder. BLOCKED on `vd` (reported). Adding `M2`/
+    //   `Qda` accessors without `vd` would be dead code.
     if (b != 0) return 0;
     if (st.enemy_anim.empty() || st.enemy_move == nullptr || moves_ == nullptr)
         return 0;

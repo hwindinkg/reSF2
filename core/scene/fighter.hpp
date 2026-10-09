@@ -328,8 +328,13 @@ public:
     // tail branches on the picked animation's `MS` (the `Physics` attr,
     // L362442): `MS ? jJa : Nsb` (L674) — `last_react_physics()` reports
     // which branch this pick ran. `rng` is the injected `Math.random` analog
-    // (never `Da.pg`). The `Pkb` weighted roulette at reaction time stays
-    // OPEN (no tactic weights available). Returns the name or "".
+    // (never `Da.pg`). `Gc.Pkb` (its `M7.Wcb` mirror filter, its `va.Ts`
+    // `<Tactics><Conditions>` filter and its `this.jL` -> `de.jL` -> `Md.jL`
+    // weighted roulette) is CONFIRMED unreachable here: the reaction event is
+    // dispatched `this.Bg.Ih(6,a)` (L201588), `Ih` leaves `eb` FALSE, so
+    // `Gc.DK`'s `d` (`c||!h.eb||h.animation.Rha||d.push(h)`) is EMPTY and the
+    // tail starts the `f[uf.sja]` pick directly (L674). No roulette is needed.
+    // Returns the name or "".
     std::string try_react(sf2::scene::FightContext& ctx,
                           const std::function<float()>& rng = {});
 

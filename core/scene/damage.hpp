@@ -704,15 +704,24 @@ inline R8aOut r8a_decide(bool ecb, bool target_vc, float zi_over_so,
 //
 // PORTED: `zBa`, `mDa` (cancelling item), `iWa`/`msb`/`nsb`, the defense
 // weighted sum + `iea` (`balance_multiplier`), the `xha` magic branch, the
-// `A8a`/`Gz` formula, the `qAa` side split, the perk `<Rating>` Me/Enemy loops
+// `A8a`/`Gz` formula, the `qAa` side split (`k5a`/`j5a` -> `rating_side_attrs`,
+// `Bua` -> `rating_ratio` L1199), the perk `<Rating>` Me/Enemy loops
 // (`xc.Wk` items' `x4`, perks.xml `<Rating Player=..>`) and the `xc.gX`
 // PerkAspect branch (`Be.eea` + `v.CY` `<Aspect>` config + `oma`/`gy`).
-// NOT PORTED (unported subsystems — see damage.cpp OPEN): `v.cw()`/`v.EQ()`/
-// `v.Wka`/`Fm`/`Bua` (the warrior-from-save model). The perk-EQUIP mapping
-// (`AK` from the save's `<Perks>` against perks.xml) IS wired: the callers
+// The warrior-from-save CONSTRUCTORS `v.cw()`/`v.EQ()`/`v.Wka`/`Fm` (the
+// `p.C$a()` -> `Kea()` -> `Wka` chain that rebuilds a `Fighter` from the save,
+// then `Fm()` recomputes the derived `attributes` from `v.eo.attributes` +
+// `fM`) are not transcribed as objects: the port substitutes the already-built
+// `FighterParams` (its `attributes`/`equipment_names`/`perks`/`iy` carry the
+// same fields `Fm` would write), and the `xc.Wk` perk-EQUIP mapping (`AK`
+// from the save's `<Perks>` against perks.xml) IS wired: the callers
 // (`screens.cpp equipped_rating_perks`/`enemy_rating_perks`) fill
-// `FighterParams::perks` per side. The shipped fresh save has NO `<Rating>`
-// perk equipped, so the loops are EMPTY there and the sum is exact.
+// `FighterParams::perks` per side. Validated against the oracle at the map f0
+// row (`ZONE_1|BOSS_LYNX fight=0 -> 0.9534`, diff1 = the `map_zone1.png`
+// capture); the higher ladder rows are the observed `WarriorPower` fold (see
+// `map_battle_rating`), not a rating-model defect. The shipped fresh save has
+// NO `<Rating>` perk equipped, so the loops are EMPTY there and the sum is
+// exact.
 
 // One `Ba` (name, value) pair (JS `Ba` L112): the merged attribute list
 // `JBa` builds (`iWa`/`msb`) and the `k5a`/`j5a` side list.

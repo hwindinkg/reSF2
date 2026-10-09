@@ -4,10 +4,12 @@
 // of the pure logic, mirroring reference/tools/combat_golden.js
 // (dkPartition S10 + dkTail S12). Operates on plain candidate structs so
 // both the Node harness and this header agree bit-for-bit; the runtime
-// reaction pick (Fighter::try_react) uses the partition ORDER (priority
-// descending, matching hb_) while the weighted-roulette pick inside Pkb
-// stays OPEN here (the reaction path has no tactic/feature state, and
-// `Gc.DK`'s caller is the hit-reaction latch, not the per-frame `de.ia`).
+// reaction pick (Fighter::try_react) uses the `Aua` max-`priority` `f` group
+// and the uniform `f[uf.sja(f.length)]` pick — the `Gc.DK` else branch. The
+// weighted-roulette pick inside `Pkb` is CONFIRMED unreachable on this path:
+// the reaction event (`Ih(6,a)` L201588) has `eb` FALSE, so `Gc.DK`'s `d` is
+// EMPTY and the tail never calls `Pkb` (only the AI's `Vkb` `eb=true` path,
+// `de.ia`, reaches it).
 //
 // `Gc.DK` (L673) has exactly TWO reachable shapes and this header models
 // the partition for both:

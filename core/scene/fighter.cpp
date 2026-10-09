@@ -1661,35 +1661,63 @@ std::string Fighter::try_react(FightContext& ctx,
         cands.push_back(m);
     }
     if (cands.empty()) return "";  // nothing admitted by the two gates
-    // `Aua` (L343447): keep only the max-`priority` group.
-    std::vector<const MoveDef*> top;
+    // `Gc.Aua` (L343447) is applied to EVERY candidate as
+    // `Aua(h, h.animation.Rha ? g : f)`: the `Rha` (`<NoAnimation>`) group is
+    // a SEPARATE list. `Gc.DK` (L674) then draws the pick from the NON-Rha `f`
+    // group (`e = f[uf.sja(f.length)]`) and only parks the `Rha` group
+    // (`g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)`, `wd.P9`, no clip).
+    // All shipped reaction candidates are non-Rha — `<NoAnimation>` occurs only
+    // on the four PvP `*Hint*` switchers (moves.xml 53768/53787/54144/54199),
+    // which carry no `<Hit>` event — so `f` == every candidate today; the split
+    // is kept JS-exact.
+    std::vector<const MoveDef*> f;
+    std::vector<const MoveDef*> g;
+    auto aua = [](std::vector<const MoveDef*>& b, const MoveDef* m) {
+        const int ap = m->priority;
+        const int bp = b.empty() ? 0 : b.front()->priority;
+        if (ap >= bp) {
+            if (ap > bp) b.clear();
+            b.push_back(m);
+        }
+    };
     for (const MoveDef* m : cands) {
-        // `Aua` partitions by `Rha` (NoAnimation) — false for all shipped
-        // moves, so every candidate lands in the non-Rha `f` group.
-        const int c = m->priority;
-        const int d = top.empty() ? 0 : top.front()->priority;
-        if (c >= d) {
-            if (c > d) top.clear();
-            top.push_back(m);
+        if (m->no_animation) {
+            aua(g, m);
+        } else {
+            aua(f, m);
         }
     }
-    if (top.empty()) return "";
-    // `uf.sja(f.length)`: uniform index. JS `Math.random`; the port's
-    // injected `math_random01()` keeps it deterministic AND off `Da.pg`.
+    // JS order: `f.length>0 && (e = f[uf.sja(f.length)])` FIRST, then
+    // `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)` (L674). `uf.sja` is
+    // the `Math.random` analog; the injected `rng` keeps it deterministic and
+    // off `Da.pg`. `|list| <= 1` needs no draw (`floor(r*1) == 0`).
     std::size_t idx = 0;
-    if (top.size() > 1 && rng) {
+    if (f.size() > 1 && rng) {
         float r = rng();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;
-        idx = static_cast<std::size_t>(r * static_cast<float>(top.size()));
-        if (idx >= top.size()) idx = top.size() - 1;
+        idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
+        if (idx >= f.size()) idx = f.size() - 1;
     }
+    if (!g.empty()) {
+        std::size_t gi = 0;
+        if (g.size() > 1 && rng) {
+            float r = rng();
+            if (r < 0.0f) r = 0.0f;
+            if (r >= 1.0f) r = 0.9999999f;
+            gi = static_cast<std::size_t>(r * static_cast<float>(g.size()));
+            if (gi >= g.size()) gi = g.size() - 1;
+        }
+        decision_.ukb = g[gi]->name;  // `a.Ukb(g[sja].animation)` -> `wd.P9`
+        decision_.ukb_set = true;
+    }
+    if (f.empty()) return "";  // `e == null` -> nothing fires
     // JS `e.animation.MS ? a.jJa(e.animation,e.R1)
     //                : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)` (L674):
     // BOTH queue — `jJa` sets `qs` (physics/getup), `Nsb` -> `fJa` sets `Ml`
     // (ordinary clip). The start happens on the next `wd.ia`
     // (`process_reaction_queues`), NOT here.
-    const MoveDef* m = top[idx];
+    const MoveDef* m = f[idx];
     queue_reaction(m, m->physics);
     react_physics_ = m->physics;  // JS `e.animation.MS` (L674)
     return m->name;
