@@ -2824,6 +2824,54 @@ bool draw_user_image(App& app, const std::string& file_name, float cx, float cy,
     return true;
 }
 
+// The natural size of a JS `oe` user image (same `res/users/images/<name>` set
+// as `draw_user_image`), own lazy cache. JS `sk.xmb` (L2165) `$w(E.get(338),a)`
+// sizes the `sk` node to the loaded image, so `Wr.qFa` (L2179) reads that size
+// through `a.node.Eb`; the port exposes it here for `MapScreen::map_button_rect`.
+bool user_image_natural_size(App& app, const std::string& file_name, float& w, float& h) {
+    if (file_name.empty()) return false;
+    static std::map<std::string, std::pair<float, float>> cache;
+    static std::set<std::string> failed;
+    const auto hit = cache.find(file_name);
+    if (hit != cache.end()) {
+        w = hit->second.first;
+        h = hit->second.second;
+        return w > 0.0f && h > 0.0f;
+    }
+    if (failed.count(file_name) != 0) return false;
+    std::string stem = file_name;
+    std::transform(stem.begin(), stem.end(), stem.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    const std::string stems[2] = {stem, "img_" + stem};
+    const std::string dir = app.res_root() + "/users/images";
+    sf2::data::Texture tex;
+    bool decoded = false;
+    try {
+        for (const std::string& s : stems) {
+            for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                const std::string name = entry.path().filename().string();
+                if (name.rfind(s + ".", 0) != 0) continue;
+                const std::string ext = entry.path().extension().string();
+                if (ext != ".png" && ext != ".webp") continue;
+                if (sf2::data::decode_texture(entry.path().string(), tex)) {
+                    decoded = true;
+                    break;
+                }
+            }
+            if (decoded) break;
+        }
+    } catch (const std::exception&) {
+    }
+    if (!decoded || tex.w <= 0 || tex.h <= 0) {
+        failed.insert(file_name);
+        return false;
+    }
+    w = static_cast<float>(tex.w);
+    h = static_cast<float>(tex.h);
+    cache[file_name] = {w, h};
+    return true;
+}
+
 // Draws a profile-cell icon: the JS `Ed.Fs = R.$(E.get(atlas), frame, icon)`
 // (L2202) used by the `uk` perk cell (`Icons01/IconAvenger`, L2222) and the
 // `is` achievement cell (`Achievements01/ach_block_gold`, L2212). The XML
@@ -9427,10 +9475,43 @@ void ur_blink_tick(UrBlink& s, const UrBlinkCfg& cfg) {
 void MapScreen::map_button_rect(std::size_t i, float& cx, float& cy, float& w,
                                 float& h) const {
     const MapMetrics mm = map_metrics(app());
-    w = kViewW * 0.20f;
-    h = w * 0.52f;
-    cx = w * 0.7f;
-    cy = mm.map_y + h * 0.5f + static_cast<float>(i) * (h + kViewH * 0.02f);
+    // JS `Wr.qFa` (L2179, offset 1122152) VERBATIM:
+    //   qFa(a){ var b=Ya.get(); a.zf(b.ue.ve.size.y*.25); var c=a.node.Eb;
+    //     let d=a.Y.za()*c; c*=a.Y.qa(); b=b.ue.Wj.node.ra;
+    //     a.C(this.node.ya+d-d*.3); a.D((N.height+b)*.5);
+    //     N.lc>1.25?a.D(b-c/2):N.lc>.55&&a.D(N.height-c*.55) }
+    // `Ya.get().ue` is the `qk` map child; `ve` is the `Vr` strip whose
+    // `qk.layout` (L2137) `this.ve.ba(a.w,d)` sets `ve.size.y` = the strip
+    // height `d` (= `mm.map_h`); `Wj` is the `Ur` bottom bar whose
+    // `Wj.D(ve.node.ra+d)` makes `Wj.node.ra` = `mm.bar_y`. `a.node.Eb` is the
+    // `sk` button width, set by `sk.xmb` (L2165) to the loaded user image size;
+    // `za()`/`qa()` are the widget scale x/y (1). The `Wr` container (`Qo`,
+    // offset 945776) is appended at the content origin -> `this.node.ya` = 0.
+    // x = `0 + d - d*.3` = `0.7*width`; the 16:9 desktop branch
+    // (`N.lc`=1.777>1.25) is `y = bar_y - width*.5` (anchored to the bottom bar,
+    // NOT a left-edge stack).
+    float iw = 0.0f, ih = 0.0f;
+    const std::vector<EngineMapButton>& mbs = app().quest_engine().map_buttons();
+    if (i < mbs.size()) user_image_natural_size(app(), mbs[i].image, iw, ih);
+    if (iw > 0.0f && ih > 0.0f) {
+        w = iw;
+        h = ih;
+    } else {
+        // The `$w` miss fallback (`E.get(260)`, a fixed default button image) is
+        // not shipped in the port; the flat fallback plate keeps the former
+        // screen-fraction size (the one remaining size proxy, image-miss only).
+        w = kViewW * 0.20f;
+        h = w * 0.52f;
+    }
+    const float lc = kViewW / kViewH;
+    cx = w * 0.7f;  // `this.node.ya(0) + d - d*.3`
+    if (lc > 1.25f) {
+        cy = mm.bar_y - h * 0.5f;  // `b - c/2`
+    } else if (lc > 0.55f) {
+        cy = kViewH - h * 0.55f;  // `N.height - c*.55`
+    } else {
+        cy = (kViewH + mm.bar_y) * 0.5f;  // `(N.height + b)*.5`
+    }
 }
 
 bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {    if (zi >= zones_.size()) return false;
