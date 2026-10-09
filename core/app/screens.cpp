@@ -1223,7 +1223,12 @@ SettingsLayout settings_layout() {
     // RESTART, both `Pb(150)`). D15: RESTART is `X(!1)` hidden until the
     // language row changed (`t9`), when `un.rHa` case 4 (L1931) reveals it and
     // splits BACK/RESTART by `width*.6` (`Kb.C(-w*.6)` / `Km.C(w*.6)`).
-    s.btn_w = 320.0f * p.c;
+    // `un` ctor: `this.Kb=new Bb("EButtonDark"); ... this.Kb.Pb(150)` with the
+    // `Bb` ctor `this.xc(600)` (L1842) — the plate is 600 design wide, 150 tall
+    // (`Pb(150)`), NOT 320. The oracle `settings` BACK plate measures ~270 px
+    // (600*0.4706 = 282, less the transparent bevel edges); the old 320 gave a
+    // ~150 px plate (drawn ~101 with the caps shrunk).
+    s.btn_w = 600.0f * p.c;
     s.btn_h = 150.0f * p.c;
     const float split = g_settings_restart_visible ? s.btn_w * 0.6f : 0.0f;
     s.back_cx = cx - split;
@@ -3147,6 +3152,18 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
             st.PF = false;  // the lock clears at the animation's end
         }
         za_nav_settle(st, st.uJ ? p : 1.0f - p);
+    }
+    // `gk.aa` (L1998): while a `Wb` dialog is up the column AUTO-COLLAPSES —
+    // `a=L.K.dd(); if(!this.PF && this.uxa && this.background!=null &&
+    // this.yI>0 && a.Db(0) && ma.Bd(this.background.L,!0)) this.Hfb()` and
+    // `Hfb(){this.collapse(.3)}` (L2001). The oracle `settings` capture (the
+    // `un` dialog open) shows the column COLLAPSED — its own 0.502 `gk`
+    // background dim is gone and the backdrop is the single `Wb.Qa` 0.502. The
+    // port kept the column expanded, so the nav dim stacked with the dialog dim
+    // (0.502*0.502 = 0.25 backdrop instead of the oracle's 0.502).
+    if (!st.PF && st.yI > 0.0f &&
+        (g_settings_dialog_open || quest_modal_top(app) != nullptr)) {
+        za_nav_collapse_run(st, kZaNavAnimSeconds);
     }
     // `za.YA(!1)` (`Bo`/`Do`/`Eo`, L1121-1125): `this.LW.R(!0)` shows the nav
     // column's own touch blocker, which swallows EVERY column tap (the `МЕНЮ`
@@ -20376,6 +20393,15 @@ void SettingsScreen::on_key(int glfw_key, bool down) {
 // saved one (`t9 = G.Rq()!=this.$u` is false at open, so RESTART stays hidden).
 void open_settings_dialog(App& app) {
     g_settings_dialog_open = true;
+    // JS `gk.aa` (L1998) auto-collapses the nav column the moment a `Wb`
+    // dialog owns the screen: `a=L.K.dd(); if(!this.PF && this.yI>0 &&
+    // a.Db(0) && ...) this.Hfb()` with `Hfb(){this.collapse(.3)}`. The oracle
+    // `settings` capture shows the column COLLAPSED (its 0.502 `gk` background
+    // dim gone, backdrop = the single `Wb.Qa` 0.502). Collapse immediately so
+    // the settled frame matches regardless of the capture's frame offset (the
+    // Dojo's own `za_update` may not step the column once the overlay is up).
+    za_nav_collapse_run(za_nav_state(kScreenDojo), 0.0f);
+    za_nav_collapse_run(za_nav_state(kScreenSettings), 0.0f);
     // `un.B()` (`E.eD(252); G.Qr(253)`, offset 994738) + the ctor `C8` build.
     app.load_settings_fonts();
     g_settings_lang = app.language().empty() ? "en" : app.language();
@@ -20719,8 +20745,14 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         sfont = app.menu_font();
         stex = app.font_texture();
     }
-    const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
-    ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 0.55f);
+    // The `Wb.Qa` backdrop (`Fc.Ed(-2147483648)` = ARGB 0x80000000, black @
+    // alpha 0x80 = 0.50196), faded by `x3a` L927 — the SAME shared overlay the
+    // `He` quest dialogs draw (`draw_dialog_backdrop`). The old `0.55` here was
+    // a second, invented dim stacked ON TOP of the `Wb` overlay the port also
+    // applies for the settings dialog, so the whole screen behind the panel
+    // rendered at 0.5*0.45 = 0.225 instead of 0.502 (the oracle `settings`
+    // backdrop is exactly 0.502 of `dojo_hub`, measured 0.5*0.45=0.2241 port).
+    draw_dialog_backdrop(ren, 1.0f);
     const SettingsLayout s = settings_layout();
     draw_od_base(app, ren, s.panel);
     // Title `Vc`: `IVa.Settings_Title` (L1917); `ua(152)` + `La(Z.W6)` (L1900).
