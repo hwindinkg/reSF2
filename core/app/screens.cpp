@@ -2936,9 +2936,16 @@ ZaDiscipleRect za_disciple_rect(App& app, bool disciple) {
     unsigned int gl = 0;
     const char* frame = disciple ? "btn_punching_bag" : "btn_disciple";
     if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl) && fr.w > 0 && fr.h > 0) {
-        // JS uses `zq.Y.fa` (the untrimmed SourceSize); the packed rect is the
-        // closest available proxy (documented approximation).
-        r.h = r.w * static_cast<float>(fr.h) / static_cast<float>(fr.w);
+        // JS `zq.Y.fa` is the UNTRIMMED `sourceSize` (`zq` is scaled by
+        // `scroll.Af.width*.5 / zq.Y.fa.x`, so the on-screen height is
+        // `width*.5 * fa.y/fa.x`). Use the packed `frame` rect only when a
+        // pack omits `sourceSize` (the button frames ship 278x278 source,
+        // packed 246x248, so the old proxy was ~0.8% too tall).
+        const float sw = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                         : static_cast<float>(fr.w);
+        const float sh = fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                         : static_cast<float>(fr.h);
+        r.h = r.w * sh / sw;
     }
     r.cx = lay.nav_x + r.w * 0.5f;
     r.cy = r.w * 0.5f + lay.bar_h + content_h;
