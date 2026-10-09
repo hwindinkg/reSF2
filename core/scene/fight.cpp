@@ -6555,6 +6555,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                        !foe.fighter.ragdoll_active())
                           ? foe.fighter.world_x()
                           : 0.0f;
+        // JS `this.Ji.dw()` (`Te.dw` L547) — MY OWN root world-x while MY
+        // clip plays (`Pe`), else 0. Read by `Gea`'s `cs` branch.
+        st.my_dw = (me.fighter.current_move() != nullptr &&
+                    !me.fighter.ragdoll_active())
+                       ? me.fighter.world_x()
+                       : 0.0f;
         st.my_anim = me.fighter.current_move() ? me.fighter.current_move()->name : "";
         st.enemy_anim = foe.fighter.current_move() ? foe.fighter.current_move()->name : "";
         st.enemy_move = foe.fighter.current_move();

@@ -1033,10 +1033,84 @@ int AiController::gea(const AiFightState& st, int variant) {
     dbg_.rec = e != nullptr;
     if (e == nullptr) return 0;
 
-    // REMAINDER (blocked): the JS `cs` branch (`this.Ji.Pe && this.cs!=null`
-    // -> `gcb` -> `e.aCa(k.va.align.CK)` -> `Uea` -> `q.frames[r].Ny[].n0` ->
-    // the `p0(true)` wait) needs MY OWN current move (`this.cs`), its
-    // `va.align.CK` chain and the `q7`/`dw`/`hd` pose; not modeled here.
+    // JS `Gea` `cs` branch (L613), verbatim:
+    //   `var k=this.cs; if(this.Ji.Pe&&k!=null){
+    //      var l=k.PX; l!=null&&(k=l);
+    //      l=!1; for(n=0;n<h.length;) if(k.$k(h[n++])){l=!0;break}   // h=YCa()
+    //      if(l){ var q=e.aCa(k.va.align.CK);
+    //        if(q!=null){ var r=q.$_(this.Uea(c-this.q7));
+    //          if(-1<r){ h=f.dw(); b==1&&(h=f.Iha);
+    //            h=f.hd()*(this.Ji.dw()-h)+this.Mu;
+    //            l=!1; for(q=q.frames[r].Ny;...) if(r.animation==k&&0<r.n0(h)){l=!0;break}
+    //            if(!l) return this.wb.push(new kd(null,d.p0(!0)-this.Fl+1)),this.wb.length }}}}`
+    // `h = P.YCa()` = `P.fsa` = computer_settings.xml
+    // `<MovementsTables><MovementsLastIteration>` (shipped StanceIdle /
+    // StepForward / StepBack) — a DIFFERENT list from the tactic
+    // `<NoDecision><Moves>` (`P.psa`) used by `hcb`.
+    // `k.va.align.CK` = the `<Align><Pivot Part=..>` (`Fa.jva` L659:
+    // `b.CK=c.attributes.get("Part")` with `c=a.A("Pivot")`) = the port's
+    // `Align::pivot_part`. `Uea(a)= a%sp==0 ? a : (a>0 ? a-a%sp+sp : a-a%sp)`
+    // (sp=5). `k.PX` (the `tub` redirect) is unmodeled (no shipped redirect).
+    if (st.playing && st.current_move != nullptr) {
+        static const std::vector<std::string> fsa = [] {
+            return xml_animation_names_nested(
+                read_res_file("reference/extracted/xml/res/computer_settings.xml"),
+                "MovementsTables", "MovementsLastIteration");
+        }();
+        const MoveDef* k = st.current_move;  // `this.cs`
+        bool l = false;
+        for (const std::string& n : fsa) {
+            if (n.empty()) continue;
+            if (k->name == n || k->template_tags.count(n) > 0) {
+                l = true;
+                break;
+            }
+        }
+        if (l) {
+            const std::string ck = k->align.pivot_part;  // `k.va.align.CK`
+            const TacticRow* q = nullptr;
+            for (const TacticRow& row : e->rows) {
+                if (row.label == ck) {  // `Il.aCa`: `ju[d].label==a`
+                    q = &row;
+                    break;
+                }
+            }
+            if (q != nullptr) {
+                const auto uea = [](int a) -> int {
+                    const int sp = 5;
+                    if (a % sp == 0) return a;
+                    return a > 0 ? a - a % sp + sp : a - a % sp;
+                };
+                const int r = ju_frame_index(uea(Fl_ - q7_), q->rda,
+                                             q->hu_frames);
+                if (r >= 0) {
+                    // `h=f.dw(); b==1&&(h=f.Iha); h=f.hd()*(this.Ji.dw()-h)+Mu`
+                    // (b==0 here: c == this.Fl).
+                    const float target =
+                        static_cast<float>(st.enemy_clip_mirror) *
+                            (st.my_dw - st.enemy_dw) +
+                        static_cast<float>(Mu_);
+                    l = false;
+                    for (const TacticOutcome& oc : q->outcomes) {
+                        if (oc.hu_index != r) continue;
+                        if (oc.anim != k->name) continue;
+                        if (window_outcome_at(oc, target) > 0) {
+                            l = true;
+                            break;
+                        }
+                    }
+                    if (!l) {
+                        // `return this.wb.push(new kd(null,
+                        //   d.p0(!0)-this.Fl+1)),this.wb.length`
+                        wb_.clear();
+                        wb_.push_back(
+                            {"", attack_end_full(d) - Fl_ + 1});
+                        return static_cast<int>(wb_.size());
+                    }
+                }
+            }
+        }
+    }
 
     // this.ld.length=0; ra.nAa(P.t$a(), this.ld) — the group CHILDREN
     // (`ra.xC.get(tpl).children` = every move whose name/transitive template

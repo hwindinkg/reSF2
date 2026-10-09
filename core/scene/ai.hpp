@@ -385,6 +385,10 @@ struct AiFightState {
     // `Te.dw` accumulates in `yaa`/`Pta`; the fight supplies it gated by
     // `enemy_playing`. Probes that model no opponent leave it 0 (JS `Pe` off).
     float enemy_dw = 0.0f;
+    // JS `this.Ji.dw()` (`Te.dw` L547) — MY OWN root world-x while MY clip
+    // plays (`Pe`), else 0. Read by `Gea`'s `cs` branch (L613
+    // `h=f.hd()*(this.Ji.dw()-h)+this.Mu`).
+    float my_dw = 0.0f;
     // My / enemy current animation names (`da.Ua.name`).
     std::string my_anim;
     std::string enemy_anim;
