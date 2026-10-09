@@ -8677,7 +8677,20 @@ void DojoScreen::render_impl(App& app) {
                 }
             }
         }
-        draw_dojo_gamepad(app, dojo_pad_);
+        // JS `Za.update` (L454-455): the on-screen controls fade their node
+        // alpha OUT while a dialog is up — `if(this.isVisible&&this.enabled){
+        // if(Wb.F().If!=null){ a.wa(a.mn()-.1) } else { a.wa(a.mn()+.1) } }`
+        // (`Ea` L456 draws only when `isVisible&&enabled`). `Wb.F().If` is the
+        // global `Wb` overlay slot: the `un extends od` settings dialog (hosted
+        // on `SettingsScreen`, screens.cpp:20316) and a queued `He` quest modal
+        // both sit in it. So the pad is drawn only while the Dojo OWNS the
+        // screen AND no modal is up; otherwise it bleeds over the dialog — the
+        // oracle `settings`/`dojo_sensei` hide it (btn-strip variance 38.9 vs
+        // the port's 51.0/48.3), the oracle `dojo_hub` shows it (59.6~62.4).
+        if (app.screens().top() == this && !g_settings_dialog_open &&
+            quest_modal_top(app) == nullptr) {
+            draw_dojo_gamepad(app, dojo_pad_);
+        }
         // Shared `za` chrome (topPanel + wr/xr/yr widgets + the vertical nav
         // column) — the JS `ma.D1` chrome on every shell screen
         // (PORT_AUDIT_UI §2.1). Replaces the invented draw_dojo_hud_bar
