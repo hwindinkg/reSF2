@@ -1976,6 +1976,22 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     return true;
 }
 
+// Reads a frame's UNTRIMMED `sourceSize` (JS `.fa`) from the atlas cache,
+// falling back to the shipped size when the frame is not registered. The JS
+// sizes every cap/backdrop/icon sprite from `fa` (e.g. `Zh.ba` L1872
+// `d/e.fa.y`, `Vr.ba` L2118 `b/background.fa.y`, the `Le` overlay `Wm` L1848),
+// never a literal, so the port must read it here instead of hardcoding the
+// shipped value. `out_w`/`out_h` receive the fallback when the frame is absent.
+void atlas_source_size(App& app, const std::string& frame_name, float fallback_w,
+                       float fallback_h, float* out_w, float* out_h) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    const bool ok = app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl);
+    *out_w = (ok && fr.source_w > 0) ? static_cast<float>(fr.source_w) : fallback_w;
+    *out_h = (ok && fr.source_h > 0) ? static_cast<float>(fr.source_h) : fallback_h;
+}
+
 // A UI (screen-space) camera — world == screen. Shared by the standalone
 // texture draws (sensei portrait, item images).
 sf2::render::Camera ui_camera() {
@@ -2865,9 +2881,15 @@ const ZaNavDef kZaNav[kZaNavCount] = {
     {"Settings_normal", "Settings_active", nullptr, kScreenSettings, "SETTINGS", "Settings"},
 };
 
-// The nav button source frame is 278x278 (menu atlas Dojo_normal
-// sourceSize), so row height b = 278*0.85 (JS `buttons[0].Y.fa.y*.85`).
-constexpr float kZaNavSource = 278.0f;
+// The nav button source frame is 278x278 (menu atlas `Dojo_normal`
+// sourceSize); row height b = fa.y*.85 (JS `ndb` L1976
+// `this.buttons[0].Y.fa.y*.85`). The JS reads `fa` from the atlas, so read the
+// registered frame (fallback 278) instead of hardcoding it.
+constexpr float kZaNavSourceFallback = 278.0f;
+
+// `odb` L1975 `Sp` = min(H*.13,100)*.78 — atlas-independent, for the callers
+// that need only the bar height and carry no App handle.
+float za_sp() { return std::min(kViewH * 0.13f, 100.0f) * 0.78f; }
 
 struct ZaLayout {
     float bar_h = 0.0f;        // topPanel height (odb: PL.Pb)
@@ -2879,24 +2901,31 @@ struct ZaLayout {
     float nav_scale = 1.0f;    // d
     float nav_step = 0.0f;     // row step b*d
     float nav_first_y = 0.0f;  // Sp + b/2*d
-    float nav_btn = 0.0f;      // on-screen button size 278*d
+    float nav_btn = 0.0f;      // on-screen button size fa.y*d
     float nav_qka = 0.0f;      // qka = 50*d (Fg content-frame cap / rails)
     float nav_col_h = 0.0f;    // f = (b*N+45)*d (column height)
+    float nav_row = 0.0f;      // b = buttons[0].Y.fa.y*.85
 };
 
-ZaLayout za_layout() {
+ZaLayout za_layout(App& app) {
     ZaLayout lay;
     const float w = kViewW, h = kViewH;
     const float lc = w / h;  // N.lc
     // odb() (L1975).
     lay.bar_h = std::min(h * 0.13f, 100.0f);
-    lay.sp = lay.bar_h * 0.78f;
+    lay.sp = za_sp();
     lay.widget_h = lay.sp * 0.65f;
     lay.gap = 50.0f * lc;
     // ndb() (L1976-1977).
     const float lc_clamped = std::clamp(lc, 0.5f, 2.0f);
     lay.nav_x = 100.0f * (0.2f + (lc_clamped - 0.5f) / 1.5f * 0.8f);
-    const float row = kZaNavSource * 0.85f;                            // b
+    // `this.buttons[0].Y.fa.y` — the first nav button's UNTRIMMED sourceSize
+    // height (menu atlas). Read `fa` from the atlas, never a literal.
+    float nav_src_w = kZaNavSourceFallback, nav_src_h = kZaNavSourceFallback;
+    atlas_source_size(app, "Dojo_normal", kZaNavSourceFallback, kZaNavSourceFallback,
+                      &nav_src_w, &nav_src_h);
+    (void)nav_src_w;
+    const float row = nav_src_h * 0.85f;                               // b
     const float col_h = row * static_cast<float>(kZaNavCount) + 45.0f;  // c
     float d = std::max(0.1f, std::min(w, h) * 0.35f / 430.0f);
     const float avail = h - lay.sp - 100.0f;                           // rect.v - Sp - 100
@@ -2907,9 +2936,10 @@ ZaLayout za_layout() {
     lay.nav_scale = d;
     lay.nav_step = row * d;
     lay.nav_first_y = lay.sp + (row * 0.5f) * d;                       // Sp + a
-    lay.nav_btn = kZaNavSource * d;
+    lay.nav_btn = nav_src_h * d;
     lay.nav_qka = 50.0f * d;                                           // qka
     lay.nav_col_h = col_h * d;                                         // f
+    lay.nav_row = row;
     return lay;
 }
 
@@ -2970,8 +3000,8 @@ struct ZaDiscipleRect {
 };
 
 ZaDiscipleRect za_disciple_rect(App& app, bool disciple) {
-    const ZaLayout lay = za_layout();
-    const float row = kZaNavSource * 0.85f;
+    const ZaLayout lay = za_layout(app);
+    const float row = lay.nav_row;
     const float content_h =
         (row * static_cast<float>(kZaNavCount) + 45.0f) * lay.nav_scale;
     ZaDiscipleRect r;
@@ -3016,10 +3046,10 @@ void za_header_rect(float& x, float& y, float& w, float& h) {
 // (`lay.sp + lay.nav_col_h - rail_h`). The click target is `gk.button` — a
 // child of `Af` — so it MOVES with the rail (the reported bug was a FIXED top
 // rect that never followed the button down).
-void za_nav_rail_rect(float yI, float& x, float& y, float& w, float& h) {
+void za_nav_rail_rect(App& app, float yI, float& x, float& y, float& w, float& h) {
     float cx0 = 0.0f, cy0 = 0.0f, cw0 = 0.0f, ch0 = 0.0f;
     za_header_rect(cx0, cy0, cw0, ch0);
-    const ZaLayout lay = za_layout();
+    const ZaLayout lay = za_layout(app);
     const float rail_h = 90.0f * lay.nav_scale;
     const float rail_top = lay.sp + lay.nav_col_h - rail_h;
     const float t = std::clamp(yI, 0.0f, 1.0f);
@@ -3033,9 +3063,9 @@ void za_nav_rail_rect(float yI, float& x, float& y, float& w, float& h) {
 
 // The live centre of the `gk.Af` header/rail (see screens.hpp). The toggle
 // button rides `Af`, so a tap must target its CURRENT position.
-void za_nav_rail_center(ScreenId id, float& cx, float& cy) {
+void za_nav_rail_center(App& app, ScreenId id, float& cx, float& cy) {
     float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
-    za_nav_rail_rect(za_nav_state(id).yI, x, y, w, h);
+    za_nav_rail_rect(app, za_nav_state(id).yI, x, y, w, h);
     cx = x + w * 0.5f;
     cy = y + h * 0.5f;
 }
@@ -3043,8 +3073,8 @@ void za_nav_rail_center(ScreenId id, float& cx, float& cy) {
 namespace {
 
 // Hit test for the vertical nav column; -1 when outside every button.
-int za_nav_hit(double px, double py) {
-    const ZaLayout lay = za_layout();
+int za_nav_hit(App& app, double px, double py) {
+    const ZaLayout lay = za_layout(app);
     const float cx = lay.nav_x + lay.nav_w * 0.5f;  // g.C(wc.Gv/2)
     const float half = lay.nav_btn * 0.5f;
     for (int i = 0; i < kZaNavCount; ++i) {
@@ -3251,7 +3281,7 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
     // The hit rect FOLLOWS the rail (`gk.button` is a child of the moving
     // `Af`): when expanded the `МЕНЮ` button has slid to the column bottom, so
     // a tap THERE (not the original top slot) closes it.
-    za_nav_rail_rect(st.yI, hx, hy, hw, hh);
+    za_nav_rail_rect(app, st.yI, hx, hy, hw, hh);
     const double px = app.pointer().x, py = app.pointer().y;
     const bool header_hit = px >= hx && px <= hx + hw && py >= hy && py <= hy + hh;
     // JS `gk.aa` (L1998) drag (`case 0/1/2`): pressing the rail enters state 1
@@ -3259,7 +3289,7 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
     // expands, dragging UP past `-2*this.vk` from expanded collapses; release
     // ends the drag. Runs only `if(!this.PF)` (the animation lock).
     if (!st.PF) {
-        const float vk2 = 2.0f * 50.0f * za_layout().nav_scale;  // 2*this.vk
+        const float vk2 = 2.0f * 50.0f * za_layout(app).nav_scale;  // 2*this.vk
         switch (st.hD) {
             case 0:
                 if (header_hit && app.pointer().down) {
@@ -3321,7 +3351,7 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
         sf2::audio::AudioEngine::instance().play("snd_focus_1");
         return;
     }
-    const int hit = za_nav_hit(px, py);
+    const int hit = za_nav_hit(app, px, py);
     if (hit >= 0 && app.pointer().pressed) {
         za_nav_activate(app, self, active, hit);
         return;
@@ -3507,11 +3537,14 @@ float ui_flash_alpha(App& app) {
 // overlay from the misc frame `y.BRa="Highlight_menu"` (sourceSize 250x250),
 // a child of the button node (so scaled by the column's `d`), centred by `Wm`'s
 // `Ga()` and shown by `Vg(!0)` (`eo.dia` L1119). This is the JS highlight the
-// old flat `draw_flash_tint` rect replaced.
-constexpr float kHighlightMenuSource = 250.0f;  // Highlight_menu sourceSize
-void draw_highlight_menu(App& app, float cx, float cy, float size) {
-    // `fill=false` -> aspect-correct fit of the 250x250 source into (size,size).
-    try_draw_atlas_button(app, "Highlight_menu", cx, cy, size, size, ui_flash_alpha(app));
+// old flat `draw_flash_tint` rect replaced. `Wm` adds the sprite at its natural
+// `fa` size (JS reads `sourceSize`, never a literal); read it from the atlas.
+void draw_highlight_menu(App& app, float cx, float cy, float scale) {
+    float src_w = 250.0f, src_h = 250.0f;
+    atlas_source_size(app, "Highlight_menu", 250.0f, 250.0f, &src_w, &src_h);
+    // `fill=false` -> aspect-correct fit of the source into (src_w,src_h)*scale.
+    try_draw_atlas_button(app, "Highlight_menu", cx, cy, src_w * scale, src_h * scale,
+                          ui_flash_alpha(app));
 }
 
 // `he` — the `MenuBtnFlashing` hint arrow (`eo.N3a` L1117 -> `he.show(a.target)`,
@@ -3545,7 +3578,7 @@ void draw_nav_hint_arrow(App& app, float cx, float bottom_y) {
 void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     sf2::render::Renderer& ren = app.renderer();
     const float w = kViewW;
-    const ZaLayout lay = za_layout();
+    const ZaLayout lay = za_layout(app);
     // JS `gk.background` (L1997): the `za` nav scroll is built with `e=!0`, so
     // its ctor appends the dim quad `Fc.Ed(-2147483648)` (= ARGB 0x80000000,
     // black @ alpha 0x80). `NLa` (L2001) drives `lyb(yI)` -> `background.wa(yI)`,
@@ -3582,11 +3615,20 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // = energy icon + Energy_Bar; `yr` = gold + money + ruby + gems.
     // Icon widths use the UNTRIMMED source ratios (JS `R.za()` = `fa.x*Eb`):
     // misc `level` 115x111, `energy` **101x103** (frame is 95x103 — the
-    // packed rect is trimmed), `gold` 95x95, `ruby` 88x87.
-    const float icon_level = icon * (115.0f / 111.0f);
-    const float icon_energy = icon * (101.0f / 103.0f);
-    const float icon_gold = icon;
-    const float icon_ruby = icon * (88.0f / 87.0f);
+    // packed rect is trimmed), `gold` 95x95, `ruby` 88x87. Read `fa` from the
+    // atlas (the JS reads it, never a literal); fall back to the shipped sizes.
+    float lvl_src_w = 115.0f, lvl_src_h = 111.0f;
+    atlas_source_size(app, "level", 115.0f, 111.0f, &lvl_src_w, &lvl_src_h);
+    float en_src_w = 101.0f, en_src_h = 103.0f;
+    atlas_source_size(app, "energy", 101.0f, 103.0f, &en_src_w, &en_src_h);
+    float gold_src_w = 95.0f, gold_src_h = 95.0f;
+    atlas_source_size(app, "gold", 95.0f, 95.0f, &gold_src_w, &gold_src_h);
+    float ruby_src_w = 88.0f, ruby_src_h = 87.0f;
+    atlas_source_size(app, "ruby", 88.0f, 87.0f, &ruby_src_w, &ruby_src_h);
+    const float icon_level = icon * (lvl_src_w / lvl_src_h);
+    const float icon_energy = icon * (en_src_w / en_src_h);
+    const float icon_gold = icon * (gold_src_w / gold_src_h);
+    const float icon_ruby = icon * (ruby_src_w / ruby_src_h);
     const float q = icon * 0.25f;                        // wr text gap b = iw.za()*.25
     // JS `wr.layout` (L1987): the level BAR starts at the MEASURED value
     // width — `d.C(gA.ya + (f.N-f.J) + b)` with `f = gA.Oj()` (the level text
@@ -3607,8 +3649,10 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     const float gem_num_w = measured_w(gem_text);
     // JS `hk.zf(a)` (L2002) = `node.la(a / Ud.fa.y)`, `Ud` = the empty frame
     // `level_bar_empty_short` (source 246x32); `wr.Vd.zf(a*.4)` (L1987) so the
-    // bar length = 246/32 * 0.4 * widget_h = 3.075*widget_h (was icon*2).
-    const float bar_w = icon * (246.0f / 32.0f) * 0.4f;  // widget bar length
+    // bar length = 246/32 * 0.4 * widget_h. Read the frame's `fa` from the atlas.
+    float bar_src_w = 246.0f, bar_src_h = 32.0f;
+    atlas_source_size(app, "level_bar_empty_short", 246.0f, 32.0f, &bar_src_w, &bar_src_h);
+    const float bar_w = icon * (bar_src_w / bar_src_h) * 0.4f;  // widget bar length
     // JS `yr.layout` (L1991) uses a DIFFERENT gap: `b = ((clamp(N.lc,.6,2)
     // -.6)/1.4*100)`, an aspect offset (~84px at 16:9), between the money
     // value and the ruby (and before AddMoney). Previously the native reused
@@ -3748,9 +3792,11 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         {
             // `Zh.ba(a,b)`: `c = b>a` is false for the horizontal rail, so the
             // cap scale is `min(w,h)/roll_end.source_h` (`d = c?a:b`) and the
-            // centre is stretched to `max(len - 2*cap, 10)`.
-            constexpr float kCapSrcW = 101.0f, kCapSrcH = 114.0f;  // scroll.json roll_end
-            const float cap_w = kCapSrcW * (std::min(hw, hh) / kCapSrcH);
+            // centre is stretched to `max(len - 2*cap, 10)`. `e.fa` is the
+            // frame's `sourceSize` — read it from the atlas, not a literal.
+            float cap_src_w = 101.0f, cap_src_h = 114.0f;
+            atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
+            const float cap_w = cap_src_w * (std::min(hw, hh) / cap_src_h);
             const float body_w = std::max(hw - 2.0f * cap_w, 10.0f);
             if (!try_draw_atlas_button(app, "roll_end", hx + cap_w * 0.5f, hy + hh * 0.5f,
                                        cap_w, hh, 1.0f, /*fill=*/true) ||
@@ -3836,7 +3882,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         }
     }
     // Vertical nav column (ndb L1976-1977).
-    const int hover = za_nav_hit(app.pointer().x, app.pointer().y);
+    const int hover = za_nav_hit(app, app.pointer().x, app.pointer().y);
     const float nav_cx = lay.nav_x + lay.nav_w * 0.5f;
     for (int i = 0; i < kZaNavCount; ++i) {
         const ZaNavDef& def = kZaNav[i];
@@ -3881,7 +3927,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
             // overlay — the misc frame `Highlight_menu` (`Le` ctor
             // `Wm(null,y.BRa)` L1848), a child of the button node (scale `d`),
             // centred and alpha-pulsed by `db.aa` (L1849).
-            draw_highlight_menu(app, nav_cx, cy_i, kHighlightMenuSource * lay.nav_scale);
+            draw_highlight_menu(app, nav_cx, cy_i, lay.nav_scale);
         }
     }
     ren.pop_clip();  // end the `gk.mI` content reveal (rail below is unclipped)
@@ -3897,12 +3943,14 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         // rect by the open fraction so the unfold is visible (previously the
         // draw hard-switched at `yI>0`, so there was no animation).
         float rx = 0.0f, ry = 0.0f, rw = 0.0f, rh = 0.0f;
-        za_nav_rail_rect(nav_frac, rx, ry, rw, rh);
+        za_nav_rail_rect(app, nav_frac, rx, ry, rw, rh);
         const float rail_h = rh;
         const float rail_cy = ry + rh * 0.5f;
         const float rail_cx = rx + rw * 0.5f;
-        constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;  // scroll.json roll_end
-        const float cap_w = kRollEndW * (rail_h / kRollEndH);
+        // `Zh.ba`: cap width = `roll_end.za()` = `fa.x * (rail_h / fa.y)`.
+        float cap_src_w = 101.0f, cap_src_h = 114.0f;
+        atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
+        const float cap_w = cap_src_w * (rail_h / cap_src_h);
         const float body_w = std::max(rw - 2.0f * cap_w, 10.0f);
         load_scroll_atlas(app);
         try_draw_atlas_button(app, "roll_end", rx + cap_w * 0.5f, rail_cy, cap_w,
@@ -4836,8 +4884,13 @@ void draw_scene_letterbox(sf2::render::Renderer& ren,
 //   * `qe.X0a`: node = `pos*uM + bg.fa/2`, `-pos.y*uM + bg.fa/2`, `-50`
 //     (item-local; the `dA` scale/offset above maps it to the screen).
 //   * `Qr` is sized `y5a() = 150/225*uM` times its 225px source frame.
-constexpr float kMapFrameW = 2046.0f;                  // mapN sourceSize
-constexpr float kMapFrameH = 854.0f;
+// The `mapN` backdrop frame's UNTRIMMED `sourceSize` (JS `Vr.ba` L2118
+// `b/background.fa.y`, `qe.X0a` L2144 `background.fa/2`, `cCa` summing
+// `background.fa.x`). Every shipped `map0..map6` frame is 2046x854; the port
+// reads the registered frame from the atlas (the JS reads `fa`, never a
+// literal) and falls back to the shipped size.
+constexpr float kMapFrameWFallback = 2046.0f;
+constexpr float kMapFrameHFallback = 854.0f;
 constexpr float kMapNodeUnit = 1.5003663003663004f;    // JS L2488 qe.uM
 constexpr float kMapNodeYOffset = 50.0f;               // JS L2144 d.node.ra-50
 constexpr float kMapNodeSourcePx = 225.0f;             // Qr frame sourceSize
@@ -4848,7 +4901,9 @@ struct MapMetrics {
     float qka = 0.0f;       // za.qka (Rr rail / `wc.ba` third arg)
     float map_y = 0.0f;     // Vr.node.y
     float map_h = 0.0f;     // Vr strip height `d`
-    float bg_scale = 1.0f;  // dA.Eb = d / 854
+    float map_fr_w = 0.0f;  // background.fa.x (mapN sourceSize.w)
+    float map_fr_h = 0.0f;  // background.fa.y (mapN sourceSize.h)
+    float bg_scale = 1.0f;  // dA.Eb = d / background.fa.y
     float bg_x = 0.0f;      // dA.x (0 when the one-zone content fits)
     float bar_y = 0.0f;     // Wj.node.y = Sp + d
     float bar_h = 0.0f;     // H - bar_y
@@ -4861,10 +4916,15 @@ struct MapMetrics {
     float content_h = 0.0f; // wc.Xy = panel_h - 1*rail (one rail: bottom)
 };
 
-MapMetrics map_metrics() {
-    const ZaLayout za = za_layout();
+MapMetrics map_metrics(App& app) {
+    const ZaLayout za = za_layout(app);
     const float lc = kViewW / kViewH;
     MapMetrics m;
+    // `Vr.ba` L2118: `dA.la(b / this.items[0].background.fa.y)`; the item
+    // backdrop is a `mapN` frame (all shipped ones share sourceSize). Read `fa`
+    // from the atlas, never a literal.
+    atlas_source_size(app, "map0", kMapFrameWFallback, kMapFrameHFallback,
+                      &m.map_fr_w, &m.map_fr_h);
     m.sp = za.sp;
     // JS `Rr.layout` (offset 1081417): `var c=50; za.instance!=null&&
     // (b=za.instance.Sp, c=za.instance.qka)` — the rail width is the za
@@ -4878,9 +4938,9 @@ MapMetrics map_metrics() {
     m.map_h = (kViewH - m.sp) * (0.5f + (std::clamp(lc, 0.9f, 1.5f) - 0.9f) / 0.6f * 0.5f) -
               kViewH * 0.1f;
     m.map_y = m.sp;
-    m.bg_scale = m.map_h / kMapFrameH;
+    m.bg_scale = m.map_h / m.map_fr_h;
     // `Vr.aa`: a single-zone content fits -> ca = 0, `dA.C(0)`.
-    m.bg_x = (kViewW > kMapFrameW * m.bg_scale - 200.0f) ? 0.0f : -100.0f;
+    m.bg_x = (kViewW > m.map_fr_w * m.bg_scale - 200.0f) ? 0.0f : -100.0f;
     m.bar_y = m.map_y + m.map_h;
     m.bar_h = kViewH - m.bar_y;
     // `Rr.layout` (L2100).
@@ -4898,9 +4958,8 @@ MapMetrics map_metrics() {
 
 // On-screen node box (view px): the 225px `Qr` source scaled by
 // `y5a() = 150/225*uM` and then by the strip scale `dA.Eb`.
-float map_node_size(float view_w) {
-    (void)view_w;  // the layout is the JS `qk.layout`/`Vr.ba` chain, not the view
-    return kMapNodeSourcePx * kMapNodeScaleK * kMapNodeUnit * map_metrics().bg_scale;
+float map_node_size(App& app) {
+    return kMapNodeSourcePx * kMapNodeScaleK * kMapNodeUnit * map_metrics(app).bg_scale;
 }
 
 // The `Rr` info-panel FIGHT button (`tj` = `Bb("EButtonWhite")`, JS L2099/
@@ -4945,9 +5004,7 @@ MapFightButtonRect map_fight_button_rect(const MapMetrics& mm) {
 // Only battles carrying map coordinates become nodes (HIDDEN/INTERMISSION
 // rows without X/Y are not map nodes). Covers all 8 zones (Punchbag +
 // ZONE_1..7) — the old first-zone-only loader is folded into this.
-std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
-    (void)view_w;  // node coords come from map_metrics(), not the view size
-    (void)view_h;
+std::vector<MapScreen::ZoneTab> load_zone_map(App& app) {
     std::vector<MapScreen::ZoneTab> out;
     try {
         sf2::data::xml_doc doc;
@@ -5020,10 +5077,10 @@ std::vector<MapScreen::ZoneTab> load_zone_map(float view_w, float view_h) {
                 // JS `qe.X0a` (L2144): x = pos.x*uM + bg.fa.x/2,
                 // y = -pos.y*uM + bg.fa.y/2, then -50 — item-local, mapped to
                 // the screen through the `Vr` strip transform (map_metrics).
-                const MapMetrics mm = map_metrics();
-                n.x = mm.bg_x + (x * kMapNodeUnit + kMapFrameW * 0.5f) * mm.bg_scale;
+                const MapMetrics mm = map_metrics(app);
+                n.x = mm.bg_x + (x * kMapNodeUnit + mm.map_fr_w * 0.5f) * mm.bg_scale;
                 n.y = mm.map_y +
-                      (-y * kMapNodeUnit + kMapFrameH * 0.5f - kMapNodeYOffset) * mm.bg_scale;
+                      (-y * kMapNodeUnit + mm.map_fr_h * 0.5f - kMapNodeYOffset) * mm.bg_scale;
                 n.active = true;  // the MapScreen ctor applies the lock rule
                 // Xs warriors (FLOW_STATIC Modes): FirstNames across the
                 // battle's Fights, deduped, capped (bracket display).
@@ -8296,7 +8353,7 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
         return;
     }
     std::string location;
-    for (const MapScreen::ZoneTab& z : load_zone_map(kViewW, kViewH)) {
+    for (const MapScreen::ZoneTab& z : load_zone_map(app())) {
         if (!zone.empty() && z.name != zone) continue;
         for (const MapScreen::Node& n : z.nodes) {
             if (n.name == battle) {
@@ -8891,7 +8948,7 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     // fight/act cleared `lb.rJ`, so leaving a fight never leaves the fight
     // track running (JS `ai.B()` teardown -> `lb.OS()`, L384).
     sf2::audio::AudioEngine::instance().play_music_once("menu");
-    zones_ = load_zone_map(kViewW, kViewH);
+    zones_ = load_zone_map(app());
     // The current zone from the save (JS `xf.ro` / CurrentZone, L248) plus
     // the battle records (iF) and MapFocus (ys) for the live rules below.
     std::string cur = "ZONE_1";
@@ -8943,7 +9000,7 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
 }
 
 void MapScreen::fight_button_center(float& x, float& y) const {
-    const MapFightButtonRect r = map_fight_button_rect(map_metrics());
+    const MapFightButtonRect r = map_fight_button_rect(map_metrics(app()));
     x = r.cx;
     y = r.cy;
 }
@@ -9183,8 +9240,8 @@ void MapScreen::start_battle(const Node& n) {
 //   dots `WG`: `la(c / bulbSourceH)`, `C(a+25)`, `D(b/2)`; dot i sits at
 //   `i*80 + bulbSourceW/2`; `c = b*.5` is the dot diameter
 // where `b = N.height - Ur.y` (= `mm.bar_h`). The draw and the click hit-test
-// both read `ur_layout()` so they cannot drift.
-constexpr float kBulbSourcePx = 68.0f;  // bulb/inactive_bulb/red_bulb sourceSize
+// both read `ur_layout()` so they cannot drift. The `bulb`/`inactive_bulb`
+// frames are sized from their `sourceSize` (`fa`), read from the atlas.
 
 struct UrLayout {
     float label_w = 0.0f;   // `Dk.Fa(a-25, ...)` box width
@@ -9193,16 +9250,29 @@ struct UrLayout {
     float dot_d = 0.0f;     // `c = b*.5` dot diameter
     float dots_x = 0.0f;    // `WG.C(a)` after `a += 25`
     float dots_cy = 0.0f;   // `Ur.y + b/2` (the bar centre)
-    float scale = 0.0f;     // `WG.la(c / bulbSourceH)`
+    float scale = 0.0f;     // `WG.la(c / bulb.fa.y)`
+    float dot_half_src = 0.0f;  // `inactive_bulb.fa.x / 2` (local, pre-scale)
 };
 
-UrLayout ur_layout(const MapMetrics& mm) {
+UrLayout ur_layout(App& app, const MapMetrics& mm) {
     const float lc = kViewW / kViewH;
     const float b = mm.bar_h;  // `N.height - Ur.y`
     UrLayout u;
     u.dot_d = b * 0.5f;
     u.dots_cy = mm.bar_y + b * 0.5f;
-    u.scale = u.dot_d / kBulbSourcePx;
+    // JS L2114: `this.WG.la(c / E.get(260).Mza(y.Una).fa.y)` — the dot
+    // container scale is the dot diameter over the `bulb` frame's sourceSize
+    // height. The per-dot x (`TWа` L2116 `d.C(c*80 + d.Y.za()/2)`) uses the
+    // `inactive_bulb` frame's `fa.x` (`.za()` = `fa.x*scale`). Read both `fa`
+    // from the atlas, never a literal; fall back to the shipped 68.
+    float bulb_w = 68.0f, bulb_h = 68.0f;
+    atlas_source_size(app, "bulb", 68.0f, 68.0f, &bulb_w, &bulb_h);
+    float dot_w = 68.0f, dot_h = 68.0f;
+    atlas_source_size(app, "inactive_bulb", 68.0f, 68.0f, &dot_w, &dot_h);
+    (void)bulb_w;
+    (void)dot_h;
+    u.scale = u.dot_d / bulb_h;
+    u.dot_half_src = dot_w * 0.5f;
     const float a = kViewW * (0.5f + (std::clamp(lc, 1.0f, 1.6f) - 1.0f) / 0.6f * -0.1f);
     u.label_w = a - 25.0f;
     u.label_h = b * 0.7f;
@@ -9356,7 +9426,7 @@ void ur_blink_tick(UrBlink& s, const UrBlinkCfg& cfg) {
 // rect. The size is a screen-fraction so it scales with the viewport.
 void MapScreen::map_button_rect(std::size_t i, float& cx, float& cy, float& w,
                                 float& h) const {
-    const MapMetrics mm = map_metrics();
+    const MapMetrics mm = map_metrics(app());
     w = kViewW * 0.20f;
     h = w * 0.52f;
     cx = w * 0.7f;
@@ -9376,9 +9446,9 @@ bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {   
         if (!any) continue;                // no dot drawn -> no rect
         if (zones_[i].part < 0) continue;  // no map backdrop -> not a map zone
         if (i == zi) {
-            const UrLayout u = ur_layout(map_metrics());
+            const UrLayout u = ur_layout(app(), map_metrics(app()));
             cx = u.dots_x +
-                 u.scale * (static_cast<float>(slot) * 80.0f + kBulbSourcePx * 0.5f);
+                 u.scale * (static_cast<float>(slot) * 80.0f + u.dot_half_src);
             cy = u.dots_cy;
             return true;
         }
@@ -9573,7 +9643,7 @@ void MapScreen::update_impl(float dt) {
         for (std::size_t zi = 0; zi < zones_.size(); ++zi) {
             float dot_cx = 0.0f, dot_cy = 0.0f;
             if (!zone_dot_center(zi, dot_cx, dot_cy)) continue;
-            const float dot_half = ur_layout(map_metrics()).dot_d * 0.5f;
+            const float dot_half = ur_layout(app(), map_metrics(app())).dot_d * 0.5f;
             if (p.x >= dot_cx - dot_half && p.x <= dot_cx + dot_half &&
                 p.y >= dot_cy - dot_half && p.y <= dot_cy + dot_half) {
                 if (p.pressed && static_cast<int>(zi) != zone_sel_) {
@@ -9633,7 +9703,7 @@ void MapScreen::update_impl(float dt) {
     for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
-        const float node_half = map_node_size(kViewW) * 0.5f;
+        const float node_half = map_node_size(app()) * 0.5f;
         if (p.x >= n.x - node_half && p.x <= n.x + node_half &&
             p.y >= n.y - node_half && p.y <= n.y + node_half) {
             node_hit = static_cast<int>(i);
@@ -9663,7 +9733,7 @@ void MapScreen::update_impl(float dt) {
     if (p.pressed && !node_tap && hover_ >= 0 &&
         static_cast<std::size_t>(hover_) < zones_[zone_sel_].nodes.size()) {
         const Node& n = zones_[zone_sel_].nodes[static_cast<std::size_t>(hover_)];
-        const MapFightButtonRect fb = map_fight_button_rect(map_metrics());
+        const MapFightButtonRect fb = map_fight_button_rect(map_metrics(app()));
         // The `tj` FIGHT plate is drawn ONLY for the `Sr`/`Whb` body (the
         // `mk` LOCKED/Fake branch never calls `Cyb`, L2103/L2161) — a locked
         // record / `FightFake` node has NO fight trigger.
@@ -10333,8 +10403,10 @@ void draw_map_paper_panel(App& app, const MapMetrics& mm) {
     }
     const float rail_h = 50.0f * (mm.panel_w / 430.0f);  // `Dl[1].ba(f, 50*e)`
     const float rail_y = mm.panel_y + mm.panel_h - rail_h;
-    constexpr float kRollEndW = 101.0f, kRollEndH = 114.0f;
-    const float cap = kRollEndW * (rail_h / kRollEndH);
+    // `Zh.ba`: cap width = `roll_end.za()` = `fa.x * (rail_h / fa.y)`.
+    float cap_src_w = 101.0f, cap_src_h = 114.0f;
+    atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
+    const float cap = cap_src_w * (rail_h / cap_src_h);
     const float body = std::max(mm.panel_w - 2.0f * cap, 10.0f);
     if (scroll_ok) {
         try_draw_atlas_button(app, "roll_end", mm.panel_x + cap * 0.5f,
@@ -10836,7 +10908,7 @@ void MapScreen::render_impl(App& app) {
         return;
     }
     load_map_backdrops(app);  // once; silent unless frames decode
-    const MapMetrics mm = map_metrics();
+    const MapMetrics mm = map_metrics(app);
     // `Vr` map strip (JS `qk.layout` L2137 / `Vr.ba` L2118): the selected
     // zone's backdrop (JS `qe.W0a` L2143 `parseInt(fileName.split(".")[1])-1`)
     // is scaled to the strip height `d` and drawn at `dA.x` (0 for the
@@ -10845,7 +10917,7 @@ void MapScreen::render_impl(App& app) {
     if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size() &&
         zones_[zone_sel_].part >= 0) {
         bg_done = app.draw_atlas_rect("map" + std::to_string(zones_[zone_sel_].part),
-                                      mm.bg_x, mm.map_y, kMapFrameW * mm.bg_scale,
+                                      mm.bg_x, mm.map_y, mm.map_fr_w * mm.bg_scale,
                                       mm.map_h, 1.0f);
     }
     if (!bg_done) {
@@ -10864,7 +10936,7 @@ void MapScreen::render_impl(App& app) {
     const bool zone_ok =
         zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size();
     const std::size_t node_count = zone_ok ? zones_[zone_sel_].nodes.size() : 0;
-    const float node_px = map_node_size(kViewW);
+    const float node_px = map_node_size(app);
     const float node_ls = node_px / kMapNodeSourcePx;  // local -> screen
     for (std::size_t i = 0; i < node_count; ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
@@ -10918,7 +10990,7 @@ void MapScreen::render_impl(App& app) {
     // through `ur_layout()` (see its comment); the label box is node-local
     // (0,0) so it sits at `(0, mm.bar_y)` right-aligned (`Ia(4)`).
     if (zone_ok) {
-        const UrLayout u = ur_layout(mm);
+        const UrLayout u = ur_layout(app, mm);
         draw_ui_label(app, 0.0f, mm.bar_y, u.label_w, u.label_h,
                       loc(app, zones_[zone_sel_].name, zones_[zone_sel_].name),
                       u.label_ua / 100.0f, UiAlign::Right, 0.78f, 0.655f, 0.451f);
@@ -15612,7 +15684,7 @@ float shop_list_bottom(const ShopLayout& l) { return l.cell_top + l.list_h; }
 ShopLayout shop_layout(int tab) {
     const float lc = kViewW / kViewH;            // N.lc
     const float t = std::clamp(lc, 0.6f, 1.0f);  // clamp(lc,.6,1)
-    const float sp = za_layout().sp;             // za.Sp (JS L1975)
+    const float sp = za_sp();                    // za.Sp (JS L1975)
     const float margin = kViewW * 0.05f * ((t - 0.6f) / 0.4f);  // L2293
     ShopRect b{margin, sp * 1.4f, kViewW - margin,
                kViewH - sp * 1.5f * 1.3f};  // L2293
@@ -15714,8 +15786,10 @@ void draw_shop_scroll(App& app, sf2::render::Renderer& ren, const ShopRect& v) {
     try_draw_atlas_button(app, "paper_edge_right", v.N - c * 0.5f, cy, c, h, 1.0f, true,
                           false);
     const float kRollH = v.width() * 0.08f;  // vk = c (`Fg.ba`, @962809)
-    constexpr float kCapSrcW = 101.0f, kCapSrcH = 114.0f;  // roll_end 101x114
-    const float capw = kCapSrcW * (kRollH / kCapSrcH);
+    // `Zh.ba`: cap width = `roll_end.za()` = `fa.x * (kRollH / fa.y)`.
+    float cap_src_w = 101.0f, cap_src_h = 114.0f;
+    atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
+    const float capw = cap_src_w * (kRollH / cap_src_h);
     const float midw = std::max(w - 2.0f * capw, 10.0f);
     for (int band = 0; band < 2; ++band) {
         const float by = (band == 0) ? v.P + kRollH * 0.5f : v.W - kRollH * 0.5f;
@@ -18094,14 +18168,17 @@ struct ProfileTabLayout {
     float btn_scale = 1.0f;
 };
 
-ProfileTabLayout profile_tab_layout() {
-    const ZaLayout z = za_layout();
+ProfileTabLayout profile_tab_layout(App& app) {
     ProfileTabLayout t;
-    t.bar_h = z.sp * kTabBarHeightK;                 // Eg.aa: za.Sp*1.5 (un)
-    constexpr float kSrcW = 199.0f, kSrcH = 190.0f;  // profile Le sourceSize
-    const float scale = t.bar_h / kSrcH;             // Eg: height/button.Y.fa.y
+    t.bar_h = za_sp() * kTabBarHeightK;              // Eg.aa: za.Sp*1.5 (un)
+    // `Eg.aa` L1852: `c = this.height / button.Y.fa.y` — the first profile tab
+    // button's UNTRIMMED `sourceSize` (profile atlas `buttons/*`, 199x190). Read
+    // `fa` from the atlas (the JS reads it, never a literal); fall back to 199x190.
+    float src_w = 199.0f, src_h = 190.0f;
+    atlas_source_size(app, "buttons/Achiev", 199.0f, 190.0f, &src_w, &src_h);
+    const float scale = t.bar_h / src_h;             // Eg: height/button.Y.fa.y
     t.btn_h = t.bar_h;
-    t.btn_w = kSrcW * scale;
+    t.btn_w = src_w * scale;
     t.btn_scale = scale;
     constexpr float kSpread = 1.2f;                  // Eg `b` (lc>1 clamp)
     t.step = t.btn_w * kSpread;
@@ -18125,7 +18202,7 @@ struct ProfileLayout {
 ProfileLayout profile_layout() {
     const float lc = kViewW / kViewH;             // N.lc
     const float t = std::clamp(lc, 0.6f, 1.0f);   // clamp(lc,.6,1)
-    const float sp = za_layout().sp;              // kA.Sp (JS L1975)
+    const float sp = za_sp();              // kA.Sp (JS L1975)
     const float margin = kViewW * 0.05f * ((t - 0.6f) / 0.4f);  // L2195
     ShopRect b{margin, sp * 1.4f, kViewW - margin,
                kViewH - sp * 1.5f * 1.3f};        // L2195
@@ -18366,8 +18443,8 @@ ShopRect profile_achiev_reward_rect(const ShopRect& v, int i, float scroll_y) {
 }
 
 // Hit test for the `cs` tab strip; -1 when outside every button.
-int profile_tab_hit(double px, double py) {
-    const ProfileTabLayout t = profile_tab_layout();
+int profile_tab_hit(App& app, double px, double py) {
+    const ProfileTabLayout t = profile_tab_layout(app);
     for (int i = 0; i < kProfileTabCount; ++i) {
         const float cx = t.cx0 + static_cast<float>(i) * t.step;
         if (px >= cx - t.btn_w * 0.5f && px <= cx + t.btn_w * 0.5f &&
@@ -18383,7 +18460,7 @@ int profile_tab_hit(double px, double py) {
 // pushes into each `Le.badge` (`Dg`, L1850).
 void draw_profile_tabs(App& app, int tab, int hover, const int* badges) {
     sf2::render::Renderer& ren = app.renderer();
-    const ProfileTabLayout t = profile_tab_layout();
+    const ProfileTabLayout t = profile_tab_layout(app);
     const float bar[] = {0, kViewH - t.bar_h, kViewW, kViewH - t.bar_h, kViewW, kViewH,
                          0, kViewH - t.bar_h, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(bar, 6, kTabBarBgR, kTabBarBgG, kTabBarBgB, 1.0f);
@@ -19479,7 +19556,7 @@ void EquipmentScreen::update_impl(float dt) {
     // unlatched hover tracked the user's real mouse and made
     // `profile_tab3.png` diff between runs. At steady state (no press) the
     // latch keeps the last logical position -> byte-identical captures.
-    if (p.pressed || p.down) tab_hover_ = profile_tab_hit(p.x, p.y);
+    if (p.pressed || p.down) tab_hover_ = profile_tab_hit(app(), p.x, p.y);
     if (tab_hover_ >= 0 && p.pressed) {
         // `db.aa` L1839: while the quest holds `Sb.Xva`, only the armed target
         // activates; a profile sub-tab is addressed as `ProfileTab<i>`.

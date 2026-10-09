@@ -1690,7 +1690,7 @@ bool za_nav_expanded(ScreenId id);
 // header at the top (`yI=0`) or the full-width column-bottom rail (`yI=1`).
 // A probe/driver taps THIS point (not a fixed top position) to toggle the
 // column, because the button MOVES with the rail.
-void za_nav_rail_center(ScreenId id, float& cx, float& cy);
+void za_nav_rail_center(App& app, ScreenId id, float& cx, float& cy);
 // JS `lca(TF.lD, TF.uP, TF.Y1)` (L2009): the `<Fight>` the boss ladder is on —
 // the wins recorded for the battle, clamped to its `<Fight>` count, so the
 // quest journal's `_$Fight` is `zone|name|(index+1)`.
