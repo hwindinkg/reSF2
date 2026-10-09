@@ -91,6 +91,60 @@ namespace sf2::scene {
 
 namespace {
 
+// Forward declarations (defined further down): the shipped-res reader and
+// the nested `<outer><inner>...<Animation Name=..>` extractor.
+std::string read_res_file(const char* rel);
+std::vector<std::string> xml_animation_names_nested(const std::string& xml,
+                                                    const std::string& outer,
+                                                    const std::string& inner);
+
+// JS `P.s$a()` = `P.csa` (`computer_settings.xml`
+// `<MoveLengthIntervals><Strict><Interval Name=..>`, parse L318270). Read
+// from the SAME file the JS reads; the port previously HARDCODED the shipped
+// {Uninterrupt, SemiUninterrupt}. (`jc.$I` = `vBa(P.s$a())`.)
+const std::vector<std::string>& move_length_strict() {
+    static const std::vector<std::string> v = xml_animation_names_nested(
+        read_res_file("reference/extracted/xml/res/computer_settings.xml"),
+        "MoveLengthIntervals", "Strict");
+    return v;
+}
+// JS `P.r$a()` = `P.bsa` = `<MoveLengthIntervals><Extended>` (parse L318430);
+// the shipped {Uninterrupt, SemiUninterrupt, SelfUninterrupt}. (`jc.Tea` =
+// `vBa(P.r$a())`.)
+const std::vector<std::string>& move_length_extended() {
+    static const std::vector<std::string> v = xml_animation_names_nested(
+        read_res_file("reference/extracted/xml/res/computer_settings.xml"),
+        "MoveLengthIntervals", "Extended");
+    return v;
+}
+// JS `P.sp` = `computer_settings.xml` `<TablesReduction><MovementsTables
+// Step="5"/>` (parse L317354: `P.sp=u.I(b.A("MovementsTables").attributes.
+// get("Step"),1)`; default 1). The port previously hardcoded 5 at every use
+// (`Uea`/`YAa`/`XAa`/`gea`). Shipped Step is 5, so behaviour is preserved.
+int tables_reduction_step() {
+    static const int v = [] {
+        const std::string xml =
+            read_res_file("reference/extracted/xml/res/computer_settings.xml");
+        const std::size_t p = xml.find("<TablesReduction>");
+        if (p == std::string::npos) return 1;
+        const std::size_t m = xml.find("<MovementsTables", p);
+        if (m == std::string::npos) return 1;
+        const std::size_t a = xml.find("Step=\"", m);
+        if (a == std::string::npos) return 1;
+        const std::size_t s = a + 6;
+        const std::size_t e = xml.find('"', s);
+        if (e == std::string::npos) return 1;
+        int n = 0;
+        for (std::size_t i = s; i < e; ++i) {
+            const char ch = xml[i];
+            if (ch < '0' || ch > '9') return 1;
+            n = n * 10 + (ch - '0');
+        }
+        return n > 0 ? n : 1;
+    }();
+    return v;
+}
+
 // Move-length helpers mirroring the JS `jc` methods the AI reads:
 //   p0 (L697): the max Attack-interval finish (1-based frames).
 //   zD (L698): the max Uninterrupt-interval finish.
@@ -114,24 +168,25 @@ int uninterrupt_end(const MoveDef& m) {
     return best;
 }
 // JS `jc.$I` (L697): `vBa(P.s$a())` — the max finish among the Strict
-// move-length interval names. `P.s$a()` = computer_settings.xml
-// `MoveLengthIntervals/Strict` = {Uninterrupt, SemiUninterrupt}.
+// move-length interval names, READ from computer_settings.xml
+// `MoveLengthIntervals/Strict` (shipped {Uninterrupt, SemiUninterrupt}).
 int strict_end(const MoveDef& m) {
     int best = 0;
+    const std::vector<std::string>& names = move_length_strict();
     for (const Interval& iv : m.intervals) {
-        if (iv.name == "Uninterrupt" || iv.name == "SemiUninterrupt")
+        if (std::find(names.begin(), names.end(), iv.name) != names.end())
             best = std::max(best, iv.end);
     }
     return best;
 }
 // JS `jc.Tea` (L697): `vBa(P.r$a())` — the max finish among the Extended
-// move-length interval names. `P.r$a()` = `MoveLengthIntervals/Extended`
-// = Strict + {SelfUninterrupt}.
+// move-length interval names, READ from computer_settings.xml
+// `MoveLengthIntervals/Extended` (shipped Strict + SelfUninterrupt).
 int extended_end(const MoveDef& m) {
     int best = 0;
+    const std::vector<std::string>& names = move_length_extended();
     for (const Interval& iv : m.intervals) {
-        if (iv.name == "Uninterrupt" || iv.name == "SemiUninterrupt" ||
-            iv.name == "SelfUninterrupt")
+        if (std::find(names.begin(), names.end(), iv.name) != names.end())
             best = std::max(best, iv.end);
     }
     return best;
@@ -923,7 +978,11 @@ const TacticRecord* AiController::find_record(const std::string& key_anim,
 
 int AiController::yaa(const AiFightState& st) {
     wb_.clear();
-    Ao_ = (Fl_ % 5) != 0;  // P.sp (TablesReduction Step) = 5
+    // JS `YAa` (L600): `this.Ao = this.Fl % P.sp != 0 ? !0 : !1` — `P.sp`
+    // READ from computer_settings.xml `<TablesReduction><MovementsTables
+    // Step="5"/>` (was hardcoded 5).
+    const int sp = tables_reduction_step();
+    Ao_ = (Fl_ % sp) != 0;
     if (st.enemy_anim.empty()) return 0;
 
     const TacticRecord* rec = find_record(st.enemy_anim, /*safe=*/1);
@@ -942,8 +1001,8 @@ int AiController::yaa(const AiFightState& st) {
     // were computed from the wrong quantity.
     const int g = Fl_;
     // Round the enemy frame up to a P.sp multiple (JS L610: `f = g%P.sp!=0
-    // ? g+P.sp-g%P.sp : g`).
-    const int f = (g % 5) != 0 ? g + 5 - g % 5 : g;
+    // ? g+P.sp-g%P.sp : g`; `P.sp` READ from computer_settings.xml).
+    const int f = (g % sp) != 0 ? g + sp - g % sp : g;
 
     // For each condition row, the target distance (JS `Wea` L600 + L610:
     // the row label's bone world-x) and the frame window:
@@ -1005,7 +1064,10 @@ int AiController::yaa(const AiFightState& st) {
 // JS `XAa` (L611-612): the attack-table selection (Z0()[0]).
 int AiController::xaa(const AiFightState& st) {
     wb_.clear();
-    if (Fl_ % 5 != 0) {
+    // JS `XAa` L611: `if(this.Fl % P.sp != 0) { this.Ao=!0; return 0 }` —
+    // `P.sp` READ from computer_settings.xml `<TablesReduction>` (was 5).
+    const int sp = tables_reduction_step();
+    if (Fl_ % sp != 0) {
         Ao_ = true;
         return 0;
     }
@@ -1114,7 +1176,10 @@ int AiController::gea(const AiFightState& st, int variant) {
         return 0;
 
     const int c = Fl_;  // b==0 -> `c = this.Fl`
-    if (c % 5 != 0) {
+    // JS `Gea` L613: `if(c % P.sp != 0) { this.Ao=!0; return 0 }` — `P.sp`
+    // READ from computer_settings.xml `<TablesReduction>` (was 5).
+    const int sp = tables_reduction_step();
+    if (c % sp != 0) {
         Ao_ = true;
         return 0;
     }
@@ -1171,8 +1236,10 @@ int AiController::gea(const AiFightState& st, int variant) {
                 }
             }
             if (q != nullptr) {
-                const auto uea = [](int a) -> int {
-                    const int sp = 5;
+                const auto uea = [sp](int a) -> int {
+                    // JS `Uea` (L304312): `a % P.sp == 0 ? a : (a > 0 ?
+                    // a - a%P.sp + P.sp : a - a%P.sp)`; `P.sp` READ from
+                    // computer_settings.xml `<TablesReduction>` (was 5).
                     if (a % sp == 0) return a;
                     return a > 0 ? a - a % sp + sp : a - a % sp;
                 };
