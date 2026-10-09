@@ -20822,9 +20822,13 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         // JS `un.Oyb` (offset 995552): `this.Nm.qg(a)` where `a=C8.v[$u]` — the
         // restart notice uses the SETTINGS font (the ctor builds `Nm` with the
         // menu font, then `Oyb` re-fonts it). Route it through `sfont`/`stex`.
+        // `Nm.D(250)` (L1929) is the node's TOP edge (`Ke` anchor 0,0, exactly
+        // like `Vc.D(-(a+pfa().y))` at `od.layout` L1898): the old
+        // `- 25*p.c` double-counted the half-height, drawing the notice ~12 px
+        // (design 25) too high.
         draw_ui_label_font(app, sfont, stex,
                       s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
-                      s.notice_y - 25.0f * s.panel.c, 1500.0f * s.panel.c, 50.0f * s.panel.c,
+                      s.notice_y, 1500.0f * s.panel.c, 50.0f * s.panel.c,
                       loc_lang(app, lang, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
                       kSettingsTextR, kSettingsTextG, kSettingsTextB);
     }
