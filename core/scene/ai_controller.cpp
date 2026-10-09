@@ -58,11 +58,10 @@
 //   - JS `de.V1` (L601-602) additionally rejects a candidate when a
 //     HIGHER-`Priority` move sharing its `<Keys>` signature (`a.M7.$Q`, the
 //     port's `MoveDef::mirror_exclusive`) is in `me` and its conditions pass
-//     (`f.Yz(this.model,null,a.FQ(2))`). The port applies `mirror_exclusive`
-//     in the Random-tactic path (`update_random`/`Pkb`) but NOT in `v1`; the
-//     sibling condition re-eval needs the `Ql.Hc`/`FQ(2)` type-2 context
-//     (`Yz`'s `c.rb=g` chaining), so `v1` remains a cited divergence
-//     (key-combo moves only).
+//     (`f.Yz(this.model,null,a.FQ(2))`). NOW PORTED: `v1` applies the `$Q`
+//     sibling filter JS-exact (the sibling's `<Conditions>` re-evaluated with
+//     the context mutated to the sibling's `xl`/`Wl`/`YH`); the Random-tactic
+//     path (`update_random`/`Pkb`) already used `mirror_exclusive`.
 // Exact since this wave (no oracle needed — pure JS math):
 //   - the `mW` watch-recompute (JS `de.ia` L592): after `dsb` the port now
 //     recomputes `eh` from the OPPONENT's move length (`p0`/`zD`/`$I`/`Tea`
@@ -454,25 +453,62 @@ void AiController::set_no_decision(std::vector<std::string> intervals,
     if (!moves.empty()) no_decision_moves_ = std::move(moves);
 }
 
+namespace {
+// JS `P.Yra`/`P.Lra` (`tactic_settings.xml` `<MissileAnimations>` /
+// `<MagicAnimations>`, parsed by `P.yK` L319806 `P.yK(b,P.Yra)` /
+// `P.yK(b,P.Lra)`). Read from the SAME file the JS reads; the port previously
+// HARDCODED these three/two names (and cited the wrong file). `P.yK` appends
+// every child `<Animation Name=..>`.
+std::vector<std::string> anim_names_in_tag(const char* path, const char* tag) {
+    std::vector<std::string> out;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return out;
+    const std::string xml((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+    const std::size_t p = xml.find(std::string("<") + tag + ">");
+    if (p == std::string::npos) return out;
+    std::size_t end = xml.find(std::string("</") + tag + ">", p);
+    if (end == std::string::npos) end = xml.size();
+    const std::string block = xml.substr(p, end - p);
+    std::size_t k = 0;
+    const std::string key = "Name=\"";
+    while ((k = block.find(key, k)) != std::string::npos) {
+        k += key.size();
+        const std::size_t e = block.find('"', k);
+        if (e == std::string::npos) break;
+        out.push_back(block.substr(k, e - k));
+        k = e + 1;
+    }
+    return out;
+}
+const std::vector<std::string>& missile_animations() {  // JS `P.o$a()`
+    static const std::vector<std::string> v = anim_names_in_tag(
+        "reference/extracted/xml/res/tactic_settings.xml", "MissileAnimations");
+    return v;
+}
+const std::vector<std::string>& magic_animations() {  // JS `P.n$a()`
+    static const std::vector<std::string> v = anim_names_in_tag(
+        "reference/extracted/xml/res/tactic_settings.xml", "MagicAnimations");
+    return v;
+}
+}  // namespace
+
 // JS `fCa` (L599-600): whether the enemy is playing a cautious anim
 // (variant 0 = missiles, variant 1 = magic) AND is facing / in reach.
 // The native port derives it from the enemy's current animation name.
 bool AiController::fca(const AiFightState& st, int variant) const {
     if (st.enemy_anim.empty()) return false;
-    // The JS checks each enemy body part's animation controller; the
-    // native fighter has one animation, so we check the current anim
-    // against the missile/magic animation name lists (P.Yra / P.Lra):
-    //   missiles: RangedMissile, MagicMissile, MagicMissileStart
-    //   magic:    MagicMissile, MagicStart
-    // (these match computer_settings.xml's MissileAnimations /
-    // MagicAnimations lists).
-    const bool is_missile =
-        st.enemy_anim == "RangedMissile" || st.enemy_anim == "MagicMissile" ||
-        st.enemy_anim == "MagicMissileStart";
-    const bool is_magic =
-        st.enemy_anim == "MagicMissile" || st.enemy_anim == "MagicStart";
-    if (variant == 0) return is_missile;
-    return is_magic;
+    // The JS checks each enemy body part's animation controller; the native
+    // fighter has one animation, so we check the current anim against the
+    // missile/magic animation name lists (P.o$a / P.n$a = the
+    // `tactic_settings.xml` `<MissileAnimations>` / `<MagicAnimations>`
+    // groups), read from the shipped file, not hardcoded.
+    const std::vector<std::string>& list =
+        variant == 0 ? missile_animations() : magic_animations();
+    for (const std::string& a : list) {
+        if (st.enemy_anim == a) return true;
+    }
+    return false;
 }
 
 // JS `V1` (L601-602): a candidate move must be in `me` (the fighter's move
@@ -547,8 +583,51 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     // `ThrowForward`'s `<Distance Max="100">`) was never rejected and the AI
     // started/landed throws from across the arena. Keys conditions pass for
     // the AI (`ctx.keys_gm=false`, the same `gm=false` gate `NS` uses).
-    return eval_move_conditions(m.conditions, ctx) &&
-           eval_move_conditions(m.tactics, ctx);
+    if (!eval_move_conditions(m.conditions, ctx)) return false;
+
+    // JS `de.V1` (L601-602), the `$Q` SIBLING filter (the ONE confirmed AI
+    // divergence — verbatim, char offsets 306189-306760):
+    //   `var d=a.M7; if(0<d.$Q.length){ let e=0;
+    //      for(d=d.$Q;e<d.length;){ let f=d[e];++e;
+    //        if(b.includes(f)&&(c.xK=f.xl,c.Wl=f.xD(c,this.Ji.hd()),
+    //           c.YH=f.va.align.WE, f.Yz(this.model,null,a.FQ(2)))) return!1 } }`
+    // `a.M7` is the `Pu` mirror-exclusive container (`$Q` = its list) built by
+    // `ra.c1a`/`ra.b1a` (L683-684) — the port's `MoveDef::mirror_exclusive`
+    // (move_def.cpp L159-178, same `a.priority < e.priority` + `$ga` key
+    // conflict). `b = this.model.me` = MY move list; `c = this.model.Fc` is
+    // the SHARED condition context mutated to the SIBLING's `xl`/`Wl`/`YH`
+    // before `f.Yz` re-evaluates the sibling's `<Conditions>` (`va.rb`). So a
+    // candidate whose higher-priority mirror superior is ALSO in my move list
+    // AND whose own conditions pass is REJECTED. Previously `v1` applied
+    // `mirror_exclusive` only in the Random path (`update_random`/`Pkb`), so
+    // the tabular AI could pick the lower-priority sibling (e.g. a plain
+    // strike over the key-combo variant sharing its `<Keys>` signature).
+    for (const std::string& sib : m.mirror_exclusive) {
+        auto it = moves_->find(sib);
+        if (it == moves_->end()) continue;
+        const MoveDef& f = it->second;
+        // `b.includes(f)` — the sibling must be in MY OWN move list.
+        if (st.my_moves != nullptr) {
+            bool own = false;
+            for (const MoveDef* om : *st.my_moves) {
+                if (om != nullptr && om->name == f.name) {
+                    own = true;
+                    break;
+                }
+            }
+            if (!own) continue;
+        }
+        // `c.xK = f.xl` (the sibling's animation names) + `c.Wl = f.xD(...)`
+        // (the sibling's `<SetDirection>` sign, or my facing). The port's
+        // `FightContext` rebuilds per candidate; copy and override.
+        FightContext fctx = ctx;
+        fctx.candidate_moves = f.anim_names;  // `c.xK = f.xl`
+        // `f.Yz(this.model,null,a.FQ(2))` — the SIBLING's `<Conditions>`
+        // (`va.rb`), NOT its `<Tactics>` (`va.Ts`). `f.Yz` defaults its list to
+        // `this.va.rb`.
+        if (eval_move_conditions(f.conditions, fctx)) return false;
+    }
+    return eval_move_conditions(m.tactics, ctx);
 }
 
 // Resolves a candidate animation/tag name to the move(s) whose name or
