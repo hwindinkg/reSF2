@@ -454,10 +454,6 @@ struct AiFightState {
     sf2::scene::StrikeMemory* strike_memory = nullptr;
     // Magic bullets (`bh`).
     int magic_bullets = 0;
-    // My / enemy body-part frames (JS `vd` bone anim frames) — used for
-    // the fCa/V1 body checks.
-    std::vector<int> my_part_frames;
-    std::vector<int> enemy_part_frames;
     // Frame counter (`ca.frame` — the fight's frame).
     int fight_frame = 0;
     // Random source for the chance draws (injected; the native demo

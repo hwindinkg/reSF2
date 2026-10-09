@@ -469,7 +469,6 @@ int main(int argc, char** argv) {
             st.enemy_max_part_frames = foe.fighter.move_frame();
             st.ranged = -1;
             st.magic_bullets = 0;
-            st.enemy_part_frames.push_back(foe.fighter.move_frame());
             st.fight_frame = frame;
             st.roll01 = roll01;
 

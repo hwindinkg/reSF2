@@ -6625,7 +6625,6 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                            !foe.fighter.ragdoll_active();
         st.my_reacting = me.fighter.ragdoll_active();  // JS `Nd.nk`
         st.magic_bullets = 0;
-        st.enemy_part_frames.push_back(foe.fighter.m2());
         st.fight_frame = frame_;
         st.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
         // JS `Da.pg` — the ONE shared stream; hand it to the AI so QJa/gfa/
