@@ -20757,7 +20757,11 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     // `Kc(.6)`, `V(Y.na("dlgSettingsRestart"))`, `R(!1)`; `R(t9)` (L1933) on a
     // language change.
     if (g_settings_restart_visible) {
-        draw_ui_label(app, s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
+        // JS `un.Oyb` (offset 995552): `this.Nm.qg(a)` where `a=C8.v[$u]` — the
+        // restart notice uses the SETTINGS font (the ctor builds `Nm` with the
+        // menu font, then `Oyb` re-fonts it). Route it through `sfont`/`stex`.
+        draw_ui_label_font(app, sfont, stex,
+                      s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
                       s.notice_y - 25.0f * s.panel.c, 1500.0f * s.panel.c, 50.0f * s.panel.c,
                       loc_lang(app, lang, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
                       kSettingsTextR, kSettingsTextG, kSettingsTextB);
