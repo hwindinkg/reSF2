@@ -571,6 +571,17 @@ public:
     // `(MidFrames+1)` sub-steps (`Te.ia`'s normal branch `Xh++`). NOT the
     // quantity `kJ()` returns.
     int playhead() const { return playhead_; }
+    // [FIX pose-dump `cf`] The JS `Te.Xh` — the value the oracle trace dumps
+    // as `cf` (`trace.js` L179 `da.Xh`), NOT `Te.M0()` (`move_frame_`). After
+    // the JS `eda` order fix (`sample` then `mo++`) the port's `playhead_` is
+    // the play-buffer span index `S` (`sample()`'s `play = playhead_`) and
+    // `subframe_` is the post-increment `mo` (1,2 then the wrap 0). `Te.Xh`
+    // increments ONCE per span on the span's FIRST frame (the `Gka` branch
+    // `this.Xh++`), so `Xh == S+1` on every frame of the span: `S+1` while
+    // `mo != 0`, and the already-bumped `playhead_ == S+1` on the wrap frame
+    // (`mo == 0`). Dumping this (instead of `move_frame_ = M0`) aligns the
+    // native `cf` with the oracle's `Xh` sequence.
+    int playhead_xh() const { return playhead_ + (subframe_ != 0 ? 1 : 0); }
     // JS `Te.kJ` (L279097, @278950): `kJ(){return this.Pe?this.lq:0}` — `lq`
     // is the PER-SUB-STEP counter, incremented on EVERY `Te.ia` tick while
     // playing (buffer branch `lq++`; normal branch `lq++,fG++,Xh++`). The

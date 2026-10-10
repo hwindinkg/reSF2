@@ -7435,17 +7435,20 @@ void FightController::dump_pose_frame() {
         // `b6a` facing lock (`facing()`, fighter.cpp:1173) is a DIFFERENT
         // quantity and read -1 where the oracle read +1 on 232/233 matched
         // frames (pose_gap_report.txt), i.e. the fighter at x=690 read fx=-1
-        // natively vs +1 in the oracle while its bones matched. `cf` stays
-        // the JS `Te.M0()` clip frame (`move_frame_`) — the comparator
-        // documents the native side as an "int clip frame" vs the oracle's
-        // `da.Xh` playhead (compare_pose.py L14/L166), and the two sides'
-        // alignment key tolerates the constant offset.
+        // natively vs +1 in the oracle while its bones matched.
+        // `cf` = the JS `Te.Xh` playhead (`da.Xh`, trace.js L179), NOT the
+        // `Te.M0()` clip frame. The oracle trace dumps `da.Xh`; the port used
+        // to dump `move_frame_` (= `M0`), a DIFFERENT quantity that only
+        // coincides with `Xh` after the first two spans (`M0 = ff+max(0,Xh-2)`
+        // vs `Xh`), so the comparator aligned the native's first span against
+        // the oracle's second span — the first-frame spike (idle cf=2 max
+        // 196, intro cf=11 max 80). Dump the same `Xh` the oracle dumps.
         std::fprintf(pose_dump_file_,
                      "%s{\"id\":\"%s\",\"x\":%.3f,\"y\":%.3f,\"fx\":%d,\"clip\":\"%s\","
                      "\"cf\":%d,\"sub\":%d,\"subn\":%d,\"bones\":[",
                      i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
                      f.world_x(), f.world_y(), f.clip_mirror(), clip_name.c_str(),
-                     f.move_frame(), f.subframe(), f.sub());
+                     f.playhead_xh(), f.subframe(), f.sub());
         for (std::size_t b = 0; b + 1 < pos.size(); b += 2) {
             std::fprintf(pose_dump_file_, "%s[%.3f,%.3f]", b == 0 ? "" : ",", pos[b],
                          pos[b + 1]);

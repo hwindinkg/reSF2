@@ -2040,13 +2040,22 @@ void Fighter::advance_step() {
         return;
     }
 
+    // [FIX JS `eda` order — first-frame spike] `Te.eda` (L282908) samples the
+    // CURRENT subframe (`e.ma = fq[mo]`, i.e. `wu.curve`'s `t=(mo+1)/UM`)
+    // BEFORE advancing `mo` (`this.mo==a-1?++this.mo:(mo += Tx/HD)`). The port
+    // incremented `subframe_` FIRST, so every sampled/combat pose was one
+    // subframe AHEAD of the JS: the clip's very first subframe `fq[0]`
+    // (`t=(0+1)/3`) was skipped and the second span's `fq[0]` was read at the
+    // clip's first dumped frame — the measured first-frame spike (idle
+    // cf=2 max 196, intro cf=11 max 80). Sample `fq[subframe_]` first, then
+    // advance, so the sampled `t=(subframe_+1)/sub` is the JS `fq[subframe_]`.
+    sample_current();
     ++subframe_;
     if (subframe_ >= sub) {
         subframe_ = 0;
         ++playhead_;  // JS `Xh++` (once per `sub` steps)
     }
     move_frame_ = ff + std::max(0, playhead_ - 2);
-    sample_current();
     // JS `Te.ia` L547-548 order: `eda()` (the pose apply) THEN `vp()`
     // (L563) which detects the frame change (`a != this.cX`) and runs
     // `rrb()` + the action pass `Lwa()` (L563-564:
