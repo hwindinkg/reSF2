@@ -1424,7 +1424,20 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // visibly snapped/slid back at each move->idle boundary. The JS has NO
     // such translation (see the solver-seed note in `set_model`).
     build_prepend(move);
-    sample_current();
+    // [FIX cloth double-step — JS `Te.Skb` L551] `Skb` builds the play buffer
+    // (`Pka`/`qrb`) and the align (`Gub`/`Gla`) but does NOT sample a pose:
+    // the first `eda` + `Al.ia` (solver) runs on the frame's `wd.ia`
+    // (`this.da.ia()` -> `this.Nd.ia()`, L499) — ONE solver step per 60 Hz
+    // frame. This port's move start is driven by the fight controller
+    // (`Fighter::start_move_impl` <- `ai_start_move`/`try_start_move`), which
+    // runs BEFORE the same frame's `advance()`/`advance_step()` (the `wd.ia`
+    // equivalent). Sampling here stepped the `Al` cloth solver a SECOND time
+    // on every move-start frame, desyncing the stateful non-clip bodies (the
+    // BODY ankle cloth 76..81 and the head cloth 86..93) from the oracle — the
+    // persistent ~12 u idle-cloth offset (compare_pose: bone 77 34.7% /
+    // 79 30.6% / 81 31.0% over tolerance -> 0%). The JS has no such step, so
+    // drop it: the frame's own `advance_step()` `sample_current()` supplies the
+    // pose (and the single solver step).
     return true;
 }
 
