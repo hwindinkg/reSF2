@@ -859,6 +859,15 @@ public:
 
     const Model& model() const { return model_; }
     const std::vector<float>& positions() const { return pos_; }  // x,y pairs
+    // JS `Te.yaa`/`Te.Gla` (L284971/L279707): the persistent MODEL-ROOT offset
+    // the `MoveModel` perk tween (`Ow`, L710...) writes — every posed node
+    // shifts by (x, y). Applied in `build_vertices` (render path; the solver
+    // `sol_ma_` is untouched, matching `bK` which offsets render nodes).
+    void set_model_offset(float x, float y) { model_off_x_ = x; model_off_y_ = y; }
+    float model_offset_x() const { return model_off_x_; }
+    float model_offset_y() const { return model_off_y_; }
+    float model_off_x_ = 0.0f;
+    float model_off_y_ = 0.0f;
     // [FIX phase-1 f=0 = bind] Overwrite the DRAWN pose (`pos_`) without
     // touching the solver state (`sol_ma_`/`sol_mf_`). `FNa` (JS L409) shows
     // the held bind pose at phase-1 f=0 while the first `wd.ia` step (f=1)

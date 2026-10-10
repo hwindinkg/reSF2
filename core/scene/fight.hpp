@@ -2084,6 +2084,9 @@ public:
     // The magic/effect containers (JS `tl.Rf`, L842-844) fed by the `Yl`
     // "Effect" trigger action (`tl.Nt` L842; split `Gq`/`Hq`). Presentation.
     const MagicEffects& magic_fx() const { return magic_fx_; }
+    // JS `bu` (L220406): the `SetDarkness` full-screen overlay (`ca.mV`).
+    struct ScreenOverlay;  // fwd-declared; defined below in this class
+    const ScreenOverlay& overlay() const { return overlay_; }
     // The current center-screen plate (JS `Cr.type`) — presentation only.
     banner_kind banner() const { return cur_banner_; }
 
@@ -2300,6 +2303,31 @@ private:
     // cached here so `EachFight` groups keep the same choice across rounds.
     std::map<int, int> random_pick_;
     bool random_pick_done_ = false;
+    // JS `cl.qmb` (L724359): the SECOND `$Ja` reseed. `$Ja` (L723864) runs
+    // `pmb()` THEN `qmb()`, each reseeding the shared `Da.pg` from ONE draw;
+    // the port modeled only the `pmb` reseed.
+    bool qmb_done_ = false;
+    // JS `bu` (L220406) — the full-screen overlay the `SetDarkness` perk
+    // (type 25) installs via `ca.Nqb` (L199177 -> `this.mV = new bu(...)`).
+    // `bu.Qh` (L220546) ramps its alpha once per frame.
+    struct ScreenOverlay {
+        bool active = false;
+        float alpha = 0.0f;   // `uo.wa(a/255)` -> 0..1
+        int frames = 0;       // `bu.frames` (FrameTimer)
+        bool show = false;    // `bu.show`
+        int aa = 0;           // `bu.aa` (cursor; <0 = finished)
+    };
+    ScreenOverlay overlay_;
+    // JS `Ow` (L710...) — the `MoveModel` perk (type 31) tween: lerp the owner
+    // model from `start` to `target` at `step` per frame, axis-locked.
+    struct ModelTween {
+        bool active = false;
+        float dx = 0.0f, dy = 0.0f;   // target - start (owner-space delta)
+        float progress = 0.0f;         // `Ow.JZ`
+        float step = 0.05f;            // `Ow.s2`
+        bool axis_x = false, axis_y = false;  // `cI`/`dI` (`Axis` X/Y)
+    };
+    ModelTween move_tween_[2];
     // JS `ca` area state (L406): `e$` (qca), `c$`/`d$` (Nma), `g9`, `P8`.
     float area_e_ = 0.0f;           // `e$` (the RandomArea full width)
     float area_cmin_ = 0.0f;        // `c$` (left bound, world)

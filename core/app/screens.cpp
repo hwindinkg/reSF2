@@ -14041,6 +14041,20 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
+    // --- JS `bu` (L220406) — the `SetDarkness` screen overlay --------------
+    // `ca.Nqb` (L199177) installs `this.mV = new bu(color, FrameTimer, Show)`;
+    // `bu.Qh` (L220546) ramps its alpha each frame. The JS quad is
+    // `R.Ed(-16777216,1,1)` (BLACK, L423188) scaled `Rh(width*1.5)` /
+    // `mj(height*3)`, alpha `Lka(a/255)`. Drawn on top of the location.
+    {
+        const auto& ov = fight_->overlay();
+        if (ov.active && ov.alpha > 0.001f) {
+            const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH,
+                                 0, 0, kViewW, kViewH, 0, kViewH};
+            ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, ov.alpha);
+        }
+    }
+
     // --- JS `Ut.V0a` (L831) + `Ut.kyb` (L825): the flashing `arrow` marker --
     // `Ut.V0a` creates the marker (`E.get(268)`, frame `y.OQa` = "arrow") and
     // appends it to the arena render node `this.go.node`; `Ut.init` (L823) runs

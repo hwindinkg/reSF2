@@ -3460,12 +3460,13 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
     for (std::size_t i = 0; i < model_.resolved_tris.size(); ++i) {
         if (i < model_.tri_active.size() && !model_.tri_active[i]) continue;
         const TriResolved& tri = model_.resolved_tris[i];
-        out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2]);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1]);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2]);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2 + 1]);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i3) * 2]);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i3) * 2 + 1]);
+        // JS `Te.Gla` model-root offset (`MoveModel`): shift every posed node.
+        out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2] + model_off_x_);
+        out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1] + model_off_y_);
+        out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2] + model_off_x_);
+        out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2 + 1] + model_off_y_);
+        out.push_back(pos_[static_cast<std::size_t>(tri.i3) * 2] + model_off_x_);
+        out.push_back(pos_[static_cast<std::size_t>(tri.i3) * 2 + 1] + model_off_y_);
     }
     return out.size() / 2;
 }

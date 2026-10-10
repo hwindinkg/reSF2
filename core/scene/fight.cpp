@@ -412,6 +412,7 @@ void FightController::init_locks(
     // JS `cl.pmb`: each battle re-picks the `ERuleRandom` children (`pn.M4`).
     random_pick_.clear();
     random_pick_done_ = false;
+    qmb_done_ = false;
 
     // NOTE (W2 blocker): the move-LIST weapon subtype stays "Fists". The JS
     // derives it from the equipped weapon (`xc.cM` L809-810 -> `ra.Hza`
@@ -2429,6 +2430,18 @@ void FightController::rules_begin_round(int round) {
             random_pick_[gid] = pick;
         }
         random_pick_done_ = true;
+        // JS `cl.qmb` (L724359): `$Ja` (L723864) runs `pmb()` THEN `qmb()`,
+        // each reseeding the shared `Da.pg` from ONE draw
+        // (`Da.IT(ob?ob.Qm|ob.fv : 2147483647*Da.pg.jf()|0)`). The port
+        // modeled only the `pmb` reseed; `qmb` adds the SECOND reseed (the
+        // single-battle port has no `<Warriors>` roster `qpa`, so only the
+        // reseed applies). Shipped single fights: `ob==null` -> random path.
+        if (!qmb_done_) {
+            const int seed2 = static_cast<int>(
+                2147483647.0 * static_cast<double>(draw01()));
+            reseed_stream(seed2);
+            qmb_done_ = true;
+        }
         for (FightRule& r : rules_) {
             if (r.random_group < 0) continue;
             const auto it = random_pick_.find(r.random_group);
@@ -4340,6 +4353,49 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
             magic_fx_.stop_follow(nm, (owner_side == 0) ? 0 : 1);
             bus_.log("stopfolloweffect " + nm);
         }
+    } else if (type == "SetDarkness") {
+        // JS `Zp` (type 25, L712177) -> `opb` (L665335): `ca.Ka().Nqb(color,
+        // Yza, show)` installs the `bu` overlay (L220406); `Qh` (L220546)
+        // ramps its alpha. The JS quad is created BLACK (`R.Ed(-16777216)`,
+        // L423188) and the perk `Color` is stored but never read, so the
+        // overlay is black regardless of the {255,255,255,255} attr.
+        overlay_.active = true;
+        overlay_.frames = static_cast<int>(num("FrameTimer", 0.0));
+        overlay_.show = num("Show", 0.0) != 0.0;
+        overlay_.aa = 0;
+        overlay_.alpha = 0.0f;
+    } else if (type == "MoveModel") {
+        // JS `Wp` (type 31, L709325) -> `S` (L710...): build the `Ow` tween
+        // (L710...) on the OWNER model. `From`/`To` pick the start/target
+        // fighter (RV==2 / TX!=1 -> foe); `PositionOffsetX` is scaled by the
+        // START fighter's facing; `Axis` locks the lerped axes; `LerpSpeed`
+        // is the per-frame step (default .05). Shipped PERK_TIME_SURGE:
+        // From=Me, Target=Me, Axis=X -> shift the owner by facing*offsetX.
+        FightFighter& own = (owner_side == 0) ? player_ : enemy_;
+        FightFighter& opp = (owner_side == 0) ? enemy_ : player_;
+        const std::string from_s = str("FromPlayer");
+        const std::string to_s = str("ToPlayer");
+        const bool from_foe = (from_s == "Enemy" || from_s == "2");
+        const bool to_foe = (to_s == "Enemy" || to_s == "2");
+        FightFighter& sf = from_foe ? opp : own;
+        FightFighter& tf = to_foe ? opp : own;
+        const float dx = static_cast<float>(
+            sf.fighter.facing() * num("PositionOffsetX", 0.0) +
+            (tf.fighter.world_x() - sf.fighter.world_x()));
+        const float dy = static_cast<float>(
+            num("PositionOffsetY", 0.0) +
+            (tf.fighter.world_y() - sf.fighter.world_y()));
+        ModelTween& tw = move_tween_[owner_side & 1];
+        tw.active = true;
+        tw.dx = dx;
+        tw.dy = dy;
+        tw.progress = 0.0f;
+        const double ls = num("LerpSpeed", 0.05);
+        tw.step = static_cast<float>(ls > 0.0 ? ls : 0.05);
+        const std::string ax = str("Axis");
+        tw.axis_x = ax.find('X') != std::string::npos;
+        tw.axis_y = ax.find('Y') != std::string::npos;
+        own.fighter.set_model_offset(0.0f, 0.0f);
     } else if (is_combat_action(type)) {
         bus_.log("perknoop " + type + " (outside hit scope, OPEN)");
     } else {
@@ -7096,6 +7152,39 @@ void FightController::update(float dt) {
     // 60 Hz sim frame. Stepping here (not in the uncapped render loop) keeps
     // the fade/pulse period frame-exact.
     advance_perk_icons();
+    // JS `bu.Qh` (L220546): the `SetDarkness` screen-overlay alpha ramp, once
+    // per frame (the JS `ca.ia` update calls `this.mV.Qh(this.Ta)` L195951).
+    if (overlay_.active && overlay_.aa >= 0) {
+        if (overlay_.frames == 0) {
+            overlay_.alpha = 1.0f;
+        } else {
+            float b = 1.0f / static_cast<float>(overlay_.frames);
+            float c = 0.0f;
+            if (!overlay_.show) {
+                b = -b;
+                c = 1.0f;
+            }
+            if (overlay_.aa < overlay_.frames) {
+                overlay_.alpha = c + b;
+                ++overlay_.aa;
+            } else {
+                overlay_.aa = -1;
+            }
+        }
+    }
+    // JS `Ow.update` (L710...): the `MoveModel` tween, once per frame.
+    for (int s = 0; s < 2; ++s) {
+        ModelTween& tw = move_tween_[s];
+        if (!tw.active) continue;
+        FightFighter& f = (s == 0) ? player_ : enemy_;
+        float a = tw.progress;
+        if (a < 0.0f) a = 0.0f;
+        if (a > 1.0f) a = 1.0f;
+        f.fighter.set_model_offset(tw.axis_x ? tw.dx * a : 0.0f,
+                                   tw.axis_y ? tw.dy * a : 0.0f);
+        tw.progress += tw.step;
+        if (tw.progress >= 1.0f) tw.active = false;
+    }
     // [fx] The particle pool + the hit judder/hit-stop tick (presentation
     // only — runs even after the battle ends so the KO burst finishes and
     // the camera kick settles back to 0; neither touches the simulation).
