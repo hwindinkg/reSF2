@@ -937,3 +937,70 @@ registration (.Am L623868 if(p.o.yN||v.qZa(-a.d4))) is not modelled in
 the map launch (MapScreen::start_battle, screens.cpp:9204) - deferred by prior
 waves as map/UI scope; implementing it would deplete the multi-fight headless
 tours and needs the yN (Unlimited_Energy) flag + q5/uZa save plumbing first.
+
+## WAVE (2026-10-10): HUD-LAYOUT + MAGIC-VISUALS + REMAINING-OPEN re-audit
+
+Scope: (1) fight-HUD layout, (2) magic visuals/projectiles, (3) remaining
+OPEN/TODO/BLOCKED markers in core/. Method: JS-verbatim re-read
+(reference/www/sf2.502f0946.js) + port comparison + oracle/port PNG pixel-diff
++ all gates + --fx-probe.
+
+Item 1 (fight-HUD layout). JS `Sf.layout` (@1048833), VERBATIM:
+  `let b=a.N-a.J; var c=b/(a.W-a.P); let d=c<.4?.4:c>1.5?1.5:c;
+   c=Math.min(a.N-a.J,a.W-a.P)/2; let e=d<1?1:d>1.1?1.1:d, f=c*.07;
+   d<1&&(f+=(1-d)*200); let g=1+((d<1?1:d>1.5?1.5:d)-1)/.5*.1; c=c/675*g;
+   this.Id.node.C((a.J+a.N)*.5-520*c*e); this.Id.node.D(a.P+150*c+f*g);
+   ... this.Kp.C(b/2); this.Kp.D(this.Id.node.ra-120*c); this.Kp.ua(120*c);
+   ... this.Jn.node.D(this.Id.node.ra+(a<0?0:a>1?1:a)*25); this.Jn.node.la(c*.8);
+   a=135*c; this.RH.J=b/2-a*3.5/2; this.RH.N=b/2+a*3.5/2;
+   this.RH.P=this.Jn.node.ra+100*c; this.RH.W=this.RH.P+a;
+   this.ck!=null&&(this.ck.node.C(b/2),this.ck.node.D(this.Jn.node.ra+100*c),
+   this.ck.node.la(c*.65))`.
+Port screens.cpp:14153-14199 reproduces b/d/e/f/g/c and the panel/Kp/OA/Jn/RH
+positions 1:1; `lk.bMa` bar `uL(330)`/`Pb(43)` at ±295, `Er` pip width
+`n6==2?40:32` pitch 1.5e, `BL(25*(type==0?-1:1))` skew, `Hr`/`Ir` perk stack
+(185/140 local, `Vnb` spacing.x*.2, `Ir.l4` pulse + `Kab`/`t2a` fade). RH is
+consumed by the achievement toast (`ur.aa` `Sf.W4a()`; screens.cpp:13226-13238).
+Live geometry log @1280x720: `kq=(0,1280,0,720) c=0.58667 bar_w=193.6 bar_y=86.4`
+matches the JS algebra exactly (c0=360, f=25.2, g=1.1). Oracle/port PNG delta
+(fight_stance, HUD band y0..200): player bar fill oracle x[394,567] vs port
+[397,573], enemy oracle [712,884] vs port [706,882]; timer ink oracle
+x[620,661]y[33,63] vs port x[622,672]y[35,62] (port digits.fnt is ~2px shorter /
+~9px wider - a glyph-metric property of the shipped .fnt, not a scale error:
+JS `ua(120*c)`=70.4px vs the empirical 86*c/90, both calibrated to the oracle
+ink height). No layout divergence -> NOT changed.
+
+Item 2 (magic visuals/projectiles). JS `Yl` (@371340) `parse` reads
+Name/Sequence/Scale/TimeScale(NL)/Looped(wcb)/OnBackground(Gfb)/Backwards(lYa)/
+ScaleX/Y/StartRotation(Vla)/PackName/Attach/Position; `Uh(a){a.gwb(this)}` ->
+`gwb(a){a.model=this;this.Nt.Z(a);a.model=null}` (the effect container). `Vl`
+(AddBullets @369808) `Tvb`: `s6==0` MagicBullet -> `hZ(value)+LA()`, `s6==1`
+RaidChargeBullet -> `vZa(value)+Amb()` - these are fighter COUNTERS (`bh`/`dO`),
+not projectile entities; the visual IS the `Effect` sequence. Port fight.cpp
+Tvb models the counters; magic_effects.* carries the `ni` frame runs. --fx-probe:
+`magic atlases=79 frames=2011 real_spawn=1 real_frame=effect_fall_1 -> PASS`,
+`attach=(105,48)->(205,68) attach_ok=1`, `stopeffect_destroyed=1
+stopfollow_alive=1 detached=1 finished_empty=1 -> PASS`. Descriptor build:
+`254 loaded (rows=467 resolved=254 unresolved=213 shared-names=160 split-names=44
+atlas-sets=79)` - the 213 unresolved rows reference DLC-pack atlases genuinely
+absent from res/magic_ktx.72456186.dat; every shipped atlas (79/79) resolves.
+No divergence -> NOT changed.
+
+Item 3 (remaining OPEN markers). core/ OPEN/TODO/BLOCKED/not-modelled markers
+re-read against the JS; none is a NEW confirmed divergence. Tracked, NOT
+regressions: settings-font `eF` per-language size split (screens.cpp:443, port
+choice measured CLOSER to the oracle: 26.41 vs 26.89 %pix>12); standalone
+Results `ma.Kq.P/W` (screens.cpp:15575, no live camera); trigger.hpp OPEN
+evaluators (DamageConverter/frame-in-animation/rule bounds); fight.hpp rule
+effects (`qmb`/`BVa`/`hh`); the perk-icon geometry note in damage.hpp:352 is
+STALE (the perk-icon HUD IS drawn at screens.cpp:14615+); `vd` sub-fighters +
+VS brush remain OPEN from prior waves.
+
+Gates (this wave, RULE 0 hidden + --watchdog, save backed up): --verify-input
+7/7 PASS; --input-tape 0 FAIL; --flow-verify 20/20; --ui-tour ALL 15 STEPS DONE;
+--fidelity-tour ALL 40 STEPS DONE; --headless-loop ALL 13 STEPS DONE;
+--boss-hit-probe HIT; --quest-verify PASS; --settings-profile-shop-probe PASS
+(0 fail); --fx-probe PASS. Incremental Release build 0 errors. Determinism:
+regenerated reference/traces/port_matrix/* byte-identical to HEAD (clean tree).
+VERDICT: no new confirmed code divergence; HUD-layout + magic-visuals OPEN
+items verified CLOSED (JS-exact); docs-only commit.
