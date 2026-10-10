@@ -911,3 +911,29 @@ conditions legitimately block the reminder (fires only once
 premise ("first condition now resolves true") is incorrect; no condition other
 than cond0 blocks it. Build: incremental Release, 0 errors. COMMIT+PUSH per
 orchestrator (STATE.md untouched).
+
+
+## FRESH BROAD DIVERGENCE SWEEP (2026-10-10, wave sweep-50+)
+
+Scope: fight/round/reaction, AI, rewards/achievements, quest engine,
+map/shop/profile UI, model/animation, audio, save, input, dialogs/tutorial.
+Method: JS-verbatim re-read (reference/www/sf2.502f0946.js) + port comparison +
+all gates + oracle/port PNG pixel-diff (reference/traces/{oracle,port}_matrix).
+
+Result: NO NEW confirmed code divergence. Every area is either JS-exact or
+carries a PREVIOUSLY documented OPEN (vd sub-fighters, entry energy qZa/uZa,
+HUD per-pixel layout, magic visuals, VS brush). Verified JS-exact this wave:
+- achievement counter flush (yt.ika cap-on-VALUE for WinBattle) + claim
+  sound rb.U3->snd_buy (screens.cpp:19830 before achiev_claim);
+- RandomSound pick = Math.random (fight.cpp:561), not round-robin;
+- style_name_by_level (trigger.hpp:107) is dead code (JS ZBa is name->level);
+- battle_music stages.xml zone-scoped lookup; audio bus muting.
+Oracle/port PNG diff (phase-1 captures, stale timing): loader 0.9%, settings
+5.8%, profile_tab0 7.5%, map 11.5%, shop_tab1 12.0%; dynamic fight/results
+frames differ (30-50%) as expected for unsynced captures.
+
+Remaining OPEN (tracked, NOT regressions): entry energy spend on battle
+registration (.Am L623868 if(p.o.yN||v.qZa(-a.d4))) is not modelled in
+the map launch (MapScreen::start_battle, screens.cpp:9204) - deferred by prior
+waves as map/UI scope; implementing it would deplete the multi-fight headless
+tours and needs the yN (Unlimited_Energy) flag + q5/uZa save plumbing first.
