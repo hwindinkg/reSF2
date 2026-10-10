@@ -1192,6 +1192,16 @@ struct FightFighter {
     // `I.Vh`, `vzb` L108540); `ranged_available` is its negation. Fed by
     // the equipment setup; defaults true (no NoRanged item -> K0 = -1).
     bool ranged_available = true;
+    // JS `kc.d$a()` (L820): `this.Mg != null && this.Mg.name != v.wea("Magic")`.
+    // `Mg` is the equipped Magic slot (type `I.Cf`); `wea("Magic")` resolves
+    // the DefaultItems Magic NAME "NoMagic" (internal_settings.xml L100,
+    // `v.fjb` L? over `<DefaultItems>`). So the Magic button (`Eg`) is
+    // VISIBLE only when a real (non-NoMagic) magic item is equipped — the
+    // exact twin of `ranged_available` (`kc.f$a()`: `ig.name != "NoRanged"`).
+    // JS `Za.refresh(a,b)` (L458) feeds `DMa(a)`/`FMa(b)` -> `Eg.X`/`di.X`
+    // (node visibility); `DEa` (L459) then blocks controls 12/11. Fed by the
+    // same equipment setup as `ranged_available`.
+    bool magic_available = true;
     int hits_landed = 0;
     int hits_taken = 0;
     // JS `xc.cE` (L411256 default true; cleared by the hit resolver

@@ -2861,6 +2861,9 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
         if (ow.name == "NoRanged" || ow.subtype == "NoRanged" || ow.type == "NoRanged") {
             enemy_.ranged_available = false;
         }
+        if (ow.name == "NoMagic" || ow.subtype == "NoMagic" || ow.type == "NoMagic") {
+            enemy_.magic_available = false;
+        }
     }
     std::fprintf(stdout,
                  "[ai] enemy ranged_available=%d -> K2=%d (owned items=%zu)\n",
@@ -2925,6 +2928,10 @@ void FightController::spawn_next_enemy_wave() {
         if (ow.name == "NoRanged" || ow.subtype == "NoRanged" ||
             ow.type == "NoRanged") {
             enemy_.ranged_available = false;
+        }
+        if (ow.name == "NoMagic" || ow.subtype == "NoMagic" ||
+            ow.type == "NoMagic") {
+            enemy_.magic_available = false;
         }
     }
     sample_enemy_idle();
@@ -3836,8 +3843,20 @@ void FightController::setup_bus(const PerkSetup& perks) {
         }
         return false;
     };
+    // JS `kc.d$a()` (L820) twin of the Ranged flag: `Mg != null &&
+    // Mg.name != wea("Magic")`, `wea("Magic")` = the DefaultItems Magic NAME
+    // "NoMagic" (internal_settings.xml L100). So `magic_available` is the
+    // negation of "the equipped Magic slot is the NoMagic placeholder".
+    auto has_nomagic = [](const std::vector<std::string>& items) {
+        for (const std::string& n : items) {
+            if (n == "NoMagic") return true;
+        }
+        return false;
+    };
     player_.ranged_available = !has_noranged(player_items_);
     enemy_.ranged_available = !has_noranged(enemy_items_);
+    player_.magic_available = !has_nomagic(player_items_);
+    enemy_.magic_available = !has_nomagic(enemy_items_);
     if (perks.catalog == nullptr) return;
     // JS `Wk` L811-812: `let a=m.l(); m.addRange(a,this.AK); m.addRange(a,
     // this.TE); ... this.Mja(a,this.ZR)` — the save's LEARNED perks

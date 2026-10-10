@@ -1767,7 +1767,15 @@ static void update_pad_input(App& app, sf2::scene::FightController* fight,
     const float py = static_cast<float>(p.y);
     if (p.pressed && !st.joy_grabbed) {
         // JS `fu.nia` (L229772) walks `this.Cd` = [fh(kick), Si(punch),
-        // di(ranged), Eg(magic)] and takes the FIRST circle hit.
+        // di(ranged), Eg(magic)] and takes the FIRST circle hit — but `uab`
+        // first requires `a.node.dg()` (the node is VISIBLE), so a button
+        // hidden by `Za.refresh` (`di.X`/`Eg.X`) never takes a hit. Ranged
+        // (slot 11) needs a real Ranged item (`kc.f$a()`), Magic (slot 12) a
+        // real Magic item (`kc.d$a()`); the JS `DEa` gate blocks them too.
+        const bool has_ranged =
+            fight != nullptr ? fight->player().ranged_available : true;
+        const bool has_magic =
+            fight != nullptr ? fight->player().magic_available : true;
         auto hit = [&](float cx, float cy) {
             const float dx = px - cx;
             const float dy = py - cy;
@@ -1781,11 +1789,11 @@ static void update_pad_input(App& app, sf2::scene::FightController* fight,
             st.btn_punch_down = true;
             key(sf2::scene::key_type::punch, sf2::scene::press_type::tap);
             std::fprintf(stdout, "[%s] player input -> punch (pad)\n", tag);
-        } else if (hit(pad.ranged_cx, pad.ranged_cy)) {
+        } else if (has_ranged && hit(pad.ranged_cx, pad.ranged_cy)) {
             st.btn_ranged_down = true;
             key(sf2::scene::key_type::ranged, sf2::scene::press_type::tap);
             std::fprintf(stdout, "[%s] player input -> ranged (pad)\n", tag);
-        } else if (hit(pad.magic_cx, pad.magic_cy)) {
+        } else if (has_magic && hit(pad.magic_cx, pad.magic_cy)) {
             st.btn_magic_down = true;
             key(sf2::scene::key_type::magic, sf2::scene::press_type::tap);
             std::fprintf(stdout, "[%s] player input -> magic (pad)\n", tag);
@@ -7712,7 +7720,8 @@ static void draw_ability_ring(App& app, float cx, float cy, float scale,
 // uses. The hub's pad is wired to its `FightNone` controller (see
 // DojoScreen::update_impl / draw_dojo_figure callers).
 void draw_dojo_gamepad(App& app, const PadInputState& pad_in,
-                       const sf2::scene::FightController::AbilityPad* ap) {
+                       const sf2::scene::FightController::AbilityPad* ap,
+                       bool has_ranged = true, bool has_magic = true) {
     const GamepadLayout pad;
     const float base_size = pad.joy_r * 2.0f;
     const float knob_size = pad.knob_r * 2.0f;
@@ -7743,7 +7752,12 @@ void draw_dojo_gamepad(App& app, const PadInputState& pad_in,
     static const char* kAct[4] = {"btn_punch_action", "btn_kick_action",
                                   "btn_throw_action", "btn_magic_action"};
     static const bool kHasRing[4] = {false, false, true, true};
+    // JS `Za.refresh(a,b)` (L458): the Ranged (`di`, slot 11) and Magic (`Eg`,
+    // slot 12) buttons are visible ONLY when the loadout has a real item
+    // (`kc.f$a()`/`kc.d$a()`); Punch/Kick are always visible. Hidden buttons
+    // draw nothing and take no hits (`fu.uab` `a.node.dg()`).
     for (int i = 0; i < 4; ++i) {
+        if ((i == 2 && !has_ranged) || (i == 3 && !has_magic)) continue;
         try_draw_atlas_button(app, bdown[i] ? kAct[i] : kNorm[i], bcx[i],
                               bcy[i], btn_size, btn_size, 1.0f);
         if (kHasRing[i]) {
@@ -8994,9 +9008,16 @@ void DojoScreen::render_impl(App& app) {
         // the port's 51.0/48.3), the oracle `dojo_hub` shows it (59.6~62.4).
         if (app.screens().top() == this && !g_settings_dialog_open &&
             quest_modal_top(app) == nullptr) {
+            // JS `Za.refresh(a,b)`: the Ranged/Magic buttons follow the
+            // controller's own loadout (`kc.f$a()`/`kc.d$a()`).
+            const bool d_ranged =
+                dojo_fight_ ? dojo_fight_->player().ranged_available : true;
+            const bool d_magic =
+                dojo_fight_ ? dojo_fight_->player().magic_available : true;
             draw_dojo_gamepad(app, dojo_pad_,
                               dojo_fight_ ? &dojo_fight_->ability_pad()
-                                          : nullptr);
+                                          : nullptr,
+                              d_ranged, d_magic);
         }
         // Shared `za` chrome (topPanel + wr/xr/yr widgets + the vertical nav
         // column) — the JS `ma.D1` chrome on every shell screen
@@ -12427,6 +12448,15 @@ void FightScreen::on_key(int glfw_key, bool down) {
     }
     last_input_key_type_ = kt_id;
     if (kt_id == 0) return;
+    // JS `Za.DEa` (L459): the keyboard feeds the SAME `hS` handler as the
+    // on-screen pad, so control 11 (Ranged) is blocked without a real Ranged
+    // item and control 12 (Magic) without a real Magic item.
+    if (kt_id == 11 && fight_ != nullptr && !fight_->player().ranged_available) {
+        return;
+    }
+    if (kt_id == 12 && fight_ != nullptr && !fight_->player().magic_available) {
+        return;
+    }
     sf2::scene::key_type kt = static_cast<sf2::scene::key_type>(kt_id);
     const int idx = static_cast<int>(kt);
     if (idx < 0 || idx >= 16) return;
@@ -12485,6 +12515,17 @@ void FightScreen::evaluate_gamepad_bindings() {
     }
     for (const GamepadBinding& b : kGamepadBindings) {
         if (b.control <= 8) continue;
+        // JS `Za.DEa` (L459): control 11 (Ranged) is blocked when `!xra`
+        // (no real Ranged item) and control 12 (Magic) when `!ora` (no real
+        // Magic item). `xra`/`ora` are the `kc.f$a()`/`kc.d$a()` flags.
+        if (b.control == 11 && fight_ != nullptr &&
+            !fight_->player().ranged_available) {
+            continue;
+        }
+        if (b.control == 12 && fight_ != nullptr &&
+            !fight_->player().magic_available) {
+            continue;
+        }
         const bool now = pad_held_.count(b.a) != 0;
         if (now == pad_btn_down_[b.control]) continue;
         pad_btn_down_[b.control] = now;
@@ -12933,10 +12974,24 @@ void FightScreen::draw_gamepad(App& app) const {
     // `Uua()` runs for di (ranged) + Eg (magic) ONLY: they alone carry the
     // `magic_full` overlay (`oH`) and the `magic_progress` ring (`jv`).
     static const bool kHasRing[4] = {false, false, true, true};
+    // JS `Za.refresh(a,b)` (L458): `EMa(!0);BMa(!0);Ntb();DMa(a);FMa(b)`.
+    // `DMa(a){this.ora=a;this.sg.jvb(a)}` -> `jvb(a){this.Eg.X(a)}` and
+    // `FMa(b){this.xra=b;this.sg.rvb(b)}` -> `rvb(a){this.di.X(a)}`, where
+    // `X(a){this.node.R(a)}` is node VISIBILITY. `a = kc.d$a()` (a real Magic
+    // item: `Mg.name != "NoMagic"`) and `b = kc.f$a()` (a real Ranged item:
+    // `ig.name != "NoRanged"`). So the Magic (`Eg`, slot 12) and Ranged (`di`,
+    // slot 11) buttons are drawn ONLY when equipped; Punch (`Si`) and Kick
+    // (`fh`) are always visible (`EMa(!0)`/`BMa(!0)`). The port previously
+    // drew all four unconditionally.
+    const bool has_ranged = fight_->player().ranged_available;
+    const bool has_magic = fight_->player().magic_available;
     constexpr float kPi = 3.14159265358979323846f;
     constexpr int kSegs = 14;
     const float step = 2.0f * kPi / static_cast<float>(kSegs);
     for (int i = 0; i < 4; ++i) {
+        // Hidden buttons (`node.R(false)`) draw nothing AND take no hits
+        // (JS `fu.uab`: `if(!a.node.dg())return!1`).
+        if ((i == 2 && !has_ranged) || (i == 3 && !has_magic)) continue;
         // JS append order: button `Y`, then the `magic_full` overlay `oH`
         // (`o5`: visible when `Yx >= HW` = 100), then the ring `ita`.
         const bool drawn = try_draw_atlas_button(
