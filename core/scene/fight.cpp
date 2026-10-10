@@ -7395,11 +7395,19 @@ void FightController::dump_pose_frame() {
     // The dumped zoom = the LAYER zoom Bj (Ut.xCa) — what the oracle trace
     // records (its hook reads Ut.Al's this.Bj = 1.0 at the fight start),
     // NOT the camera zoom (Sya f = 1.3 at 16:9).
+    // The dumped cx/cy = the camera FOCUS (`ql.Go.ma`), NOT the render
+    // position. The oracle trace.js hook records `Ut.Al`'s first argument
+    // (`focus`, fed from `ql.c3a` -> `Go.ma`) and its `camFallback` reads
+    // `fight.Ta.Go.ma` — the SAME smoothed focus. The port's `go_x_/go_y_`
+    // (JS `Go.ma`) is that quantity; `center_x/center_y` is the Io-clamped
+    // RENDER camera (JS `K4` leaves position.y at 0), a different node, so
+    // dumping it made the camera column incomparable (cy 0 vs focus -101.5
+    // -> -222). Emit the focus to match the oracle's schema exactly.
     std::fprintf(pose_dump_file_,
                  "{\"t\":\"frame\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"
                  "\"cam\":{\"cx\":%.6f,\"cy\":%.6f,\"zoom\":%.6f},\"fighters\":[",
                  frame_, phase(), round_.number, round_.time_nf,
-                 camera_.center_x, camera_.center_y, camera_.zoom_layer);
+                 camera_.go_x_, camera_.go_y_, camera_.zoom_layer);
     for (int i = 0; i < 2; ++i) {
         const Fighter& f = fighters[i]->fighter;
         const std::vector<float>& pos = f.positions();
