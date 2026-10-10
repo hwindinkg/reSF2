@@ -605,6 +605,8 @@ public:
     // `Cl` one-shot at EVERY move start, including a repeat of the same
     // move (whose pointer is unchanged).
     int move_start_count() const { return move_start_count_; }
+    // Per-clip-start interrupt serial (JS `Te.Skb` L280074 `this.Pe && gh(...)`).
+    int interrupt_count() const { return interrupt_count_; }
     // Incremented when a move's clip ends (JS `Te.lS` -> the `EStopAnimation
     // Event`). The EndStance gate uses the edge to know the KO/lying chain (or
     // the `Loss_fall`/`Win_Fists` clip) has finished.
@@ -1035,6 +1037,11 @@ private:
     int move_end_frame_ = 0;
     // Incremented in `start_move_impl` (JS `Te.Skb` L551 -> `x3` -> `hob`).
     int move_start_count_ = 0;
+    // Incremented in `start_move_impl` when a move starts while another was
+    // still active (`Te.Skb` L280074: `this.Pe && gh("EAnimationInterrupted
+    // Event", a)`). The `EAnimationInterruptedEvent` -> fighter `kK` -> `lK`
+    // signal -> the perk-bus slot 11 (`Gj(model,11)`).
+    int interrupt_count_ = 0;
     // Incremented when a clip ends (`ended_move_` set in `advance_step`).
     int move_end_count_ = 0;
     // JS `Vu` (mu L249972) — the pending hit-reaction latch (`lrb`/`eob`).

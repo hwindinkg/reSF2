@@ -26,6 +26,7 @@
 //     `StopFollowEffect` are handled by `exec_action` but are not shipped
 //     `Ma` tags.)
 
+#include <functional>
 #include <map>
 #include <string>
 #include <utility>
@@ -43,6 +44,15 @@ struct PerkAction {
                  // `e6a`: 1→owner model, 2→foe model; default 1 = Me)
     std::map<std::string, double> num;    // Value/Multiplier/Frames/...
     std::map<std::string, std::string> str;  // names
+    // The RAW attribute strings (pre-`_Var`-substitution), so the action can be
+    // RE-substituted with the merged Set at equip time (`Be.clone` / the
+    // template-merge Set, JS `Hf.H2` L697632). Only the item-ref-override path
+    // reads these; a plain def action keeps its load-time `num`/`str`.
+    std::map<std::string, std::string> raw;
+    // The owning perk's merged `<Set>` numeric map (the `_X` operands of a
+    // `Qa` expression attribute, e.g. `SetHit Damage="?Hit[].Damage*_Factor"`).
+    // JS `Qa.oh` binds the perk Set via `Rsb` at parse (`Ma.parse` L703).
+    std::map<std::string, double> set_num;
 };
 
 // A ticking damage/heal mod (JS `znb`/`Inb`, L1290/L1298).
@@ -86,9 +96,15 @@ inline double perk_num(const PerkAction& a, const std::string& key, double def =
 // `atk_so`/`foe_so` feed Lifesteal's exact ratio (`apb` L1294:
 // `aM(model, VZ·Zi·(model.jb.so/model.so))` — heal = DamagePart × Zi ×
 // foe_so/atk_so; both default 1.0).
-inline PerkHitOutcome decide_hit_perks(const std::vector<PerkAction>& perks,
-                                       const HitRecord& rec, float atk_so = 1.0f,
-                                       float foe_so = 1.0f) {
+// `eval_damage` evaluates a NON-numeric `SetHit Damage` attribute (a `Qa`
+// expression, JS `$p.parse` L712: `this.Xb=Qa.oh(Damage)`, evaluated by
+// `ppb` L663774: `b.Xb.Wb().ou()` -> BOTH `bR` and `Zi`). Empty = dropped
+// (the old behaviour); `run_bus_hit` supplies the live evaluator.
+inline PerkHitOutcome decide_hit_perks(
+    const std::vector<PerkAction>& perks, const HitRecord& rec,
+    float atk_so = 1.0f, float foe_so = 1.0f,
+    const std::function<double(const PerkAction&, const std::string&)>&
+        eval_damage = {}) {
     PerkHitOutcome o;
     for (const PerkAction& a : perks) {
         const std::string& t = a.type;
@@ -112,6 +128,14 @@ inline PerkHitOutcome decide_hit_perks(const std::vector<PerkAction>& perks,
             if (a.num.count("Damage")) {
                 o.f_damage = static_cast<float>(a.num.at("Damage"));
                 o.has_damage = true;
+            } else if (eval_damage) {
+                // `$p.parse` put the non-numeric `Damage` in `a.str`; JS `ppb`
+                // evaluates `Xb` at hit time and sets BOTH `bR` and `Zi`.
+                const auto di = a.str.find("Damage");
+                if (di != a.str.end() && !di->second.empty()) {
+                    o.f_damage = static_cast<float>(eval_damage(a, di->second));
+                    o.has_damage = true;
+                }
             }
         } else if (t == "Lifesteal") {
             o.heal += static_cast<float>(perk_num(a, "DamagePart", 0.0) *

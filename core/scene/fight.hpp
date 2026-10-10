@@ -1540,6 +1540,11 @@ struct PerkSetup {
     // names as `learned`; the trigger bus (`Wk`) uses these with the Set.
     std::vector<sf2::scene::ItemPerkRef> learned_refs;
     const std::map<std::string, sf2::scene::TacticDef>* tactics = nullptr;
+    // Item name -> the perk names that item contributes (its catalog
+    // `<Perks>`/`<Enchantments>` rows). JS `ud.Oa` (the equipped item's perk
+    // list, filled at `$o`/`hk` L417600); read by `bc.FE` (L700207) to disable
+    // exactly the DROPPED weapon's triggers on the disarm (`Wqb` L268496).
+    std::map<std::string, std::vector<std::string>> item_perk_names;
 };
 
 // The fight controller (JS `ca` L379-433).
@@ -2165,6 +2170,9 @@ private:
     const std::map<std::string, sf2::scene::TacticDef>* tactic_defs_ = nullptr;
     std::vector<std::string> player_items_;  // equipped names (Item conds)
     std::vector<std::string> enemy_items_;
+    // Item name -> its perk names (`PerkSetup::item_perk_names`), for `bc.FE`
+    // (the disarm drop disables the DROPPED weapon's triggers, JS L700207).
+    std::map<std::string, std::vector<std::string>> item_perk_names_;
     PrizeFh prize_fh_;             // JS `Fh` (fresh per battle via kD)
     // The fighter mesh fill color (the location Root Color; default black).
     std::uint32_t fighter_color_ = 0x000000u;
@@ -2230,6 +2238,9 @@ private:
     // (unchanged pointer) also re-tests.
     std::map<std::string, std::pair<const void*, const void*>> cl_last_;
     std::map<std::string, int> cl_move_;
+    // Per-move interrupt serial (`Fighter::interrupt_count()`), keyed like
+    // `cl_move_`; a change publishes perk-bus slot 11 (AnimationInterrupted).
+    std::map<std::string, int> cl_intr_;
     bool hit_audit_ = false;  // `[hitaudit]` per-frame hit row probe
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
@@ -2614,6 +2625,12 @@ private:
                      int owner_side, int depth = 0);
     // EveryFrame tick + mod `ia` tick + interval edge detect for one side.
     void tick_bus_side(int side);
+    // Fire one perk-bus slot with `vars` and execute the drained actions
+    // (the non-hit path: `Gj` -> `v_a` -> `lY` -> `Qh` -> `exec_action`).
+    // Used by the animation-event publishers (slots 9/10/11) and the combo
+    // signal (slot 4).
+    void fire_bus_slot(int slot, const sf2::scene::TrigVars& vars, int side,
+                       bool has_info = true);
     // `ia` mod tick for one side (Uf countdown, JNa, slot-14 publish).
     void tick_mods(int side);
     // Shared JNa state bindings for the mod tick.

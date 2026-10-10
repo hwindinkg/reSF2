@@ -6354,7 +6354,9 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
     const auto add_items = [&catalog](
                                const std::vector<std::string>& names,
                                std::vector<std::string>& out_names,
-                               std::vector<sf2::scene::ItemPerkRef>& out_refs) {
+                               std::vector<sf2::scene::ItemPerkRef>& out_refs,
+                               std::map<std::string, std::vector<std::string>>&
+                                   out_item_perks) {
         for (const std::string& name : names) {
             if (name.empty()) continue;
             for (const CatalogItem& ci : catalog) {
@@ -6367,6 +6369,10 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
                     scene_ref.set_str = ref.set_str;
                     scene_ref.enchant = ref.enchant;
                     out_refs.push_back(std::move(scene_ref));
+                    // JS `ud.Oa` per item (`$o` L417600 `f.Oa.push(k)`), read
+                    // by `bc.FE` on the disarm to disable the DROPPED weapon's
+                    // triggers.
+                    out_item_perks[name].push_back(ref.name);
                 }
                 break;
             }
@@ -6383,7 +6389,7 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
         ref.set_str = pr.set;
         ps.enemy_refs.push_back(std::move(ref));
     }
-    add_items(enemy.items, ps.enemy_items, ps.enemy_refs);
+    add_items(enemy.items, ps.enemy_items, ps.enemy_refs, ps.item_perk_names);
     std::fprintf(stdout,
                  "[perk] enemy loadout: warrior perks=%zu items=%zu -> refs=%zu\n",
                  enemy.perks.size(), enemy.items.size(), ps.enemy_refs.size());
@@ -6411,7 +6417,7 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
         ref.set_str = pr.set;  // `<Set>` override (JS `Ji.vva`)
         ps.learned_refs.push_back(std::move(ref));
     }
-    add_items(equipped, ps.player_items, ps.player_refs);
+    add_items(equipped, ps.player_items, ps.player_refs, ps.item_perk_names);
     return ps;
 }
 

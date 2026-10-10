@@ -713,6 +713,19 @@ inline bool match_event(const TrigEvent& e, const TrigVars& v, int entry_side,
             const bool tok = e.interval_type == 0 || e.interval_type == itype;
             r = nok && tok;
         }
+    } else if (e.type == kEvAnimStart || e.type == kEvAnimEnd ||
+               e.type == kEvAnimIntr) {
+        // `Km`/`Gc` animation events (L766/L671): scope gate then the
+        // `Animation` attr vs the fired animation name. JS `Km.compare`
+        // accepts `Ki==""` or `Ki` in the owner's animation list; the fired
+        // `Animation` var IS that move name, so a direct compare suffices.
+        if (e.ob == 1 && entry_side != fired_side) r = false;
+        else if (e.ob == 2 && entry_side == fired_side) r = false;
+        else {
+            const auto ai = v.str.find("Animation");
+            const std::string iname = ai != v.str.end() ? ai->second : "";
+            r = e.animation.empty() || e.animation == iname;
+        }
     } else if (e.type == kEvModExpires) {
         // `Dp.isEqual`: empty Jd → name compare; else namespace compare.
         // Vars carry ModExpires/Namespace (JNa stamps, L1299).
@@ -874,6 +887,27 @@ class TrigBus {
         for (const PerkTrigger& t : s.triggers) {
             if (t.enabled && !t.name.empty() && t.name == sl) {
                 for (const PerkAction& a : t.actions) out.emplace_back(t, a);
+            }
+        }
+    }
+
+    // `bc.FE(a)` (L700207): disable a model's triggers + purge its queued `Fw`
+    // entries. JS iterates the item's `Oa` (the perk refs the dropped weapon
+    // contributed) and, for each, disables the matching `Kw` trigger entry
+    // (`Srb`) and clears every queued action whose trigger is that perk
+    // (`g.St.nb == d -> g.pP(!0)`). The port keys a trigger by its owning perk
+    // (`PerkTrigger.perk`), so `perks` is that name set.
+    void disable_by_perks(int side, const std::set<std::string>& perks) {
+        if (perks.empty()) return;
+        BusSide& s = sides_[side & 1];
+        for (PerkTrigger& t : s.triggers) {
+            if (perks.count(t.perk)) t.enabled = false;
+        }
+        for (auto it = s.deferred.begin(); it != s.deferred.end();) {
+            if (perks.count(it->first.perk)) {
+                it = s.deferred.erase(it);
+            } else {
+                ++it;
             }
         }
     }
@@ -1112,10 +1146,12 @@ inline PerkAction load_perk_action(const pugi::xml_node& e,
                                    const std::map<std::string, std::string>& str) {
     PerkAction a;
     a.type = e.name();
+    a.set_num = num;
     a.ob = ob_by_player(load_str_attr(e, "Player", num, str));
     if (a.ob == 0) a.ob = 1;
     for (const pugi::xml_attribute at : e.attributes()) {
         const std::string key = at.name();
+        a.raw[key] = at.value();  // pre-substitution (equip re-substitution)
         const std::string v = subst_var(at.value(), num, str);
         try {
             std::size_t pos = 0;
@@ -1169,6 +1205,80 @@ inline std::map<std::string, PerkDef> parse_perks_xml(const std::string& xml_tex
     const pugi::xml_parse_result ok = doc.load_string(xml_text.c_str());
     if (!ok) return out;
     const pugi::xml_node root = doc.root().first_child();
+    // JS `Hf.y0a` (L697146) runs on the perks.xml document BEFORE `v.Rg.parse`
+    // (`Pdb` L594990): for each `<Perk Template=...>` it resolves the chain
+    // recursively (`Hf.qGa` L697949), merges each template's `<Set>` attrs into
+    // the outer perk's `<Set>` (outer wins, `Hf.H2` L697632) and appends the
+    // template's `<Trigger>` children (`Hf.Cha` L697780). The merged triggers
+    // are then parsed with the MERGED Set — so a template trigger's `_Var`
+    // tokens resolve against the OUTER perk's Set, not the template's own.
+    {
+        std::map<std::string, pugi::xml_node> by_name;
+        for (const pugi::xml_node p : root.children("Perk")) {
+            const char* n = p.attribute("Name") ? p.attribute("Name").value() : "";
+            if (*n != 0) by_name[n] = p;
+        }
+        auto split_pipe = [](const char* tv) {
+            std::vector<std::string> names;
+            std::string cur;
+            for (const char* q = tv; ; ++q) {
+                if (*q == '|' || *q == 0) {
+                    if (!cur.empty()) names.push_back(cur);
+                    cur.clear();
+                    if (*q == 0) break;
+                } else {
+                    cur += *q;
+                }
+            }
+            return names;
+        };
+        // `qGa`: clone the template into a scratch doc, recursively resolve ITS
+        // templates INTO the clone, return the clone (the original node is
+        // never mutated, so a perk reused as a template stays clean).
+        pugi::xml_document scratch;
+        std::function<pugi::xml_node(pugi::xml_node, int)> resolve_clone =
+            [&](pugi::xml_node tpl, int depth) -> pugi::xml_node {
+            pugi::xml_node c = scratch.append_copy(tpl);
+            if (depth > 64) return c;
+            const char* tv =
+                c.attribute("Template") ? c.attribute("Template").value() : "";
+            for (const std::string& nm : split_pipe(tv)) {
+                const auto it = by_name.find(nm);
+                if (it == by_name.end()) continue;
+                pugi::xml_node cc = resolve_clone(it->second, depth + 1);
+                pugi::xml_node cset = cc.child("Set");
+                if (cset) {
+                    pugi::xml_node dst = c.child("Set");
+                    if (!dst) dst = c.append_child("Set");
+                    for (pugi::xml_attribute a : cset.attributes()) {
+                        if (!dst.attribute(a.name()))
+                            dst.append_attribute(a.name()).set_value(a.value());
+                    }
+                }
+                for (pugi::xml_node tr : cc.children("Trigger")) c.append_copy(tr);
+            }
+            return c;
+        };
+        for (pugi::xml_node p : root.children("Perk")) {
+            const char* tv = p.attribute("Template") ? p.attribute("Template").value() : "";
+            if (*tv == 0) continue;
+            for (const std::string& nm : split_pipe(tv)) {
+                const auto it = by_name.find(nm);
+                if (it == by_name.end()) continue;
+                pugi::xml_node cc = resolve_clone(it->second, 0);
+                pugi::xml_node cset = cc.child("Set");
+                if (cset) {
+                    pugi::xml_node dst = p.child("Set");
+                    if (!dst) dst = p.append_child("Set");
+                    for (pugi::xml_attribute a : cset.attributes()) {
+                        if (!dst.attribute(a.name()))
+                            dst.append_attribute(a.name()).set_value(a.value());
+                    }
+                }
+                for (pugi::xml_node tr : cc.children("Trigger")) p.append_copy(tr);
+            }
+        }
+    }
     for (const pugi::xml_node p : root.children("Perk")) {
         PerkDef def;
         def.name = p.attribute("Name") ? p.attribute("Name").value() : "";
@@ -1193,19 +1303,6 @@ inline std::map<std::string, PerkDef> parse_perks_xml(const std::string& xml_tex
             def.triggers.push_back(load_trigger(t, def.name, def.set_num, def.set_str));
         }
         out[def.name] = std::move(def);
-    }
-    // Template merge: append the named perk's triggers (own Set applies —
-    // substitution already ran at the template's load; re-substitution
-    // with the outer Set is OPEN).
-    for (auto& kv : out) {
-        if (!kv.second.templ.empty()) {
-            const auto it = out.find(kv.second.templ);
-            if (it != out.end()) {
-                kv.second.triggers.insert(kv.second.triggers.end(),
-                                          it->second.triggers.begin(),
-                                          it->second.triggers.end());
-            }
-        }
     }
     return out;
 }
@@ -1238,39 +1335,35 @@ inline std::vector<PerkTrigger> build_side_triggers(
             out.insert(out.end(), def.triggers.begin(), def.triggers.end());
             continue;
         }
-        // Re-substitute with merged vars (item wins).
+        // Re-substitute with merged vars (item wins). JS `Be.clone(set,rating)`
+        // (L1329-1330) writes the save's `<Set>` OVER the def's, then the whole
+        // perk is parsed with the merged Set — so EVERY action attr (numeric or
+        // not) is re-substituted from its RAW XML value, not just still-literal
+        // `_Var` tokens.
         std::map<std::string, double> num = def.set_num;
         for (const auto& kv : ref.set_num) num[kv.first] = kv.second;
         std::map<std::string, std::string> str = def.set_str;
         for (const auto& kv : ref.set_str) str[kv.first] = kv.second;
-        // NOTE: triggers were substituted at catalog load; a merged
-        // re-substitution needs the raw XML (OPEN) — refs WITH overrides
-        // re-resolve only still-literal `_Var` tokens below.
         for (PerkTrigger t : def.triggers) {
             t.perk = def.name;
             for (PerkAction& a : t.actions) {
-                for (auto& kv : a.num) {
-                    (void)kv;
-                }
-                for (auto& kv : a.str) {
-                    if (!kv.second.empty() && kv.second[0] == '_') {
-                        kv.second = subst_var(kv.second, num, str);
-                        try {
-                            std::size_t pos = 0;
-                            const double d = std::stod(kv.second, &pos);
-                            if (pos == kv.second.size()) {
-                                a.num[kv.first] = d;
-                                kv.second = "";
-                            }
-                        } catch (...) {
+                a.set_num = num;  // the merged Set (Qa expr operands)
+                for (const auto& kv : a.raw) {
+                    const std::string v = subst_var(kv.second, num, str);
+                    bool numeric = false;
+                    try {
+                        std::size_t pos = 0;
+                        const double d = std::stod(v, &pos);
+                        if (pos == v.size()) {
+                            a.num[kv.first] = d;
+                            a.str.erase(kv.first);
+                            numeric = true;
                         }
+                    } catch (...) {
                     }
-                }
-                for (auto itn = a.str.begin(); itn != a.str.end();) {
-                    if (itn->second.empty()) {
-                        itn = a.str.erase(itn);
-                    } else {
-                        ++itn;
+                    if (!numeric) {
+                        a.num.erase(kv.first);
+                        a.str[kv.first] = v;
                     }
                 }
             }

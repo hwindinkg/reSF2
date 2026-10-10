@@ -782,6 +782,11 @@ struct SetValueCtx {
     double default_perks_aspect = 0.0;  // `?PlayerParameter[Me].DefaultPerksAspect`
     double damage_converter = 1.0;      // `?PlayerParameter[Me].DamageConverter`
     double enemy_damage_converter = 1.0;  // `?PlayerParameter[Enemy].DamageConverter`
+    // `?PlayerParameter[Me|Enemy].Health` (JS `Qa` -> `gd`, the ABSOLUTE hp).
+    // Shipped `SetHit Damage="?PlayerParameter[Me].Health"` perks.xml:3230 and
+    // `?Root[?PlayerParameter[Me].Health - _Health]` perks.xml:651 read it.
+    double me_health = 0.0;
+    double enemy_health = 0.0;
     double hit_damage = 0.0;            // `?Hit[].Damage`
     double hit_base_damage = 0.0;       // `?Hit[].BaseDamage`
     std::map<std::string, double> me_attrs;     // `?PlayerAttribute[Me].X`

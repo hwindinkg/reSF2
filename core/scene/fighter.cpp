@@ -1096,7 +1096,13 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
     }
 
+    const bool prev_move_active = current_move_ != nullptr;
     current_move_ = &move;
+    // JS `Te.Skb` (L280074): `this.Pe && this.gh("EAnimationInterruptedEvent",
+    // a)` — a new clip interrupting a still-active one. `Pe` is the animator's
+    // "a clip is playing" latch; the port's previous `current_move_` is the
+    // same state.
+    if (prev_move_active) ++interrupt_count_;
 
     // Clip lookup: FileName -> anim_archive entry (JS `jc.uja` L693 loads
     // the clip by `Eza` = FileName minus ".bytes"). Resolved BEFORE the

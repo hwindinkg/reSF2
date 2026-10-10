@@ -967,6 +967,16 @@ struct SetExpr {
                 ctx.fp != nullptr ? *ctx.fp : FightParams::defaults();
             return static_cast<double>(aspect_curve(static_cast<float>(v), fp));
         }
+        if (name == "Root") {
+            // `Qa.parse` (L1211312) wraps the whole expression in
+            // `?Root[...]`; the node is the identity over its inner expr.
+            // Shipped `SetHit Damage="?Root[...]"` (perks.xml:215/651/2758/3286).
+            SetExpr inner{arg, ctx};
+            auto r = inner.expr();
+            inner.skip();
+            if (!r || inner.pos != arg.size()) return std::nullopt;
+            return r;
+        }
         if (name == "CurrentFight" && field == "isRaid") {
             return std::optional<double>(ctx.is_raid ? 1.0 : 0.0);
         }
@@ -980,6 +990,12 @@ struct SetExpr {
                                                  ? ctx.enemy_damage_converter
                                                  : ctx.damage_converter);
             if (field == "Level") return std::optional<double>(ctx.level);
+            // `Pgb` (L686713) `case "Health": d.result = K.T(a.gd)` — the
+            // absolute HP (the `gd` field, same as the trigger `?PlayerParameter`
+            // `Health` operand in `trigger.hpp`).
+            if (field == "Health")
+                return std::optional<double>((arg == "Enemy") ? ctx.enemy_health
+                                                              : ctx.me_health);
             return std::nullopt;
         }
         if (name == "PlayerAttribute") {

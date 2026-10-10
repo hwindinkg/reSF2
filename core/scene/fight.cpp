@@ -3798,6 +3798,7 @@ void FightController::setup_bus(const PerkSetup& perks) {
     tactic_defs_ = perks.tactics;
     player_items_ = perks.player_items;
     enemy_items_ = perks.enemy_items;
+    item_perk_names_ = perks.item_perk_names;
     // JS `wd.K0` (L505): `parameters.ig != null && parameters.ig.Yb ==
     // "NoRanged" ? 1 : -1`. `parameters.ig` is the equipped item of the
     // NoRanged type (`vzb` L108540 maps type `I.Vh` -> name "NoRanged").
@@ -4367,8 +4368,44 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
             }
         }
         if (!rest.empty()) {
-            const sf2::scene::PerkHitOutcome po =
-                sf2::scene::decide_hit_perks(rest, rec, atk.params.so, def.params.so);
+            // `SetHit Damage=` non-numeric attributes (a `Qa` expression, JS
+            // `$p.parse` L712 `this.Xb=Qa.oh(Damage)` evaluated by `ppb`
+            // L663774 `b.Xb.Wb().ou()`). The evaluator reads the fired side's
+            // live operands (`?Hit[].Damage`, `?PlayerParameter[Me|Enemy]`,
+            // `?Variable`, the perk `<Set>` `_X`).
+            const int owner = s;
+            auto eval_damage = [this, hit_dmg, owner](
+                                   const sf2::scene::PerkAction& a,
+                                   const std::string& raw) -> double {
+                const sf2::scene::SetValueRuntime& rt =
+                    sf2::scene::set_value_runtime();
+                sf2::scene::SetValueCtx sc;
+                sc.fp = &sf2::scene::fight_params();
+                sc.level = rt.level;
+                sc.is_raid = rt.is_raid;
+                sc.is_player = true;
+                sc.default_perks_aspect = rt.default_perks_aspect;
+                sc.damage_converter = rt.damage_converter;
+                sc.enemy_damage_converter = rt.enemy_damage_converter;
+                sc.me_attrs = rt.me_attrs;
+                sc.enemy_attrs = rt.enemy_attrs;
+                sc.set_vals = a.set_num;
+                sc.hit_damage = hit_dmg;
+                sc.me_health = static_cast<double>(
+                    (owner == 0 ? player_ : enemy_).hp);
+                sc.enemy_health = static_cast<double>(
+                    (owner == 0 ? enemy_ : player_).hp);
+                for (const auto& kv : bus_.side(owner).q3) {
+                    sc.vars[kv.first] = kv.second;
+                }
+                sc.rand01 = [this]() { return draw01(); };
+                sc.aspect_scale = [](int level) {
+                    return sf2::scene::aspect_scale_for_level(level);
+                };
+                return sf2::scene::eval_set_value(raw, sc);
+            };
+            const sf2::scene::PerkHitOutcome po = sf2::scene::decide_hit_perks(
+                rest, rec, atk.params.so, def.params.so, eval_damage);
             if (po.has_critical) rec.critical = po.f_critical;
             if (po.has_block) rec.blocked = po.f_block;
             if (po.has_shock) rec.shock = po.f_shock;
@@ -4393,6 +4430,19 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
                 if (dst.hp < 0.0f) dst.hp = 0.0f;
             }
         }
+    }
+}
+
+// Fire one perk-bus slot and execute the drained actions (non-hit path).
+void FightController::fire_bus_slot(int slot, const sf2::scene::TrigVars& vars,
+                                    int side, bool has_info) {
+    bus_.fire(slot, vars, has_info, side & 1, cond_ctx(0), cond_ctx(1),
+              oba_phase(phase_), frame_);
+    for (int q = 0; q < 2; ++q) {
+        std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>>
+            pairs;
+        bus_.drain(q, pairs);
+        for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
     }
 }
 
@@ -5875,6 +5925,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         if (atk.combo_run >= fight_params().combo_min_hits) {
             atk.combo_j2 = atk.combo_announced = atk.combo_run;
             ++atk.combos_announced;
+            // Perk-bus slot 4 (Combo): JS `Gc.Ihb` (L215492) -> `this.tb.Gj(a,4)`
+            // (no `withInfo`, so the `Hc` gate is skipped — `xG.info=null`).
+            fire_bus_slot(sf2::scene::kEvCombo, sf2::scene::TrigVars(),
+                          atk.is_player ? 0 : 1, /*has_info=*/false);
             std::fprintf(stdout, "[fx] combo signal %d (F%d %s)\n",
                          atk.combo_announced, frame_, atk.name.c_str());
             std::fflush(stdout);
@@ -6057,9 +6111,32 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // (`Km.compare` L766 checks `Ki` against the owner's animation
             // list, which holds exactly this name).
             if (me.fighter.current_move() != nullptr) {
+                const int sd = &me == &player_ ? 0 : 1;
                 dispatch_global_triggers("AnimationStart", "AnimationStart",
                                          me.fighter.current_move()->name.c_str(),
-                                         &me == &player_ ? 0 : 1);
+                                         sd);
+                // Perk-bus slot 9 (AnimationStart): JS `Gc.Pf` (L196661) ->
+                // `this.tb.mg.set("Animation",a.data); this.tb.Gj(a.model,9)`.
+                sf2::scene::TrigVars av;
+                av.str["Animation"] = me.fighter.current_move()->name;
+                fire_bus_slot(sf2::scene::kEvAnimStart, av, sd);
+            }
+            // Perk-bus slot 11 (AnimationInterrupted): JS `Gc.kK` (L197074) ->
+            // `mg.set("Animation",a.data); Gj(a.model,11)`, fired when a new
+            // clip interrupts a still-active one (`Te.Skb` L280074). The
+            // interrupt serial changed this frame => the new move cut off the
+            // previous clip; the `Animation` payload is the NEW move.
+            const int icur = me.fighter.interrupt_count();
+            auto iit = cl_intr_.find(me.name);
+            if ((iit == cl_intr_.end() || iit->second != icur) &&
+                me.fighter.current_move() != nullptr) {
+                cl_intr_[me.name] = icur;
+                sf2::scene::TrigVars iv;
+                iv.str["Animation"] = me.fighter.current_move()->name;
+                fire_bus_slot(sf2::scene::kEvAnimIntr, iv,
+                              &me == &player_ ? 0 : 1);
+            } else if (iit != cl_intr_.end() && iit->second != icur) {
+                cl_intr_[me.name] = icur;
             }
         }
     }
@@ -6388,6 +6465,27 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          gfp.shock_impulse_y, gfp.shock_impulse_z,
                          me.fighter.active_tri_count());
             std::fflush(stdout);
+            // JS `Wqb` (L268496): after the item swap, `this.FE.Z(new
+            // uu(this,a.Oa))` -> the fight controller `FE(a){this.tb.FE(a)}`
+            // (L197206) -> `bc.FE` (L700207): disable the DROPPED weapon's
+            // triggers (`Srb`) and purge its queued `Fw` entries. `a.Oa` is the
+            // old weapon item's perk list.
+            {
+                const int sd = &me == &player_ ? 0 : 1;
+                std::set<std::string> drop_perks;
+                const auto pit = item_perk_names_.find(dropped);
+                if (pit != item_perk_names_.end()) {
+                    for (const std::string& n : pit->second) drop_perks.insert(n);
+                }
+                if (!drop_perks.empty()) {
+                    bus_.disable_by_perks(sd, drop_perks);
+                    std::fprintf(stdout,
+                                 "[perk] F%d %s bc.FE dropped='%s' perks=%zu\n",
+                                 frame_, me.name.c_str(), dropped.c_str(),
+                                 drop_perks.size());
+                    std::fflush(stdout);
+                }
+            }
         }
         // HUD style decay `ia()` (L2092): bar-only drain, levels never drop.
         static const StyleTable kStyleDecay =
@@ -6488,6 +6586,16 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // sides (`v_` moves `Yo -> Xb` and `gy -> tf`).
             foe.fighter.strike_memory().v_(true, ended);
             me.fighter.strike_memory().v_(false, ended);
+            // Perk-bus slot 10 (AnimationEnd): JS `Gc.kg` (L196842) ->
+            // `this.tb.mg.set("Animation",a.data); this.tb.Gj(a.model,10,!0)`,
+            // raised from `Te.lS` (`EStopAnimationEvent` -> `wd.eIa`). The
+            // `Animation` payload is the ended move's name.
+            {
+                sf2::scene::TrigVars ev;
+                ev.str["Animation"] = ended->name;
+                fire_bus_slot(sf2::scene::kEvAnimEnd, ev,
+                              &me == &player_ ? 0 : 1);
+            }
             std::vector<const sf2::scene::MoveAction*> end_acts;
             for (const sf2::scene::MoveAction& a : ended->actions) {
                 if (!a.frame_trigger && a.event == "AnimationEnd") end_acts.push_back(&a);
@@ -7160,6 +7268,12 @@ void FightController::update(float dt) {
                         fr->combo_run = 0;
                         fr->combo_announced = 0;
                         if (fr->combo_j2 >= combo_min_hits) {
+                            // Perk-bus slot 4 (Combo), the `iu.wyb` window-expiry
+                            // signal (`Jt.Z(Ui)` -> `Gc.Ihb` L215492 `Gj(a,4)`).
+                            fire_bus_slot(sf2::scene::kEvCombo,
+                                          sf2::scene::TrigVars(),
+                                          fr->is_player ? 0 : 1,
+                                          /*has_info=*/false);
                             std::fprintf(
                                 stdout,
                                 "[fx] combo signal 0 end (F%d %s run=%d)\n",
