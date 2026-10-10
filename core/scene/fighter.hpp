@@ -846,6 +846,15 @@ public:
 
     const Model& model() const { return model_; }
     const std::vector<float>& positions() const { return pos_; }  // x,y pairs
+    // [FIX phase-1 f=0 = bind] Overwrite the DRAWN pose (`pos_`) without
+    // touching the solver state (`sol_ma_`/`sol_mf_`). `FNa` (JS L409) shows
+    // the held bind pose at phase-1 f=0 while the first `wd.ia` step (f=1)
+    // seeds the solver; the port re-samples on the transition frame, so the
+    // drawn pose is restored to the held one while the solver keeps its step.
+    void set_drawn_positions(std::vector<float> p) {
+        pos_ = std::move(p);
+        pose_sampled_ = true;
+    }
 
     // JS `Te.Ic(name, facing)` (L549) consumed by `de.Wea` (L600): the world
     // x of the named skeleton node in MY current posed frame (the node `ma.x`

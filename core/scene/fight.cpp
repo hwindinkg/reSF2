@@ -3071,8 +3071,22 @@ void FightController::enter_start_stance() {
     enemy_.fighter.clear_move();
     player_.fighter.teleport(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.teleport(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
+    // [FIX phase-1 f=0 = bind — JS `FNa` L409 does NOT sample] `FNa` is
+    // `{this.Ta.XF(!0); this.xF(1)}` — it shows the scene and sets the phase;
+    // the first `Al.ia` step (`ca.ia` -> `Hnb` -> `wd.ia` -> `Nd.ia`) happens
+    // on the NEXT frame. The oracle's phase-1 f=0 is therefore the HELD bind
+    // pose (bone 67 = 714.99) and f=1 is the first solver step (676.58). The
+    // port re-samples HERE, which steps the cloth solver one frame early, so
+    // its f=0 dump matched the oracle's f=1 — the 38 u residual on bone 67.
+    // Reproduce the JS: capture the held pose for THIS frame's dump, run the
+    // sample (seeding the solver for f=1), then restore the held pose so f=0
+    // reads the bind exactly like the oracle.
+    const std::vector<float> held_p = player_.fighter.positions();
+    const std::vector<float> held_e = enemy_.fighter.positions();
     sample_idle(player_);
     sample_enemy_idle();
+    player_.fighter.set_drawn_positions(held_p);
+    enemy_.fighter.set_drawn_positions(held_e);
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     set_phase(fight_phase::start_stance);
