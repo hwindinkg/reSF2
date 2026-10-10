@@ -4496,6 +4496,10 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
                 sc.enemy_attrs = rt.enemy_attrs;
                 sc.set_vals = a.set_num;
                 sc.hit_damage = hit_dmg;
+                // `?PlayerParameter[].Combo` (JS `Pgb` `a.aw()`): the owner
+                // side's live combo counter.
+                sc.combo = static_cast<int>(
+                    (owner == 0 ? player_ : enemy_).combo_run);
                 sc.me_health = static_cast<double>(
                     (owner == 0 ? player_ : enemy_).hp);
                 sc.enemy_health = static_cast<double>(

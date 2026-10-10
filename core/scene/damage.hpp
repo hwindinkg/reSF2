@@ -789,6 +789,11 @@ struct SetValueCtx {
     double enemy_health = 0.0;
     double hit_damage = 0.0;            // `?Hit[].Damage`
     double hit_base_damage = 0.0;       // `?Hit[].BaseDamage`
+    // `?PlayerParameter[Me|Enemy].Combo` (JS `Pgb` L686713
+    // `case "Combo":d.result=K.T(a.aw())`; `aw()` = the live combo counter).
+    // The shipped SKANDA/ARCANE-set `<Random Chance="_BaseChance +
+    // ?PlayerParameter[].Combo * _AdditionalChancePerCombo">` reads it.
+    int combo = 0;
     std::map<std::string, double> me_attrs;     // `?PlayerAttribute[Me].X`
     std::map<std::string, double> enemy_attrs;  // `?PlayerAttribute[Enemy].X`
     std::map<std::string, double> vars;         // `?Variable[X]`

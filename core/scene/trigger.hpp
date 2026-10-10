@@ -397,8 +397,13 @@ struct ExprParse {
             return it != owner.q3.end() ? std::optional<double>(it->second) : 0.0;
         }
         if (name == "PlayerParameter") {
-            const CondCtx& m = (arg == "Enemy") ? foe : (arg == "Me" ? owner : owner);
-            if (arg != "Me" && arg != "Enemy") return std::nullopt;
+            // JS `Xe` (L684017): `var d=this.i6; d!=null&&c.result=="Enemy"&&
+            // (d=d.jb); switch(b.method){case "PlayerParameter":this.Pgb(d,b,
+            // a,c)}`. `c.result` holds the `[Me|Enemy]` selector: ONLY the
+            // literal "Enemy" selects the foe; EVERYTHING else (incl. the
+            // shipped empty `?PlayerParameter[].X`, 8 uses) resolves against
+            // `this.i6` = Me (the owner).
+            const CondCtx& m = (arg == "Enemy") ? foe : owner;
             if (field == "Health") return m.hp;
             // JS `Pgb` (L686713): `case "MagicBullet":d.result=K.T(a.bh)`,
             // `case "MagicCharge":d.result=K.T(a.my)`.
@@ -406,6 +411,15 @@ struct ExprParse {
             if (field == "MagicCharge") return m.charge;
             // `Pgb` (L686713): `case "DamageConverter":d.result=K.T(a.so)`.
             if (field == "DamageConverter") return m.damage_converter;
+            // `Pgb` (L686713): `case "Combo":d.result=K.T(a.aw())` (`aw()` is
+            // the live combo counter) and `case "Pain":d.result=a.sr==null?
+            // "null":""+a.sr` (the shock/pain value). Shipped `<Greater
+            // Value1="?PlayerParameter[].Combo">` (SKANDA set) and `<Greater
+            // Equal Value1="?PlayerParameter[Enemy].Pain">` (WARLOCK curse)
+            // conditions read these; previously they failed closed (always
+            // false).
+            if (field == "Combo") return static_cast<double>(m.combo);
+            if (field == "Pain") return m.pain;
             return std::nullopt;
         }
         return std::nullopt;
@@ -471,6 +485,9 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
                 sc.me_attrs = rt.me_attrs;
                 sc.enemy_attrs = rt.enemy_attrs;
                 sc.set_vals = c.set_vals;
+                // `?PlayerParameter[].Combo` in the Chance expression (JS
+                // `Pgb` `a.aw()`); `m` is the condition's Lh-selected side.
+                sc.combo = m.combo;
                 sc.rand01 = m.draw01 ? m.draw01 : rt.rand01;
                 sc.aspect_scale = [](int level) {
                     return aspect_scale_for_level(level);

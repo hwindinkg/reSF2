@@ -990,6 +990,11 @@ struct SetExpr {
                                                  ? ctx.enemy_damage_converter
                                                  : ctx.damage_converter);
             if (field == "Level") return std::optional<double>(ctx.level);
+            // `Pgb` (L686713) `case "Combo": d.result = K.T(a.aw())` — the live
+            // combo counter (the `[Me|Enemy]` selector only picks `Enemy`;
+            // everything else, incl. empty `[]`, is Me — JS `Xe` L684017).
+            if (field == "Combo")
+                return std::optional<double>(static_cast<double>(ctx.combo));
             // `Pgb` (L686713) `case "Health": d.result = K.T(a.gd)` — the
             // absolute HP (the `gd` field, same as the trigger `?PlayerParameter`
             // `Health` operand in `trigger.hpp`).
