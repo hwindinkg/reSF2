@@ -484,6 +484,10 @@ struct SetValueRuntime {
     bool is_raid = false;            // `?CurrentFight[].isRaid`
     bool is_player = true;           // `?PlayerParameter[Me].isPlayer`
     double default_perks_aspect = 0.0;  // `wd.yV`
+    // `?PlayerParameter[Me|Enemy].DamageConverter` = `wd.so` (L249364, ctor
+    // `this.so=1`). `[Enemy]` reads the foe's (`this.i6.jb`, L684323).
+    double damage_converter = 1.0;
+    double enemy_damage_converter = 1.0;
     std::map<std::string, double> me_attrs;     // `?PlayerAttribute[Me]`
     std::map<std::string, double> enemy_attrs;  // `?PlayerAttribute[Enemy]`
 };
@@ -776,7 +780,8 @@ struct SetValueCtx {
     bool is_raid = false;               // `?CurrentFight[].isRaid`
     bool is_player = true;              // `?PlayerParameter[Me].isPlayer`
     double default_perks_aspect = 0.0;  // `?PlayerParameter[Me].DefaultPerksAspect`
-    double damage_converter = 0.0;      // `?PlayerParameter[Me].DamageConverter`
+    double damage_converter = 1.0;      // `?PlayerParameter[Me].DamageConverter`
+    double enemy_damage_converter = 1.0;  // `?PlayerParameter[Enemy].DamageConverter`
     double hit_damage = 0.0;            // `?Hit[].Damage`
     double hit_base_damage = 0.0;       // `?Hit[].BaseDamage`
     std::map<std::string, double> me_attrs;     // `?PlayerAttribute[Me].X`

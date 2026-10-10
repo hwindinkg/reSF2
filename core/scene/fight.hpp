@@ -98,10 +98,11 @@ bool hit_audit_global();
 // live. The animation-scoped LoseFall (`jn`, arm + `Rba` zone, cp==4 anim
 // match and the cp==7 reaction-start pulse), the Combo/Crazy `ws` mutuality
 // (`$m`/`an` via `du.kZ`) and Invulnerability's `Zk` (`gn.ws=true`) are now
-// implemented. Still parsed + gated but inert (OPEN, cited below):
+// implemented. WinStyle (`tj`) is now fired on the `z3` style-level edge
+// (`apply_hit`: slot 3 publish + `PC(8, side)` -> `tj.hh(xP=dz>=BVa)`).
+// Still parsed + gated but inert (OPEN, cited below):
 // RatingEvaluation (UI), DamageFactor (no per-interval `Cea` setter; A5),
-// Darkness / RandomArea / LightInTheDarkness (render-side), WinStyle (the
-// model style score `dz` has no native source — COMBAT_STATIC App. C), and
+// Darkness / RandomArea / LightInTheDarkness (render-side), and
 // the perk/UI/item rules. `<ComplexRule>`/`<RandomRule>` child rules are
 // now expanded by the shared parser (modes.hpp `append_rule_element`,
 // `hp` direct-children semantics): `<ComplexRule>` flattens its children
@@ -279,11 +280,11 @@ struct FightRule {
     int points_defense = 2;
     // `rj` (`ERuleWinCombo`, L912): `pV` (Value).
     float win_combo_value = 0.0f;
-    // `tj` (`ERuleWinStyle`, L913): `BVa` (`VIa(Type)`). Effect OPEN: `hh`
-    // (L913) reads `a.xP` = the model style score `dz` snapshotted per
-    // context (`ca.Ema` L420 `ze.rl/kl.xP=yb/pb.dz`), which is set only by
-    // the achievement-counter event (`ca.z3` L423) — no native source
-    // (COMBAT_STATIC App. C "OPEN-KEPT: live dz tick source"). See OPEN.
+    // `tj` (`ERuleWinStyle`, L913): `BVa` (`VIa(Type)`). `hh(a)`
+    // (L466765) = `a.xP >= this.BVa`. `a.xP` = the model style score `dz`
+    // snapshotted per context (`ca.Ema` L213533 `ze.rl/kl.xP=yb/pb.dz`),
+    // and `dz` IS the style level (`B9a` L1044602 = `Sh.bn`). Fired on the
+    // `z3` style-change edge (`apply_hit`): slot 3 publish + `PC(8, side)`.
     int win_style_type = 0;
     // `qn` (`ERuleRatingEvaluation`, L881): `eVa`/`yUa`/`jVa`. The Magic/
     // Ranged variants (`PlayerRatingMagic`/`EnemyRatingMagic`/

@@ -2060,14 +2060,19 @@ void FightController::rules_fire(FightRule& r) {
         }
         case FightRuleKind::win_combo:
         case FightRuleKind::win_shock:
+        case FightRuleKind::win_style:
         case FightRuleKind::lose_fall:
             // `Oob` (L901-902): `case "ERuleLoseFall": ... this.Oe.BT(a)` ->
-            // `BT` (L392-393) sets `ey=2`. The winner is resolved by
-            // `wfa()` (LoseFall `Yu=true` -> the enemy wins).
+            // `BT` (L392-393) sets `ey=2`. `ERuleWinStyle` (L901) is in the
+            // SAME `BT(a)` arm. The winner is resolved by `wfa()` (WinStyle/
+            // WinCombo/WinShock `Yu=false`, LoseFall `Yu=true`).
             rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
             break;
         default:
-            return;  // effect OPEN (Darkness/RandomArea/... not modelled)
+            // Rules whose `Oob` arm is a no-op here (e.g. Combo/Crazy
+            // mutuality runs via `rules_kz`; WinStyle/Points/WinCombo/
+            // WinShock are handled above).
+            return;
     }
     rule_winner_player_ = rule_winner_is_player(r);
     rule_pending_ = true;  // JS `Pu = a`
@@ -3846,6 +3851,10 @@ void FightController::setup_bus(const PerkSetup& perks) {
         // CURRENT fight type, not a constant. `battle_.type` is the
         // `Da.type` analog (`battle_type_for_kind`, screens.cpp:5557).
         rt.is_raid = (battle_.type == "FightRaid");
+        // `?PlayerParameter[Me|Enemy].DamageConverter` (`wd.so`, L249364):
+        // the shipped `<Random Chance>` perks divide by it.
+        rt.damage_converter = player_.params.so;
+        rt.enemy_damage_converter = enemy_.params.so;
         rt.me_attrs.clear();
         for (const auto& kv : player_.params.attributes) rt.me_attrs[kv.first] = kv.second;
         rt.enemy_attrs.clear();
@@ -3911,6 +3920,10 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
     ctx.combo = me.combo_run;
     ctx.stage = oba_phase(phase_);
     ctx.anim = me.fighter.current_move() != nullptr ? me.fighter.current_move()->name : "";
+    if (me.fighter.current_move() != nullptr) {
+        ctx.anim_names = me.fighter.current_move()->anim_names;  // `Sj().xl`
+    }
+    ctx.anim_frame = me.fighter.anim_ip();  // `b.ip()` (np frame bound)
     for (const std::string& n : me.fighter.active_intervals()) {
         ctx.intervals.emplace_back(n, me.fighter.interval_type(n));
     }
@@ -3919,6 +3932,7 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
     ctx.raid = me.raid_bullets;
     ctx.charge = me.charge;
     ctx.hit_dmg = hit_dmg;
+    ctx.damage_converter = me.params.so;  // `Pgb` DamageConverter (`wd.so`)
     ctx.items = side == 0 ? player_items_ : enemy_items_;
     ctx.round = round_.number;
     ctx.pain = me.shock.pain_sr;
@@ -5441,10 +5455,33 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // attack move's RNa (blocked or not — `ha.Gzb` runs unconditionally).
     {
         static const StyleTable kStyle = sf2::scene::style_table_from_params();
+        const int old_level = atk.style.level;
         const double credit =
             style_credit(kStyle, atk.style, move.name, move.style_factor);
         style_vma(atk.style, credit, static_cast<int>(kStyle.sna.size()));
         if (atk.style.best > prize_fh_.b6) prize_fh_.b6 = atk.style.best;
+        // JS `z3` (L215000): `b!=f.dz && (... this.tb.Gj(f,3) [slot 3 Style],
+        // f.z3(b,c,d,e), this.PC(8, a.model==0?1:2))`. The `dz` written by
+        // `f.z3` IS the style level (`B9a` L1044602 = `Sh.bn`), so a level
+        // change is the `b!=f.dz` edge. `PC(8, side)` ticks the `Zf(8)`
+        // group; `Ga.compare` (L432230) picks `hh(ze.rl)` for `Li==1` /
+        // `hh(ze.kl)` for `Li==2` and returns false for `Li==3`, so
+        // `tj.hh(x) = x.xP>=BVa` fires WinStyle only for the matching side.
+        if (atk.style.level != old_level) {
+            const int atk_side = atk.is_player ? 0 : 1;
+            bus_.fire(sf2::scene::kEvStyle, sf2::scene::TrigVars(), true,
+                      atk_side, cond_ctx(0), cond_ctx(1), oba_phase(phase_),
+                      frame_);
+            for (FightRule& r : rules_) {
+                if (!r.active || r.kind != FightRuleKind::win_style) continue;
+                const bool side_match =
+                    (r.apply_to == 1 && atk.is_player) ||
+                    (r.apply_to == 2 && !atk.is_player);
+                if (side_match && atk.style.level >= r.win_style_type) {
+                    rules_fire(r);
+                }
+            }
+        }
     }
 
     // Event flags for the golden trace (JS `Sba` L393: Defense/Animation/

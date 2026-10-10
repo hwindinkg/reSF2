@@ -976,7 +976,9 @@ struct SetExpr {
             if (field == "DefaultPerksAspect")
                 return std::optional<double>(ctx.default_perks_aspect);
             if (field == "DamageConverter")
-                return std::optional<double>(ctx.damage_converter);
+                return std::optional<double>((arg == "Enemy")
+                                                 ? ctx.enemy_damage_converter
+                                                 : ctx.damage_converter);
             if (field == "Level") return std::optional<double>(ctx.level);
             return std::nullopt;
         }

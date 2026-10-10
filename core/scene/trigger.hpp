@@ -22,15 +22,18 @@
 // 6 (post-crit, Damage=0 — `Bb.Zi` reset at strike start) + 7 (post-hit,
 // Damage=base); EveryFrame slot 2 per fighter tick; RoundStageStart slot 1
 // on phase change; Interval 12/13 on edge detect; ModExpires 14 on mod
-// expiry; MagicCharged 8 on the `bh<1 -> bh>=1` edge (`Cgb` L201). NOT
-// wired (OPEN, parsed but never fired): 3 Style, 4 Combo (battle-end
-// `TYa→Gj(a,4)` noted), 9/10/11 anim (plumbing cost), 15/16 area (`rR`
-// bounds OPEN — `ERuleRandomArea` `qca`/`Nma`/`Xwa` L206514 + rule `ij`
-// L446758 not simulated). `bc.FE` (disable a model's triggers + purge its
+// expiry; MagicCharged 8 on the `bh<1 -> bh>=1` edge (`Cgb` L201); Style
+// slot 3 on a style-level change (`ca.z3` L215000 -> `Gj(f,3)` — fired by
+// `apply_hit`'s style-credit block). NOT wired (OPEN, parsed but never
+// fired): 4 Combo (battle-end `TYa→Gj(a,4)` noted), 9/10/11 anim (plumbing
+// cost), 15/16 area (`rR` bounds — `ERuleRandomArea` `qca`/`Nma`/`Xwa`
+// L206514 + rule `ij` L446758; the port DOES run the `ij.hh` tick and the
+// `Xwa` enter/exit detector in `rules_frame`, setting `CondCtx.in_area`).
+// `bc.FE` (disable a model's triggers + purge its
 // Fw entries, L700207) has no ported call site (`Wqb` L268150, the
 // weapon-swap timer `Wx` path — unported). Bullets/MagicCharge conditions
 // read the live `bh/dO/my` state (ranged/magic wave); `InTheArea` reads the
-// `rR` flag (OPEN). JNa revert log-only for 27/28/29.
+// `rR` flag (`cond_ctx` `in_area_`). JNa revert log-only for 27/28/29.
 
 #include <cctype>
 #include <cmath>
@@ -100,6 +103,18 @@ inline int stage_by_name(const std::string& n) {
     if (n == "StartStance") return 1;
     if (n == "Fight") return 2;
     if (n == "EndStance") return 3;
+    return 0;
+}
+
+// `fe.G0` (L394567): Attack->4, Block->5, Invisible->7, Invulnerable->6,
+// anything else (incl. numeric strings) -> 0. Used by the `Lj` interval
+// events (`IntervalStart`/`IntervalEnd` `Type=`), the `op` `CurrentInterval`
+// condition `Type=`, and the `DisableInterval` action.
+inline int interval_type_by_name(const std::string& t) {
+    if (t == "Attack") return 4;
+    if (t == "Block") return 5;
+    if (t == "Invulnerable") return 6;
+    if (t == "Invisible") return 7;
     return 0;
 }
 
@@ -184,13 +199,27 @@ struct CondCtx {
     int style_level = 0;
     int combo = 0;
     int stage = 0;
-    std::string anim;
+    std::string anim;  // current move name (`Sj().name`)
+    // `Sj().xl` (the move's animation-NAME list): `np.isEqual`'s name test is
+    // `a.$k(this.name)` = `move.name == name || move.xl contains name`
+    // (`$k` L355809, `d2` L355809). Set by `cond_ctx`.
+    std::vector<std::string> anim_names;
+    // `b.ip()` (`np.isEqual` L671284 frame bound): the fighter's
+    // frame-in-animation (`wd.ip` L264899 = ragdoll `frameCount` when the
+    // ragdoll is active, else `da.ip` L279031 = `Ua.MS ? fG : M0()`; -1 with
+    // no move). Set by `cond_ctx`.
+    int anim_frame = -1;
     std::vector<std::pair<std::string, int>> intervals;  // (name, G0 type)
     double hp = 1.0;
     double hit_dmg = 0.0;
     int bullets = 0;  // wd.bh (MagicBullet count)
     int raid = 0;     // wd.dO (RaidChargeBullet count)
     double charge = 0.0;  // wd.my [0,1] (MagicCharge)
+    // `wd.so` — the DamageConverter (`Pgb` L686713
+    // `case "DamageConverter":d.result=K.T(a.so)`; JS ctor `this.so=1`
+    // L249364). Provably 1 with shipped data (`damage.hpp`), but read from
+    // the live fighter, never hardcoded. Set by `cond_ctx`.
+    double damage_converter = 1.0;
     std::map<std::string, double> q3;
     std::vector<std::string> items;  // equipped item names
     int round = 1;
@@ -236,8 +265,8 @@ inline bool range_check(const TrigCond& c, double v) {
 // +,-,*,/,(,) combinations. Unknown fields/functions fail closed
 // (same as the old always-false, but numerics now evaluate).
 // Supported `?PlayerParameter` fields: Health (absolute `gd`),
-// MagicBullet (`bh`) and MagicCharge (`my`); DamageConverter and
-// anything else fail closed (OPEN).
+// MagicBullet (`bh`), MagicCharge (`my`) and DamageConverter (`so`,
+// `Pgb` L686713); any other field fails closed.
 
 struct ExprParse {
     const std::string& s;
@@ -375,7 +404,9 @@ struct ExprParse {
             // `case "MagicCharge":d.result=K.T(a.my)`.
             if (field == "MagicBullet") return static_cast<double>(m.bullets);
             if (field == "MagicCharge") return m.charge;
-            return std::nullopt;  // DamageConverter etc. OPEN
+            // `Pgb` (L686713): `case "DamageConverter":d.result=K.T(a.so)`.
+            if (field == "DamageConverter") return m.damage_converter;
+            return std::nullopt;
         }
         return std::nullopt;
     }
@@ -431,6 +462,12 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
                 sc.is_raid = rt.is_raid;
                 sc.is_player = true;
                 sc.default_perks_aspect = rt.default_perks_aspect;
+                // `?PlayerParameter[Me|Enemy].DamageConverter` (`so`): the
+                // shipped `<Random Chance>` perks divide `?Hit[].Damage` by
+                // it (e.g. perks.xml:774), so an unset 0 made every such
+                // trigger fire (`ch = dmg/0 = inf >= 1`). JS `this.so=1`.
+                sc.damage_converter = rt.damage_converter;
+                sc.enemy_damage_converter = rt.enemy_damage_converter;
                 sc.me_attrs = rt.me_attrs;
                 sc.enemy_attrs = rt.enemy_attrs;
                 sc.set_vals = c.set_vals;
@@ -473,15 +510,23 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
         const int want = it != c.s.end() ? stage_by_name(it->second) : 0;
         r = want == 0 || want == m.stage;
     } else if (k == "CurrentAnimation") {
-        bool ok = true;
+        // `np.isEqual` (L671284): `b=this.Lh(a); a=b.Sj(); if(a==null ||
+        // !a.$k(this.name))return!1; this.Ag.Wb(); return this.xE(b.ip())`.
+        // `$k` (`lg`, L355809) = `move.name==name || move.xl contains name`.
+        // `xE` (L669789) = `!(hasMin && min>v) && !(hasMax && max<v)` — the
+        // `Oc.Ag` range with open ends, exactly `range_check`.
         const auto it = c.s.find("Name");
-        if (it != c.s.end() && !it->second.empty() && m.anim != it->second) ok = false;
-        if (ok) {
-            // `xE(ip())`: frame-in-animation — OPEN (no clip clock here);
-            // a bare Name match passes, a Min/Max range fails closed.
-            ok = !range_has_min(c) && !range_has_max(c);
+        const std::string want = it != c.s.end() ? it->second : "";
+        bool name_ok = want.empty() || m.anim == want;
+        if (!name_ok) {
+            for (const std::string& a : m.anim_names) {
+                if (a == want) {
+                    name_ok = true;
+                    break;
+                }
+            }
         }
-        r = ok;
+        r = name_ok && range_check(c, static_cast<double>(m.anim_frame));
     } else if (k == "CurrentInterval") {
         // name-present AND type-present (either empty = wildcard).
         bool name_ok = true, type_ok = true;
@@ -492,14 +537,10 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
         if (want_name || want_type) {
             name_ok = !want_name;
             type_ok = !want_type;
-            int want_t = 0;
-            if (want_type) {
-                try {
-                    want_t = std::stoi(ti->second);
-                } catch (...) {
-                    want_t = 0;
-                }
-            }
+            // `op.isEqual` (L671686): `b = fe.G0(this.Vz)` — the named Type
+            // maps through `G0` (not a numeric parse).
+            const int want_t =
+                want_type ? interval_type_by_name(ti->second) : 0;
             for (const auto& iv : m.intervals) {
                 if (want_name && iv.first == ni->second) name_ok = true;
                 if (want_type && iv.second == want_t) type_ok = true;
@@ -604,7 +645,9 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
             }
         }
     } else if (k == "InTheArea") {
-        r = m.in_area;  // `rR` flag (area bounds OPEN)
+        // `qp.isEqual` (L674491): `b=this.Lh(a); return a==null?!1:b.rR`.
+        // `rR` is set by the `Xwa` enter/exit detector (`rules_frame`).
+        r = m.in_area;  // `rR` flag
     } else {
         r = false;  // `expression`/unknown → false (OPEN evaluators)
     }
@@ -1014,17 +1057,8 @@ inline TrigEvent load_trig_event(const pugi::xml_node& e,
     ev.step = load_int_attr(e, "Step", 0, num, str);
     ev.stage = stage_by_name(load_str_attr(e, "Name", num, str));
     ev.interval = load_str_attr(e, "Name", num, str);
-    {
-        // `Lj` Type via `fe.G0` — numeric here; named types are OPEN.
-        const std::string t = load_str_attr(e, "Type", num, str);
-        if (!t.empty()) {
-            try {
-                ev.interval_type = std::stoi(t);
-            } catch (...) {
-                ev.interval_type = 0;
-            }
-        }
-    }
+    // `Lj` Type via `fe.G0` (L394567): named types map to their code.
+    ev.interval_type = interval_type_by_name(load_str_attr(e, "Type", num, str));
     ev.mod_name = load_str_attr(e, "Name", num, str);
     ev.mod_ns = load_str_attr(e, "Namespace", num, str);
     return ev;

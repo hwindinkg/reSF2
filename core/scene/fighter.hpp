@@ -557,6 +557,17 @@ public:
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // JS `wd.ip()` (L264899) = `Nd.nk ? Nd.frameCount : (Sj()!=null ?
+    // da.ip() : -1)`, and `da.ip()` (L279031) = `Ua.MS ? fG : M0()`. `M0()`
+    // is the clip frame (`move_frame_`); `fG` is the physics-frame counter
+    // (incremented alongside `Xh` in `Te.ia`'s normal branch, so it is the
+    // `Xh` domain — the port's `playhead_`). Powers the `CurrentAnimation`
+    // Min/Max frame bound (`np.isEqual` L671284 `this.xE(b.ip())`).
+    int anim_ip() const {
+        if (ragdoll_active()) return ragdoll_frame_count_;
+        if (current_move_ == nullptr) return -1;
+        return current_move_->physics ? playhead_ : move_frame_;
+    }
     // JS `jc.c7a` (L691): an interval is active iff
     //   `(g.start>=qx?g.start:qx) <= frame <= (g.finish<=Lj?g.finish:Lj)`.
     // The end term is `h`, i.e. `finish` CLAMPED DOWN to `Lj`. `fe.init`
