@@ -5457,6 +5457,95 @@ void battle_rewards(const std::string& battle_name, const std::string& zone_name
     }
 }
 
+// JS `dl` `<Fight>` ctor (offset ~98696): `a.d4=u.I(b.attributes.get("Power"),1)`
+// — the fight's energy cost, default 1 (`u.I(x,1)` -> 1 for an absent/NaN
+// attr). `v.Am` (L623868) spends it on entry (`v.qZa(-a.d4)`). The battle/fight
+// selection is exactly `battle_rewards`'s (zone-scoped `hp("Fight")`).
+int battle_power_cost(const std::string& battle_name, const std::string& zone_name,
+                      int fight_index) {
+    int cost = 1;  // `u.I(...,1)` default
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return cost;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return cost;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return cost;
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (!battle) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return cost;
+        int fi = 0;
+        for (const pugi::xml_node f : battle.children("Fight")) {
+            if (fi++ == fight_index) {
+                const pugi::xml_attribute pw = f.attribute("Power");
+                if (pw) cost = pw.as_int(1);  // `u.I(attr,1)`
+                break;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return cost;
+}
+
+// JS `qZa`/`uZa`/`q5` (L624195 / L134253 / L134431):
+//   uZa(a){ if(a==0)return!0; a=this.dk+a; let b=this.wr; a=a>b?b:a;
+//           if(a<0)return!1; this.q5(a); return!0 }
+//   q5(a){ var b=this.wr; a=a>b?b:a; b=this.dk;
+//          a!=b && (b=this.dk=a, this.nF("Power",b),
+//          b==this.wr && this.wr!=0 && (this.F5(-1), this.aPa(-1))) }
+// `v.qZa(-d4)` deducts the fight cost (`d4`) and returns false — leaving the
+// save untouched — when the player cannot afford it. `p.o.save()` persists.
+bool spend_energy(App& app, int cost) {
+    const int max = energy_max();  // `this.wr` = `v.$Ca()`
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    int a = w.power - cost;  // `uZa(-cost)`: `this.dk + a`
+    if (a > max) a = max;    // `a=a>b?b:a`
+    if (a < 0) return false; // `if(a<0)return!1`
+    if (a != w.power) {      // `q5`: `a!=b && (this.dk=a, ...)`
+        w.power = a;
+        if (w.power == max && max != 0) {
+            w.power_sync_time = -1;  // `this.F5(-1)` + `this.aPa(-1)`
+        }
+    }
+    try {
+        app.save().save(w);  // `p.o.save()`
+    } catch (const std::exception&) {
+    }
+    return true;
+}
+
 // The battle's first <Fight><Rules> children (stages.xml). JS `Ya` mp(6)
 // parses the stage fight (`nj.parse` L885) and `f_a` L896-897 feeds the
 // FIRST active `ERuleRingout` rule to the `sXa` off-screen markers. The
@@ -9232,6 +9321,39 @@ void MapScreen::start_battle(const Node& n) {
             return;
         }
     }
+    // JS `v.Am` (L623868): `if(p.o.yN || v.qZa(-a.d4)) { ...enter battle... }`.
+    // Entering a battle deducts the fight's `<Power>` cost (`a.d4`, default 1,
+    // `<Fight>` ctor offset ~98696) UNLESS the player owns the Unlimited_Energy
+    // item (`p.o.yN`, derived at save-parse L125833). `qZa` -> `uZa(-d4)` ->
+    // `q5` deducts + persists `Power`; when the player cannot afford it `uZa`
+    // returns false and NOTHING launches (no gong, no track, no roster, no
+    // fight) — exactly the JS `if` with no `else`.
+    bool unlimited_entry = false;
+    try {
+        unlimited_entry = app().save().load().unlimited_energy();
+    } catch (const std::exception&) {
+    }
+    if (!unlimited_entry) {
+        const int cost = battle_power_cost(n.name, n.zone, fight_index);
+        int power_before = 0;
+        try {
+            power_before = app().save().load().power;
+        } catch (const std::exception&) {
+        }
+        if (!spend_energy(app(), cost)) {
+            std::fprintf(stdout,
+                         "[map] FightEnter %s|%s|%d -> NOT ENOUGH ENERGY "
+                         "(power=%d cost=%d) battle blocked\n",
+                         n.zone.c_str(), n.name.c_str(), fight_index + 1, power_before,
+                         cost);
+            std::fflush(stdout);
+            return;
+        }
+        std::fprintf(stdout, "[map] FightEnter %s|%s|%d -> energy %d -> %d (cost %d)\n",
+                     n.zone.c_str(), n.name.c_str(), fight_index + 1, power_before,
+                     power_before - cost, cost);
+        std::fflush(stdout);
+    }
     // JS `v.Am` (L1216): `p.o.save(), d && rb.Wkb()` — the battle-enter GONG
     // fires at battle REGISTRATION, right after the `FightEnter` quest event
     // and BEFORE the fight screen is pushed. JS `ai.aa` case 0 (L2007) then
@@ -9275,6 +9397,17 @@ void MapScreen::start_battle(const Node& n) {
         }
     }
     launch_battle(n);
+}
+
+bool MapScreen::probe_start_battle(const std::string& name) {
+    if (zone_sel_ < 0 || zone_sel_ >= static_cast<int>(zones_.size())) return false;
+    for (const Node& n : zones_[zone_sel_].nodes) {
+        if (n.name == name) {
+            start_battle(n);
+            return true;
+        }
+    }
+    return false;
 }
 
 // `Ur` zone-strip geometry (JS L2112-2116, `qk.layout` L2137). `Ur.ba`
@@ -22775,6 +22908,11 @@ void tick_energy(App& app) {
     }
 }
 
+// Public accessor for the harness's per-gate full-energy seed (`v.$Ca()`, the
+// `<Power Max>` cap; the internal `energy_max()` lives in the anonymous
+// namespace above).
+int energy_max_cap() { return energy_max(); }
+
 // `--energy-regen-probe`: the `Zma`/`aPa` trajectory over a simulated clock.
 bool energy_regen_probe() {
     const int max = energy_max();
@@ -22799,6 +22937,119 @@ bool energy_regen_probe() {
     const bool ok = max == 5 && interval == 600 && w.power == 5 &&
                     energy_refill_seconds(w, 1000 + interval * 6) == -1;
     std::fprintf(stdout, "[energy] RESULT %s\n", ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return ok;
+}
+
+// `--energy-spend-probe`: prove the JS `v.Am` entry-energy deduction
+// (`p.o.yN || v.qZa(-a.d4)`, L623868) on the REAL map entry. Seeds a known save
+// and drives `MapScreen::probe_start_battle` (the `Rr` FIGHT path) three ways:
+//   1. full energy, no Unlimited_Energy -> `Power` drops by the `<Fight Power>`;
+//   2. zero energy -> `qZa` false -> the battle is BLOCKED (still on the map);
+//   3. zero energy + Unlimited_Energy -> `p.o.yN` bypasses the deduction and the
+//      battle launches with `Power` untouched.
+bool energy_spend_probe(App& app) {
+    const int max = energy_max();
+    std::fprintf(stdout,
+                 "[espend] config: Max=%d (internal_settings.xml <Power Max=\"5\">), "
+                 "JS v.$Ca() L616130\n",
+                 max);
+    app.set_headless_frames(1);  // suppress the greeting-modal deferral
+    app.set_auto_attack(false);
+
+    const auto seed = [&app, max](int power, bool unlimited) {
+        WarriorSave w;
+        try {
+            w = app.save().load();
+        } catch (const std::exception&) {
+            return;
+        }
+        w.set_story_step("END");
+        w.level = 52;
+        w.current_zone = "ZONE_1";
+        w.weapon = "WEAPON_KNIVES";
+        w.battle_unlock("ZONE_1", "Tournament");
+        bool has_knives = false;
+        for (const WarriorSave::OwnedItem& it : w.items) {
+            if (it.name == "WEAPON_KNIVES") has_knives = true;
+        }
+        if (!has_knives) {
+            WarriorSave::OwnedItem k;
+            k.name = "WEAPON_KNIVES";
+            k.count = 1;
+            k.equipped = true;
+            w.items.push_back(k);
+        }
+        w.items.erase(std::remove_if(w.items.begin(), w.items.end(),
+                                     [](const WarriorSave::OwnedItem& it) {
+                                         return it.name == "Unlimited_Energy";
+                                     }),
+                      w.items.end());
+        if (unlimited) {
+            WarriorSave::OwnedItem u;
+            u.name = "Unlimited_Energy";  // JS `Qj("Unlimited_Energy")`
+            u.count = 1;
+            w.items.push_back(u);
+        }
+        w.power = power;  // `p.o.dk`
+        w.power_sync_time = (power == max)
+                                ? -1  // full -> `F5(-1)`
+                                : static_cast<int>(std::llround(WarriorSave::live_clock()));
+        try {
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+    };
+
+    // The real map (its node visibility reads the save at construction).
+    app.screens().push(make_screen(app.screens(), kScreenMap));
+    auto* map = static_cast<MapScreen*>(app.screens().top());
+    if (map == nullptr) {
+        std::fprintf(stdout, "[espend] RESULT FAIL (no map screen)\n");
+        std::fflush(stdout);
+        return false;
+    }
+    const int cost = battle_power_cost("Tournament", "ZONE_1", 0);
+    std::fprintf(stdout, "[espend] Tournament <Fight 1> Power cost = %d\n", cost);
+    bool ok = true;
+
+    // Case 1: full energy, no unlimited -> one deduction on entry.
+    seed(max, false);
+    map->refresh_nodes();
+    int before = app.save().load().power;
+    map->probe_start_battle("Tournament");
+    int after = app.save().load().power;
+    bool entered = app.screens().current_id() == kScreenFight;
+    std::fprintf(stdout,
+                 "[espend] case1 deduct: power %d -> %d (cost %d) screen=%d -> %s\n",
+                 before, after, cost, app.screens().current_id(),
+                 (after == before - cost && entered) ? "PASS" : "FAIL");
+    if (!(after == before - cost && entered)) ok = false;
+    if (app.screens().current_id() == kScreenFight) app.screens().pop();
+
+    // Case 2: zero energy, no unlimited -> blocked, no deduction, still on map.
+    seed(0, false);
+    map->refresh_nodes();
+    map->probe_start_battle("Tournament");
+    bool blocked = app.screens().current_id() == kScreenMap;
+    int p2 = app.save().load().power;
+    std::fprintf(stdout, "[espend] case2 blocked: power=%d screen=%d -> %s\n", p2,
+                 app.screens().current_id(), (blocked && p2 == 0) ? "PASS" : "FAIL");
+    if (!(blocked && p2 == 0)) ok = false;
+
+    // Case 3: zero energy + Unlimited_Energy -> bypass, no deduction.
+    seed(0, true);
+    map->refresh_nodes();
+    map->probe_start_battle("Tournament");
+    bool entered3 = app.screens().current_id() == kScreenFight;
+    int p3 = app.save().load().power;
+    std::fprintf(stdout,
+                 "[espend] case3 unlimited bypass: power=%d screen=%d -> %s\n", p3,
+                 app.screens().current_id(), (entered3 && p3 == 0) ? "PASS" : "FAIL");
+    if (!(entered3 && p3 == 0)) ok = false;
+    if (app.screens().current_id() == kScreenFight) app.screens().pop();
+
+    std::fprintf(stdout, "[espend] RESULT %s\n", ok ? "PASS" : "FAIL");
     std::fflush(stdout);
     return ok;
 }

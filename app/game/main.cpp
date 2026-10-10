@@ -1709,6 +1709,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --energy-regen-probe: the JS `Zma`/`aPa` energy chain (`v.$Ca` cap,
     // `v.YE` interval, `$N` sync time) over a simulated clock. No OS input.
     bool energy_regen_probe_mode = false;
+    // --energy-spend-probe: drive the real map entry and prove the `v.Am`
+    // entry-energy deduction + the Unlimited_Energy bypass. No OS input.
+    bool energy_spend_probe_mode = false;
     bool za_nav_verify = false;  // --za-nav-verify: the per-screen `za` open/close proof
     bool ui_tour = false;
     bool fidelity_tour = false;
@@ -2000,6 +2003,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // The energy-regeneration model (JS `Zma` L134483 / `aPa` L138972)
             // walked over a simulated clock (dispatched after the watchdog).
             energy_regen_probe_mode = true;
+        } else if (arg == "--energy-spend-probe") {
+            // The entry-energy deduction (`v.Am` L623868) on the real map path
+            // (dispatched after boot; no OS input).
+            energy_spend_probe_mode = true;
         } else if (arg == "--mode-probe") {
             // Mode series advance + reward proof (JS `Onb` L209117 win
             // handler -> `mfb` L205744 `Rk++`/`Zb=pf[Rk]` -> `D0(i)`
@@ -3243,11 +3250,45 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
     }
 
+    // [energy harness seed] The headless tours enter real battles, which now
+    // deduct the fight's `<Power>` on entry (JS `v.Am` L623868:
+    // `p.o.yN || v.qZa(-a.d4)`). Seed FULL energy (`p.o.dk = v.$Ca()`,
+    // `PowerSyncTime = -1`) before each tour so the gate is deterministic and
+    // can never be blocked mid-run by a prior gate's depletion.
+    if (headless_loop || tour_walk || ui_tour || fidelity_tour) {
+        const std::string default_save = res_root + "/users_default.xml";
+        const std::string hashed_save = res_root + "/users_default.b7da2019.xml";
+        const std::string extracted_save = "reference/extracted/xml/res/users_default.xml";
+        const std::string def = std::filesystem::exists(default_save)   ? default_save
+                                : std::filesystem::exists(hashed_save)  ? hashed_save
+                                                                        : extracted_save;
+        try {
+            sf2::app::SaveSystem ss(save_path, def);
+            sf2::app::WarriorSave w = ss.load();
+            w.power = sf2::app::energy_max_cap();  // `p.o.dk` = `v.$Ca()` (cap)
+            w.power_sync_time = -1;            // full -> `F5(-1)`
+            ss.save(w);
+            std::fprintf(stdout, "[energy] seeded full energy before tour: power=%d\n",
+                         w.power);
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[energy] tour seed failed: %s\n", e.what());
+        }
+    }
+
     // `--map-difficulty-probe`: dispatched after the RULE 0 watchdog install
     // (above) AND after `App` boot, so the per-fight rating/tier walk can never
     // leave a process behind and can read the live save.
     if (map_difficulty_probe_mode) {
         return sf2::app::map_difficulty_probe(app) ? 0 : 1;
+    }
+
+    // `--energy-spend-probe`: after boot (and the RULE 0 watchdog), drive the
+    // real map entry to prove the `v.Am` deduction + the Unlimited_Energy bypass.
+    if (energy_spend_probe_mode) {
+        const bool ok = sf2::app::energy_spend_probe(app);
+        app.shutdown();
+        return ok ? 0 : 1;
     }
 
     if (!dump_clip.empty()) {

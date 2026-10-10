@@ -171,6 +171,19 @@ struct WarriorSave {
         return false;
     }
 
+    // JS `p.o.yN` — the Unlimited_Energy flag. The save parse derives it
+    // `this.XT(this.xa.Qj("Unlimited_Energy")!=null)` (L125833): owning an item
+    // named "Unlimited_Energy" (existence only — `Qj(a)=m.find(this.items,
+    // b=>b.name==a)`, L151505). `XT(a){this.yN=a}` (L128917) does NOT persist
+    // the flag (no `hL`), so it is recomputed from the inventory on every load.
+    // `v.Am` (L623868) bypasses the entry-energy deduction when it is set.
+    bool unlimited_energy() const {
+        for (const OwnedItem& it : items) {
+            if (it.name == "Unlimited_Energy") return true;
+        }
+        return false;
+    }
+
     // Shop locks (JS `p.o.R$`, ctor L124103 `this.R$=new gd`; the `sc` save
     // parse L126188 walks every `<Shop>` child and calls `vq(name)` for its
     // `Name`). `vq(a,b)` L267 appends a `<Lock Name=a>` under `<Shop>` (when

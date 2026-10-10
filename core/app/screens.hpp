@@ -418,6 +418,12 @@ public:
     // / JS `WDa` L256 + `Qr.lla` L2094). Pure read of the layout state.
     bool node_center(const std::string& name, float& cx, float& cy) const;
 
+    // TEST-DRIVER HOOK (no gameplay change): run the REAL `Rr` FIGHT entry
+    // (`start_battle`, JS `v.Am`) for the first node named `name` in the
+    // selected zone. Used by `--energy-spend-probe` to exercise the entry-energy
+    // deduction on the exact player path. Returns false when no such node.
+    bool probe_start_battle(const std::string& name);
+
     // `Ur` zone-dot strip geometry (JS L2112-2116, `qk.layout` L2137): the
     // centre of the dot drawn for zone `zi`, or false when that zone renders
     // none (`Vr.HXa` L2123-2124). The draw AND the click hit-test both read
@@ -1731,6 +1737,14 @@ void tick_energy(App& app);
 // `--energy-regen-probe`: walk `Zma`/`aPa` over a simulated clock and print
 // the power/timer trajectory. Returns true when the model reaches the cap.
 bool energy_regen_probe();
+// `v.$Ca()` = `<Power Max>` — the energy cap (`energy_max` in screens.cpp),
+// needed by the harness's per-gate full-energy seed.
+int energy_max_cap();
+// `--energy-spend-probe`: drive the REAL map entry (`Rr` FIGHT -> `start_battle`
+// -> `v.Am`) and prove the entry-energy deduction (`p.o.yN || v.qZa(-a.d4)`)
+// drops the save `Power`, that an unaffordable cost blocks the launch, and that
+// the Unlimited_Energy flag (`p.o.yN`) bypasses the deduction.
+bool energy_spend_probe(App& app);
 
 // --- quest dialog (He) display/dispatch contracts (screens.cpp) -------------
 // The action-plate frame for a `<Button Color>` (`He.lea` L1063 ->
