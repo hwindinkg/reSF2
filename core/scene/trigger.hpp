@@ -965,7 +965,11 @@ struct ModTickCtx {
 //   adds from the recorded side's map; ModInvisibility(15): no state;
 //   ChangeImpulse(20): `gob()` → (1,1,1); ChangeHitEffectScale(21):
 //   `fob()` → Qz=1; ChangeAdditionalDamageValue(22): `Ynb()` → Ly=0;
-//   27/28/29: log-only states; TurnOffCollision(30): log (body flags OPEN).
+//   SlowModel(28): `gLa`→`Kvb(,true)` = KT(1) (ctx.set_timescale);
+//   ChangeModelColor(29): `ZKa`→`Qs(,true)` = location colour
+//   (ctx.reset_color); StealMagicMod(27): `aLa`→`Kf.$o(,true)` = `Kf.reset`
+//   (restore the `Mg` Magic item + un-graft nodes) — OPEN with the apply
+//   (see perks.hpp); TurnOffCollision(30): log (body flags OPEN).
 inline void revert_mod(const ModState& m, int side, ModTickCtx& ctx,
                        std::function<void(const std::string&)> log) {
     if (m.kind == "ModAttributes" && m.attr_side >= 0 && m.attr_side < 2 &&

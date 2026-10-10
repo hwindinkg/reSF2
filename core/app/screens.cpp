@@ -13811,7 +13811,14 @@ void FightScreen::render_impl(App& app) {
     // arms/legs) matching the oracle.
     auto draw_capsules = [&camera, &ren, &assets, arena_half](
                              const sf2::scene::Model& model,
-                             const std::vector<float>& pos, float r, float g, float b) {
+                             const std::vector<float>& pos, float ox, float oy,
+                             float r, float g, float b) {
+        // JS `Te.Gla(a,b,c)` (L279763) -> `this.jc.shift(a,b,c)`: the
+        // MoveModel root offset shifts the whole model container, so EVERY
+        // child node (`yu.dw()` = capsule endpoint `ma`) moves with it. The
+        // mesh path (`build_vertices`) already adds `model_off_*`; the capsule
+        // strip must add the SAME (ox,oy) or the ragdoll strip detaches from
+        // the mesh during a MoveModel tween.
         // [F6 — capsule-figure render] JS `Yc.Uib` L570 walks
         // `A("Figures").children` in DOCUMENT ORDER and calls `Yc.Tib` (L573)
         // for every `Type="Capsule"` figure, so there is ONE `zu` visual per
@@ -13850,11 +13857,14 @@ void FightScreen::render_impl(App& app) {
             }
             // `Dk.update` L836: `c=b.x-a.x; d=b.y-a.y;`
             //   `b=a.x+c*cGa; e=a.y+d*cGa; c=a.x+c*(1-bGa); a=a.y+d*(1-bGa)`
-            const float wx1 = pos[u1] + (pos[u2] - pos[u1]) * cap.margin1;
-            const float wy1 = pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * cap.margin1;
-            const float wx2 = pos[u1] + (pos[u2] - pos[u1]) * (1.0f - cap.margin2);
+            const float wx1 = pos[u1] + (pos[u2] - pos[u1]) * cap.margin1 + ox;
+            const float wy1 =
+                pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * cap.margin1 + oy;
+            const float wx2 =
+                pos[u1] + (pos[u2] - pos[u1]) * (1.0f - cap.margin2) + ox;
             const float wy2 =
-                pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * (1.0f - cap.margin2);
+                pos[u1 + 1] + (pos[u2 + 1] - pos[u1 + 1]) * (1.0f - cap.margin2) +
+                oy;
             const float stroke = cap.radius1 * 2.0f * camera.zoom;  // `stroke=Radius1*2`
             if (stroke <= 0.0f) {
                 continue;
@@ -13915,11 +13925,15 @@ void FightScreen::render_impl(App& app) {
     // the whole enemy node FIRST (capsules+mesh, z=-.001) then the whole
     // player node (z=0) on top.
     draw_capsules(fight_->enemy().fighter.model(), fight_->enemy().fighter.positions(),
+                  fight_->enemy().fighter.model_offset_x(),
+                  fight_->enemy().fighter.model_offset_y(),
                   fight_->enemy().fighter.color_r(), fight_->enemy().fighter.color_g(),
                   fight_->enemy().fighter.color_b());
     ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
                        fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
     draw_capsules(fight_->player().fighter.model(), fight_->player().fighter.positions(),
+                  fight_->player().fighter.model_offset_x(),
+                  fight_->player().fighter.model_offset_y(),
                   fight_->player().fighter.color_r(), fight_->player().fighter.color_g(),
                   fight_->player().fighter.color_b());
     ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
@@ -13934,6 +13948,7 @@ void FightScreen::render_impl(App& app) {
         ch.fighter.build_vertices(cv);
         std::vector<float> cpv = project(cv);
         draw_capsules(ch.fighter.model(), ch.fighter.positions(),
+                      ch.fighter.model_offset_x(), ch.fighter.model_offset_y(),
                       ch.fighter.color_r(), ch.fighter.color_g(), ch.fighter.color_b());
         ren.draw_triangles(cpv.data(), cpv.size() / 2, ch.fighter.color_r(),
                            ch.fighter.color_g(), ch.fighter.color_b());

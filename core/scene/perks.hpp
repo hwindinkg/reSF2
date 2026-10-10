@@ -20,14 +20,26 @@
 //     cooldown via `wd.wKa`/`wd.b5`), ChangeImpulse(20),
 //     ChangeHitEffectScale(21), ChangeAdditionalDamageValue(22) +Ly,
 //     SlowModel(28) `Kvb`, ChangeModelColor(29), TurnOffCollision(30),
+//     SetDarkness(25) `bu` screen overlay, MoveModel(31) `Ow` model tween,
 //     ModHealthChange(12) DoT/HoT install, ApplyModEffect(11) `cpb`
 //     (perk-icon pulse/stack via `Hr.Maa`).
-//   NO-OP+log: SetDarkness(25, screen overlay `bu` not modelled),
-//     Switch(26, applies its nested `<Case>` actions via `Z4a`;
-//     no shipped case content), StealMagicMod(27), MoveModel(31, model
-//     tween `Ow`), ShowDebugLine(23), MarkPerkAsUsed(24). (`Effect`/
+//   NO-OP+log: Switch(26, applies its nested `<Case>` actions via `Z4a`;
+//     no shipped case content), StealMagicMod(27, OPEN — see below),
+//     ShowDebugLine(23), MarkPerkAsUsed(24). (`Effect`/
 //     `StopEffect`/`StopFollowEffect` are handled by `exec_action` but are
 //     not shipped `Ma` tags.)
+//
+// StealMagicMod(27, JS `Kf` L716844) stays OPEN: `Kf.Ywb` swaps the model's
+// `parameters.Mg` (Magic item, `Fd`/`hk`) with a `clone`+`dE` of
+// `a.model.jb.parameters.Mg`, then `Q3a` grafts the source model's magic NODES
+// (`me` tagged `Kf.qTa="MagicPlayer"` / `Kf.ueb=["MagicPlayer","MagicMissile",
+// "MagicMissileStart","MagicMissileFly"]`, plus `Mo` fragments with `zl.locks`)
+// into the owner via the `Ae` linked-interval transfer (`nw`), and registers
+// them with the `Su.FT`/`JB.u5` updaters. The port has NO model node graph
+// (`me`/`Mo`/`xl`/`QX`/`priority`), NO per-fighter parameter store
+// (`parameters.Fd/hk`), NO magic ITEM slot (`Mg.Yb`), and no
+// `?PlayerParameter[...].Magic` resolver — only `bullets`/`charge`/`raid`
+// (JS `bh`/`my`/`dO`). `Kf` is therefore not expressible JS-exact.
 
 #include <functional>
 #include <map>
