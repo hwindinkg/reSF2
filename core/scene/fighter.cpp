@@ -1377,14 +1377,34 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // using the PRE-sample `sol_ma_`, not the first interpolated
             // sample (the buffer's slot-2 reference is the raw clip frame).
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
-            // [B1 FIX vertical anchor] JS `Gla(a.dI ? Fk.y : a.eja)` (L559):
-            // the y shift is the world delta only when the Y axis is an align
-            // axis; otherwise it is `ShiftY` (0 shipped).
-            render_offset_y_ = move.align.axis_y
-                                   ? (prev_align_pivot_world_y_ - sol_ma_[pu * 3 + 1])
-                                   : move.align.shift_y;
+            // [FIX cloth Y-space across a clip switch — JS `Te.Gla` L559 +
+            // `Dl.oL` L293874] `render_offset_y_` is the clip->world PLACEMENT
+            // (the JS `oL` origin = `world_y - sol[anchor].y`), a UNIFORM
+            // offset applied to EVERY bone. The JS `oL` runs ONCE at fighter
+            // init and is never re-applied, so the placement is CONTINUOUS
+            // across a clip switch. The old code pinned `render_offset_y_ =
+            // ShiftY` (0) whenever Y was not an `<Align Axis>` (all shipped
+            // stances are `X|Z`), which dropped the placement for every
+            // NON-clip body: the cloth `Al` solver state kept its model-space
+            // y while the clip bones jumped to the raw clip y, so the `Al.jE`
+            // edge relax mixed two spaces (max 78.3 on bones 86..93 at each
+            // clip's first frames). Keep the placement on EVERY axis; the
+            // buffer shift that makes the total clip y shift equal the JS
+            // `Gla` value is applied to `align_y_` below.
+            render_offset_y_ = prev_align_pivot_world_y_ - sol_ma_[pu * 3 + 1];
             render_offset_valid_ = true;
         }
+    }
+    // [FIX cloth Y-space — JS `Te.Gla` L559] The total clip y shift is
+    // `Gla(a.dI ? Fk.y : a.eja)`: `Fk.y` when Y is an align axis, else
+    // `ShiftY` (`eja`, 0 shipped). The port splits that total into
+    // `align_y_` (the buffer shift, applied in `ctl`) + `render_offset_y_`
+    // (the placement, applied in `sample`). With `render_offset_y_` now
+    // ALWAYS the placement, the buffer shift must be `shift.y -
+    // render_offset_y_` so the clip bones' world y is unchanged while the
+    // persisted non-clip (cloth) solver state shares that one space.
+    if (!move.align.axis_y) {
+        align_y_ = move.align.shift_y - render_offset_y_;
     }
     // JS `Te.Skb` order: the play buffer prepend (`Pka`/`qrb`) is built
     // BEFORE the first `eda` sample and after `Gub` (align).
