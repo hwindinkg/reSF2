@@ -869,6 +869,27 @@ int Fighter::capsule_bbox(float& min_x, float& min_y, float& max_x,
     return count;
 }
 
+// JS `wd.yp.Z(a)` / `wd.lHa.Z(a)` (L523-524): publish one `yd` on the
+// model's ability-animation buses (`a.Ft = this.bw()`).
+void Fighter::emit_yp(int slot, float value, int frames, int extra) {
+    AbilityEvent e;
+    e.slot = slot;
+    e.value = value;
+    e.frames = frames;
+    e.extra = extra;
+    e.side = ability_side_;  // `a.Ft = this.bw()`
+    yp_events.push_back(e);
+}
+void Fighter::emit_lha(int slot, float value, int frames, int extra) {
+    AbilityEvent e;
+    e.slot = slot;
+    e.value = value;
+    e.frames = frames;
+    e.extra = extra;
+    e.side = ability_side_;
+    lha_events.push_back(e);
+}
+
 // JS `wd.wKa(a)` (L523) — reset the slot's cooldown. Emits `yd(slot,0,0)`.
 void Fighter::ability_cooldown_reset(int slot) {
     switch (slot) {
@@ -878,9 +899,9 @@ void Fighter::ability_cooldown_reset(int slot) {
         case 14: ability_cooldowns_.super_active_ = false;  ability_cooldowns_.super_elapsed_ = 0.0f;  break;
         default: break;  // JS: no case -> no-op
     }
+    // `wKa` L523: `a=new yd(slot,0,0); a.Ft=this.bw(); this.yp.Z(a)`.
     if (slot == 9 || slot == 10 || slot == 11 || slot == 14) {
-        std::fprintf(stdout, "[cd] wKa slot=%d emit yd(%d,0,0)\n", slot, slot);
-        std::fflush(stdout);
+        emit_yp(slot, 0.0f, 0, -1);
     }
 }
 
@@ -894,11 +915,8 @@ void Fighter::ability_cooldown_start(int slot, float duration) {
         case 14: ability_cooldowns_.super_active_ = true;  ability_cooldowns_.super_reload_ = duration;  break;
         default: break;
     }
-    if (slot == 9 || slot == 10 || slot == 11 || slot == 14) {
-        std::fprintf(stdout, "[cd] b5 slot=%d duration=%.3f active\n", slot,
-                     static_cast<double>(duration));
-        std::fflush(stdout);
-    }
+    // JS `b5(a,b)` (L524) only SETS the flag + timer; it publishes NO `yd`
+    // (the ring update comes from the next `MOa` tick, L532-533).
 }
 
 // JS `wd.MOa()` (L532-533): advance the live cooldowns one frame. The `!=`
@@ -911,46 +929,31 @@ void Fighter::tick_ability_cooldowns(float game_speed) {
         if (denom == 0.0f) return std::numeric_limits<float>::infinity();
         return target / denom;
     };
-    // The JS emit `yd(slot, elapsed, 1)` fires every frame onto `this.yp`
-    // (the ability-animation bus the port does not have), so only the
-    // transition to ready is logged — a per-frame print would flood the
-    // capture/trace output (the Super charge runs 500 frames at fight start).
+    // JS `wd.MOa()` (L532-533) emits `yd(slot, elapsed, 1)` EVERY frame the
+    // timer is live (`a.Ft=this.bw(); this.yp.Z(a)`), so the ability-button
+    // cooldown ring follows the exact elapsed value. The events are queued on
+    // `yp_events` and drained by the fight's `Irb` consumer
+    // (`apply_ability_events`); nothing prints per frame.
     if (cd.punch_active_ && cd.punch_elapsed_ != cd.punch_target_) {
         cd.punch_elapsed_ += step(cd.punch_target_, cd.punch_reload_);
         if (cd.punch_elapsed_ > cd.punch_target_) cd.punch_elapsed_ = cd.punch_target_;
-        if (cd.punch_elapsed_ == cd.punch_target_) {
-            std::fprintf(stdout, "[cd] MOa slot=9 ready (yd(9,%.3f,1))\n",
-                         static_cast<double>(cd.punch_elapsed_));
-            std::fflush(stdout);
-        }
+        emit_yp(9, cd.punch_elapsed_, 1, -1);
     }
     if (cd.kick_active_ && cd.kick_elapsed_ != cd.kick_target_) {
         cd.kick_elapsed_ += step(cd.kick_target_, cd.kick_reload_);
         if (cd.kick_elapsed_ > cd.kick_target_) cd.kick_elapsed_ = cd.kick_target_;
-        if (cd.kick_elapsed_ == cd.kick_target_) {
-            std::fprintf(stdout, "[cd] MOa slot=10 ready (yd(10,%.3f,1))\n",
-                         static_cast<double>(cd.kick_elapsed_));
-            std::fflush(stdout);
-        }
+        emit_yp(10, cd.kick_elapsed_, 1, -1);
     }
     if (cd.ranged_active_ && cd.ranged_elapsed_ != cd.ranged_target_) {
         cd.ranged_elapsed_ += step(cd.ranged_target_, cd.ranged_reload_);
         if (cd.ranged_elapsed_ > cd.ranged_target_) cd.ranged_elapsed_ = cd.ranged_target_;
-        if (cd.ranged_elapsed_ == cd.ranged_target_) {
-            std::fprintf(stdout, "[cd] MOa slot=11 ready (yd(11,%.3f,1))\n",
-                         static_cast<double>(cd.ranged_elapsed_));
-            std::fflush(stdout);
-        }
+        emit_yp(11, cd.ranged_elapsed_, 1, -1);
     }
     if (cd.super_active_ && cd.super_elapsed_ < cd.super_target_) {
         cd.super_elapsed_ += step(cd.super_target_, cd.super_reload_);
         if (cd.super_elapsed_ > cd.super_target_) cd.super_elapsed_ = cd.super_target_;
-        if (cd.super_elapsed_ >= cd.super_target_) {
-            cd.super_active_ = false;
-            std::fprintf(stdout, "[cd] MOa slot=14 ready (yd(14,%.3f,1))\n",
-                         static_cast<double>(cd.super_elapsed_));
-            std::fflush(stdout);
-        }
+        emit_yp(14, cd.super_elapsed_, 1, -1);
+        if (cd.super_elapsed_ >= cd.super_target_) cd.super_active_ = false;
     }
 }
 

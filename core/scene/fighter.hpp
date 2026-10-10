@@ -1000,6 +1000,30 @@ public:
     // terms (`bh`/`$aa` magic gate, `sN`, `Kl.Sgb`) have no port consumer.
     bool ability_cooldown_running(int slot) const;
 
+    // --- JS `yd` (class g="CC", sf2.502f0946.js L276131) — the ability-HUD
+    // event published on the model's `wd.yp` / `wd.lHa` buses (L250176 /
+    // L267983 `this.yp=new V; this.lHa=new V`). Fields keep the JS minified
+    // names: `awa`=slot, `value`, `frames`, `fwa`=extra, `Ft`=side.
+    //   `constructor(a,b,c,d){ d==null&&(d=-1); c==null&&(c=-1);
+    //     this.awa=a; this.value=b; this.frames=c; this.fwa=d; this.Ft=-1 }`
+    struct AbilityEvent {
+        int slot = 0;        // `awa` (9/10/11/12/13/14)
+        float value = 0.0f;  // `value`
+        int frames = -1;     // `frames`
+        int extra = -1;      // `fwa` (the raid `dO` payload)
+        int side = -1;       // `Ft` (`wd.bw()`: 0 player / 1 enemy / -1 none)
+    };
+    std::vector<AbilityEvent> yp_events;   // JS `wd.yp` bus queue (L523-533)
+    std::vector<AbilityEvent> lha_events;  // JS `wd.lHa` bus queue (L524)
+    // JS `wd.bw()` (L531): `ca.Ka()==null?-1 : this==ca.Ka().yb?0 :
+    // this==ca.Ka().pb?1:-1` — the emitting model's side. Set once by the
+    // fight (`make_fighter`), read by every `yd` emit.
+    void set_ability_side(int side) { ability_side_ = side; }
+    int ability_side() const { return ability_side_; }
+    // The JS `this.yp.Z(a)` / `this.lHa.Z(a)` publish (`a.Ft = this.bw()`).
+    void emit_yp(int slot, float value, int frames = -1, int extra = -1);
+    void emit_lha(int slot, float value, int frames = -1, int extra = -1);
+
     // JS `Bl.s2a()` (L588) — the pre-strike midpoint smoothing: for every
     // solver body, `mf = (mf + ma) * 0.5` (per x,y,z). `Bl.strike` calls it
     // before splitting the impulse onto the hit bodies.
@@ -1015,6 +1039,10 @@ public:
 
 private:
     Model model_;
+    // JS `wd.bw()` (L531): the emitting model's side (0 player / 1 enemy /
+    // -1 none). Set by the fight (`set_ability_side`), stamped onto every
+    // `yd` event as `Ft`.
+    int ability_side_ = -1;
     std::vector<float> pos_;  // per-bone [x, y] after sampling (world space)
     // The previous frame's `pos_` (JS node `mf`). Snapshotted at the top of
     // `advance()`; the `Distance ... Frame="Previous"` refs read it.

@@ -735,15 +735,24 @@ void FightController::dispatch_move_actions(
                 std::fflush(stdout);
             } else if (act->bullet_kind == 1) {
                 // `vZa(value)` L524 = `this.dO += value`; `Amb()` L524 then
-                // publishes `yd(13, -1, -1, dO)` on the `lHa` bus (the raid
-                // charge animation channel, not ported) and, when `dO==0`, a
-                // `yd(13, 0, 0)` on the `yp` bus.
+                // publishes the raid-charge events.
                 owner.raid_bullets += act->bullet_value;
+                // JS `wd.Amb()` (L524): `var a=this.lb; a==null ? this.
+                // parameters.qb && (this.dO==0 && this.yp.Z(new yd(13,0,0)),
+                // a=new yd(13,-1,-1,this.dO), this.lHa.Z(a)) : a.LA()`. The
+                // native has no `lb` link model, and `parameters.qb` is the
+                // ENEMY flag, so only the enemy publishes: a `yd(13,0,0)` on
+                // `yp` while `dO==0`, then the `yd(13,-1,-1,dO)` on `lHa`.
+                if (!owner.is_player) {
+                    if (owner.raid_bullets == 0)
+                        owner.fighter.emit_yp(13, 0.0f, 0, -1);
+                    owner.fighter.emit_lha(13, -1.0f, -1, owner.raid_bullets);
+                }
                 std::fprintf(stdout,
                              "[fx] F%d %s %s AddBullets RaidChargeBullet value=%d -> dO=%d "
-                             "(Amb yd(13) not ported)\n",
+                             "Amb(qb=%d)\n",
                              frame_, owner.name.c_str(), why, act->bullet_value,
-                             owner.raid_bullets);
+                             owner.raid_bullets, owner.is_player ? 0 : 1);
                 std::fflush(stdout);
             }
             continue;
@@ -1784,6 +1793,9 @@ FightFighter FightController::make_fighter(
     // `wd.dwb` L519). The app layer resolves the two sides' Voice
     // (users_default.xml player / stages.xml stage-Warrior template).
     f.fighter.set_voice(is_player ? battle_.player_voice : battle_.enemy_voice);
+    // JS `wd.bw()` (L531): the emitting model's side, stamped onto every `yd`
+    // event as `Ft` (`0` player / `1` enemy).
+    f.fighter.set_ability_side(is_player ? 0 : 1);
     f.max_hp = static_cast<float>(max_hp);
     f.hp = f.max_hp;
     // JS `ur` L194: `Fj = NotAI==null`; the AI is created ONLY when the
@@ -4578,6 +4590,11 @@ void FightController::la_normalize(FightFighter& f) {
         sf2::scene::la_normalize(f.bullets, f.charge, no_bullets_replenish_);
     f.bullets = r.bh;
     f.charge = r.my;
+    // JS `wd.LA` (L505) `lb==null` tail (the native has no link model, so this
+    // is the only branch): `a=new yd(12, 0==this.bh?a:1); a.Ft=this.bw();
+    // a.frames=50; this.yp.Z(a)` — the Magic button ring (slot 12) takes the
+    // normalized charge (`bh==0 ? my : 1`).
+    f.fighter.emit_yp(12, (r.bh == 0) ? static_cast<float>(r.my) : 1.0f, 50, -1);
 }
 
 // Slot-8 publish after bullet/charge adds (mirrors the only shipped
@@ -4591,6 +4608,54 @@ void FightController::fire_slot8(int side) {
         bus_.drain(q, pairs);
         for (const auto& pr : pairs) exec_action(pr.first, pr.second, q);
     }
+}
+
+// JS `Pi.Irb(a)` (L202013): the `yp` bus listener (registered by
+// `a.yp.addListener(w(this,this.Irb))` L213297).
+//   `Irb(a){ let b=a.value*100;
+//            a.awa==12 && b>97 && b<100 && (b=97);
+//            a.Ft!=0 && this.Da.type!="FightPVP" || Za.F().sg.Hrb(a.awa,b,a.frames) }`
+// `&&` binds tighter than `||`, so `Hrb` runs only when `!(a.Ft!=0 &&
+// type!="FightPVP")` — i.e. the PLAYER's events (`Ft==0`) outside PVP. `Hrb`
+// (L229772) then dispatches to the button `qL(b, frames)` (L951754): the
+// widget's displayed fill. The `lHa` bus (slot 13) has NO listener in the JS
+// (the only `lHa.Z` is `Amb`'s publish, L267141), so it is drained and
+// discarded.
+void FightController::apply_ability_events() {
+    const bool pvp = battle_.type == "FightPVP";  // `this.Da.type!="FightPVP"`
+    // [probe, authorised] SF2_ABILITY_PROBE=1: dump every drained `yd` event
+    // (the `Irb`/`Hrb` path) so the plumbing is observable without touching
+    // the gate traces. Unset in every shipped gate.
+    static const bool kAbilityProbe = []() {
+        const char* v = std::getenv("SF2_ABILITY_PROBE");
+        return v != nullptr && v[0] == '1';
+    }();
+    auto consume = [&](Fighter& f) {
+        for (const Fighter::AbilityEvent& e : f.yp_events) {
+            if (kAbilityProbe) {
+                std::fprintf(stdout,
+                             "[yd] F%d slot=%d value=%.4f frames=%d fwa=%d Ft=%d\n",
+                             frame_, e.slot, static_cast<double>(e.value),
+                             e.frames, e.extra, e.side);
+                std::fflush(stdout);
+            }
+            if (e.side != 0 && !pvp) continue;  // `a.Ft!=0 && type!="FightPVP"`
+            float b = e.value * 100.0f;         // `let b=a.value*100`
+            if (e.slot == 12 && b > 97.0f && b < 100.0f) b = 97.0f;
+            switch (e.slot) {  // `fu.Hrb` (L229772)
+                case 9:  ability_pad_.punch = b; break;   // `Si.qL`
+                case 10: ability_pad_.kick = b; break;    // `fh.qL`
+                case 11: ability_pad_.ranged = b; break;  // `di.qL`
+                case 12: ability_pad_.magic = b; break;   // `Eg.qL`
+                case 14: ability_pad_.kick = b; break;    // `fh.qL` (Super)
+                default: break;  // 13/other: no case -> no-op
+            }
+        }
+        f.yp_events.clear();
+        f.lha_events.clear();  // no `lHa` listener in the JS
+    };
+    consume(player_.fighter);
+    consume(enemy_.fighter);
 }
 
 // `ia` mod tick for one side + slot-14 publish on expiry.
@@ -7227,6 +7292,9 @@ void FightController::update(float dt) {
     // JS `wd.MOa()` (L532): `ca.Ka()` (the player) advances its ability
     // cooldowns when `ca.Ka().eu == 2`. `v.on()` = 1 here.
     player_.fighter.tick_ability_cooldowns(game_speed_);
+    // JS `Pi.Irb` (L202013): drain the `yd` buses into the ability-button
+    // rings. Runs after the `MOa` tick so this frame's emits land this frame.
+    apply_ability_events();
     if (battle_over_) return;
 
     // The K.O. slow-mo beat (JS: the KO freeze): the first 30 frames of

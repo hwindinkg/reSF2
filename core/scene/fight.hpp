@@ -2572,7 +2572,26 @@ public:
     void probe_child_cycle(bool for_player, int ticks, int* spawned,
                            int* live_after_spawn, int* live_after_delete);
 
+    // --- ability-button cooldown rings (JS `Pi.Irb` L202013 -> `fu.Hrb`
+    // L229772) -------------------------------------------------------------
+    // The `yp` bus consumer: `Irb(a)` scales `a.value*100`, clamps slot 12 to
+    // 97 when it sits in (97,100), gates on `a.Ft!=0 && Da.type!="FightPVP"`,
+    // and dispatches `sg.Hrb(a.awa, b, a.frames)`, which calls the matching
+    // button's `qL(b, frames)` (L951754: the widget's displayed fill `Yx`).
+    // Slot -> button: 9 Punch, 10 Kick, 11 Ranged, 12 Magic, 14 Kick (Super).
+    // The value is the fill percent (0..100). The native pad draws Punch/Kick;
+    // Ranged/Magic are carried for the JS-exact values.
+    struct AbilityPad {
+        float punch = 100.0f;   // slot 9  (`Si`)
+        float kick = 100.0f;    // slot 10 / 14 (`fh`)
+        float ranged = 100.0f;  // slot 11 (`di`)
+        float magic = 100.0f;   // slot 12 (`Eg`)
+    };
+    const AbilityPad& ability_pad() const { return ability_pad_; }
+
 private:
+    // The live pad fill (JS `fu.Hrb` -> the button `qL`; see `AbilityPad`).
+    AbilityPad ability_pad_;
     // --- child models (JS `ih`, `wd.vd`, the `su` spawn cache) -----------
     // JS `wd.bwb` (L518) -> `wd.fya` (L535-536): `<CreatePlayer>`.
     void spawn_child(FightFighter& owner, const sf2::scene::MoveAction& act);
@@ -2666,6 +2685,9 @@ private:
     // Magic/bullet normalize (`LA` without the link branch) + slot-8 publish.
     void la_normalize(FightFighter& f);
     void fire_slot8(int side);
+    // JS `Pi.Irb` (L202013) + `fu.Hrb` (L229772): drain both fighters'
+    // `yp`/`lHa` queues and update `ability_pad_`.
+    void apply_ability_events();
     // Magic per-fighter init + per-round reset (`Ka`/`yKa`).
     void init_magic();
     // One fighter's magic reset (JS `wd.yKa` L504: `zL(0)`, `yL(
