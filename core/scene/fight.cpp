@@ -4285,6 +4285,24 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         m.uf = uf;
         m.col_side = tgt;
         bus_.install_mod(owner_side, std::move(m));
+    } else if (type == "SetCooldown") {
+        // `Yp` (perk action type 19, L711891): parse `BZ`=Frames,
+        // `Av`=Button. On fire `npb` (L664...) does
+        //   `c=b.BZ; b=sa.HQ(0,b.Av); a.model.wKa(b); a.model.b5(b,c)`
+        // i.e. reset then arm the target fighter's ability-button cooldown —
+        // the SAME `wd.wKa`/`wd.b5` primitives the move-effect path uses
+        // (`Zvb` L523 -> `dispatch_move_actions`). `sa.HQ` slots: Punch 9 /
+        // Kick 10 / Ranged 11 / Super 14; Magic/RaidCharge and unknown names
+        // fall outside the `wKa`/`b5` switch (a silent no-op, JS-exact).
+        // Shipped perks: PERK_MINE_PLAYER (Ranged, 480f) and
+        // PERK_SPHERE_COOLDOWN (RaidCharge -> no-op).
+        const int slot = button_slot(str("Button"));
+        target.fighter.ability_cooldown_reset(slot);
+        target.fighter.ability_cooldown_start(
+            slot, static_cast<float>(num("Frames", 0.0)));
+        std::fprintf(stdout, "[perk] SetCooldown button='%s' slot=%d frames=%.0f\n",
+                     str("Button").c_str(), slot, num("Frames", 0.0));
+        std::fflush(stdout);
     } else if (type == "Effect") {
         // JS `Yl` (L728) -> `wd.gwb` (L519: `this.Nt.Z(a)`) -> `tl.Nt`
         // (L842): route the started effect by `Gfb` (OnBackground) into

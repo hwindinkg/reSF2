@@ -16,15 +16,18 @@
 //     DisableInterval(6), AddBullets(7) `Rob`, AddMagicCharge(8) `Sob`,
 //     SetHit(9), SetModFrames(10), Provoke(13), Lifesteal(14),
 //     ModInvisibility(15), SetTactic(16) `qpb`, SetModVariable(17) `dka`,
-//     SetRangeVariable(18), ChangeImpulse(20), ChangeHitEffectScale(21),
-//     ChangeAdditionalDamageValue(22) +Ly, SlowModel(28) `Kvb`,
-//     ChangeModelColor(29), TurnOffCollision(30), ModHealthChange(12)
-//     DoT/HoT install.
-//   NO-OP+log: ApplyModEffect(11), SetCooldown(19), SetDarkness(25),
-//     Switch(26, inert per spec), StealMagicMod(27), MoveModel,
-//     ShowDebugLine(23), MarkPerkAsUsed(24). (`Effect`/`StopEffect`/
-//     `StopFollowEffect` are handled by `exec_action` but are not shipped
-//     `Ma` tags.)
+//     SetRangeVariable(18), SetCooldown(19) `npb` (fighter ability-button
+//     cooldown via `wd.wKa`/`wd.b5`), ChangeImpulse(20),
+//     ChangeHitEffectScale(21), ChangeAdditionalDamageValue(22) +Ly,
+//     SlowModel(28) `Kvb`, ChangeModelColor(29), TurnOffCollision(30),
+//     ModHealthChange(12) DoT/HoT install, ApplyModEffect(11) `cpb`
+//     (perk-icon pulse/stack via `Hr.Maa`).
+//   NO-OP+log: SetDarkness(25, screen overlay `bu` not modelled),
+//     Switch(26, applies its nested `<Case>` actions via `Z4a`;
+//     no shipped case content), StealMagicMod(27), MoveModel(31, model
+//     tween `Ow`), ShowDebugLine(23), MarkPerkAsUsed(24). (`Effect`/
+//     `StopEffect`/`StopFollowEffect` are handled by `exec_action` but are
+//     not shipped `Ma` tags.)
 
 #include <functional>
 #include <map>
