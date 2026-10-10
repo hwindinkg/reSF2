@@ -1483,6 +1483,8 @@ struct GamepadLayout {
     float node_scale = 1.0f;            // e/440
     float punch_cx = 0.0f, punch_cy = 0.0f;  // button centers (view coords)
     float kick_cx = 0.0f, kick_cy = 0.0f;
+    float ranged_cx = 0.0f, ranged_cy = 0.0f;
+    float magic_cx = 0.0f, magic_cy = 0.0f;
     float btn_r = 0.0f;  // the button hit radius (view coords)
 
     GamepadLayout() {
@@ -1506,6 +1508,12 @@ struct GamepadLayout {
         punch_cy = node_cy + 28.0f * node_scale;
         kick_cx = node_cx - 50.0f * node_scale;
         kick_cy = node_cy + 198.0f * node_scale;
+        // JS `fu` ctor (L229772): `di` (Ranged) at (-120,-28), `Eg` (Magic) at
+        // (50,-198) — the mobile (`L.K.un`) branch, which is the oracle layout.
+        ranged_cx = node_cx - 120.0f * node_scale;
+        ranged_cy = node_cy - 28.0f * node_scale;
+        magic_cx = node_cx + 50.0f * node_scale;
+        magic_cy = node_cy - 198.0f * node_scale;
         btn_r = kPadBtnHitR * node_scale;
     }
 };
@@ -1683,11 +1691,12 @@ static void update_pad_input(App& app, sf2::scene::FightController* fight,
     if (!live) {
         // Round ended mid-drag: release everything so no key stays held.
         if (st.joy_grabbed || st.joy_sector != 0 || st.btn_punch_down ||
-            st.btn_kick_down) {
+            st.btn_kick_down || st.btn_ranged_down || st.btn_magic_down) {
             st.joy_grabbed = false;
             st.joy_knob_x = st.joy_knob_y = 0.0f;
             st.joy_sector = 0;
             st.btn_punch_down = st.btn_kick_down = false;
+            st.btn_ranged_down = st.btn_magic_down = false;
         }
         return;
     }
@@ -1757,23 +1766,31 @@ static void update_pad_input(App& app, sf2::scene::FightController* fight,
     const float px = static_cast<float>(p.x);
     const float py = static_cast<float>(p.y);
     if (p.pressed && !st.joy_grabbed) {
-        const float pdx = px - pad.punch_cx;
-        const float pdy = py - pad.punch_cy;
-        if (pdx * pdx + pdy * pdy <= pad.btn_r * pad.btn_r) {
+        // JS `fu.nia` (L229772) walks `this.Cd` = [fh(kick), Si(punch),
+        // di(ranged), Eg(magic)] and takes the FIRST circle hit.
+        auto hit = [&](float cx, float cy) {
+            const float dx = px - cx;
+            const float dy = py - cy;
+            return dx * dx + dy * dy <= pad.btn_r * pad.btn_r;
+        };
+        if (hit(pad.kick_cx, pad.kick_cy)) {
+            st.btn_kick_down = true;
+            key(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
+            std::fprintf(stdout, "[%s] player input -> kick (pad)\n", tag);
+        } else if (hit(pad.punch_cx, pad.punch_cy)) {
             st.btn_punch_down = true;
             key(sf2::scene::key_type::punch, sf2::scene::press_type::tap);
             std::fprintf(stdout, "[%s] player input -> punch (pad)\n", tag);
-            std::fflush(stdout);
-        } else {
-            const float kdx = px - pad.kick_cx;
-            const float kdy = py - pad.kick_cy;
-            if (kdx * kdx + kdy * kdy <= pad.btn_r * pad.btn_r) {
-                st.btn_kick_down = true;
-                key(sf2::scene::key_type::kick, sf2::scene::press_type::tap);
-                std::fprintf(stdout, "[%s] player input -> kick (pad)\n", tag);
-                std::fflush(stdout);
-            }
+        } else if (hit(pad.ranged_cx, pad.ranged_cy)) {
+            st.btn_ranged_down = true;
+            key(sf2::scene::key_type::ranged, sf2::scene::press_type::tap);
+            std::fprintf(stdout, "[%s] player input -> ranged (pad)\n", tag);
+        } else if (hit(pad.magic_cx, pad.magic_cy)) {
+            st.btn_magic_down = true;
+            key(sf2::scene::key_type::magic, sf2::scene::press_type::tap);
+            std::fprintf(stdout, "[%s] player input -> magic (pad)\n", tag);
         }
+        std::fflush(stdout);
     }
     if (st.btn_punch_down && !p.down) {
         st.btn_punch_down = false;
@@ -1782,6 +1799,14 @@ static void update_pad_input(App& app, sf2::scene::FightController* fight,
     if (st.btn_kick_down && !p.down) {
         st.btn_kick_down = false;
         key(sf2::scene::key_type::kick, sf2::scene::press_type::release);
+    }
+    if (st.btn_ranged_down && !p.down) {
+        st.btn_ranged_down = false;
+        key(sf2::scene::key_type::ranged, sf2::scene::press_type::release);
+    }
+    if (st.btn_magic_down && !p.down) {
+        st.btn_magic_down = false;
+        key(sf2::scene::key_type::magic, sf2::scene::press_type::release);
     }
 }
 
@@ -7676,13 +7701,18 @@ void ensure_dojo_location(App& app) {
     }
 }
 
+// Forward decl: the ranged/magic ring helper (defined near the fight pad).
+static void draw_ability_ring(App& app, float cx, float cy, float scale,
+                              float fill);
+
 // Dojo gamepad (display only): the oracle Dojo shows the joystick +
 // punch/kick buttons (same ui/controller frames as the fight pad). The hub's
 // drawn pad reflects its live interaction state (the knob follows a drag, the
 // base/buttons swap to their _action frames) — the same frames the fight pad
 // uses. The hub's pad is wired to its `FightNone` controller (see
 // DojoScreen::update_impl / draw_dojo_figure callers).
-void draw_dojo_gamepad(App& app, const PadInputState& pad_in) {
+void draw_dojo_gamepad(App& app, const PadInputState& pad_in,
+                       const sf2::scene::FightController::AbilityPad* ap) {
     const GamepadLayout pad;
     const float base_size = pad.joy_r * 2.0f;
     const float knob_size = pad.knob_r * 2.0f;
@@ -7699,14 +7729,31 @@ void draw_dojo_gamepad(App& app, const PadInputState& pad_in) {
                           pad.joy_cx + pad_in.joy_knob_x,
                           pad.joy_cy + pad_in.joy_knob_y, knob_size, knob_size,
                           1.0f);
-    try_draw_atlas_button(app,
-                          pad_in.btn_punch_down ? "btn_punch_action"
-                                                : "btn_punch_normal",
-                          pad.punch_cx, pad.punch_cy, btn_size, btn_size, 1.0f);
-    try_draw_atlas_button(app,
-                          pad_in.btn_kick_down ? "btn_kick_action"
-                                               : "btn_kick_normal",
-                          pad.kick_cx, pad.kick_cy, btn_size, btn_size, 1.0f);
+    // The SAME 4 `fu` buttons (L229772) the fight pad draws: punch/kick/
+    // ranged/magic, with the ranged+magic rings (`Uua`).
+    const float fill[4] = {
+        ap ? ap->punch : 0.0f, ap ? ap->kick : 0.0f,
+        ap ? ap->ranged : 0.0f, ap ? ap->magic : 100.0f};
+    const float bcx[4] = {pad.punch_cx, pad.kick_cx, pad.ranged_cx, pad.magic_cx};
+    const float bcy[4] = {pad.punch_cy, pad.kick_cy, pad.ranged_cy, pad.magic_cy};
+    const bool bdown[4] = {pad_in.btn_punch_down, pad_in.btn_kick_down,
+                           pad_in.btn_ranged_down, pad_in.btn_magic_down};
+    static const char* kNorm[4] = {"btn_punch_normal", "btn_kick_normal",
+                                   "btn_throw_normal", "btn_magic_normal"};
+    static const char* kAct[4] = {"btn_punch_action", "btn_kick_action",
+                                  "btn_throw_action", "btn_magic_action"};
+    static const bool kHasRing[4] = {false, false, true, true};
+    for (int i = 0; i < 4; ++i) {
+        try_draw_atlas_button(app, bdown[i] ? kAct[i] : kNorm[i], bcx[i],
+                              bcy[i], btn_size, btn_size, 1.0f);
+        if (kHasRing[i]) {
+            if (fill[i] >= 100.0f) {
+                try_draw_atlas_button(app, "magic_full", bcx[i], bcy[i],
+                                      btn_size, btn_size, 1.0f);
+            }
+            draw_ability_ring(app, bcx[i], bcy[i], pad.node_scale, fill[i]);
+        }
+    }
     // JS `Za` tutorial control hints. `Do`/`Eo` `S` (sf2.502f0946.js
     // L1123/L1125) gate them on `lJ()` = `ca.Ka()!=null && ca.Ka().Ra.length>=1`
     // (L1121 `lJ`), i.e. an ACTIVE `ca`. The Dojo `FightNone` viewer builds one
@@ -8947,7 +8994,9 @@ void DojoScreen::render_impl(App& app) {
         // the port's 51.0/48.3), the oracle `dojo_hub` shows it (59.6~62.4).
         if (app.screens().top() == this && !g_settings_dialog_open &&
             quest_modal_top(app) == nullptr) {
-            draw_dojo_gamepad(app, dojo_pad_);
+            draw_dojo_gamepad(app, dojo_pad_,
+                              dojo_fight_ ? &dojo_fight_->ability_pad()
+                                          : nullptr);
         }
         // Shared `za` chrome (topPanel + wr/xr/yr widgets + the vertical nav
         // column) — the JS `ma.D1` chrome on every shell screen
@@ -12763,6 +12812,58 @@ void FightScreen::update_gamepad_input() {
 // from ui/controller — JoystickContainer_norm/action (base), Joystick_
 // norm/action (knob), btn_punch_normal/action, btn_kick_normal/action.
 // Flat procedural circles when the atlas is unavailable.
+// JS `ig.Uua` (L951754) + `Yj.update` (L848213): the ranged/magic cooldown
+// ring — an annulus sector textured with the controller atlas `magic_progress`
+// frame. It starts at -90 deg and sweeps `fill/100` of the circle; the outer
+// radius is `fa.x/2*1.01`, the inner `0.75x`. `Yj.precision` (0.1) picks the
+// segment count. Emitted as textured quads through `draw_textured_quad`.
+static void draw_ability_ring(App& app, float cx, float cy, float scale,
+                              float fill) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame("magic_progress", &fr, &tw, &th, &gl)) return;
+    if (tw <= 0 || th <= 0) return;
+    float frac = fill / 100.0f;
+    if (frac <= 0.0f) return;  // `Yj.update`: `if(this.Lda!=0)`
+    if (frac > 1.0f) frac = 1.0f;  // `(c<0?0:c>1?1:c)`
+    const float fw = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                     : static_cast<float>(fr.w);
+    const float zA = fw * 0.5f * 1.01f;  // `jv.zA = fa.x/2*1.01`
+    const float kR = zA * 0.75f;         // `jv.kR = zA*.75`
+    const float sweep = frac * 2.0f * 3.14159265358979323846f;
+    const float precision = 0.1f;  // `Yj.precision`
+    const float denom = 2.0f * std::acos(1.0f - precision / zA);
+    int segs = denom > 0.0f ? static_cast<int>(sweep / denom - 1.0f) : 1;
+    if (segs < 1) segs = 1;
+    const float step = sweep / static_cast<float>(segs);  // `d/=c`
+    sf2::render::Renderer& ren = app.renderer();
+    for (int g = 0; g < segs; ++g) {
+        const float h = -1.5707963267948966f + g * step;
+        const float k = h + step;
+        const float ch = std::cos(h), sh = std::sin(h);
+        const float ck = std::cos(k), sk = std::sin(k);
+        // local corners: 0 outer-start, 1 outer-end, 2 inner-start, 3 inner-end
+        const float lx[4] = {ch * zA, ck * zA, ch * kR, ck * kR};
+        const float ly[4] = {sh * zA, sk * zA, sh * kR, sk * kR};
+        float xy[8];
+        float uv[8];
+        for (int c = 0; c < 4; ++c) {
+            xy[c * 2] = cx + lx[c] * scale;
+            xy[c * 2 + 1] = cy + ly[c] * scale;
+            // radial UV: the annulus maps onto the frame band (see the note).
+            const float u = (lx[c] / zA) * 0.5f + 0.5f;
+            const float v = (ly[c] / zA) * 0.5f + 0.5f;
+            uv[c * 2] = (static_cast<float>(fr.x) + u * static_cast<float>(fr.w)) /
+                        static_cast<float>(tw);
+            uv[c * 2 + 1] =
+                (static_cast<float>(fr.y) + v * static_cast<float>(fr.h)) /
+                static_cast<float>(th);
+        }
+        ren.draw_textured_quad("magic_progress", xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+}
+
 void FightScreen::draw_gamepad(App& app) const {
     if (fight_ == nullptr || !pad_visible()) return;
     const GamepadLayout pad;
@@ -12813,46 +12914,53 @@ void FightScreen::draw_gamepad(App& app) const {
         }
     }
 
-    // --- Attack buttons: punch + kick circles (the JS `ig` swaps the
-    // frame to _action while pressed). Draw-size 0.9 (centers + hit radii
-    // untouched — JS fu/uab; draw only): 4px gap -> 12px gap.
+    // --- Attack buttons: the 4 JS `fu` buttons (L229772) — punch `Si`,
+    // kick `fh`, ranged `di`, magic `Eg` — with the ui/controller frames
+    // (`btn_punch/kick/throw/magic_normal|action`). The `ig` widget swaps to
+    // _action while pressed (`nia`/`oia`: `Y.Cb(vt/frame)`). Draw-size 0.9
+    // (centers + hit radii untouched — JS fu/uab; draw only): 4px -> 12px gap.
     const float btn_size = pad.btn_r * 2.0f * 0.9f;
-    const bool punch_drawn =
-        try_draw_atlas_button(app, pad_.btn_punch_down ? "btn_punch_action" : "btn_punch_normal",
-                              pad.punch_cx, pad.punch_cy, btn_size, btn_size, 1.0f);
-    const bool kick_drawn =
-        try_draw_atlas_button(app, pad_.btn_kick_down ? "btn_kick_action" : "btn_kick_normal",
-                              pad.kick_cx, pad.kick_cy, btn_size, btn_size, 1.0f);
-    if (!punch_drawn) {
-        constexpr float kPi = 3.14159265358979323846f;
-        constexpr int kSegs = 14;
-        const float step = 2.0f * kPi / static_cast<float>(kSegs);
-        for (int s = 0; s < kSegs; ++s) {
-            const float a0 = static_cast<float>(s) * step;
-            const float a1 = static_cast<float>(s + 1) * step;
-            float tri[6] = {pad.punch_cx,
-                           pad.punch_cy,
-                           pad.punch_cx + std::cos(a0) * pad.btn_r,
-                           pad.punch_cy + std::sin(a0) * pad.btn_r,
-                            pad.punch_cx + std::cos(a1) * pad.btn_r,
-                           pad.punch_cy + std::sin(a1) * pad.btn_r};
-            ren.draw_triangles(tri, 3, pad_.btn_punch_down ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+    const sf2::scene::FightController::AbilityPad& ap = fight_->ability_pad();
+    const float fill[4] = {ap.punch, ap.kick, ap.ranged, ap.magic};
+    const float bcx[4] = {pad.punch_cx, pad.kick_cx, pad.ranged_cx, pad.magic_cx};
+    const float bcy[4] = {pad.punch_cy, pad.kick_cy, pad.ranged_cy, pad.magic_cy};
+    const bool bdown[4] = {pad_.btn_punch_down, pad_.btn_kick_down,
+                           pad_.btn_ranged_down, pad_.btn_magic_down};
+    static const char* kNorm[4] = {"btn_punch_normal", "btn_kick_normal",
+                                   "btn_throw_normal", "btn_magic_normal"};
+    static const char* kAct[4] = {"btn_punch_action", "btn_kick_action",
+                                  "btn_throw_action", "btn_magic_action"};
+    // `Uua()` runs for di (ranged) + Eg (magic) ONLY: they alone carry the
+    // `magic_full` overlay (`oH`) and the `magic_progress` ring (`jv`).
+    static const bool kHasRing[4] = {false, false, true, true};
+    constexpr float kPi = 3.14159265358979323846f;
+    constexpr int kSegs = 14;
+    const float step = 2.0f * kPi / static_cast<float>(kSegs);
+    for (int i = 0; i < 4; ++i) {
+        // JS append order: button `Y`, then the `magic_full` overlay `oH`
+        // (`o5`: visible when `Yx >= HW` = 100), then the ring `ita`.
+        const bool drawn = try_draw_atlas_button(
+            app, bdown[i] ? kAct[i] : kNorm[i], bcx[i], bcy[i], btn_size,
+            btn_size, 1.0f);
+        if (!drawn) {
+            for (int s = 0; s < kSegs; ++s) {
+                const float a0 = static_cast<float>(s) * step;
+                const float a1 = static_cast<float>(s + 1) * step;
+                float tri[6] = {bcx[i],
+                                bcy[i],
+                                bcx[i] + std::cos(a0) * pad.btn_r,
+                                bcy[i] + std::sin(a0) * pad.btn_r,
+                                bcx[i] + std::cos(a1) * pad.btn_r,
+                                bcy[i] + std::sin(a1) * pad.btn_r};
+                ren.draw_triangles(tri, 3, bdown[i] ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+            }
         }
-    }
-    if (!kick_drawn) {
-        constexpr float kPi = 3.14159265358979323846f;
-        constexpr int kSegs = 14;
-        const float step = 2.0f * kPi / static_cast<float>(kSegs);
-        for (int s = 0; s < kSegs; ++s) {
-            const float a0 = static_cast<float>(s) * step;
-            const float a1 = static_cast<float>(s + 1) * step;
-            float tri[6] = {pad.kick_cx,
-                           pad.kick_cy,
-                           pad.kick_cx + std::cos(a0) * pad.btn_r,
-                           pad.kick_cy + std::sin(a0) * pad.btn_r,
-                           pad.kick_cx + std::cos(a1) * pad.btn_r,
-                           pad.kick_cy + std::sin(a1) * pad.btn_r};
-            ren.draw_triangles(tri, 3, pad_.btn_kick_down ? 0.9f : 0.3f, 0.55f, 0.15f, 0.85f);
+        if (kHasRing[i]) {
+            if (fill[i] >= 100.0f) {
+                try_draw_atlas_button(app, "magic_full", bcx[i], bcy[i],
+                                      btn_size, btn_size, 1.0f);
+            }
+            draw_ability_ring(app, bcx[i], bcy[i], pad.node_scale, fill[i]);
         }
     }
 }

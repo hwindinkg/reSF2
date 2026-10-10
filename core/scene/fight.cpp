@@ -4642,12 +4642,12 @@ void FightController::apply_ability_events() {
             if (e.side != 0 && !pvp) continue;  // `a.Ft!=0 && type!="FightPVP"`
             float b = e.value * 100.0f;         // `let b=a.value*100`
             if (e.slot == 12 && b > 97.0f && b < 100.0f) b = 97.0f;
-            switch (e.slot) {  // `fu.Hrb` (L229772)
-                case 9:  ability_pad_.punch = b; break;   // `Si.qL`
-                case 10: ability_pad_.kick = b; break;    // `fh.qL`
-                case 11: ability_pad_.ranged = b; break;  // `di.qL`
-                case 12: ability_pad_.magic = b; break;   // `Eg.qL`
-                case 14: ability_pad_.kick = b; break;    // `fh.qL` (Super)
+            switch (e.slot) {  // `fu.Hrb` (L229772) -> `qL(b, c)` (c=frames)
+                case 9:  ability_qL(0, b, e.frames); break;  // `Si.qL`
+                case 10: ability_qL(1, b, e.frames); break;  // `fh.qL`
+                case 11: ability_qL(2, b, e.frames); break;  // `di.qL`
+                case 12: ability_qL(3, b, e.frames); break;  // `Eg.qL`
+                case 14: ability_qL(1, b, e.frames); break;  // `fh.qL` (Super)
                 default: break;  // 13/other: no case -> no-op
             }
         }
@@ -4656,6 +4656,49 @@ void FightController::apply_ability_events() {
     };
     consume(player_.fighter);
     consume(enemy_.fighter);
+}
+
+// JS `ig.qL(a,b)` (L951754): set a button's displayed fill toward `a` over
+// `b` frames.
+//   `qL(a,b){ b/=60; this.wh!=null&&this.o5(this.wh.uPa); this.kFa();
+//             let c=this.bC,d=this.HW; a<c?a=c:a>d&&(a=d);
+//             this.Yx!=a&&(b==0?this.o5(a):this.wh=new yx(0,b,this.Yx,a)) }`
+// `bC`/`HW` are 0/100 for every button (`ig` ctor). A live tween is finished
+// (snap to its target) before the new one starts.
+void FightController::ability_qL(int idx, float target, int frames) {
+    float* cur = idx == 0 ? &ability_pad_.punch
+                : idx == 1 ? &ability_pad_.kick
+                : idx == 2 ? &ability_pad_.ranged
+                           : &ability_pad_.magic;
+    AbilityTween& tw = ability_tween_[idx];
+    if (tw.active) {  // `this.wh!=null&&this.o5(this.wh.uPa)`
+        *cur = tw.to;
+        tw.active = false;
+    }
+    if (target < 0.0f) target = 0.0f;      // `a<c?a=c`
+    else if (target > 100.0f) target = 100.0f;  // `a>d&&(a=d)`
+    if (*cur == target) return;            // `this.Yx!=a&&(...)`
+    const float dur = static_cast<float>(frames) / 60.0f;  // `b/=60`
+    if (dur == 0.0f) {
+        *cur = target;  // `o5(a)`
+    } else {
+        tw = AbilityTween{true, 0.0f, dur, *cur, target};  // `new yx(0,b,Yx,a)`
+    }
+}
+
+// JS `ig.aa(a)` (L951754): `this.wh.time+=a; let b=Math.min(time/duration,1);
+// this.o5(from+(to-from)*b); b>=1&&(this.wh=null)`.
+void FightController::step_ability_pad(float dt) {
+    float* slots[4] = {&ability_pad_.punch, &ability_pad_.kick,
+                       &ability_pad_.ranged, &ability_pad_.magic};
+    for (int i = 0; i < 4; ++i) {
+        AbilityTween& tw = ability_tween_[i];
+        if (!tw.active) continue;
+        tw.time += dt;
+        const float f = tw.dur > 0.0f ? std::min(tw.time / tw.dur, 1.0f) : 1.0f;
+        *slots[i] = tw.from + (tw.to - tw.from) * f;  // `o5(...)`
+        if (f >= 1.0f) tw.active = false;             // `this.wh=null`
+    }
 }
 
 // `ia` mod tick for one side + slot-14 publish on expiry.
@@ -7295,6 +7338,8 @@ void FightController::update(float dt) {
     // JS `Pi.Irb` (L202013): drain the `yd` buses into the ability-button
     // rings. Runs after the `MOa` tick so this frame's emits land this frame.
     apply_ability_events();
+    // JS `fu.update` -> `ig.aa(L.K.sk.Bm)` (L951754): advance the `yx` fills.
+    step_ability_pad(dt);
     if (battle_over_) return;
 
     // The K.O. slow-mo beat (JS: the KO freeze): the first 30 frames of

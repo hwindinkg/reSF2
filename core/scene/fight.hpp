@@ -2579,19 +2579,36 @@ public:
     // and dispatches `sg.Hrb(a.awa, b, a.frames)`, which calls the matching
     // button's `qL(b, frames)` (L951754: the widget's displayed fill `Yx`).
     // Slot -> button: 9 Punch, 10 Kick, 11 Ranged, 12 Magic, 14 Kick (Super).
-    // The value is the fill percent (0..100). The native pad draws Punch/Kick;
-    // Ranged/Magic are carried for the JS-exact values.
+    // The value is the fill percent (0..100). This is the DISPLAYED fill
+    // (`ig.Yx`, L951754): `qL` starts a `yx` tween toward the target, and
+    // `step_ability_pad` advances it. JS init (the `fu` ctor L229772):
+    // Punch/Kick/Ranged 0, Magic 100 (`this.Eg.qL(100,1)`).
     struct AbilityPad {
-        float punch = 100.0f;   // slot 9  (`Si`)
-        float kick = 100.0f;    // slot 10 / 14 (`fh`)
-        float ranged = 100.0f;  // slot 11 (`di`)
+        float punch = 0.0f;     // slot 9  (`Si`)
+        float kick = 0.0f;      // slot 10 / 14 (`fh`)
+        float ranged = 0.0f;    // slot 11 (`di`)
         float magic = 100.0f;   // slot 12 (`Eg`)
     };
     const AbilityPad& ability_pad() const { return ability_pad_; }
 
+    // JS `ig.aa(a)` (L951754): advance every in-flight `yx` fill by `dt`
+    // seconds. The fight calls this once per frame (like `fu.update` ->
+    // `ig.aa(L.K.sk.Bm)`).
+    void step_ability_pad(float dt);
+
 private:
-    // The live pad fill (JS `fu.Hrb` -> the button `qL`; see `AbilityPad`).
+    // The live pad fill (JS `ig.Yx`; the `fu.Hrb` -> `qL` target + the `yx`
+    // tween state). See `AbilityPad`.
     AbilityPad ability_pad_;
+    // JS `ig.wh` (`yx` tween, L951754): per-button (0 punch, 1 kick, 2 ranged,
+    // 3 magic) the in-flight fill animation `{time, duration, from, to}`.
+    struct AbilityTween {
+        bool active = false;
+        float time = 0.0f, dur = 0.0f, from = 0.0f, to = 0.0f;
+    };
+    AbilityTween ability_tween_[4];
+    // JS `ig.qL(a,b)` (L951754): set slot `idx`'s target `a` with `b` frames.
+    void ability_qL(int idx, float target, int frames);
     // --- child models (JS `ih`, `wd.vd`, the `su` spawn cache) -----------
     // JS `wd.bwb` (L518) -> `wd.fya` (L535-536): `<CreatePlayer>`.
     void spawn_child(FightFighter& owner, const sf2::scene::MoveAction& act);

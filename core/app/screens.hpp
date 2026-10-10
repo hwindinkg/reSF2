@@ -74,6 +74,8 @@ struct PadInputState {
     int joy_sector = 0;         // the active movement key 1-8 (0 = neutral)
     bool btn_punch_down = false;
     bool btn_kick_down = false;
+    bool btn_ranged_down = false;  // JS `fu.di` (slot 11)
+    bool btn_magic_down = false;   // JS `fu.Eg` (slot 12)
 };
 
 // The keyboard's directional state (JS `gu` keyboard + `Za.bbb` bindings).
