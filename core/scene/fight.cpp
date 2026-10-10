@@ -7428,11 +7428,23 @@ void FightController::dump_pose_frame() {
             }
             if (clip_name.empty()) clip_name = m->name;
         }
+        // [trace] `fx` = JS `da.hd()` (trace.js L176), NOT `facing()`. The
+        // oracle hook dumps `da.hd()` = `Te.FX` = `hd(){return this.FX}`
+        // (L278218, `rub(a){this.FX=a<0?-1:1}` L278220) — the CLIP-BUFFER
+        // MIRROR, i.e. the port's `clip_mirror()` (fighter.hpp:619). The
+        // `b6a` facing lock (`facing()`, fighter.cpp:1173) is a DIFFERENT
+        // quantity and read -1 where the oracle read +1 on 232/233 matched
+        // frames (pose_gap_report.txt), i.e. the fighter at x=690 read fx=-1
+        // natively vs +1 in the oracle while its bones matched. `cf` stays
+        // the JS `Te.M0()` clip frame (`move_frame_`) — the comparator
+        // documents the native side as an "int clip frame" vs the oracle's
+        // `da.Xh` playhead (compare_pose.py L14/L166), and the two sides'
+        // alignment key tolerates the constant offset.
         std::fprintf(pose_dump_file_,
                      "%s{\"id\":\"%s\",\"x\":%.3f,\"y\":%.3f,\"fx\":%d,\"clip\":\"%s\","
                      "\"cf\":%d,\"sub\":%d,\"subn\":%d,\"bones\":[",
                      i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
-                     f.world_x(), f.world_y(), f.facing(), clip_name.c_str(),
+                     f.world_x(), f.world_y(), f.clip_mirror(), clip_name.c_str(),
                      f.move_frame(), f.subframe(), f.sub());
         for (std::size_t b = 0; b + 1 < pos.size(); b += 2) {
             std::fprintf(pose_dump_file_, "%s[%.3f,%.3f]", b == 0 ? "" : ",", pos[b],

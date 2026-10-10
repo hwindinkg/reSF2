@@ -1172,7 +1172,9 @@ private:
     bool pose_sampled_ = false;
     // [F10] The `b6a` FACING LOCK (movement/orientation), JS L603
     // `b6a(a){...a.ma.x-b.ma.x>=0?1:-1}` — set in `start_move_impl`. This is
-    // what `facing()` reports (the pose dump's `fx`).
+    // what `facing()` reports. NOTE: the pose dump's `fx` is NOT this — it is
+    // the `Te.FX` clip mirror (`clip_mirror()` / JS `da.hd()`), see
+    // fight.cpp's `dump_pose_frame`.
     int facing_ = 1;
     // [F10] The CLIP-BUFFER MIRROR sign — JS `Te.FX`, read through
     // `Te.hd()` (L547 `hd(){return this.FX}`). A term DISTINCT from the
