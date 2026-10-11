@@ -1317,6 +1317,12 @@ private:
     // JS `ha.Yba` (L523358) via `Mn.S` (L1037): remove matching NON-running
     // entries from the active queue (`Dh`). TRANSIENT — no session latch.
     void clear_quest_queue(const std::string& name);
+    // JS `ha.Yba()` NO-ARG (L523358) via `Sn.S` (L40258, the `<EFight>` action):
+    // drop EVERY active-queue entry whose `SC != 1` — i.e. every matched but not
+    // yet RUNNING quest. The port's running state is `pending_` / `dialogs_` /
+    // `tutorial_gate_` (all SC==1); the queued-but-not-run state is
+    // `deferred_fight_quests_` (SC==0), so only those are dropped.
+    void clear_quest_queue_all();
     // JS `L3(a,b)` (L184): read one file, walk the root's children —
     // `Quest` -> register, `Include` -> `Sjb`.
     void load_quest_file(App& app, const std::string& rel);

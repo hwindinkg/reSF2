@@ -267,16 +267,27 @@ void parse_condition_element(const pugi::xml_node& ch, QuestCond& parent) {
         leaf.invert = not_attr == "1";
         // `yb.parse` L40641: `fca = (CompareType ?? "") == "Versions" ? 1 : 0`.
         leaf.versions = ch.attribute("CompareType").value() == std::string("Versions");
-        // `yb.parse` L491578: `NEa()` (Contains/Starts/Ends) reads
-        // `CaseSensitive` (absent -> "1").
-        leaf.case_sensitive = ch.attribute("CaseSensitive").value() != "0";
+        // `yb.parse` L40645-40647: `NEa()` (Contains/Starts/Ends) reads
+        // `CaseSensitive` as `(b ?? "1") == "1"` — ABSENT -> true, and any
+        // value other than exactly "1" is FALSE (the port used `!= "0"`, which
+        // wrongly treated "abc" as case-sensitive). 0 shipped uses today.
+        const std::string cs = ch.attribute("CaseSensitive").value();
+        leaf.case_sensitive = cs.empty() ? true : (cs == "1");
         parent.children.push_back(std::move(leaf));
         return;
     }
     if (tag == "Operator" || tag == "And" || tag == "Or") {
         QuestCond op;
+        // `yb.parse` L40639-40651: `MF = yb.AAa(Type ?? "")` (`AAa` L42087:
+        // "And"->2, "Or"->1, else 0); if `MF==0` it falls back to
+        // `yb.AAa(a.name)`. A node whose `MF` stays 0 is UNEVALUABLE: `compare`
+        // L40679-40684 takes neither the And nor the Or branch, so the result
+        // is FALSE (then `cr` applies Not). The port defaulted such an
+        // `<Operator>` to "And" — a divergence. 0 shipped `<Operator>` uses.
         const std::string type = ch.attribute("Type").value();
-        op.kind = (type == "Or" || tag == "Or") ? "Or" : "And";
+        int mf = (type == "And") ? 2 : (type == "Or") ? 1 : 0;
+        if (mf == 0) mf = (tag == "And") ? 2 : (tag == "Or") ? 1 : 0;
+        op.kind = (mf == 2) ? "And" : (mf == 1) ? "Or" : "Never";
         op.invert = not_attr == "1";
         for (pugi::xml_node g = ch.first_child(); g; g = g.next_sibling()) {
             if (g.type() != pugi::node_element) continue;
@@ -2927,6 +2938,12 @@ double QuestEngine::eval_expr_num(
 }
 
 QuestEngine::Tri QuestEngine::eval_cond(App& app, const QuestCond& cond, const EvalCtx& ctx) {
+    // JS `yb.compare` L40663-40686: an operator whose `MF` stayed 0 (an
+    // `<Operator>` with no/unknown `Type`) takes neither branch -> FALSE, then
+    // `cr` applies Not.
+    if (cond.kind == "Never") {
+        return cond.invert ? Tri::True : Tri::False;
+    }
     if (cond.kind == "And" || cond.kind == "Or") {
         const bool is_or = cond.kind == "Or";
         bool acc = !is_or;      // And starts true, Or starts false
@@ -3114,6 +3131,11 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             req.reopen = attr_bool01(attr_or(a.attrs, "ReopenScene"));
             fx.navigate.push_back(std::move(req));
         } else if (t == "Fight") {
+            // JS `Sn.S` (L40258, `g="1EB"`): the FIRST statement is
+            // `ha.F().Yba()` — drop every queued (SC!=1) quest BEFORE resolving
+            // and starting the fight. The port's queued-not-run entries live in
+            // `deferred_fight_quests_` (see `clear_quest_queue_all`).
+            clear_quest_queue_all();
             // JS `Sn` (the `Fight` action, `g="1EB"` L548832): `parse` keeps the
             // raw `Name` (`this.Ba`), and `S(a)` resolves it through a fresh
             // journal — `c.fc(this.Ba,b)` — BEFORE the lookup. The shipped quest
@@ -6119,6 +6141,20 @@ void QuestEngine::clear_quest_queue(const std::string& name) {
     }
     std::fprintf(stdout, "[quest] ClearQuestQueue %s -> %s (transient, not latched)\n",
                  name.c_str(), removed ? "removed active" : "no active entry");
+    std::fflush(stdout);
+}
+
+void QuestEngine::clear_quest_queue_all() {
+    // JS `ha.Yba()` L523358: `let b=this.Dh.length-1; while(b>=0){ let c=
+    // this.Dh[b]; if(!(c.SC==1 || a!=null && a.length!=0 && !c.lcb(a))){...m.ye(
+    // this.Dh,b);} --b; }` with `a` undefined -> the filter term drops out, so
+    // every entry with `SC != 1` is removed. In the port the only SC==0 analog
+    // is `deferred_fight_quests_` (matched while scene==Fight, not yet run).
+    const std::size_t n = deferred_fight_quests_.size();
+    deferred_fight_quests_.clear();
+    std::fprintf(stdout,
+                 "[quest] EFight -> Yba() dropped %zu queued (SC!=1) quest(s)\n",
+                 n);
     std::fflush(stdout);
 }
 
