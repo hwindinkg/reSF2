@@ -1098,3 +1098,39 @@ Gates (this sweep, RULE 0 hidden + --watchdog, save backed up + restored):
 --settings-profile-shop-probe PASS (0 fail); --save-fields-probe PASS.
 Incremental Release build 0 errors.
 VERDICT: no new confirmed code divergence in the six areas; docs-only commit.
+
+## FRESH VERBATIM SWEEP - achievements/tutorial/save/profile (2026-10-11, HEAD 90b0f3e5)
+
+Scope: the four layers named in this wave, re-read VERBATIM from
+reference/www/sf2.readable.js and compared term-for-term to the port. Result: NO
+new confirmed code divergence; two previously-documented OPEN notes are now
+STALE (already fixed by earlier commits) - corrected below.
+
+| # | area | port | JS (readable.js) | verdict |
+|---|------|------|------------------|---------|
+| 1 | achievements predicates/counters | screens.cpp:15352-15516 (`AchievementCounterDef`, `fight_result_counter_deltas`, `flush_achievement_counters`) | `Jt` L12802 (Name/Type/Fight/Fight2/EclipseMode/OnFightEnd), `Vt` L15084 (`Bq` L15304, `Nk` L15354, `$l` L15364, `ika` L11896, `BZa` L49010, `Cpb` L50073) | JS-exact |
+| 1b | star rating `v1a` + toast | screens.cpp:15922-15997 (`kk_rows` star row), 13398-13520 (global toast) | `Pr` L86591 (`aa` L86619, `B3a`=exp/`w_`=money), `Or` L86707, `v1a` L86517, `ur` L78917 (0.5/1.5/1.0 s) | JS-exact |
+| 1c | `ShockWin`/`MaximumLevel`/`Great.MaxHealth` | screens.cpp:15436-15443 (`player_shocked`/`reached_max_level`), damage.cpp:395-399 | `JZa` L15403 `m$&&fe.vsb()`, `x_a` `d+1==$0()`, `v.gDa` L48149 (`Great.MaxHealth`, shipped 0.1) | JS-exact |
+| 1d | `<Achievements>` parse | save_system.cpp:473-481, 1090-1136 | `yt.parse` L11860 (`ll` L52206, `kl` L52274, `ch` L52298) | JS-exact |
+| 2 | tutorial chain | save_system.hpp:443-476 (`story_step`/`set_story_step`), quest_panel.hpp, quest_engine.cpp | `zt` L12588 (`parse` L12611, `PMa` L12595, `Pla` L12602), `nw` L49909 (`<StepsNames>`), `_$StoryTutorialStep` L40817 | JS-exact |
+| 2b | MOVE/ATTACK move type | move_def.cpp:1132 (`<Profile>`), move Type->EAnimationMove/Attack | L30097-30101 (`Type` MOVE->`EAnimationMove`, ATTACK->`EAnimationAttack`) | JS-exact |
+| 3 | save envelope round-trip | save_system.cpp:150-505 read, 984-1136 write; defaults save_system.hpp:60-124 | `p.o` ctor L9938-10086, `Fr`/`vl`/`IMa`/`HMa` L10087-10157, `xtb`/`mtb` L10257-10277 | JS-exact |
+| 3b | energy / `v.Am` / Unlimited_Energy | screens.cpp:5582-5598 (`qZa`/`uZa`/`q5`), 9452-9461 (`v.Am` gate), 23234-23241 (`--energy-spend-probe`), 23176 (`tick_energy`) | `v.Am` L50670 (`p.o.yN||v.qZa(-a.d4)` L50708), `qZa` L50739, `uZa`/`q5` L10684-10709, `Zma` L10710 | JS-exact |
+| 3c | version migration / DataVersion | save_system.cpp:574-605 (`set_data_version`), quest_engine.cpp:1613-1622/4308-4343/5170-5177 | `tg.version`/`tg.fz` L48241, `po` L43769 (`S`/`R6a`/`u7a`), `Oqb` L181, `yzb`/`Czb` L41607/41631 | JS-exact |
+| 4 | profile/settings detail | screens.cpp:18612-18719 (`cs` tab strip + badges), profile bodies; damage.cpp:528-532 (`zc` GUI/Profile) | `vb` L90885 (`hla` L90910), `cs` L90827 (`getCounterValue` L90855), `zc` L53442, `Dg` L77700, `Eg.GU` L77829 | JS-exact |
+
+STALE OPEN NOTES (now fixed, corrected in MASTER_TODO):
+- NOTE-2 (denomination `kq` not threaded into prize) is STALE: `d5853fdf`
+  threads the save `DenominationDigits` into `FightController::prize`
+  (fight.cpp:6437-6482, `prize_vk(a,kq)`).
+- The entry-energy OPEN (map launch `v.Am` not modelled) is STALE:
+  screens.cpp:9452-9461 + `--energy-spend-probe` implement it (yN + qZa/uZa/q5).
+
+Gates (RULE 0 hidden + --watchdog, save backed up + restored): --verify-input 7/7
+PASS; --input-tape PASS (0 FAIL); --flow-verify 20/20; --ui-tour ALL 15 STEPS
+DONE; --fidelity-tour ALL 40 STEPS DONE; --headless-loop PASS (13 steps);
+--boss-hit-probe HIT; --quest-verify PASS; --quest-verify-buy PASS
+(--watchdog 900); --dialog-verify PASS; --tutorial-real-verify PASS;
+--settings-profile-shop-probe PASS (0 fail); --save-fields-probe PASS.
+Incremental Release build 0 errors. VERDICT: no new confirmed code divergence;
+docs-only commit.
