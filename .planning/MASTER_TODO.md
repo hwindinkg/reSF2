@@ -1004,3 +1004,52 @@ Gates (this wave, RULE 0 hidden + --watchdog, save backed up): --verify-input
 regenerated reference/traces/port_matrix/* byte-identical to HEAD (clean tree).
 VERDICT: no new confirmed code divergence; HUD-layout + magic-visuals OPEN
 items verified CLOSED (JS-exact); docs-only commit.
+
+## FRESH VERBATIM SWEEP - enchant / waves / ladder / difficulty / prize / shop / perk-grid (2026-10-11, HEAD 887403fe)
+
+Scope: the seven areas the prior waves listed as not-yet-re-derived, re-read
+VERBATIM from reference/www/sf2.502f0946.js + the shipped data
+(reference/extracted/xml/res + reference/www/res) and compared to the port.
+Result: NO new confirmed code divergence reachable in normal play. Every
+documented OPEN remainder in these areas was re-checked against the SHIPPED
+data and is a non-visible no-op there (evidence below).
+
+| # | area | port | JS | verdict |
+|---|------|------|----|---------|
+| 1 | enchant `<Enchantments>` parse | item_catalog.cpp:398-426 (Name/`<Set>`); save_system.cpp:251-274 read + 754-770 write; quest_engine.cpp:4888-4957 (`ItemEnchantGrant` `mY`) | `xe.Qd` L693039 (Name/ItemType/`<Set>`), `I.JS` L174391 (perk def + `<RatingEvaluation>`), item `rjb` L97286 -> `lQ`+`Oa`, `akb`/`ljb` L169897/170138, `Kia` L644414, quest `GivePerk` `mY` L646355 | JS-exact |
+| 1b | `Wk` live-set merge (p.BD/Xz) | screens.cpp:6387-6413 `add_items` adds the catalog `<Perks>`/`<Enchantments>` for every equipped item | `Wk` L413727: `p.BD` L111518 + `v.Xz` L626428 + `Wh==0` Combo gate L682942 | JS-exact for shipped data (see NOTE-1) |
+| 2 | waves / bodyguards | fight.cpp:2883-2944 (`spawn_next_enemy_wave` = `mfb`), 3420-3503 (`b`/`c`/`spawn_wave`), 7655-7657 | `mfb` L205855 (`Rk++; Zb=pf[Rk]`), `Onb` L208997 (`b=qb&&Rk<pf.length-1`, `c=Da.sR()` L729205, `mfb(!c||c&&kc==wo.nB)`), `sR` L729205 (`Xs.length>1 && pT>1`) | JS-exact |
+| 3 | tournament / ladder | screens.cpp:9267-9318 (`map_fight_wins`/`map_fight_index`), 11661-11776, 12063-12166; `--tour-walk` | `<Fights>` parse L125967; `CurrentFight` L684535; `WinCount` L499074 (`c.Wc.no`); `Fights` records L131236 | JS-exact |
+| 4 | difficulty scaling | screens.cpp:10262-10297 (`WarriorPower` fold), 10086 (`kMapDiffLevels`), 10618-10650 (`map_difficulty_level`) | `WarriorPower` L94857 -> `ur` fold `v.UDa` L617236 over `v.wv`; `Wc.NAa` L2163 | JS-exact |
+| 5 | rating / prize math | fight.hpp:1514-1536 (`fh_lxa`/`prize_vk`), fight.cpp:6207-6261; results rows screens.cpp:15812-15834 | `Fh.lXa` L1058250, `Vk` L626149, counts `d6/c6/jU/e6` L1056509/1055869/1055916/1056924, rows L1070111-1070330 | JS-exact (see NOTE-2) |
+| 6 | shop upgrades / enchant UI | item_catalog.cpp:521-591 (`qkb`/`gfb`/`zz`/`S7a`); app.cpp:816 enchant atlas; screens.cpp:6377-6422 item enchant list | `it.qkb` L82602, `wf.gfb` L178503, `zz` L171007, `S7a` L171121 | JS-exact |
+| 7 | profile perk grid | screens.cpp:18540-18713 (`profile_tab_layout`/`profile_layout`/`profile_badges`), 10098-10139 (rating perk set) | `vb` L2195 layout, `ds`/`Rl=ds` L2227 perk-tree tab, `cs.getCounterValue` L2189 badges (`p.o.co.uCa()` L305) | JS-exact |
+
+NOTE-1 (enchant Combo/Xz gates): the `f.Wh==0` Combo gate + `v.Xz` conflict
+check in `Wk` only fire for `PerkType="Combo"` enchants. The shipped data has
+14 `PerkType="Combo"` perks (all `ItemSet=...` set bonuses, perks.xml), but the
+only `<Enchantments>` reference to one (`PERK_MONK_SET_WHIRL`) is inside a
+COMMENTED-OUT item (list.xml L232275), and pugixml skips comments. All 247 live
+`<Enchantments>` blocks carry only the 48 `PERK_ITEM_SPECIAL_*` perks (none
+Combo, `Wh!=0`). So `add_items`' unconditional add == the JS live-set exactly.
+NOTE-1b (`EnchantmentsCountExclusion` budget, JS `Lv` L604236 `sOa`): the
+shipped internal_settings.xml `<EnchantmentsCountExclusion>` is EMPTY ->
+`DV` empty -> `sOa` returns the default (no-op). Not a divergence.
+
+NOTE-2 (denomination `kq` in prize math): JS `v.Vk(a,b)` L626149 is
+`ceil(a / 10^(p.o.kq-b))` and `p.o.kq` = the save `<User DenominationDigits>`
+(L124846). The shipped save carries NO `DenominationDigits` -> `kq=0` ->
+`prize_vk(...,0)` (fight.hpp:1518) is exact. A non-zero kq is set only by the
+zone-6 intermission / zone-7 `Denomination` quests (JS `On` L534501), whose
+`Bya` rescale IS modelled (quest_engine.cpp:4964-4987); threading the save's kq
+into `FightController::prize` is the only un-modelled tail. NOT fixed: not
+reachable with the shipped save, and unverifiable without the oracle.
+
+Gates (this sweep, RULE 0 hidden + --watchdog, save backed up + restored):
+--verify-input 7/7 PASS; --input-tape PASS (0 FAIL); --flow-verify 20/20;
+--ui-tour ALL 15 STEPS DONE; --fidelity-tour ALL 40 STEPS DONE;
+--headless-loop ALL 13 STEPS DONE; --boss-hit-probe HIT; --quest-verify PASS;
+--quest-verify-buy PASS; --dialog-verify 116 passed / 0 failed PASS;
+--tutorial-real-verify PASS; --settings-profile-shop-probe PASS (0 fail);
+--save-fields-probe PASS. Incremental Release build 0 errors.
+VERDICT: no new confirmed code divergence in the seven areas; docs-only commit.
