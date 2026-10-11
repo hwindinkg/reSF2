@@ -79,6 +79,13 @@ that char-offset grep missed:
   Ruby price by the same live discount.
 - `ed587c31` re-verify of the pre-Wakaru fixes vs the readable JS — none wrong
   (only a ground-death attribution comment corrected).
+- `6951902f` render: real `drop_blood` hit-spark sprite (no invented fade/shrink)
+  + hot_ground callout label Y (absolute `D(-0.1h)`).
+- `608aa260` font `eF` = **signed** i16 abs (shipped `.fnt` carry negative sizes
+  → the old unsigned read gave 65446/65486, breaking every `fontSize/eF` ratio);
+  callout scale `1.2·nat_h/eF` (hot_ground) vs `hud_c` (combo); banner Y =
+  arena-projected centre `h/2 − 75·d`; spark-pool clear order (`Cnb` tests
+  before increment, no reset); magic effects draw at constant alpha.
 - `153ad295` `?Hit[].BaseDamage` (JS `xgb` L56083 = `Bb.ODa * 2^(block) *
   2^(crit)`) was declared but **never filled** — 0 in every path. Added
   `HitRecord.base_damage` (`ODa`), threaded through `cond_ctx` +
