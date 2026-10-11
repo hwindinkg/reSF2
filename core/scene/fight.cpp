@@ -3406,8 +3406,21 @@ void FightController::check_round_end() {
             }
             const int qH = p1 != nullptr ? p1->points_self : 0;
             const int gN = p2 != nullptr ? p2->points_self : 0;
-            const bool player_wins = qH > gN;
-            apply_round_result(round_result::timeout,
+            // `gj.wfa` (L36945): Contest (`ZN==0`) `qH>gN ? 1 : 2`; Score
+            // (`ZN==1`) `qH>=IW ? 1 : 2`. `IW` = the rule's `Max`.
+            const int zn = p1 != nullptr ? p1->points_type
+                                         : (p2 != nullptr ? p2->points_type : 0);
+            const float iw = p1 != nullptr ? p1->points_max
+                                           : (p2 != nullptr ? p2->points_max : 0.0f);
+            const bool player_wins =
+                (zn == 1) ? (static_cast<float>(qH) >= iw) : (qH > gN);
+            // JS `ca.ia` L412 at the timer: `Ema(9); ud.Ih(9,3,ze)`. `Ema(9)`
+            // (L17178-17179) sets BOTH fighters' `cp=9`, and `gj.compare`
+            // (L36937) returns TRUE when `a.rl.cp==9 || a.kl.cp==9` -> `Oob`
+            // fires the Points rule -> `BT` (L16044) sets `ey=2` (`rule_win`),
+            // NOT `ey=3` (a plain timeout). `E3a` (L16847) then uses
+            // `Pu.wfa()` for the winner (the same `qH`/`gN`/`Max` compare).
+            apply_round_result(round_result::rule_win,
                                player_wins ? player_ : enemy_,
                                player_wins ? enemy_ : player_);
         } else if (battle_.timeout_rule) {
