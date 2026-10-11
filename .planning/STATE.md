@@ -79,6 +79,12 @@ that char-offset grep missed:
   Ruby price by the same live discount.
 - `ed587c31` re-verify of the pre-Wakaru fixes vs the readable JS — none wrong
   (only a ground-death attribution comment corrected).
+- `153ad295` `?Hit[].BaseDamage` (JS `xgb` L56083 = `Bb.ODa * 2^(block) *
+  2^(crit)`) was declared but **never filled** — 0 in every path. Added
+  `HitRecord.base_damage` (`ODa`), threaded through `cond_ctx` +
+  `run_bus_hit` + the `exec_action` action-value ctx via persistent
+  `cur_hit_*` members (`Bb` persists). Shipped `perks.xml` L315/629/926/947
+  read it. ⚠ build/gates pending (background wave held `main.obj`).
 
 ## Open items (documented, not invented)
 - `vd` sub-fighters (`gea b==1`/`VAa`/`Tba`/`fCa`) — shipped fights are single-part;
