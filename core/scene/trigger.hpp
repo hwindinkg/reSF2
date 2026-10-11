@@ -212,6 +212,10 @@ struct CondCtx {
     std::vector<std::pair<std::string, int>> intervals;  // (name, G0 type)
     double hp = 1.0;
     double hit_dmg = 0.0;
+    // `?Hit[].BaseDamage` (JS `xgb` L56083 `a = d.ODa` then `* 2^(block) *
+    // 2^(crit)`): the interval's `<Damage Value>` scaled by the block/crit
+    // multis. The shipped `perks.xml` Chance expressions read it (L315/629/947).
+    double hit_base_damage = 0.0;
     int bullets = 0;  // wd.bh (MagicBullet count)
     int raid = 0;     // wd.dO (RaidChargeBullet count)
     double charge = 0.0;  // wd.my [0,1] (MagicCharge)
@@ -492,6 +496,10 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
                 // they must be supplied (they previously defaulted to 0).
                 sc.vars = m.q3;
                 sc.hit_damage = m.hit_dmg;
+                // `?Hit[].BaseDamage` (JS `xgb` L56083): the interval's
+                // `<Damage Value>` times the block/crit multis, already
+                // resolved on the `CondCtx` by the caller.
+                sc.hit_base_damage = m.hit_base_damage;
                 sc.me_health = owner.hp;
                 sc.enemy_health = foe.hp;
                 // `?PlayerParameter[].Combo` in the Chance expression (JS

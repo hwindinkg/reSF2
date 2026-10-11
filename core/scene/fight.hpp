@@ -2718,7 +2718,16 @@ private:
     void setup_bus(const PerkSetup& perks);
     // Condition context for one side (0 = player, 1 = enemy).
     // `hit_dmg` feeds `?Hit[].Damage` (the in-flight mg.Damage).
-    sf2::scene::CondCtx cond_ctx(int side, double hit_dmg = 0.0);
+    sf2::scene::CondCtx cond_ctx(int side, double hit_dmg = 0.0,
+                                 double hit_base_damage = 0.0);
+    // The current hit record's values, kept as members: the JS `Bb` persists
+    // (`this.Bb` L22647) and its `Zi` (`?Hit[].Damage`) / `ODa`-derived
+    // `?Hit[].BaseDamage` stay readable by action-value expressions evaluated
+    // OUTSIDE `run_bus_hit` (e.g. `exec_action`'s `eval_set_value`), which the
+    // shipped `perks.xml` `<SetRangeVariable Value="... ?Hit[].BaseDamage">`
+    // rows (L915/926) rely on. Updated at every hit-scope fire.
+    double cur_hit_damage_ = 0.0;
+    double cur_hit_base_damage_ = 0.0;
     // Fire a hit-scope slot (6/7) and execute: combat actions fold into
     // `rec`/fighters via `decide_hit_perks`, state actions apply now.
     // `out_has_damage/out_damage` report the last SetHit Damage (`ppb`

@@ -4037,7 +4037,8 @@ int oba_phase(fight_phase p) {
 }
 }  // namespace
 
-sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
+sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg,
+                                              double hit_base_damage) {
     const FightFighter& me = side == 0 ? player_ : enemy_;
     sf2::scene::CondCtx ctx;
     ctx.style_level = me.style.level;
@@ -4056,6 +4057,8 @@ sf2::scene::CondCtx FightController::cond_ctx(int side, double hit_dmg) {
     ctx.raid = me.raid_bullets;
     ctx.charge = me.charge;
     ctx.hit_dmg = hit_dmg;
+    // `?Hit[].BaseDamage` (JS `xgb` L56083 `d.ODa * 2^(block) * 2^(crit)`).
+    ctx.hit_base_damage = hit_base_damage;
     ctx.damage_converter = me.params.so;  // `Pgb` DamageConverter (`wd.so`)
     ctx.items = side == 0 ? player_items_ : enemy_items_;
     ctx.round = round_.number;
@@ -4124,6 +4127,12 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         for (const auto& kv : player_.params.attributes) sc.me_attrs[kv.first] = kv.second;
         for (const auto& kv : enemy_.params.attributes) sc.enemy_attrs[kv.first] = kv.second;
         sc.set_vals = ac.set_num;
+        // `?Hit[].Damage`/`?Hit[].BaseDamage` read the persistent hit record
+        // (`Bb`); the shipped `<SetRangeVariable Name="RegularHit"
+        // Value="?Variable[RegularHit]+?Hit[].Damage">` / `RegularDefenseBaseDamage`
+        // rows (perks.xml:915/926) rely on them.
+        sc.hit_damage = cur_hit_damage_;
+        sc.hit_base_damage = cur_hit_base_damage_;
         sc.combo = static_cast<int>((owner_side == 0 ? player_ : enemy_).combo_run);
         sc.me_health = static_cast<double>((owner_side == 0 ? player_ : enemy_).hp);
         sc.enemy_health = static_cast<double>((owner_side == 0 ? enemy_ : player_).hp);
@@ -4607,8 +4616,18 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
         const auto it = vars.num.find("Damage");
         if (it != vars.num.end()) hit_dmg = it->second;
     }
-    bus_.fire(slot, vars, true, fired_side & 1, cond_ctx(0, hit_dmg), cond_ctx(1, hit_dmg),
-              oba_phase(phase_), frame_);
+    // `?Hit[].BaseDamage` (JS `xgb` L56083): `d.ODa * 2^(block) * 2^(crit)`,
+    // the interval's `<Damage Value>` (`rec.base_damage` = `Bb.ODa`) scaled by
+    // the block/crit multis of the defender/attacker.
+    const double hit_base_damage =
+        static_cast<double>(rec.base_damage) *
+        sf2::scene::block_mult(def.params, rec.blocked) *
+        sf2::scene::crit_mult(atk.params, rec.critical);
+    cur_hit_damage_ = hit_dmg;
+    cur_hit_base_damage_ = hit_base_damage;
+    bus_.fire(slot, vars, true, fired_side & 1,
+              cond_ctx(0, hit_dmg, hit_base_damage),
+              cond_ctx(1, hit_dmg, hit_base_damage), oba_phase(phase_), frame_);
     for (int s = 0; s < 2; ++s) {
         std::vector<std::pair<sf2::scene::PerkTrigger, sf2::scene::PerkAction>> pairs;
         bus_.drain(s, pairs);
@@ -4638,7 +4657,7 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
             // live operands (`?Hit[].Damage`, `?PlayerParameter[Me|Enemy]`,
             // `?Variable`, the perk `<Set>` `_X`).
             const int owner = s;
-            auto eval_damage = [this, hit_dmg, owner](
+            auto eval_damage = [this, hit_dmg, hit_base_damage, owner](
                                    const sf2::scene::PerkAction& a,
                                    const std::string& raw) -> double {
                 const sf2::scene::SetValueRuntime& rt =
@@ -4655,6 +4674,7 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
                 sc.enemy_attrs = rt.enemy_attrs;
                 sc.set_vals = a.set_num;
                 sc.hit_damage = hit_dmg;
+                sc.hit_base_damage = hit_base_damage;
                 // `?PlayerParameter[].Combo` (JS `Pgb` `a.aw()`): the owner
                 // side's live combo counter.
                 sc.combo = static_cast<int>(
@@ -5665,6 +5685,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     rec.defense = defense_attr;
     rec.target_part = hit_cap.body_part;
     rec.hit_edge = iv.attacking_parts.empty() ? "" : iv.attacking_parts[0];
+    // `Bb.ODa = g.Xb` (L21075) — the interval's `<Damage Value>` (`Ul.Xb`),
+    // recorded BEFORE `bR = bCa(...)` (L21094). `?Hit[].BaseDamage` reads it
+    // (`xgb` L56083 `a = d.ODa`). The strike path passes `idmg`.
+    rec.base_damage = idmg.base_damage;
     rec.blocked = blocked;
     rec.critical = false;   // pre-crit (JS `Bb.se`, not yet recomputed)
     rec.shock = false;      // JS `Bb.Ub` (set only after the post-crit rolls)

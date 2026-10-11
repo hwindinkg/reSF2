@@ -517,6 +517,8 @@ struct IntervalDamage {
 
 // The damage computation result (JS `wd.Bb` = `pu` L558).
 struct HitRecord {
+    float base_damage = 0.0f;  // `ODa` - the interval's `<Damage Value>` (JS
+                               // `Bb.ODa = g.Xb` L21075, set BEFORE `bR=bCa`)
     float raw_damage = 0.0f;   // `bR` - from bCa
     float final_damage = 0.0f; // `Zi` - after the lethal check
     bool lethal = false;       // `Iza`
