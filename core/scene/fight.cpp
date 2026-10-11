@@ -2085,7 +2085,7 @@ void FightController::rules_fire(FightRule& r) {
             break;
         }
         case FightRuleKind::timeout_win:
-            rule_result_ = round_result::timeout_win;  // JS `BT` L393
+            rule_result_ = round_result::rule_win;  // JS `BT` L393 -> ey=2
             break;
         case FightRuleKind::hot_ground: {
             // `Oob` (L901): `a.gra && this.Oe.jT(a.mc())` (death attr ->
@@ -2094,7 +2094,7 @@ void FightController::rules_fire(FightRule& r) {
                 FightFighter& t = (r.apply_to == 2) ? enemy_ : player_;
                 t.hp = 0.0f;
             }
-            rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
+            rule_result_ = round_result::rule_win;  // JS `BT` -> ey=2
             break;
         }
         case FightRuleKind::regeneration: {
@@ -2115,7 +2115,7 @@ void FightController::rules_fire(FightRule& r) {
             // Score Max was reached (ey=2). The winner is `gj.wfa` (L872):
             // the firing copy's own counter reached Max -> that side wins.
             rule_winner_player_ = (r.apply_to == 1);
-            rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
+            rule_result_ = round_result::rule_win;  // JS `BT` -> ey=2
             rule_pending_ = true;  // JS `Pu = a`
             return;
         }
@@ -2127,7 +2127,7 @@ void FightController::rules_fire(FightRule& r) {
             // `BT` (L392-393) sets `ey=2`. `ERuleWinStyle` (L901) is in the
             // SAME `BT(a)` arm. The winner is resolved by `wfa()` (WinStyle/
             // WinCombo/WinShock `Yu=false`, LoseFall `Yu=true`).
-            rule_result_ = round_result::timeout_win;  // JS `BT` -> ey=2
+            rule_result_ = round_result::rule_win;  // JS `BT` -> ey=2
             break;
         default:
             // Rules whose `Oob` arm is a no-op here (e.g. Combo/Crazy
@@ -3393,18 +3393,18 @@ void FightController::check_round_end() {
             const int qH = p1 != nullptr ? p1->points_self : 0;
             const int gN = p2 != nullptr ? p2->points_self : 0;
             const bool player_wins = qH > gN;
-            apply_round_result(round_result::timeout_win,
+            apply_round_result(round_result::timeout,
                                player_wins ? player_ : enemy_,
                                player_wins ? enemy_ : player_);
         } else if (battle_.timeout_rule) {
             // JS `qj` (L912): TimeOutWin forces `Li=1`, `Yu=false` ->
             // `wfa()`=1 -> `E3a` `a=true` -> the PLAYER (kc) wins.
-            apply_round_result(round_result::timeout_win, player_, enemy_);
+            apply_round_result(round_result::timeout, player_, enemy_);
         } else {
             // JS `E3a` (L413) with `ey==3` and no fired rule (`Pu==null`):
             // `a=false` -> the winner is `Zb` (the ENEMY). The oracle's
             // BOSS_LYNX timeout is a player loss (`kk` "You lose!").
-            apply_round_result(round_result::timeout_win, enemy_, player_);
+            apply_round_result(round_result::timeout, enemy_, player_);
         }
     } else if (player_ko && enemy_ko) {
         // Both KO'd the same frame: higher HP wins (JS vfa L413).
@@ -3434,7 +3434,10 @@ void FightController::apply_round_result(round_result result, const FightFighter
         case round_result::ko:
             oc.reason = "KO";
             break;
-        case round_result::timeout_win:
+        case round_result::rule_win:
+            oc.reason = "RULE";
+            break;
+        case round_result::timeout:
             oc.reason = "TIMEOUT";
             break;
         case round_result::ringout:
@@ -3504,19 +3507,25 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // Stash the round result so the deferred plate can pick the same art.
     last_round_result_ = result;
     // JS `ca.Pf` (L196253, `eu==3`) -> `Cr.GZ` (L1042575): the round/battle
-    // plate.  `switch(b.Iq)` on the WINNER's end reason: `case 2` (rule,
-    // `BT` `ey=2`) -> `yca`/`xca` (`label_win`/`label_lose`); `case 3` (the
-    // plain timeout, `ey=3`) -> `uca` (`timesup`); `case 4` (`ey=4`) ->
-    // `rca` (`ringout`); `default` (`ey=0`, a normal KO) -> `GZ(...)`:
+    // plate.  `switch(b.Iq)` on the WINNER's end reason: `case 2` (`ey=2`, a
+    // fired rule `BT`) -> `yca`/`xca` (`label_win`/`label_lose`, chosen by the
+    // WINNER's `qb`: player -> `label_win`, enemy -> `label_lose`); `case 3`
+    // (`ey=3`, the plain timeout, `Onb` L412) -> `uca` (`timesup`); `case 4`
+    // (`ey=4`) -> `rca` (`ringout`); `default` (`ey=0`, a normal KO) ->
+    // `GZ(...)`:
     //   `b.cE ? GZ(!0) : b.w$a()<=v.gDa && GZ(!1)`
     // where `cE` is the winner's unhit latch, `w$a()=gd/Zn` its HP fraction
     // and `v.gDa` is `<Great MaxHealth>` (`internal_settings.xml`; shipped
     // 0.1, JS fallback 0.3).  The whole `default` branch
     // is gated `!A && !B` (`A=banner type 2`, `B=!winner.qb && !PVP`), so a
     // NON-player winner (non-PVP) shows NO plate.  The port's `ko` result is
-    // exactly this `ey=0` default branch (a rule end sets `timeout_win`/
-    // `ringout`); the plain timeout is `timeout_win` -> `timesup`.
-    if (result == round_result::timeout_win) {
+    // exactly this `ey=0` default branch.
+    if (result == round_result::rule_win) {
+        // `Pf` case 2: `if(b.qb) yca() else xca()` — the WINNER's side picks
+        // the win/lose label plate.
+        result_plate_ = w.is_player ? banner_kind::label_win
+                                    : banner_kind::label_lose;
+    } else if (result == round_result::timeout) {
         result_plate_ = banner_kind::timesup;
     } else if (result == round_result::ringout) {
         result_plate_ = banner_kind::ringout;
@@ -3534,10 +3543,11 @@ void FightController::apply_round_result(round_result result, const FightFighter
     }
     // JS `Cr.GZ(true)` -> `Ar.GZ` -> `nvb` -> `gXa` (`Fh.d6++`, L1056510):
     // the WINNING player's Perfect counter advances for EACH round it survives
-    // unhit (`cE`).  Only the `GZ` (default) branch counts — a rule/timeout/
-    // ringout end never reaches it, and a loss never does (`!b.qb`).
-    if (w.is_player && w.round_unhit && result != round_result::timeout_win &&
-        result != round_result::ringout) {
+    // unhit (`cE`).  Only the `GZ` (default) branch counts — `Pf` cases 2/3/4
+    // (rule win / plain timeout / ringout) never reach it, and a loss never
+    // does (`!b.qb`).
+    if (w.is_player && w.round_unhit && result != round_result::rule_win &&
+        result != round_result::timeout && result != round_result::ringout) {
         ++prize_fh_.d6;
     }
 
@@ -6720,9 +6730,14 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         ectx.round_victory = me.is_winner;
         // JS `Fm.he` context: `a.kh` (round-result latch) + `a.Iq` (end code).
         ectx.round_result_set = me.kh;
+        // JS `Fm.n_a(a.Iq)` (L31970): TRUE for `Iq` in {2,3,4} (any) or `Iq==5`
+        // (all gated by `uO==1`, checked at the call site). So the fired rule
+        // (2), the plain timeout (3), ringout (4) and the survival rules (5).
         ectx.round_end_timeout =
-            (rule_result_ == round_result::timeout_win ||
-             rule_result_ == round_result::ringout);
+            (rule_result_ == round_result::rule_win ||
+             rule_result_ == round_result::timeout ||
+             rule_result_ == round_result::ringout ||
+             rule_result_ == round_result::survival);
         // JS `Cm.he` reads `Al.frameCount` (the ragdoll physics frame) — the
         // `PhysicsFrameNumber` fallback in the recovery chain.
         ectx.physics_frame = me.fighter.ragdoll_frame_count();
@@ -7748,8 +7763,10 @@ void FightController::update(float dt) {
                     esctx.round_victory = f->is_winner;
                     esctx.round_result_set = f->kh;
                     esctx.round_end_timeout =
-                        (rule_result_ == round_result::timeout_win ||
-                         rule_result_ == round_result::ringout);
+                        (rule_result_ == round_result::rule_win ||
+                         rule_result_ == round_result::timeout ||
+                         rule_result_ == round_result::ringout ||
+                         rule_result_ == round_result::survival);
                     // JS `Cm.he` PhysicsFrameNumber: the ground-death moves
                     // (`Loss_1`/`Loss_2`) gate on `<PhysicsFrameNumber
                     // Min="180"/>` as the OR-fallback when the ragdoll COM is

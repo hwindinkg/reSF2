@@ -4577,6 +4577,10 @@ const char* banner_atlas_frame(sf2::scene::banner_kind kind) {
         // timesup / ringout plates, `ca.Pf` L196360 `Iq` 3/4).
         case sf2::scene::banner_kind::timesup: return "timesup";
         case sf2::scene::banner_kind::ringout: return "ringout";
+        // JS `Cr.yca` (L2024) `y.Lna` ("label_win") / `Cr.xca` `y.Kna`
+        // ("label_lose"): the `Pf` case-2 rule-end plates (ey=2).
+        case sf2::scene::banner_kind::label_win: return "label_win";
+        case sf2::scene::banner_kind::label_lose: return "label_lose";
         case sf2::scene::banner_kind::victory: return "perfect";
         case sf2::scene::banner_kind::defeat: return "great";
         default: return nullptr;

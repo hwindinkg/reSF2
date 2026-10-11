@@ -1001,6 +1001,8 @@ enum class banner_kind : int {
     ko,         // `Cr.GZ` round-end plate (atlas frame `perfect`/`great`)
     timesup,    // `Cr.uca` round-end plate `y.DQa` (js `Iq==3`)
     ringout,    // `Cr.rca` round-end plate `y.AQa` (js `Iq==4`)
+    label_win,  // `Cr.yca` round-end plate `y.Lna` (js `Iq==2`, player won)
+    label_lose, // `Cr.xca` round-end plate `y.Kna` (js `Iq==2`, enemy won)
     victory,    // the battle-end win plate
     defeat,     // the battle-end lose plate
 };
@@ -1018,16 +1020,21 @@ enum class banner_action : int {
     end_battle,   // the result-plate hold -> `battle_over_` (the Results)
 };
 
-// How a round ended (JS `ey` 0-6; the demo fight uses KO=0 and
-// TimeoutWin=2).
+// How a round ended (JS `ey`/`Iq` 0-6; the demo fight uses KO=0 and the
+// plain timeout=3). The VALUES are the JS `ey` codes set by `BT` (L392: the
+// fired rule's ey) and `Onb` (L412: the HUD-timer ey=3, or ey=6 for PVP).
 enum class round_result : int {
     ko = 0,          // `ey` 0 — a fighter was KO'd (hp <= 0)
     points = 1,      // `ey` 1 — points rule (unused here)
-    timeout_win = 2, // `ey` 2 — timeout/ringout rule
-    defeat = 3,      // `ey` 3 — the player lost (PVP/rule); the ENEMY wins
-    ringout = 4,     // `ey` 4 — ringout rule
-    survival = 5,    // `ey` 5 — survival rule
-    pvp = 6,         // `ey` 6 — PVP HP comparison
+    rule_win = 2,    // `ey` 2 — a RULE ending (`BT`: Ringout is 4, so this is
+                     //   Crazy/HotGround/LoseFall/Points/TimeoutWin/WinCombo/
+                     //   WinShock/WinStyle). `Pf` case 2 -> `yca`/`xca`
+                     //   (`label_win`/`label_lose`).
+    timeout = 3,     // `ey` 3 — the PLAIN timeout (`Onb` L412, HUD timer 0).
+                     //   `Pf` case 3 -> `uca` (`timesup`).
+    ringout = 4,     // `ey` 4 — ringout rule (`Pf` case 4 -> `rca`)
+    survival = 5,    // `ey` 5 — LifeSteal/Regeneration rule (Pf default -> GZ)
+    pvp = 6,         // `ey` 6 — PVP HP comparison (Pf default -> GZ)
 };
 
 // HUD style meter (JS `Gr`/`Fr` L2090-2092, `lw`/`v.hu` parse L1159).
