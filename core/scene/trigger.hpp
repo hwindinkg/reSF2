@@ -485,6 +485,15 @@ inline bool eval_cond(const TrigCond& c, const CondCtx& owner, const CondCtx& fo
                 sc.me_attrs = rt.me_attrs;
                 sc.enemy_attrs = rt.enemy_attrs;
                 sc.set_vals = c.set_vals;
+                // `?Variable[*]` (JS `Jhb` L55661 reads the Lh side's `Fc.Q3`),
+                // `?Hit[].Damage` (the in-flight `mg.Damage`) and
+                // `?PlayerParameter[Me|Enemy].Health` (`gd`) are live operands
+                // the shipped Chance expressions read (perks.xml:947/1202), so
+                // they must be supplied (they previously defaulted to 0).
+                sc.vars = m.q3;
+                sc.hit_damage = m.hit_dmg;
+                sc.me_health = owner.hp;
+                sc.enemy_health = foe.hp;
                 // `?PlayerParameter[].Combo` in the Chance expression (JS
                 // `Pgb` `a.aw()`); `m` is the condition's Lh-selected side.
                 sc.combo = m.combo;

@@ -4091,6 +4091,50 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         const auto it = a.str.find(key);
         return it != a.str.end() ? it->second : std::string();
     };
+    // JS `Ma` action value evaluation (`Qa.oh` -> `Xe`), used by the variable
+    // setters (`dka`/`rpb`): a numeric literal stays as loaded; a NON-numeric
+    // expression is evaluated with the live operand set. `Ogb` (`?PlayerAttribute`)
+    // reads the LIVE `parameters.attributes` (JS `a.parameters.attributes.get`,
+    // L55719), so the fight-setup `set_value_runtime` snapshot is NOT used here.
+    const auto eval_attr = [this, owner_side, tgt](const sf2::scene::PerkAction& ac,
+                                                   const std::string& raw) -> double {
+        std::size_t pos = 0;
+        try {
+            const double d = std::stod(raw, &pos);
+            if (pos == raw.size()) return d;
+        } catch (...) {
+        }
+        const sf2::scene::SetValueRuntime& rt = sf2::scene::set_value_runtime();
+        sf2::scene::SetValueCtx sc;
+        sc.fp = &sf2::scene::fight_params();
+        sc.level = rt.level;
+        sc.is_raid = rt.is_raid;
+        sc.is_player = true;
+        sc.default_perks_aspect = rt.default_perks_aspect;
+        sc.damage_converter = rt.damage_converter;
+        sc.enemy_damage_converter = rt.enemy_damage_converter;
+        for (const auto& kv : player_.params.attributes) sc.me_attrs[kv.first] = kv.second;
+        for (const auto& kv : enemy_.params.attributes) sc.enemy_attrs[kv.first] = kv.second;
+        sc.set_vals = ac.set_num;
+        sc.combo = static_cast<int>((owner_side == 0 ? player_ : enemy_).combo_run);
+        sc.me_health = static_cast<double>((owner_side == 0 ? player_ : enemy_).hp);
+        sc.enemy_health = static_cast<double>((owner_side == 0 ? enemy_ : player_).hp);
+        for (const auto& kv : bus_.side(tgt).q3) sc.vars[kv.first] = kv.second;
+        sc.rand01 = [this]() { return draw01(); };
+        sc.aspect_scale = [](int level) {
+            return sf2::scene::aspect_scale_for_level(level);
+        };
+        return sf2::scene::eval_set_value(raw, sc);
+    };
+    // An action attribute as a number: `a.num` holds load-time numerics,
+    // `a.str` the expression raws (evaluated via `eval_attr`). `nullopt` = absent.
+    const auto lookup_num = [&a, &eval_attr](const char* key) -> std::optional<double> {
+        const auto si = a.str.find(key);
+        if (si != a.str.end()) return eval_attr(a, si->second);
+        const auto ni = a.num.find(key);
+        if (ni != a.num.end()) return ni->second;
+        return std::nullopt;
+    };
     // Fight-HUD perk icon (JS `lF` case 1 `ModIcon` -> `U4`/`cka` -> `lk.Pub`,
     // L392/L2031). The icon image + stack + expiry come from the action
     // (`jp.image`/`jp.stack`/`jp.kx`); `ShowExpiration`/`Name`/`Value` are the
@@ -4284,14 +4328,23 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
     } else if (type == "ClearMods") {
         bus_.clear_mods(owner_side, str("Name"), str("Namespace"));
     } else if (type == "SetModVariable") {
-        bus_.mutable_side(owner_side).q3[str("Name")] = num("Value", 0.0);
+        // `dka` (L54104): `a.model.Fc.Q3.set(name, a_action.value.Wb().result)`
+        // — the value goes through the `Qa` engine (a shipped non-numeric Value
+        // is `?PlayerAttribute[Me].ShockHeadHitChance`, perks.xml:1186), and it
+        // is stored on the TARGET model (`a.model` = `e6a`, the `Player` side).
+        const double v = lookup_num("Value").value_or(0.0);
+        bus_.mutable_side(tgt).q3[str("Name")] = v;
     } else if (type == "SetRangeVariable") {
-        double v = num("Value", 0.0);
-        const auto mn = a.num.find("Min");
-        const auto mx = a.num.find("Max");
-        if (mn != a.num.end() && v < mn->second) v = mn->second;
-        if (mx != a.num.end() && v > mx->second) v = mx->second;
-        bus_.mutable_side(owner_side).q3[str("Name")] = v;
+        // `rpb` (L54110): clamp to `MinValue`/`MaxValue` (`cq.parse`
+        // L58154/L58160 -> `m1`/`minValue`, `l1`/`maxValue`), then store on the
+        // TARGET model. NOTE: the attr names are `MinValue`/`MaxValue` (the old
+        // port read `Min`/`Max`, which no shipped row carries).
+        double v = lookup_num("Value").value_or(0.0);
+        const auto mn = lookup_num("MinValue");
+        const auto mx = lookup_num("MaxValue");
+        if (mn && v < *mn) v = *mn;
+        if (mx && v > *mx) v = *mx;
+        bus_.mutable_side(tgt).q3[str("Name")] = v;
     } else if (type == "SetTactic") {
         // `qpb`: `model.yZa(LL)` — real tactic switch on the target side.
         FightFighter& f = tgt == 0 ? player_ : enemy_;
@@ -4510,9 +4563,20 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
             if (step < amin) step = amin;
         }
         tw.step = static_cast<float>(step);
+        // JS `Wp.parse` (L57825-57836): `Axis.split("|")`, then an EXACT "X" /
+        // "Y" token (a bare substring test would also accept e.g. "XY").
         const std::string ax = str("Axis");
-        tw.axis_x = ax.find('X') != std::string::npos;
-        tw.axis_y = ax.find('Y') != std::string::npos;
+        tw.axis_x = false;
+        tw.axis_y = false;
+        for (std::size_t p = 0; p <= ax.size();) {
+            const std::size_t bar = ax.find('|', p);
+            const std::string tok = ax.substr(
+                p, bar == std::string::npos ? std::string::npos : bar - p);
+            if (tok == "X") tw.axis_x = true;
+            if (tok == "Y") tw.axis_y = true;
+            if (bar == std::string::npos) break;
+            p = bar + 1;
+        }
         own.fighter.set_model_offset(0.0f, 0.0f);
     } else if (is_combat_action(type)) {
         bus_.log("perknoop " + type + " (outside hit scope, OPEN)");
