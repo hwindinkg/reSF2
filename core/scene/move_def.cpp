@@ -619,11 +619,13 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
     }
 
     if (out.type == "Operator") {
-        // JS `up.parse`: Type="Or" -> dv=1, Type="And" -> dv=2.
+        // JS `wm` (`Tl.create` case 8, g="132"): `oaa = a.attributes.get("Type")
+        // == "Or" ? 1 : 0` — ONLY the literal "Or" is Or; EVERY other Type
+        // (including the shipped `<Operator Type="AND">`, 6 uses) is And. The
+        // old port mapped a non-"And"/"Or" Type to the JS-nonexistent `not_`
+        // operator, so those 6 AND groups evaluated as a negated FIRST child.
         const char* type = node.attribute("Type") ? node.attribute("Type").value() : "";
-        out.op = std::strcmp(type, "Or") == 0 ? cond_op::or_
-               : std::strcmp(type, "And") == 0 ? cond_op::and_
-               : cond_op::not_;
+        out.op = std::strcmp(type, "Or") == 0 ? cond_op::or_ : cond_op::and_;
         parse_cond_children(node, out.children);
         return;
     }
@@ -631,6 +633,9 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
     // Leaf condition — capture the attributes the evaluator reads.
     out.op = cond_op::leaf;
     if (node.attribute("Name")) out.name = node.attribute("Name").value();
+    // JS `Hm`/`um` keep Type (`uc`) and SubType (`Zta`/`ZEa`) SEPARATE; store
+    // the raw Type in `type_attr` before SubType overwrites `subtype`.
+    if (node.attribute("Type")) out.type_attr = node.attribute("Type").value();
     if (node.attribute("Type")) out.subtype = node.attribute("Type").value();
     if (node.attribute("SubType")) out.subtype = node.attribute("SubType").value();
     if (node.attribute("Subtype")) out.subtype = node.attribute("Subtype").value();

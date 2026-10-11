@@ -442,7 +442,9 @@ return (!c.has_min || c.min <= b) && (!c.has_max || b <= c.max);
 bool eval_item_like(const Cond& c, const FightContext& ctx) {
     // Player attr: default Me (1). Enemy (2) -> enemy item list.
     const bool enemy = c.player == 2;
-    bool ok = ctx.has_item(c.subtype /* JS Hm: uc=Type */,
+    // JS `Hm`/`um`: `uc` (Type) and `Zta`/`ZEa` (SubType) are SEPARATE fields;
+    // the port now carries them as `type_attr` / `subtype` (move_def.cpp).
+    bool ok = ctx.has_item(c.type_attr /* JS Hm: uc=Type */,
                            c.subtype /* JS Hm: Zta=SubType */,
                            c.name, enemy);
     return ok;
@@ -740,9 +742,14 @@ bool eval_direction(const Cond& c, const FightContext& ctx) {
     return a;
 }
 
-// JS `mm.he`: Birth — fighter's aK (birth name) == Name.
+// JS `mm.he` (L31241) VERBATIM:
+//   `a = name==null || name=="" || this.name==a.aK; return this.cb?!a:a`
+// An EMPTY `Name` is TRUE (no birth constraint), NOT `fighter_name==""`. 108
+// of the 114 shipped `<Birth/>` carry no `Name` (moves.xml), so the old
+// `fighter_name == c.name` read FALSE for all of them — inverting every
+// `<Birth/>` gate (and its `Not="1"` twin).
 bool eval_birth(const Cond& c, const FightContext& ctx) {
-    bool ok = ctx.fighter_name == c.name;
+    bool ok = c.name.empty() || ctx.fighter_name == c.name;
     return ok;
 }
 

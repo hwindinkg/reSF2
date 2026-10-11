@@ -57,6 +57,14 @@ struct Cond {
     std::string type;    // element name: "Keys", "Distance", "Operator", ...
     std::string name;    // Name attr (CurrentAnimation/CurrentInterval/...)
     std::string subtype; // SubType/Type/Value attrs, kept as raw text
+    // The `Type` attribute, kept SEPARATE from `subtype`. JS `Hm`/`um`
+    // (Weapon/Item) read `uc` (Type) and `Zta`/`ZEa` (SubType) as two
+    // independent fields; the old port collapsed both into `subtype` (SubType
+    // overwrote Type) and then passed `subtype` twice, so every typed
+    // `<Item Type="Weapon" SubType="Katana"/>` failed. `type_attr` holds the
+    // raw `Type` for the Item/Weapon evaluator; `subtype` keeps its existing
+    // meaning (SubType, else Type) for the other condition types.
+    std::string type_attr;  // `Type` attribute (Item/Weapon)
     std::string value;   // generic attr (e.g. Distance Min/Max, RoundStage)
     int value_int = 0;   // numeric attr (e.g. Random Chance, Step)
     // Range (Distance Min/Max, Health Min/Max, Bullets, PhysicsFrameNumber...)
