@@ -1,76 +1,81 @@
 ---
-phase: 1
+phase: port-verification
 status: in_progress
-plan_confirmed: true
-requires_design_first: false
-design_stage: "pending"
-design_approved: false
-design_override: true
-steps_complete: [0, 1, 2, 3, 4, 5, 6, 7, 8]
-steps_pending: [9]
-last_action: "Gate re-run done locally (be7ab16c): determinism+fidelity PASS, AI/timer still stub; MASTER_TODO refreshed; phase-2 lineref scan started"
-next_action: "Phase 2: §9 breakdown + lineref suspects; push only on user word"
-blockers: []
-freshnessStatus: "fresh"
-lastUpdatedAt: 2026-07-22T01:55:39.834+03:00
-lastUpdatedBy: "system"
-lastUpdatedPhase: 1
-summaryVersion: 1
+lastUpdatedAt: 2026-10-11
+lastUpdatedBy: agent
+summaryVersion: 2
 ---
 
-# Planning State
+# Session compact — Shadow Fight 2 web → C++/OpenGL port (1:1 verification)
 
-Initialized at 2026-07-22T01:55:39.834+03:00
+## Objective
+Clean C++17/OpenGL port of the **web** build of Shadow Fight 2, **1:1 by code,
+logic and look**. Single source of truth: the minified `reference/www/sf2.502f0946.js`
+(+ shipped XML under `reference/extracted/xml/res/` and `reference/www/res/`).
+The user plays via `play.cmd`; report every divergence, find the ROOT (never the
+symptom), never invent, never hardcode.
 
-## Session History
-<!-- 2026-09-03 (Phase 0 hygiene): removed 2026-07-30 native/Unity-RE history entries
-     (ARM dump 0x8F057000, Ghidra FUN_8f*, game+0x* damage work on engine/). They
-     described a different SF2 build, not the web oracle. Git history preserves them. -->
-- 2026-07-29T20:12:59.619Z — Phase 3 COMPLETE. All waves done: 1-3 (controls/dialogs/shop), headless tests (4 phases), Wave 4 (battles, 8 steps), Wave 5 (integration, 4 steps). 34/34 tests pass.
-- 2026-07-29T19:11:32.012Z — Wave 4 (Battles) COMPLETE. All 8 steps done: conditions, damage model, hitbox collision, block mechanics, .atf parser, AI roulette, knockback, projectiles. 32/32 tests pass.
-- 2026-07-28T22:54:23.887Z — Phase 4 validation complete. Bug injected (enemy damage commented out), test_battle_integration caught it, bug reverted, 32/32 pass. Headless integration tests proven effective.
-- 2026-07-28T22:34:58.529Z — Phase 3 complete: 4 integration tests (Battle, Shop, Menu, Crash). 32/32 tests pass.
-- 2026-07-28T22:03:44.081Z — Phase 2 complete: Test harness (TestPlatform, HeadlessTestRunner, smoke test). Build green, 28/28 tests pass.
-- 2026-07-28T21:49:30.331Z — Phase 1 complete: Renderer abstraction (ITexture, IRenderer, SoftwareRendererAdapter). Build green, 27/27 tests pass.
-- 2026-07-28T21:27:45.981Z — Plan saved and CONFIRMED by user. Starting execute stage — Phase 1: Renderer abstraction
-- 2026-07-28T20:19:13.877Z — @planner completed plan for headless integration tests
-- 2026-07-28T20:19:11.928Z — Discuss stage complete — headless integration test design approved
-- 2026-07-28T20:10:09.915Z — Session resumed. Task: headless integration tests → Wave 4 → Wave 5
-- 2026-07-28T20:09:06.213Z — Task classified: complex — headless integration tests + Wave 4-5
-- 2026-07-28T19:28:50.980Z — Waves 1-3 complete + menu/shop bugs fixed. Pushed to GitHub. Wave 4-5 pending.
-- 2026-07-27T21:58:38.332Z — Waves 1-3 complete + 3 user-reported bugs fixed. 25/25 tests pass.
-- 2026-07-27T21:45:04.267Z — Wave 2 (Dialogs) + Wave 3 (Shop) complete — 25/25 tests pass
-- 2026-07-27T21:26:57.521Z — Wave 1 (Controls) complete — 25/25 tests pass
-- 2026-07-27T21:08:15.139Z — Plan confirmed by user
-- 2026-07-27T21:06:51.410Z — Phase 3 plan drafted
-- 2026-07-27T21:06:12.095Z — Phase 3 plan written
-- 2026-07-23T11:54:56.462Z — Plan written and confirmed
-- 2026-07-23T08:06:18.926Z — Phase 2 initialized: Binary-Level RE Verification
-- 2026-07-23T07:51:44.983Z — Phase 1 marked done via /fd-done — Waves 1-4 (T-01 through T-10) + 4 HIGH-fix cleanup folded in
-- 2026-07-22T21:24:37.123Z — Phase 1 verified — all checks pass
-- 2026-07-22T21:20:21.975Z — Phase 1 marked done via /fd-done. Artifact: .planning/phases/phase-1/DONE.md
-- 2026-07-22T21:19:50.443Z — Phase 1 marked done via /fd-done
-- 2026-07-22T21:18:26.727Z — All T-10 HIGH-fix cleanup steps complete: input handler refactor done, dead code removed, final build 0 errors
-- 2026-07-22T20:45:58.730Z — Supervisor approved. Starting Step 1: add InputHandler accessors.
-- 2026-07-22T20:45:08.800Z — User CONFIRM received. Starting execution.
-- 2026-07-22T20:18:03.119Z — Plan created for 4 HIGH fixes
-- 2026-07-22T20:17:46.564Z — Created plan for 4 HIGH review findings — input duplication, dead members, orphan files
-- 2026-07-22T18:36:13.685Z — T-10 refactoring resumed — game.hpp 3171 lines, target <500; game_new.hpp 655 lines, target <500
-- 2026-07-22T12:38:39.915Z — T-10 partial: LocationManager extracted, game.hpp 5348 lines (target <500)
-- 2026-07-22T09:31:32.213Z — Wave 3 complete: inventory + equipment system implemented
-- 2026-07-22T09:18:59.733Z — T-07+T-08 complete: save system + weapons/magic implemented
-- 2026-07-22T08:51:03.771Z — Wave 2 complete: audio + all scenes implemented
-- 2026-07-22T08:35:15.823Z — T-03+T-04 complete: combat AI + 56 locations implemented
-- 2026-07-22T08:18:24.635Z — T-02 complete: NPivot Y data-driven, MidFrames/FirstFrame implemented
-- 2026-07-22T08:06:27.990Z — T-01 complete: moves.xml parser wired, mid_frames+sound+test coverage added
-- 2026-07-22T08:05:51.909Z — T-01 complete: mid_frames and SoundEvent fields added, tests pass
-- 2026-07-22T07:54:28.353Z — Starting execution — Wave 1, T-01 step 1
-- 2026-07-22T07:52:56.447Z — Starting execution — Wave 1 research gate
-- 2026-07-21T23:16:22.327Z — Plan confirmed
-- 2026-07-21T23:04:45.019Z — Discussion saved (D-01: SF2 confirmed)
-- 2026-07-21T23:00:46.677Z — Preflight exploration complete
-- 2026-07-21T22:56:25.735Z — initialized
-plan_file: E:\reSF2\.planning\phases\phase-5\PLAN.md
-design_override_reason: "Backend-only task — no UI changes needed. Design requirement is a false positive."
-confirmed_at: 2026-07-29
-task_type: "complex"
+## Tooling (current)
+- **Readable JS (Wakaru)** — `reference/www/sf2.readable.js` (106 205 lines,
+  original identifiers). Produced by
+  `wakaru.exe --unpack -o <dir> reference/www/sf2.502f0946.js` where
+  `wakaru.exe` = `C:\Users\user\AppData\Roaming\npm\node_modules\wakaru\node_modules\@wakaru\cli-win32-x64\wakaru.exe`
+  (npm wakaru v1.14.0). **Cite `readable.js:LINE`** for verification (the minified
+  file stays the byte-truth). Set `REA_WAKARU_COMMAND` to that exe for the REA MCP.
+- **Web oracle** — `reference/runner/` served via `python -m http.server 8000`
+  (WebGL2 browser). Captures in `reference/traces/oracle_matrix/`.
+- **Gates** (all hidden + `--watchdog`, SERIAL foreground): `--verify-input` 7/7,
+  `--input-tape` 0 FAIL, `--flow-verify` 20/20, `--ui-tour` 15/15,
+  `--fidelity-tour` 40/40, `--headless-loop` 13/13, `--boss-hit-probe` HIT,
+  `--quest-verify`/`--quest-verify-buy`/`--dialog-verify`/`--tutorial-real-verify`/
+  `--settings-profile-shop-probe`/`--save-fields-probe` PASS.
+- **Build**: `cmake --build E:\reSF2\build --config Release` (incremental;
+  `--clean-first` fails MSB4018). exe: `build\app\game\Release\game.exe`.
+- **Save guard** (`1138c79a`, `640efc4b`): driver/probe runs back up
+  `reference/saves/save.xml` once and restore on exit — the player's save is safe.
+
+## RULE 0 (mandatory)
+Hidden window + `--watchdog` FIRST-class; never leave a process; NO OS input
+(only `App::inject_click`/`inject_key`). Use the ONE-LINE
+`-ArgumentList "<flag> --watchdog N reference/www/res reference/saves/save.xml"`
+form (a `$args` parameter / `@(...)` array can corrupt argv). Gates serial.
+
+## Session history (JS-exact roots fixed)
+Earlier waves closed the user's reported list: idle pose (`$Move`), ground death
+for a ragdolled loser, between-round input/style reset, the max-level achievement
+gate, the achievement-toast node scale, the tutorial buy park, the shop preview
+re-seat + fresh Dojo rebuild, the round result plate timing, the `Bl.strike`
+1-frame deform gate, `--verify-place` MIRROR, `$I()`/posed-bone Distance, the
+Direction condition, the crash (FightScreen downcast), Great.MaxHealth, the COM
+anchor, the Shock-edge solver, the audio bank sub-sounds, the map/tournament
+`isRaid`, the disarm weapon name, `<BarScales>`/`<Attributes>` parsing,
+`ShockWin`, `AllowDoubles`, the O1 quest gate, `<StepsNames>`, the crash driver.
+
+**Wakaru era (readable-JS verification)** — the last ~20 commits found deep roots
+that char-offset grep missed:
+- `fad696b7` **`FightContext` items/perks/mods were empty** → typed
+  `<Item>`/`<Perk>`/`<ModExists>` conditions never matched (166 `<Item>` etc.).
+- `0e5c5e3a` `eval_birth` empty-Name, `<Operator Type>` (only literal "Or"),
+  `<Item>` Type/SubType overwrite.
+- `8a497955` `<Perk>` locks used the learned subset (not the merged `Wk()`);
+  `<Perk>` `Player` selector; action `<Conditions>` ctx.
+- `f2a995bb` round-end plates: `ey=2` (fired rule) vs `ey=3` (timeout).
+- `a045f233`/`0ad0b085` quest action factory (7 attrs) + `EFight` queue drop +
+  `<Operator>` no-Type false + `CaseSensitive`.
+- `0d201470` HP-bar decay (damage/heal swap, leak drain, fixed-60Hz step, ROUND
+  plate `-a/2`).
+- `ece1c4f0` `MoveModel` tween floor + `$ea`; `d5853fdf` `kq` prize fold;
+  `6b965e49` `BossAbilityState`; `7b6f1ca3` `Nwa` total.
+
+## Open items (documented, not invented)
+- `vd` sub-fighters (`gea b==1`/`VAa`/`Tba`) — shipped fights are single-part.
+- `StealMagicMod` — needs a model-node graph + `parameters.Mg`.
+- Latent (0 shipped uses): `ChangeScene CallEvents`, `ShowBattle Instant`,
+  `ClickButton UseArrow`.
+- HP-bar segment stripes, per-language `eF` font split.
+
+## Process
+After each wave: incremental build, gates, commit + push (warm the credential:
+`"protocol=https`nhost=github.com`nusername=hwindinkg`n" | git credential fill`,
+then `git -c credential.helper=manager -c credential.interactive=false push ...`).
+Never force-push. Never leave orphaned `game.exe`.
