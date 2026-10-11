@@ -183,7 +183,9 @@ float fha_body(float& x, float& y, float& z, float px, float pz,
 // the fighter scale (`JG`, default 1). Mirrors:
 //   Kwb: d = (b.kw, b.gR, b.hR) * facing * JG
 //   Bl.strike: node1 += d * (1-b)/w1; node2 += d * b/w2
-// where b = min(1, |nJa - sx.ma| / rest_length), w = node mass.
+// where b = min(1, |nJa - sx.ma| / |Zs.ma - sx.ma|) — the CURRENT endpoint
+// span (`yu.iU`/`yu.pQ` alias the live node `ma` objects, L33527/L33529),
+// NOT the static rest `yu.length`. `w` = node mass.
 // MG/NG gate (JS L588): the whole impulse block runs only when
 // `!sx.MG || !Zs.MG` (at least one endpoint is NOT fixed), and each endpoint
 // is displaced only when its `NG` is false. `MG` = `Fixed="1"` (`Vc.MG`),

@@ -326,14 +326,17 @@ float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
     out.node2_disp = 0.0f;
     out.clamped_dx = 0.0f;
 
-    // JS `Bl.strike` (L582): b = min(1, |nJa - sx.ma| / rest_length) —
-    // the REST length (`|pQ-iU|` = `yu.length`), not the current span.
-    // `nJa` is `o$` (NOT `n$` — REVIEW A MED fix).
-    const Vec3 to_hit = hit.o - hit_cap.p1;
+    // JS `Bl.strike` (L582): `h=a.iU; k=a.pQ; l=|pQ-iU|` — `yu.iU`/`yu.pQ`
+    // ALIAS the endpoint nodes' live `ma` objects (`yu` ctor L33527/L33529:
+    // `this.iU=a.ma`, `this.pQ=b.ma`; never re-assigned), so `l` is the
+    // CURRENT span `|Zs.ma - sx.ma|`, NOT the static rest `yu.length`.
+    // Then `b = l < dist ? 1 : dist / l` with `dist = |nJa - sx.ma|` (`k=d.ma`
+    // = the RAW first endpoint; `nJa` is `o$`, NOT `n$` — REVIEW A MED fix).
+    const Vec3 span_v = hit_cap.r2 - hit_cap.r1;
+    const float span = std::sqrt(span_v.dot(span_v));
+    const Vec3 to_hit = hit.o - hit_cap.r1;
     const float dist = std::sqrt(to_hit.dot(to_hit));
-    const float rest = hit_cap.rest_length;
-    float b = rest < 1e-6f ? 1.0f : dist / rest;
-    b = std::min(1.0f, b);
+    float b = (span < 1e-6f || dist >= span) ? 1.0f : dist / span;
 
     // Node displacement, full vector: d * (1-b)/w1 on node1, d * b/w2 on
     // node2 (`a.sx.XA(l)` / `a.Zs.XA(c)` — x, y AND z move).
