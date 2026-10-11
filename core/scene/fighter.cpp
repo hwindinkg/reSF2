@@ -275,18 +275,43 @@ void Fighter::build_move_list_locks(
                 all_pass = false;
                 break;
             }
-            // `<Perk Name="..">` lock (JS `Bm.he`, L753-754): the move is
-            // admitted only while the named perk is in the fighter's live perk
-            // set (`parameters.Oa`). This is the DoubleSweep gate: without it
-            // the lock fell into the `never` fail-closed branch above, so the
-            // level-2 lesson taught the move but it never entered `hb_`.
+            // `<Perk Name="..">` lock (JS `Bm.he`, L31817-31871): the move is
+            // admitted only while the named perk is in the perk list the
+            // `Player` selector (`l.player`, JS `Ha.parse` L31195) picks:
+            // Me(1) -> the fighter's own live set (`Ae.EA` = `parameters.Wk()`,
+            // the FULL merged learned+warrior+item set — `perk_names_me_/enemy_`
+            // for the condition path), Enemy(2) -> the opponent's (`Ae.lz`),
+            // Both(5) -> own && opponent, SuperParent(7) -> own (`Kf()` == self
+            // for a top-level model). Null(0)/Parent(3)/Child(4)/EnemyChild(6)
+            // resolve to a null list for a top-level fighter -> false. `Not`
+            // inverts the whole test (`Ha.Nba`). This is the DoubleSweep gate:
+            // without it the lock fell into the `never` fail-closed branch
+            // above, so the level-2 lesson taught the move but it never
+            // entered `hb_`.
             if (!l.perk.empty()) {
-                bool matched = false;
-                for (const std::string& p : perks_) {
-                    if (p == l.perk) {
-                        matched = true;
-                        break;
+                const auto has_perk = [](const std::vector<std::string>& set,
+                                         const std::string& n) {
+                    for (const std::string& p : set) {
+                        if (p == n) return true;
                     }
+                    return false;
+                };
+                bool matched = false;
+                switch (l.player) {
+                    case 1:  // Me (`a.EA`)
+                    case 7:  // SuperParent (`a.rr.Kf().parameters.Oa`, self)
+                        matched = has_perk(perks_, l.perk);
+                        break;
+                    case 2:  // Enemy (`a.lz`)
+                        matched = has_perk(other_perks_, l.perk);
+                        break;
+                    case 5:  // Both (`a.EA && a.lz`)
+                        matched = has_perk(perks_, l.perk) &&
+                                  has_perk(other_perks_, l.perk);
+                        break;
+                    default:  // 0/3/4/6 -> null list -> false
+                        matched = false;
+                        break;
                 }
                 const bool pass = l.not_ ? !matched : matched;
                 if (l.group >= 0) {

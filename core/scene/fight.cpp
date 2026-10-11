@@ -352,6 +352,34 @@ void FightHud::render(sf2::render::Renderer& r) {
 // FightController
 // ---------------------------------------------------------------------------
 
+// JS `Wk()` (L34372): the fighter's LIVE perk set = `AK` (learned rows) +
+// `TE` (warrior/template rows) + each equipped item's `Oa` (its catalog
+// `<Perks>`/`<Enchantments>`). `ra.Hza` (`lga()` -> `Hza(this,false)`) tests
+// a move's `<Perk>` lock against THIS merged set; the learned `Oa` subset
+// alone is only the perk-CHANGE rebuild (`lga(true)`). Mirrors the merge
+// `setup_bus` performs for `perk_names_me_/enemy_`.
+static void append_perk_names(const std::vector<sf2::scene::ItemPerkRef>& refs,
+                              std::vector<std::string>& out) {
+    for (const auto& r : refs) {
+        if (!r.name.empty()) out.push_back(r.name);
+    }
+}
+static void append_perk_names(const std::vector<sf2::scene::StagePerkRef>& refs,
+                              std::vector<std::string>& out) {
+    for (const auto& r : refs) {
+        if (!r.name.empty()) out.push_back(r.name);
+    }
+}
+static std::vector<std::string> merged_perk_names(
+    const std::vector<sf2::scene::ItemPerkRef>& first,
+    const std::vector<sf2::scene::ItemPerkRef>& second = {}) {
+    std::vector<std::string> out;
+    out.reserve(first.size() + second.size());
+    append_perk_names(first, out);
+    append_perk_names(second, out);
+    return out;
+}
+
 void FightController::init(const BattleParams& battle,
                            const sf2::scene::Model& model,
                            const std::map<std::string, sf2::scene::MoveDef>& moves,
@@ -424,7 +452,8 @@ void FightController::init_locks(
     // the probe harness (app/game/main.cpp), outside the owned file set.
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
                            "Fists", player_owned, false, false, player_model,
-                           perks.learned);
+                           merged_perk_names(perks.learned_refs, perks.player_refs),
+                           merged_perk_names(perks.learned_refs, perks.player_refs));
     // JS `ur` L194-195 gates the enemy: NotAI -> no AiController, and
     // NotAnimation -> no animation attach (bind pose). Each side also renders
     // its OWN equipment model (JS `xc.cM` L809-810; the Punchbag dummy's
@@ -442,7 +471,8 @@ void FightController::init_locks(
     enemy_ = make_fighter(enemy_name, false, enemy_x, enemy_y, enemy_max_hp,
                           enemy_subtype, battle_.enemy_owned,
                           battle.enemy_not_ai, battle.enemy_not_animation,
-                          enemy_model, {});
+                          enemy_model, merged_perk_names(perks.enemy_refs),
+                          merged_perk_names(perks.learned_refs, perks.player_refs));
     // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,
     // no auto-attack. The input path (player_input -> Fighter::input ->
     // try_select_move) drives the player's moves; the enemy keeps the AI.
@@ -632,11 +662,22 @@ void FightController::dispatch_move_actions(
                              act->kind == "SetCooldown" || act->kind == "ZoomEffect" ||
                              act->kind == "TryOnEnd";
         if (!sound_kind && !fx_kind) continue;
-        // JS `cb.Ti(a,b)` (L724): `if (Fd(this.$c)) return true;` then the
-        // `<Conditions>` tree. `$c` empty -> always true.
-        if (!act->conditions.empty() &&
-            !sf2::scene::eval_move_conditions(act->conditions, conds)) {
-            continue;
+        // JS `cb.Ti(a,b)` (L30578-30593): `if (Fd(this.$c)) return true;` then
+        // the `<Conditions>` tree evaluated against a ctx built from the OWNER
+        // model — `items = b.parameters.jt()`, `EA = b.Kf().parameters.Wk()`
+        // (the FULL merged live perk set), `lz` = the opponent's, `To` = the
+        // current fight type. The caller's `conds` supplies geometry/health;
+        // the item/perk/mod sets are filled here (the 168 shipped action
+        // `<Conditions>` rows are all `<Item>`/`<Operator>` gates). `$c` empty
+        // -> always true.
+        if (!act->conditions.empty()) {
+            sf2::scene::FightContext cctx = conds;
+            const bool owner_is_player = (&owner == &player_);
+            fill_ctx_cond_state(cctx,
+                                owner_is_player ? player_ : enemy_,
+                                owner_is_player ? enemy_ : player_,
+                                owner_is_player ? 0 : 1);
+            if (!sf2::scene::eval_move_conditions(act->conditions, cctx)) continue;
         }
         // --- ShakeScreen (`dm` L734 -> `wd.Wvb` L519 -> `Pi.uS` L424) -----
         if (act->kind == "ShakeScreen") {
@@ -1646,14 +1687,21 @@ FightFighter FightController::make_fighter(
     const std::string& weapon_subtype,
     const std::vector<sf2::scene::OwnedItem>& owned,
     bool not_ai, bool not_animation, const sf2::scene::Model* model,
-    const std::vector<std::string>& perks) {
+    const std::vector<std::string>& perks,
+    const std::vector<std::string>& other_perks) {
     FightFighter f;
     f.name = nm;
     f.is_player = is_player;
-    // JS `Bm.he` (L753-754): the fighter's LIVE perk set (`parameters.Oa`) is
-    // what a `<Perk Name=..>` lock is tested against when `ra.Hza` builds the
-    // move list. Set it before `build_move_list_locks` below.
+    // JS `ra.Hza` (L28883): the move list is built by testing every move's
+    // `<Locks>` against a ctx whose perk lists are `Ae.EA` = the fighter's
+    // OWN live set (`a.Kf().parameters.Wk()` — the FULL merged learned +
+    // warrior/template + equipped-item set) and `Ae.lz` = the OPPONENT's
+    // (`<Perk Player="Enemy">`; `ca.Ka().Zb.Wk()` = the human player). `Wk()`
+    // is `AK` + `TE` + per-item `Oa`, NOT the learned `Oa` subset alone, so
+    // the locks must be fed the merged set (`perk_names_me_/enemy_` on the
+    // condition path). Set both before `build_move_list_locks` below.
     f.fighter.set_perks(perks);
+    f.fighter.set_other_perks(other_perks);
     // JS `xc.cM`: the fighter is built from its OWN equipment model. The
     // caller passes the enemy's model (the Punchbag) or nullptr for the
     // shared fight model.
@@ -2816,9 +2864,17 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     // lost its armor/weapon skin. The pointer is a one-shot handoff.
     const sf2::scene::Model* mode_model = pending_enemy_model_;
     pending_enemy_model_ = nullptr;
+    // JS `Wk()` (L34372): the enemy's own live perk set = the warrior's
+    // `<Perks>` rows + each equipped item's `Oa`; the `<Perk Player="Enemy">`
+    // set (`Ae.lz`) is the human player's merged set.
+    std::vector<std::string> enemy_own_perks;
+    append_perk_names(setup.enemy.perks, enemy_own_perks);
+    append_perk_names(setup.enemy.item_refs, enemy_own_perks);
     enemy_ = make_fighter(enemy_.name, false, ex, ey, emax, "Fists",
                           setup.enemy.owned, battle_.enemy_not_ai,
-                          battle_.enemy_not_animation, mode_model, {});
+                          battle_.enemy_not_animation, mode_model, enemy_own_perks,
+                          merged_perk_names(perk_setup_.learned_refs,
+                                            perk_setup_.player_refs));
     for (const auto& kv : setup.enemy.attrs) {
         enemy_.params.attributes[kv.first] += static_cast<float>(kv.second);
     }
@@ -2907,7 +2963,10 @@ void FightController::spawn_next_enemy_wave() {
     enemy_ = make_fighter(nm, false, ex, ey, emax,
                           wv.weapon_subtype.empty() ? std::string("Fists")
                                                     : wv.weapon_subtype,
-                          wv.owned, wv.not_ai, wv.not_animation, wmodel, {});
+                          wv.owned, wv.not_ai, wv.not_animation, wmodel,
+                          merged_perk_names(wv.perk_refs),
+                          merged_perk_names(perk_setup_.learned_refs,
+                                            perk_setup_.player_refs));
     enemy_.rounds_won = carried_ng;  // JS `this.Zb.ng=b`
     enemy_.style = carried_style;    // the HUD `Gr` meter survives `mfb`
     // The new warrior's tactic (JS `Gf` -> `new wd(a)` reads the warrior's

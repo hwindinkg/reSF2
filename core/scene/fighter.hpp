@@ -656,6 +656,16 @@ public:
     // only while its perk is present here (the `DoubleSweep` gate).
     void set_perks(std::vector<std::string> perks) { perks_ = std::move(perks); }
     const std::vector<std::string>& perks() const { return perks_; }
+    // The OPPONENT's live perk set (JS `Ae.lz` in `ra.Hza`, L28901: the
+    // `<Perk Player="Enemy">` list). For a top-level fighter JS fills it from
+    // `ca.Ka().Zb` (the human player's live perks) — so on the PLAYER's own
+    // build `lz == EA` (own), and on the ENEMY's build it is the player's set.
+    // `Bm.he` case 2/5 reads it; case 3/4/6 (`Parent`/`Child`/`EnemyChild`)
+    // resolve to a null list for a top-level model and fail closed.
+    void set_other_perks(std::vector<std::string> perks) {
+        other_perks_ = std::move(perks);
+    }
+    const std::vector<std::string>& other_perks() const { return other_perks_; }
     // The last player move decision (the JS `Gc.DK` `c == false` branch,
     // L673-674) — the record the `--verify-input` probes assert: the
     // candidate set with each candidate's `priority`, the `Aua` max-priority
@@ -1062,6 +1072,8 @@ private:
     std::vector<const MoveDef*> hb_;        // move list (document order, JS `ra.Lk`)
     // Live perk names for the `<Perk Name=..>` lock test (JS `Bm.he` L753).
     std::vector<std::string> perks_;
+    // The opponent's live perk names (JS `Ae.lz`, `<Perk Player="Enemy">`).
+    std::vector<std::string> other_perks_;
     MoveDecision decision_;                 // last player decision (probe/trace)
     // `MS` of the move `try_react` last started (see `last_react_physics`).
     bool react_physics_ = false;

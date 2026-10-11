@@ -210,6 +210,14 @@ struct Lock {
     // moves.xml L14391-14397) into the list after the level-2 lesson. `never`
     // stays false for it (modelled), unlike the still-untracked kinds.
     std::string perk;
+    // The `<Perk>` `Player` selector (JS `Ha.parse` L31195: `this.dl =
+    // Nd.ol(a.attributes.get("Player") ?? "Me")`). `Bm.he` (L31817) keys the
+    // perk list on it: Me(1) -> `a.EA`, Enemy(2) -> `a.lz`, Both(5) ->
+    // `a.EA && a.lz`, SuperParent(7) -> `a.rr.Kf().parameters.Oa` (= the
+    // fighter itself for a top-level model); Null(0)/Parent(3)/Child(4)/
+    // EnemyChild(6) resolve to a null list for a top-level fighter -> false.
+    // Default 1 = "Me" (the attribute is usually absent).
+    int player = 1;
     // The `<Operator>` block this lock was flattened from (JS: one Or node).
     // Two SEPARATE operators (e.g. a template's `<Screen>` group and the
     // move's own `<Item>` group) are separate groups AND-combined; the old

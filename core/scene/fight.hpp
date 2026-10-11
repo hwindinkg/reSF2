@@ -2510,7 +2510,8 @@ private:
                               const std::vector<sf2::scene::OwnedItem>& owned,
                               bool not_ai = false, bool not_animation = false,
                               const sf2::scene::Model* model = nullptr,
-                              const std::vector<std::string>& perks = {});
+                              const std::vector<std::string>& perks = {},
+                              const std::vector<std::string>& other_perks = {});
     // The hit test (JS `ca.Enb` -> `wd.tKa` -> `Fu.ia`).
     bool hit_test(FightFighter& atk, FightFighter& def, const sf2::scene::MoveDef& move,
                   int frame, sf2::scene::HitCapsule& hit_cap,

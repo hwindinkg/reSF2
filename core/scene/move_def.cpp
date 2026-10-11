@@ -966,6 +966,9 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
             // the member passes when the fighter owns the named perk.
             if (tag == "Perk") {
                 if (pugi::xml_attribute n = other.attribute("Name")) l.perk = n.value();
+                l.not_ = data::xml_attr_bool(other, "Not", false);
+                if (pugi::xml_attribute p = other.attribute("Player"))
+                    l.player = player_from_attr(p.value());
                 out.push_back(std::move(l));
                 continue;
             }
@@ -996,6 +999,8 @@ void parse_locks_node(pugi::xml_node locks, std::vector<Lock>& out) {
         if (tag == "Perk") {
             if (pugi::xml_attribute n = other.attribute("Name")) l.perk = n.value();
             l.not_ = data::xml_attr_bool(other, "Not", false);
+            if (pugi::xml_attribute p = other.attribute("Player"))
+                l.player = player_from_attr(p.value());
             out.push_back(std::move(l));
             continue;
         }
