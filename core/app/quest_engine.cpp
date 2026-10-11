@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <random>
 
@@ -264,6 +265,8 @@ void parse_condition_element(const pugi::xml_node& ch, QuestCond& parent) {
         leaf.value1 = ch.attribute("Value1").value();
         leaf.value2 = ch.attribute("Value2").value();
         leaf.invert = not_attr == "1";
+        // `yb.parse` L40641: `fca = (CompareType ?? "") == "Versions" ? 1 : 0`.
+        leaf.versions = ch.attribute("CompareType").value() == std::string("Versions");
         // `yb.parse` L491578: `NEa()` (Contains/Starts/Ends) reads
         // `CaseSensitive` (absent -> "1").
         leaf.case_sensitive = ch.attribute("CaseSensitive").value() != "0";
@@ -1087,6 +1090,80 @@ std::string query_num_to_string(double v) {
     char buf[40];
     std::snprintf(buf, sizeof(buf), "%.17g", v);
     return buf;
+}
+
+// True when `s` carries an INFIX arithmetic operator OUTSIDE any `?query`
+// atom (JS `aa.tjb`/`je` tokenizes the `?M[..]` nodes as single operands).
+// A `?Name[..]`/`?Name(..)` atom (with its `.Field` suffix) is skipped whole,
+// so `?Concat[ZONE_,(?_ - 1),..]` is NOT itself an arithmetic token (its arg
+// is, and the query arg loop re-resolves that). A `-`/`+` that is a leading
+// sign or follows another operator is not an operator.
+bool formula_has_arith(const std::string& s) {
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const char c = s[i];
+        if (c == '?') {
+            std::size_t j = i + 1;
+            while (j < s.size() && s[j] != '[' && s[j] != '(') ++j;
+            if (j < s.size()) {
+                const char op = s[j];
+                const char cl = (op == '[') ? ']' : ')';
+                int d = 0;
+                for (; j < s.size(); ++j) {
+                    if (s[j] == op) ++d;
+                    else if (s[j] == cl && --d == 0) { ++j; break; }
+                }
+                while (j < s.size() &&
+                       (std::isalnum(static_cast<unsigned char>(s[j])) ||
+                        s[j] == '_' || s[j] == '.')) {
+                    ++j;
+                }
+            }
+            i = j - 1;
+            continue;
+        }
+        if (c == '+' || c == '-' || c == '*' || c == '/' || c == '%') {
+            std::size_t k = i;
+            while (k > 0 && s[k - 1] == ' ') --k;
+            if (k == 0) continue;  // leading sign
+            const char p = s[k - 1];
+            if (p == '(' || p == '[' || p == ',' || p == '+' || p == '-' ||
+                p == '*' || p == '/' || p == '%') {
+                continue;  // unary after another operator / open
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// JS `Ks(a,b)` (L301): compare by LENGTH first, then char code. Used by the
+// version comparator `yb.Owb` (L40941) for the `CompareType="Versions"` path.
+int version_cmp(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) {
+        return static_cast<int>(a.size()) - static_cast<int>(b.size());
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) {
+            return static_cast<int>(static_cast<unsigned char>(a[i])) -
+                   static_cast<int>(static_cast<unsigned char>(b[i]));
+        }
+    }
+    return 0;
+}
+
+// JS `yb.vNa` (L40858): strip every `(`/`)` then split on `.`.
+std::vector<std::string> version_split(std::string s) {
+    s.erase(std::remove(s.begin(), s.end(), '('), s.end());
+    s.erase(std::remove(s.begin(), s.end(), ')'), s.end());
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t d = s.find('.', start);
+        out.push_back(s.substr(start, d == std::string::npos ? std::string::npos : d - start));
+        if (d == std::string::npos) break;
+        start = d + 1;
+    }
+    return out;
 }
 
 // JS `Da.pg.jf()` (Math.random) for `?UniformIntRandom[a,b]`. Deterministic
@@ -2344,6 +2421,106 @@ std::string QuestEngine::quest_var(
     return std::string();
 }
 
+// JS `Qa.Wb` (L97861) / `je.Wb` (L98952): the infix formula evaluator. The
+// grammar is the shipped subset — `expr := term (('+'|'-') term)*`,
+// `term := factor (('*'|'/'|'%') factor)*`, `factor := ('+'|'-')? primary`,
+// `primary := '(' expr ')' | '?M[..]'/'_ref'/number`. Each atom is resolved
+// through `resolve_token` (so a nested `?Slice[..]`/`_ref` works) and coerced
+// to a number (JS numeric coercion; a non-numeric atom -> 0, matching the
+// port's existing `?Sum` operand convention). `/`/`%` by zero yield 0 rather
+// than inventing a value (no shipped formula divides by zero).
+bool QuestEngine::eval_formula(App& app, const std::string& expr,
+                               const EvalCtx& ctx, double& out) {
+    std::size_t p = 0;
+    const std::string& s = expr;
+    auto skip = [&]() {
+        while (p < s.size() && s[p] == ' ') ++p;
+    };
+    std::function<bool(double&)> primary, term, factor;
+    // primary = '(' expr ')' | unary sign | atom.
+    primary = [&](double& v) -> bool {
+        skip();
+        if (p >= s.size()) return false;
+        const char c = s[p];
+        if (c == '+' || c == '-') {
+            ++p;
+            double x = 0.0;
+            if (!primary(x)) return false;
+            v = (c == '-') ? -x : x;
+            return true;
+        }
+        if (c == '(') {
+            ++p;
+            if (!factor(v)) return false;
+            skip();
+            if (p < s.size() && s[p] == ')') ++p;
+            return true;
+        }
+        const std::size_t start = p;
+        if (c == '?') {
+            while (p < s.size() && s[p] != '[' && s[p] != '(') ++p;
+            if (p >= s.size()) return false;
+            const char op = s[p];
+            const char cl = (op == '[') ? ']' : ')';
+            int d = 0;
+            for (; p < s.size(); ++p) {
+                if (s[p] == op) ++d;
+                else if (s[p] == cl && --d == 0) { ++p; break; }
+            }
+            while (p < s.size() &&
+                   (std::isalnum(static_cast<unsigned char>(s[p])) ||
+                    s[p] == '_' || s[p] == '.')) {
+                ++p;
+            }
+        } else {
+            while (p < s.size() &&
+                   (std::isalnum(static_cast<unsigned char>(s[p])) ||
+                    s[p] == '_' || s[p] == '.' || s[p] == '$' || s[p] == '@')) {
+                ++p;
+            }
+        }
+        if (p == start) return false;
+        const std::string atom = s.substr(start, p - start);
+        std::string val;
+        if (!resolve_token(app, atom, ctx, val)) return false;
+        v = is_numeric(val) ? to_number(val) : 0.0;
+        return true;
+    };
+    factor = [&](double& v) -> bool {
+        if (!primary(v)) return false;
+        for (;;) {
+            skip();
+            if (p >= s.size()) break;
+            const char o = s[p];
+            if (o != '*' && o != '/' && o != '%') break;
+            ++p;
+            double r = 0.0;
+            if (!primary(r)) return false;
+            if (o == '*') v *= r;
+            else if (o == '/') v = (r == 0.0) ? 0.0 : v / r;
+            else v = (r == 0.0) ? 0.0 : std::fmod(v, r);
+        }
+        return true;
+    };
+    term = [&](double& v) -> bool {
+        if (!factor(v)) return false;
+        for (;;) {
+            skip();
+            if (p >= s.size()) break;
+            const char o = s[p];
+            if (o != '+' && o != '-') break;
+            ++p;
+            double r = 0.0;
+            if (!factor(r)) return false;
+            v = (o == '+') ? v + r : v - r;
+        }
+        return true;
+    };
+    if (!term(out)) return false;
+    skip();
+    return p >= s.size();
+}
+
 bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCtx& ctx,
                                 std::string& out) {
     out.clear();
@@ -2369,6 +2546,21 @@ bool QuestEngine::resolve_token(App& app, const std::string& token, const EvalCt
             if (!resolve_token(app, token.substr(0, ap), ctx, a)) return false;
             if (!resolve_token(app, token.substr(ap + and_sep.size()), ctx, b)) return false;
             out = (truthy01(a) && truthy01(b)) ? "1" : "0";
+            return true;
+        }
+    }
+    // JS `yb.fc`/`ba.CD` (L40493/L42657): EVERY attribute value runs the
+    // formula lexer, so an infix expression such as `1 - _$InEclipseMode`
+    // (ShowBattle `Hidden`), `?SysInfo[].Time - 100` (a `Value`/`File`), or a
+    // query argument `(?Slice[?Fight[_$Fight].Zone,5,5] - 1)` evaluates to a
+    // NUMBER, not the literal text. Only tokens that name a `?`-query or a
+    // `_`-ref AND carry a top-level operator are treated as formulas — a pure
+    // literal (`dlgBuyButton`, `WEAPON_KNIVES`) is never touched.
+    if ((token.find('?') != std::string::npos || token.find('_') != std::string::npos) &&
+        formula_has_arith(token)) {
+        double num = 0.0;
+        if (eval_formula(app, token, ctx, num)) {
+            out = query_num_to_string(num);
             return true;
         }
     }
@@ -2767,6 +2959,31 @@ QuestEngine::Tri QuestEngine::eval_cond(App& app, const QuestCond& cond, const E
     std::string a, b;
     if (!resolve_token(app, cond.value1, ctx, a)) return Tri::Unknown;
     if (!resolve_token(app, cond.value2, ctx, b)) return Tri::Unknown;
+    // JS `yb.w0a` L40910: `fca==1` (CompareType="Versions") takes `x0a`
+    // (L40864) — split both operands on `.` and compare component-wise up to
+    // the SHORTER length (`Owb`: Equal = string `==`; the rest via `Ks`).
+    if (cond.versions &&
+        (cond.kind == "Equal" || cond.kind == "Greater" ||
+         cond.kind == "GreaterEqual" || cond.kind == "Less" ||
+         cond.kind == "LessEqual")) {
+        std::vector<std::string> va = version_split(a);
+        std::vector<std::string> vb = version_split(b);
+        if (va.size() > vb.size()) std::swap(va, vb);
+        bool all = true;
+        for (std::size_t i = 0; i < va.size(); ++i) {
+            const std::string& x = va[i];
+            const std::string& y = vb[i];
+            bool okc = true;
+            if (cond.kind == "Equal") okc = (x == y);
+            else if (cond.kind == "Greater") okc = version_cmp(x, y) > 0;
+            else if (cond.kind == "GreaterEqual") okc = version_cmp(x, y) >= 0;
+            else if (cond.kind == "Less") okc = version_cmp(x, y) < 0;
+            else okc = version_cmp(x, y) <= 0;
+            if (!okc) { all = false; break; }
+        }
+        if (cond.invert) all = !all;
+        return all ? Tri::True : Tri::False;
+    }
     bool ok = false;
     if (cond.kind == "Equal") {
         // Both numeric -> numeric compare; otherwise exact string compare
@@ -2822,6 +3039,30 @@ QuestEngine::ActionRest QuestEngine::run_actions(
     const std::string& quest, int depth, const std::string& iterator) {
     ActionRest result;
     if (depth > kMaxActionDepth) return result;
+    // `ba.Pc(a, attr)` (L42657) for the action attrs below: resolve a
+    // `?`-query or a `_`-ref through the expression engine (a literal passes
+    // through unchanged). Used where the JS class resolves the attr and the
+    // port previously read it raw.
+    auto resolve_attr = [&](const std::string& raw) -> std::string {
+        if (raw.empty()) return raw;
+        if (raw.find('?') == std::string::npos && raw[0] != '_') return raw;
+        EvalCtx c;
+        c.journal = journal;
+        c.iterator = iterator;
+        c.locals = &locals;
+        c.level = journal.player_level;
+        try {
+            const WarriorSave w = app.save().load();
+            c.story_step = w.story_step();
+            c.level = w.level;
+            c.save = w;
+            c.save_loaded = true;
+        } catch (const std::exception&) {
+        }
+        std::string out = raw;
+        if (resolve_token(app, raw, c, out)) return out;
+        return raw;
+    };
     for (std::size_t i = 0; i < acts.size(); ++i) {
         const QuestAction& a = acts[i];
         const std::string& t = a.tag;
@@ -3185,8 +3426,12 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             fx.has_story_step = true;
             fx.story_step = attr_or(a.attrs, "Value");
         } else if (t == "SetMapFocus") {
+            // `qo.parse`/`qo.S` (L45465/L45470): `Battle` (`opa`) is resolved
+            // through `ba.Pc` before `p.o.m5(...)`. 3 shipped uses are
+            // `?Concat[...]` (hardmode.xml L?, quests.xml L2744/L2752) — the
+            // RAW token stored a literal `?Concat[...]` as the map focus.
             fx.has_map_focus = true;
-            fx.map_focus = attr_or(a.attrs, "Battle");
+            fx.map_focus = resolve_attr(attr_or(a.attrs, "Battle"));
         } else if (t == "SetCurrentZone") {
             fx.has_current_zone = true;
             const std::string name = attr_or(a.attrs, "Name");
@@ -3196,13 +3441,25 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // `hb` triple; `ShowBattle` -> `Iaa(hb,true,true,Locked,Hidden,
             // ReplayCount)`, `HideBattle` -> `Aj(false)` -> `Iaa` `c=false`
             // -> `Eja` (record dropped).
-            const std::string nm = attr_or(a.attrs, "Name");
+            const std::string nm = resolve_attr(attr_or(a.attrs, "Name"));
             QuestBattleWrite bw = battle_write_from(nm, battle_zone(nm));
             if (!bw.name.empty()) {
                 bw.remove = (t == "HideBattle");
                 bw.locked = attr_bool01(attr_or(a.attrs, "Locked"));
-                bw.hidden = attr_bool01(attr_or(a.attrs, "Hidden"));
-                bw.replay_count = parse_int_or(attr_or(a.attrs, "ReplayCount"), 0);
+                // `Aj.S` L46307: `b.fc(this.FG,e); e=ic.$z(e.Ie,1,0.01)` —
+                // `Hidden` resolves NUMERICALLY and `ic.$z(a,1,0.01)` (L52877)
+                // is `|a-1| < 0.01`, a BOOL stored as `hl.d9` ("1"/"0"). The
+                // 6 shipped `Hidden="1 - _$InEclipseMode"` (story.xml) hid the
+                // eclipse bosses only when NOT in eclipse mode; the raw read
+                // set `hidden=false` always.
+                const std::string hraw = attr_or(a.attrs, "Hidden", "0");
+                const double hval = eval_expr_num(app, locals, journal, iterator, hraw);
+                bw.hidden = std::fabs(hval - 1.0) < 0.01;
+                // `Aj.S` L46307: `b.fc(this.x$,d); d=d.Ie|0` — `ReplayCount`
+                // resolves then truncates. 7 shipped uses are
+                // `?Fight[...].WinCount` (quests.xml) -> the raw read was 0.
+                bw.replay_count = static_cast<int>(
+                    to_number(resolve_attr(attr_or(a.attrs, "ReplayCount", "0"))));
                 fx.battle_writes.push_back(std::move(bw));
             }
         } else if (t == "SetBattleVisibility") {
@@ -3270,7 +3527,13 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 fx.set_vars[name] = value;  // Users (CH0) / absent -> save
             }
         } else if (t == "ClickButton") {
-            const std::string target = attr_or(a.attrs, "Target");
+            // `Nn.parse`/`Nn.S` (L46639/L46656): `Target` (`fua`) is resolved
+            // through `ba.Pc` before `P5a(...)` finds the widget. The one
+            // shipped non-literal (`tutorial_quests.xml` L357
+            // `?Concat[SceneMenuScroll.,_NextScene]`) resolves to
+            // `SceneMenuScroll`+the global `NextScene`; the RAW token armed a
+            // widget no such name matched.
+            const std::string target = resolve_attr(attr_or(a.attrs, "Target"));
             fx.clicks.push_back(target);
             // `Nn` `UseFlashing="1"` (L1114): highlight the target plate. The
             // tutorial pairs it with `IgnoreCallback="1"` so the map FIGHT
@@ -3566,7 +3829,20 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 }
             }
         } else if (t == "ClearQuestQueue") {
-            fx.clears.push_back(attr_or(a.attrs, "Name"));
+            // `Mn.parse` (L43707): `m.addRange(this.names, (Name ?? "").split(
+            // "|"))`; `S` (L43712): `ha.F().Yba(this.names)`. 5 shipped uses
+            // carry a `|` (`ChallengeService|FightEnter`, quests.xml) which
+            // clears BOTH quests; pushing the joined string cleared neither.
+            const std::string raw = attr_or(a.attrs, "Name");
+            std::size_t s = 0;
+            for (;;) {
+                const std::size_t bar = raw.find('|', s);
+                const std::string one =
+                    raw.substr(s, bar == std::string::npos ? std::string::npos : bar - s);
+                if (!one.empty()) fx.clears.push_back(one);
+                if (bar == std::string::npos) break;
+                s = bar + 1;
+            }
         } else if (t == "AttachQuestFile") {
             // JS `Bn.S` (L1025): `p.F().L3(this.filename)` — load the file
             // at this point in the run. Deferred to the end of the fire
@@ -3574,9 +3850,16 @@ QuestEngine::ActionRest QuestEngine::run_actions(
             // newly loaded quests only run on FUTURE events).
             fx.attach_files.push_back(attr_or(a.attrs, "File"));
         } else if (t == "Activate") {
-            // JS `Ge.S` (L1023): `ha.F().RA("QUEST_EVENT_ACTIVATE")` with
-            // `Ge.MZ` = the ActionID; re-fired by fire_inner.
-            fx.activate_requests.push_back(attr_or(a.attrs, "ActionID"));
+            // JS `Ge.S` (L43163): `super.S(a); Ge.Qob(ba.cg(a, this.Goa));
+            // this.sa()` — `ActionID` is resolved through the expression engine
+            // (`ba.cg`). The one shipped non-literal (`offers.xml` L294
+            // `<Activate ActionID="_CurrentOfferOperation"/>`) reads the Global
+            // var the same file sets (`SetVariable Scope="Global"
+            // Name="CurrentOfferOperation"`, L72/L78/L141/L146); pushing the
+            // RAW `_`-token fired an event no quest matched, so the offer
+            // dialog re-entry chain stalled.
+            std::string aid = resolve_attr(attr_or(a.attrs, "ActionID"));
+            fx.activate_requests.push_back(aid);
         } else if (t == "Wait") {
             // `Ro.S` (L1119): `this.Oqa = ba.UBa(a, Frames)` then a frame
             // listener fires `stop()` after that many frames. `Yb` (L954)

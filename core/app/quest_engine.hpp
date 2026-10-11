@@ -131,6 +131,11 @@ struct QuestCond {
     // Read only for the string operators (`NEa()` true for Contains/Starts/Ends,
     // L491578); their `v0a` lowercases both operands when false.
     bool case_sensitive = true;
+    // JS `yb.fca` (L40641): `CompareType == "Versions"` selects the
+    // component-wise version compare `x0a` (L40864) instead of the numeric/
+    // string `w0a`. 17 shipped conditions (quests.xml L1922-1923,
+    // update_quests.xml) carry it; the port ignored the attribute.
+    bool versions = false;
     std::string value1;
     std::string value2;
     std::vector<QuestCond> children;  // Operator branches
@@ -1351,6 +1356,14 @@ private:
     // conditions read. Returns false (UNKNOWN, logged) for the rest.
     bool resolve_query(App& app, const std::string& token, const EvalCtx& ctx,
                        std::string& out);
+    // JS `Qa.Wb`/`je.Wb` (L97861/L98952): the INFIX formula evaluator behind
+    // `yb.fc`/`ba.CD`. The port's `resolve_token` covers bare `_`/`?` tokens
+    // and ` Or `/` And `; this adds the shipped arithmetic forms (`a - b`,
+    // `a % b`, `a + b`, nested parens) whose operands are `?query`/`_ref`
+    // atoms. Returns false when the string is not a well-formed formula (the
+    // caller then falls back to the literal).
+    bool eval_formula(App& app, const std::string& expr, const EvalCtx& ctx,
+                      double& out);
     void note_unanswerable(const std::string& token);
     // `p.items.$b(name)` — the list.xml catalog (`Item`/`Purchase` queries).
     // Cached: the catalog is static for the process. Null when absent.
