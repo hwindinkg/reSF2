@@ -1449,8 +1449,7 @@ const AiAnimSlot* AiController::bqb(const std::vector<AiAnimSlot>& slots,
 
 int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& anim) {
     const AiAnimSlot* best = bqb(slots, anim);
-    if (best == nullptr || moves_ == nullptr) return 0;
-    int added = 0;
+    if (best == nullptr || moves_ == nullptr) return static_cast<int>(wb_.size());
     for (const std::string& n : best->names) {
         // JS `ra.nAa(a,b)` (L603): resolve the slot's animation names to
         // move objects; push each move's name (dedup against `wb_`:
@@ -1469,10 +1468,12 @@ int AiController::nwa(const std::vector<AiAnimSlot>& slots, const std::string& a
             // JS `Nwa` (L603): `this.iN.zZ.push(c.name)` — the name feeds
             // the `cc.Gb` conditional term when weighed by `iCa`.
             feat_.zz.push_back(m->name);
-            ++added;
         }
     }
-    return added;
+    // JS `Nwa` (L603) returns `this.wb.length` (the RUNNING TOTAL, not the
+    // delta). `de.ia` L594 only tests the sum's sign (`b>0`/`b<=0`), so the
+    // value is behaviourally neutral, but return it verbatim.
+    return static_cast<int>(wb_.size());
 }
 
 // JS `csb`/`Zqb` (L618-619): size `cO`/`hN` to the tactic's `$E`/`nD` slot
