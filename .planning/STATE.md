@@ -86,6 +86,14 @@ that char-offset grep missed:
   callout scale `1.2·nat_h/eF` (hot_ground) vs `hud_c` (combo); banner Y =
   arena-projected centre `h/2 − 75·d`; spark-pool clear order (`Cnb` tests
   before increment, no reset); magic effects draw at constant alpha.
+- `95a08c82` fight rules: `ERulePerk` — **195 shipped** `<Rules><Perk>` were inert
+  (the rule perks never joined the live trigger set; `ca.ZOa`/`du.rmb`) +
+  `ERuleNoPerks` (2 shipped `EndStanceClear`).
+- `c84fb177` quest dialogs: Title/Image/Line text now run the full `ba.Pc`
+  (`?`+`_`), not just `_`.
+- `927125a9` fight rules: timer **Contest** — `Ema(9)` sets `cp=9` (L17178), the
+  Points `compare` (L36937) then fires → `BT` → **`ey=2` (`rule_win`)**, not
+  `ey=3` (timeout); winner `gj.wfa` (Contest `qH>gN`, Score `qH>=Max`).
 - `153ad295` `?Hit[].BaseDamage` (JS `xgb` L56083 = `Bb.ODa * 2^(block) *
   2^(crit)`) was declared but **never filled** — 0 in every path. Added
   `HitRecord.base_damage` (`ODa`), threaded through `cond_ctx` +
