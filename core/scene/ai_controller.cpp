@@ -98,6 +98,26 @@ std::vector<std::string> xml_animation_names_nested(const std::string& xml,
                                                     const std::string& outer,
                                                     const std::string& inner);
 
+// JS `jc.$k(n)` (L29519) + `jc.d2(n)` (L29525):
+//   `$k(a){ return this.name != a ? this.d2(a) : true }`
+//   `d2(a){ for(b=0;b<this.xl.length;) if(this.xl[b++]==a) return true;
+//           return false }`
+// `xl` is the move's ANIMATION-NAME list (`jc.ava`/`m.bd`, L29286/L368460),
+// i.e. the move's own name + every name in its TRANSITIVE `<Template>` chain
+// — the port's `MoveDef::anim_names` (move_def.cpp: `anim_names` = own name +
+// template tags + each collected template node's `Name`). Every AI list test
+// (`mcb`/`hcb`/`ka`/`gea`/`Pcb`/`iwb`) and the roulette key test (`iCa` L640
+// `a.$k(f)`) routes through `$k`. Testing `template_tags` alone MISSES the
+// transitive template names (a nested `<Template>` chain), so it can fail to
+// match where the JS matches. `anim_names` is a superset of `{name} ∪
+// template_tags`, so this test is exactly `$k`.
+bool move_has_name(const MoveDef& m, const std::string& n) {
+    if (n.empty()) return false;
+    if (m.name == n) return true;
+    return std::find(m.anim_names.begin(), m.anim_names.end(), n) !=
+           m.anim_names.end();
+}
+
 // JS `P.s$a()` = `P.csa` (`computer_settings.xml`
 // `<MoveLengthIntervals><Strict><Interval Name=..>`, parse L318270). Read
 // from the SAME file the JS reads; the port previously HARDCODED the shipped
@@ -494,8 +514,7 @@ bool AiController::hcb(const AiFightState& st) const {
     // JS `P.v$a()` = the NoDecision MOVES; `cs.$k(name)` matches the name or
     // an inherited template tag.
     for (const std::string& m : no_decision_moves_) {
-        if (st.current_move->name == m ||
-            st.current_move->template_tags.count(m) > 0) {
+        if (move_has_name(*st.current_move, m)) {
             return false;
         }
     }
@@ -1235,8 +1254,7 @@ int AiController::gea(const AiFightState& st, int variant) {
         const MoveDef* k = st.current_move;  // `this.cs`
         bool l = false;
         for (const std::string& n : fsa) {
-            if (n.empty()) continue;
-            if (k->name == n || k->template_tags.count(n) > 0) {
+            if (move_has_name(*k, n)) {
                 l = true;
                 break;
             }
@@ -1347,14 +1365,9 @@ int AiController::gea(const AiFightState& st, int variant) {
     auto in_group = [&](const std::string& name,
                         const std::vector<std::string>& group) -> bool {
         for (const std::string& c : group) {
-            if (name == c) return true;
             auto it = moves_->find(name);
-            if (it != moves_->end()) {
-                if (it->second.template_tags.count(c) > 0) return true;
-                if (std::find(it->second.anim_names.begin(),
-                              it->second.anim_names.end(),
-                              c) != it->second.anim_names.end())
-                    return true;
+            if (it != moves_->end() && move_has_name(it->second, c)) {
+                return true;
             }
         }
         return false;
@@ -1583,9 +1596,7 @@ int AiController::ka(const AiFightState& st) {
     if (tactic_ == nullptr || st.current_move == nullptr) return 0;
     const MoveDef& mv = *st.current_move;
     for (const auto& kv : tactic_->conditional_player) {
-        if (mv.name == kv.first || mv.template_tags.count(kv.first) > 0 ||
-            std::find(mv.anim_names.begin(), mv.anim_names.end(), kv.first) !=
-                mv.anim_names.end()) {
+        if (move_has_name(mv, kv.first)) {
             return nwa(kv.second, st.my_anim);
         }
     }
@@ -1654,8 +1665,7 @@ void AiController::qja(const AiFightState& st) {
 // gate the `$x` ResponseDelay cache.
 bool AiController::mcb(const MoveDef& m) const {
     for (const std::string& n : ignored_enemy_anims_) {
-        if (n.empty()) continue;
-        if (m.name == n || m.template_tags.count(n) > 0) return true;
+        if (move_has_name(m, n)) return true;
     }
     return false;
 }
@@ -2077,9 +2087,7 @@ std::string AiController::update(const AiFightState& st) {
         last_my_move_ = st.current_move;
         if (my_changed && st.playing && st.current_move != nullptr) {
             for (const std::string& n : unexpected_moves_) {
-                if (n.empty()) continue;
-                if (st.current_move->name == n ||
-                    st.current_move->template_tags.count(n) > 0) {
+                if (move_has_name(*st.current_move, n)) {
                     eh_ = 1;
                     break;
                 }

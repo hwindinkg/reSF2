@@ -1491,16 +1491,18 @@ private:
 
 // Exact `Fh.lXa` accumulator (JS L2054-2056 + `Kx` L2056, `Fh` ctor):
 // `Rva+=prize; PY+=Vk(b); OY+=gems; P3+=Vk(trunc(ceil(a*d)*d6+.5));
-// ep+=Vk(trunc(ceil(a*e)*c6+.5)); Ui+=Vk(trunc(ceil(a*f)+.5))*jU;
+// ep+=Vk(trunc(ceil(a*e)*c6+.5)); Ui+=Vk(trunc(ceil(a*f)+.5)*jU);
 // DZ+=Vk(trunc(ceil(a*h[b6])+.5)); Ub+=Vk(trunc(ceil(a*g)*e6+.5));
 // m6=PY+P3+ep+Ui+DZ+Ub; mOa=OY` with `Vk(a,b=0)=ceil(a/10^(kq-b))`
 // (kq = DenominationDigits, absent in seed -> 0).
 // Fh counters init 0; `d6`++ only via victory `gXa` (post-lXa, so 0 at
 // reward time with fresh-per-battle Fh); `c6`/`e6` via strike flags
-// (`cvb`/`yvb`: first-hit/crit-shock of the round); `jU` never set (0);
-// `b6` max style reached (the `Gr.Gua` high-water mark -> the `Fh.HNa`
-// row key + the `pk[b6]` DZ term). `pk` = EAa order
-// (Turtle 0, Hard 3, Brutal 6, Aggressive 9, Crazy 12, Fantastic 15).
+// (`cvb`/`yvb`: first-hit/crit-shock of the round); `jU` = the PLAYER's
+// highest announced combo run (`ca.Ihb` -> the combo widget `Ax` L85464
+// `Ee.jU = max(Ee.jU, hq)` with `hq = a.aw()`); `b6` max style reached (the
+// `Gr.Gua` high-water mark -> the `Fh.HNa` row key + the `pk[b6]` DZ term).
+// `pk` = EAa order (Turtle 0, Hard 3, Brutal 6, Aggressive 9, Crazy 12,
+// Fantastic 15).
 struct PrizeFh {
     int d6 = 0, c6 = 0, jU = 0, e6 = 0, b6 = 0;
 };
@@ -1535,7 +1537,7 @@ inline void fh_lxa(PrizeKx& oc, const PrizeFh& fh, double prize, double coins,
     oc.oy += gems;
     oc.p3 += prize_vk(std::trunc(std::ceil(prize * Ia) * fh.d6 + .5), kq);
     oc.ep += prize_vk(std::trunc(std::ceil(prize * epF) * fh.c6 + .5), kq);
-    oc.ui += prize_vk(std::trunc(std::ceil(prize * UiF) + .5), kq) * fh.jU;
+    oc.ui += prize_vk(std::trunc(std::ceil(prize * UiF) + .5) * fh.jU, kq);
     oc.dz += prize_vk(std::trunc(std::ceil(prize * pk[fh.b6]) + .5), kq);
     oc.ub += prize_vk(std::trunc(std::ceil(prize * UbF) * fh.e6 + .5), kq);
     oc.m6 = oc.py + oc.p3 + oc.ep + oc.ui + oc.dz + oc.ub;

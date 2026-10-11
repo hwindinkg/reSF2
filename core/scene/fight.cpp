@@ -6281,6 +6281,18 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         if (atk.combo_run >= fight_params().combo_min_hits) {
             atk.combo_j2 = atk.combo_announced = atk.combo_run;
             ++atk.combos_announced;
+            // JS `ca.Ihb` (L423) -> `ha.mb.Ax(a.parameters.qb, b, c)` with
+            // `b = a.aw()` (the announced combo run). The combo widget's
+            // `Ax` (L85446) does `this.hq=b; ... if(this.hq>=v.aw()) {
+            //   ...; let c=this.Ee.jU; this.Ee.jU = c<this.hq?this.hq:c; }`
+            // — the PLAYER's widget (`Id`, L84953 `if(a) this.Id.Ax(b,c)`)
+            // holds the prize `Fh` (L84712 `this.Id.OMa(this.Ee)`), so only
+            // the PLAYER's announced combos raise `Fh.jU` (the `goldCombo`
+            // reward term `lXa` L85599). The enemy's combos feed `Ada`
+            // (L84715), a DIFFERENT `Fh`.
+            if (atk.is_player && atk.combo_j2 > prize_fh_.jU) {
+                prize_fh_.jU = atk.combo_j2;
+            }
             // Perk-bus slot 4 (Combo): JS `Gc.Ihb` (L215492) -> `this.tb.Gj(a,4)`
             // (no `withInfo`, so the `Hc` gate is skipped — `xG.info=null`).
             fire_bus_slot(sf2::scene::kEvCombo, sf2::scene::TrigVars(),
