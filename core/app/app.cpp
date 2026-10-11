@@ -1306,22 +1306,28 @@ void App::poll_input() {
     // --- the JS `fb` debug/cheat keys (@222987) ---------------------------
     // Ctrl-gated (`c&1`) and keydown-only. The `Gz` code comes from the full
     // keyboard map; only the fight screen decodes the actions.
+    //
+    // The polled set is EXACTLY the `fb.IE` (readable.js:17902) switch cases,
+    // resolved to their GLFW keys. `fb.IE` handles 135 (ArrowRight, `Gz` L24
+    // `a("ArrowRight",135)`) alongside 61 (Equal) — both `fb.Lf(3)`. The old
+    // table had 34 keys and omitted GLFW_KEY_RIGHT, so `debug_action_for_code`'s
+    // `case 135` was dead and Ctrl+ArrowRight (a live JS cheat) never fired.
     {
         const bool ctrl =
             glfwGetKey(renderer_->window(), GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
             glfwGetKey(renderer_->window(), GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
-        static const int kDebugKeys[34] = {
+        static const int kDebugKeys[35] = {
             GLFW_KEY_0, GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4,
             GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9,
             GLFW_KEY_B, GLFW_KEY_M, GLFW_KEY_U,
             GLFW_KEY_F1, GLFW_KEY_F3, GLFW_KEY_F4, GLFW_KEY_F5, GLFW_KEY_F6,
             GLFW_KEY_F7, GLFW_KEY_F10, GLFW_KEY_F11, GLFW_KEY_F12,
-            GLFW_KEY_MINUS, GLFW_KEY_EQUAL,
+            GLFW_KEY_MINUS, GLFW_KEY_EQUAL, GLFW_KEY_RIGHT,
             GLFW_KEY_KP_0, GLFW_KEY_KP_1, GLFW_KEY_KP_2, GLFW_KEY_KP_3,
             GLFW_KEY_KP_4, GLFW_KEY_KP_5, GLFW_KEY_KP_6, GLFW_KEY_KP_7,
             GLFW_KEY_KP_8, GLFW_KEY_KP_9,
         };
-        for (int di = 0; di < 34; ++di) {
+        for (int di = 0; di < 35; ++di) {
             const bool now_down =
                 glfwGetKey(renderer_->window(), kDebugKeys[di]) == GLFW_PRESS;
             if (now_down && debug_keys_down_[di] == 0 && screens_ != nullptr &&

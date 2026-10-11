@@ -533,8 +533,9 @@ private:
     std::set<int> gamepad_held_;
     std::set<int> gamepad_prev_;
     std::unordered_map<int, bool> gamepad_injected_;
-    // The `fb` debug-key held edges (the `kDebugKeys` table order).
-    int debug_keys_down_[34] = {};
+    // The `fb` debug-key held edges (the `kDebugKeys` table order; 35 = the
+    // `fb.IE` case set incl. GLFW_KEY_RIGHT -> `Gz` 135).
+    int debug_keys_down_[35] = {};
     bool injected_click_pending_ = false;
     int injected_click_steps_ = 0;  // remaining fixed steps the click stays pressed
     double injected_x_ = 0.0;
