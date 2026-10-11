@@ -9141,12 +9141,32 @@ void MapScreen::recompute_node_states(const WarriorSave& w) {
                 }
                 return 0;
             };
+            // JS `YL` (L9023, the `status` setter the pip reads): status==1
+            // (the lit pip, `wMa(0)`) requires `repeat > 0 && Wc != null &&
+            // type != "FightPeriodic" && wins >= repeat`; for the replayable
+            // types it then runs `lg.Eyb` (L59054)
+            // `status = wins >= repeat*(replays+1) ? 1 : 2`. So a repeat==0
+            // fight is NEVER lit (the old `wins >= 1` wrongly lit it) and a
+            // replayable fight needs `repeat*(replays+1)` wins.
+            const bool replayable_pips = n.type == "REPLAYABLE" ||
+                                         n.type == "BOSSES_REPLAYABLE" ||
+                                         n.type == "FINAL_BATTLE_REPLAYABLE";
+            const bool periodic_pips = n.type == "PERIODIC";
             for (int k = 0; k < pip_n; ++k) {
                 const std::string ids =
                     n.zone + "|" + n.name + "|" + n.fight_names[k];
                 int wins = wins_for(ids);
                 if (wins == 0 && pip_n == 1) wins = wins_for(n.name);
-                n.pip_beaten[static_cast<std::size_t>(k)] = wins >= 1;
+                const int repeat =
+                    static_cast<std::size_t>(k) < n.fight_replays.size()
+                        ? n.fight_replays[static_cast<std::size_t>(k)]
+                        : 0;
+                bool lit = false;
+                if (repeat > 0 && !periodic_pips) {
+                    lit = replayable_pips ? (wins >= repeat * (n.replay_count + 1))
+                                          : (wins >= repeat);
+                }
+                n.pip_beaten[static_cast<std::size_t>(k)] = lit;
             }
             // JS `Lc.eJ()` (L1405) — the node variant read by `VEa` (L2132).
             // `ag` is the FULL `<Fight>` count (`D0a` L1408); `status==1` is
@@ -10957,18 +10977,38 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         --pips;  // `Xr` ctor L2134
     }
     if (pips > 0) {
-        // `H0a` (L2135): boss group w/ d -> "bodyguards", else title/challenge;
-        // challenge families -> "stage{...}".
+        // `H0a` (L2135) label, VERBATIM: boss families -> `Y.na("bodyguards")`;
+        // the six challenge families -> `Y.na("stage{N}{M}")` (N = beaten+1,
+        // M = total; the `Y.na` nested-`{...}` form -> the `stage` table row
+        // "Stage {0}/{1}"); EVERY other type sets NO label (the switch has no
+        // case). The `d` 4th arg is always true when `H0a` runs (the block that
+        // calls it tests the same truthy expression), so the boss case is
+        // always "bodyguards". The port previously drew the battle TITLE here
+        // (a duplicate of the panel title) instead of "Stage N/M".
         std::string xr_label;
         if (node->type == "BOSSES" || node->type == "BOSSES_REPLAYABLE" ||
-            node->type == "BOSSES_INTERMISSION" || node->type == "FINAL_BATTLE_TITAN") {
+            node->type == "FINAL_BATTLE_TITAN") {
             xr_label = loc(app, "bodyguards", "BODYGUARDS");
-        } else {
-            const std::string tk = node->title.empty() ? node->name : node->title;
-            xr_label = loc(app, tk, node->name);
+        } else if (node->type == "CHALLENGE" || node->type == "PVP" ||
+                   node->type == "RAID" || node->type == "REPLAYABLE" ||
+                   node->type == "STORY" || node->type == "TOURNAMENT") {
+            int beaten = 0;
+            for (int k = 0; k < pips; ++k) {
+                if (static_cast<std::size_t>(k) < node->pip_beaten.size() &&
+                    node->pip_beaten[static_cast<std::size_t>(k)]) {
+                    ++beaten;
+                }
+            }
+            const std::string stage_key = "stage{" + std::to_string(beaten + 1) +
+                                          "}{" + std::to_string(pips) + "}";
+            xr_label = loc(app, stage_key,
+                           "Stage " + std::to_string(beaten + 1) + "/" +
+                               std::to_string(pips));
         }
-        draw_ui_label(app, body_x, body_y, body_w, pip_label_h, xr_label,
-                      pip_label_h / 100.0f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+        if (!xr_label.empty()) {
+            draw_ui_label(app, body_x, body_y, body_w, pip_label_h, xr_label,
+                          pip_label_h / 100.0f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+        }
         // `mdb` (L2136): capacity `c>12?10:6`, square side
         // `min(a/d, b/f)`, single row centred.
         const int per_row = (pips > 12) ? 10 : 6;
