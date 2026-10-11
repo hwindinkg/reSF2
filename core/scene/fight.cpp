@@ -40,13 +40,21 @@ std::vector<std::string> anim_names_of(const Fighter& f) {
 
 // JS `lg.vQ` reads the animator's CURRENT animation (`a.rb`), and `Te.KNa`
 // (L548) does NOT clear `Ua` at clip end, so after a clip the last animation's
-// names still answer. The EndStance re-selection (`Gc` -> `Gj(..,1)`) runs
-// when `current_move_` is already null, so it must read the JUST-ENDED clip's
-// names: an already-ragdolled loser then matches `<CurrentAnimation
-// Name="PhysicalLying"/>` in `Loss_1`/`Loss_2` (the ground death) instead of
-// falling through to `Loss_fall` (the reported "stands up, then plays the
-// death animation"). Scoped to this pick so the general idle/auto-move
+// names still answer. The EndStance re-selection runs when `current_move_` is
+// already null, so it must read the JUST-ENDED clip's names: the winner/loser
+// `RoundStageStart`-family move (`Win_Fists`/`Loss_fall`/`TimeoutLoss`) gates
+// on the last clip (`<CurrentAnimation Name="Physical" Not="1"/>` etc.) and
+// must not see an empty list. Scoped to this pick so the general idle/auto-move
 // selection keeps its empty-list semantics.
+//
+// NOTE: the RAGDOLLED-loser GROUND DEATH is NOT this pick. `Loss_1`/`Loss_2`
+// (`Template="Loss|NotTitan|AfterPhysics"`) carry `<Events><EveryFrame/></Events>`,
+// NOT a `<RoundStageStart Name="EndStance"/>` event, so they are selected by the
+// per-frame EveryFrame recovery chain (`try_every_frame_move`, fight.cpp below)
+// whose context already reads the LIVE clip's names (`anim_names_of`), matching
+// `<CurrentAnimation Name="PhysicalLying"/>` while the ragdoll plays. The old
+// comment attributed the ground death to this EndStance pick; the template
+// filter here (`template_tags.count("EndStance")`) would in fact exclude them.
 std::vector<std::string> end_stance_anim_names_of(const Fighter& f) {
     if (f.current_move() != nullptr) return f.current_move()->anim_names;
     return f.last_anim_names();
@@ -7830,8 +7838,10 @@ void FightController::update(float dt) {
                     esctx.stage = sf2::scene::round_stage::end_stance;
                     esctx.qb = f->is_player;
                     // `KNa` leaves `Ua` set, so the pick reads the last clip's
-                    // names (`PhysicalLying` -> the ground death) even though
-                    // `current_move_` is already null.
+                    // names even though `current_move_` is already null (the
+                    // RoundStageStart family: `Win_Fists`/`Loss_fall`/
+                    // `TimeoutLoss`; the ragdolled-loser ground death is the
+                    // EveryFrame chain above, not this pick).
                     esctx.anims_me = end_stance_anim_names_of(f->fighter);
                     esctx.anims_enemy = anim_names_of(foe.fighter);
                     fill_ctx_geometry(esctx, *f, foe);
