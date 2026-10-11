@@ -1281,13 +1281,16 @@ SettingsLayout settings_layout() {
     return s;
 }
 
-// --- HUD HP-bar leak/decay (JS `Br` L2010-2015, Phase 7.3) ---
-// JS `Qyb()` (L2012-2013): damage -> `v5(a, 10)` (instant fill over 10
-// frames) + `g5(a, 30)` (trailing "leak" over 30 frames); heal/new-round ->
-// `zO = 60` (leak hold) + `v5(a, 10)`. `ia()` steps both tweens one frame
-// per tick (`Rnb`/`Jnb`) with `gCa` clamping; `d6a()` (L2015) keeps a minimum
-// show while HP > 0. Reads the existing FightFighter hp/max_hp only (no
-// fight.hpp changes); stepped once per render_impl call (one 60 Hz frame).
+// --- HUD HP-bar leak/decay (JS `Br` L83597-83791, Phase 7.3) ---
+// JS `Qyb()` (L83673): DAMAGE (`b<0`) -> `zO = |b|<.01 ? 1 : 60` (the leak bar
+// HOLDS at the old value) + `v5(a, 10)` (instant fill over 10 frames); HEAL /
+// new-round (`b>0`) -> `v5(a, 10)` + `g5(a, 30)` (leak rises over 30). `ia()`
+// (L83648) steps both tweens one frame per tick (`Rnb`/`Jnb`) with `gCa`
+// clamping, and when the `zO` hold expires runs `g5(this.dC, 30)` (leak drains
+// to the instant target over 30 frames); `d6a()` (L83784) keeps a minimum show
+// while HP > 0. Reads the existing FightFighter hp/max_hp only (no fight.hpp
+// changes); stepped once per FIXED 60 Hz `update_impl` (NOT per render — the
+// present loop is uncapped, see the arrow-phase note above).
 // NOT ported: segment stripes (`b_`, `mO = L5`) and the `Jc.TU` gradient —
 // they need per-fighter segment state from the fight sim (forbidden files
 // this stream); noted in the stream report.
@@ -1351,8 +1354,21 @@ struct HudBarDecay {
         // JS `gCa` clamp + `d6a` min-show.
         target = std::clamp(target, 0.0f, 1.0f);
         if (target > 0.0f && target < life_bar_min_show()) target = life_bar_min_show();
-        if (target < shown_to_ - 0.0005f) {
-            // Damage: instant drops over 10 frames, leak trails over 30.
+        const float delta = target - shown_to_;
+        if (delta < -0.0005f) {
+            // JS `Br.Qyb` (L83673-83684) `b<0` = DAMAGE: `zO = |b|<.01 ? 1 : 60`
+            // FREEZES the leak bar at the OLD value (no `g5`), and `v5(a,10)`
+            // drops the instant fill over 10 frames. When the hold expires
+            // `ia()` runs `g5(this.dC,30)` — see `tick()` below. (The old port
+            // had the branches swapped: it drained the leak immediately on
+            // damage and froze it on heal.)
+            hold_ = (std::fabs(delta) < 0.01f) ? 1 : 60;
+            shown_step_ = (target - shown_) / 10.0f;
+            shown_to_ = target;
+            shown_left_ = 10;
+        } else if (delta > 0.0005f) {
+            // JS `Br.Qyb` `b>0` = HEAL / new round: `v5(a,10)` rises the instant
+            // fill over 10 AND `g5(a,30)` rises the leak over 30 immediately.
             shown_step_ = (target - shown_) / 10.0f;
             shown_to_ = target;
             shown_left_ = 10;
@@ -1360,12 +1376,6 @@ struct HudBarDecay {
             leak_to_ = target;
             leak_left_ = 30;
             hold_ = 0;
-        } else if (target > shown_to_ + 0.0005f) {
-            // Heal / new round: instant rises over 10, leak holds 60 (zO).
-            shown_step_ = (target - shown_) / 10.0f;
-            shown_to_ = target;
-            shown_left_ = 10;
-            hold_ = 60;
         }
     }
 
@@ -1375,7 +1385,15 @@ struct HudBarDecay {
             if (--shown_left_ == 0) shown_ = shown_to_;
         }
         if (hold_ > 0) {
-            --hold_;
+            // JS `Br.ia` (L83654-83659): `zO -= 1/v.on()`; when it reaches 0 the
+            // frozen leak is released with `g5(this.dC,30)` (drain to the instant
+            // target over 30 frames). `Rnb`/`Jnb` run BEFORE this in the JS, so
+            // the leak starts moving the NEXT frame — matched here.
+            if (--hold_ == 0) {
+                leak_step_ = (shown_to_ - leak_) / 30.0f;
+                leak_to_ = shown_to_;
+                leak_left_ = 30;
+            }
         } else if (leak_left_ > 0) {
             leak_ += leak_step_;
             if (--leak_left_ == 0) leak_ = leak_to_;
@@ -4638,39 +4656,49 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     const char* frame = banner_atlas_frame(kind);
     if (frame == nullptr || !load_callouts_atlas(app)) return;
     const float art = std::min(800.0f, std::min(kViewW, kViewH)) * 0.6f;
-    if (!try_draw_atlas_button(app, frame, cx, cy, art, art, 1.0f)) return;
-    // (B) The round NUMBER: `round = ea(E.get(1298))`, Ia(64), ua(fs*1.6)
-    // (JS `Cr` ctor L2022). The banner init (`Cr.init`, L1043346) positions it
-    // from the ROUND art's bounds: `a = b.W-b.P` (art height),
-    // `round.C(b.N + a*.25)` (x = art RIGHT + 0.25*height) and `round.D(b.P)`
-    // (y = art top). The port centred it ABOVE the plate (cx, top-78) - the
-    // user's "the number is somewhere at the top"; JS puts it beside ROUND.
+    // JS `Cr.init` (L84311-84322) recenters ONLY when `b==true` — the round
+    // plate (`Cr.tca` -> `init(y.BQa, true)`): after `image.C(0)` + the bounds
+    // read, `image.C(image.ya - a/2)` and `round.C(round.ya - a/2)` shift BOTH
+    // the art and the number LEFT by `a/2` (`a` = art height). fight/perfect/
+    // great call `init(a)` with `b` default false -> NO shift. The old port
+    // drew the round plate unshifted at the screen centre.
     // `try_draw_atlas_button` aspect-fits the frame's natural size into
-    // (art,art) centred, so the art's real rect is nat*min(art/nat) - NOT the
+    // (art,art) centred, so the drawn rect is nat*min(art/nat) - NOT the
     // square `art` (the round frame is 513x109).
+    float art_w = art, art_h = art;  // fallback = the requested box
+    {
+        sf2::data::atlas_frame fr;
+        int tw = 0, th = 0;
+        unsigned int gl = 0;
+        if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl)) {
+            const float nat_w = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                                : static_cast<float>(fr.w);
+            const float nat_h = fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                                : static_cast<float>(fr.h);
+            if (nat_w > 0.0f && nat_h > 0.0f) {
+                const float sc = std::min(art / nat_w, art / nat_h);
+                art_w = nat_w * sc;
+                art_h = nat_h * sc;
+            }
+        }
+    }
+    const float plate_cx =
+        (kind == sf2::scene::banner_kind::round) ? cx - art_h * 0.5f : cx;
+    if (!try_draw_atlas_button(app, frame, plate_cx, cy, art, art, 1.0f)) return;
+    // (B) The round NUMBER: `round = ea(E.get(1298))`, Ia(64), ua(fs*1.6)
+    // (JS `Cr` ctor L2022). The banner init (`Cr.init`, L84302) positions it
+    // from the ROUND art's bounds: `a = b.W-b.P` (art height),
+    // `round.C(b.N + a*.25)` (x = art RIGHT + 0.25*height), then
+    // `round.C(round.ya - a/2)` (the SAME left shift) -> `b.N - a*.25`; and
+    // `round.D(b.P)` (y = art top).
     if (kind == sf2::scene::banner_kind::round) {
         const sf2::data::font* rf = app.round_font();
         const unsigned int rtex = app.round_texture();
         if (rf != nullptr && rtex != 0) {
             const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
-            float art_w = art, art_h = art;  // fallback = the requested box
-            sf2::data::atlas_frame fr;
-            int tw = 0, th = 0;
-            unsigned int gl = 0;
-            if (app.get_atlas_frame(frame, &fr, &tw, &th, &gl)) {
-                const float nat_w = fr.source_w > 0 ? static_cast<float>(fr.source_w)
-                                                    : static_cast<float>(fr.w);
-                const float nat_h = fr.source_h > 0 ? static_cast<float>(fr.source_h)
-                                                    : static_cast<float>(fr.h);
-                if (nat_w > 0.0f && nat_h > 0.0f) {
-                    const float sc = std::min(art / nat_w, art / nat_h);
-                    art_w = nat_w * sc;
-                    art_h = nat_h * sc;
-                }
-            }
-            const float art_right = cx + art_w * 0.5f;  // `b.N` (image right)
-            const float art_top = cy - art_h * 0.5f;    // `b.P` (image top)
-            app.draw_text_with_font(*rf, rtex, art_right + art_h * 0.25f, art_top,
+            const float art_right = cx + art_w * 0.5f;      // `b.N` (image right)
+            const float art_top = cy - art_h * 0.5f;        // `b.P` (image top)
+            app.draw_text_with_font(*rf, rtex, art_right - art_h * 0.25f, art_top,
                                     std::to_string(fight.round().number + 1),
                                     rscale, 1.0f, 1.0f, 1.0f, 1.0f);
         }
@@ -13482,6 +13510,22 @@ void FightScreen::update_impl(float dt) {
         if (f > 0) g_fight_arrow_phase = (g_fight_arrow_phase + 1) % f;
     }
     if (fight_ == nullptr) return;
+    // HP-bar leak/decay (JS `Br.Qyb` + `Br.ia`): the FIXED 60 Hz step. MUST
+    // live here, not in `render_impl`: the present loop is uncapped
+    // (`glfwSwapInterval(0)`), so stepping in render runs the 10/30/60-frame
+    // tweens far faster than the JS — the same rule as the arrow phase above.
+    {
+        const float p_ratio = fight_->player().max_hp > 0.0f
+                                  ? std::clamp(fight_->player().hp / fight_->player().max_hp, 0.0f, 1.0f)
+                                  : 0.0f;
+        const float e_ratio = fight_->enemy().max_hp > 0.0f
+                                  ? std::clamp(fight_->enemy().hp / fight_->enemy().max_hp, 0.0f, 1.0f)
+                                  : 0.0f;
+        s_hud_player_decay_.retarget(p_ratio);
+        s_hud_enemy_decay_.retarget(e_ratio);
+        s_hud_player_decay_.tick();
+        s_hud_enemy_decay_.tick();
+    }
     ++callout_sim_frame_;  // fixed-step frame for the `[callout-life]` span
     // Sensei dialog modal gate (quest engine `He` records): a dialog queued
     // while the fight is up owns the input (`He` `IgnoreBack="1"`), so the
@@ -14428,19 +14472,9 @@ void FightScreen::render_impl(App& app) {
             std::fflush(stdout);
         }
     }
-    const float p_ratio = fight_->player().max_hp > 0.0f
-                              ? std::clamp(fight_->player().hp / fight_->player().max_hp, 0.0f, 1.0f)
-                              : 0.0f;
-    const float e_ratio = fight_->enemy().max_hp > 0.0f
-                              ? std::clamp(fight_->enemy().hp / fight_->enemy().max_hp, 0.0f, 1.0f)
-                              : 0.0f;
-
-    // HP leak/decay (JS `Br.Qyb` L2012-2013): retarget + step the two-layer
-    // bars once per frame, then draw the 30-frame leak UNDER the instant fill.
-    s_hud_player_decay_.retarget(p_ratio);
-    s_hud_enemy_decay_.retarget(e_ratio);
-    s_hud_player_decay_.tick();
-    s_hud_enemy_decay_.tick();
+    // HP leak/decay (JS `Br.Qyb` L83673) is retargeted + stepped once per
+    // FIXED 60 Hz frame in `FightScreen::update_impl` (NOT here — the present
+    // loop is uncapped); this render only reads the current layer values.
 
     // `mirror` = the enemy panel (`lk.type==1`): the `Br`/`Fr` bars are the
     // same art flipped 180° (`Br.init` L2010 `BL(25*a)` with `a=b==0?-1:1`;
