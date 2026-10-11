@@ -286,6 +286,14 @@ struct FightRule {
     // and `dz` IS the style level (`B9a` L1044602 = `Sh.bn`). Fired on the
     // `z3` style-change edge (`apply_hit`): slot 3 publish + `PC(8, side)`.
     int win_style_type = 0;
+    // `fj` (`ERulePerk`, L868): `perk_name` = the `Name` attr, `perk_set` = the
+    // `<Set>` override attrs (JS `.clone(a.A("Set"), a.A("RatingEvaluation"))`).
+    // `Alb` (L38384) appends the resolved model to the side's live
+    // `parameters.Oa` each round (JS `ca.ZOa` L398-399), so its triggers fire.
+    // `ej` (`ERuleNoPerks`, L869) reuses `perk_name` for its `Ba` (the Name
+    // that disables matching perks by name OR template via `Mja`/`Gcb`).
+    std::string perk_name;
+    std::map<std::string, std::string> perk_set;
     // `qn` (`ERuleRatingEvaluation`, L881): `eVa`/`yUa`/`jVa`. The Magic/
     // Ranged variants (`PlayerRatingMagic`/`EnemyRatingMagic`/
     // `PlayerRatingRanged`/`EnemyRatingRanged`) are READ by `qn` but
@@ -639,6 +647,18 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
         r.player_rating = fight_rule_float(sr.attrs, "PlayerRating", 0.0f);
         r.enemy_rating = fight_rule_float(sr.attrs, "EnemyRating", 0.0f);
         r.rating_correction = fight_rule_float(sr.attrs, "RatingCorrection", 0.0f);
+    } else if (r.kind == FightRuleKind::perk) {
+        // `fj.parse` (L868): `Name` -> the resolved perk model, `<Set>`/
+        // `<RatingEvaluation>` cloned onto it. `Alb`/`rmb` (L38384) append it
+        // to the side's live `parameters.Oa` each round.
+        const auto it = sr.attrs.find("Name");
+        if (it != sr.attrs.end()) r.perk_name = it->second;
+        r.perk_set = sr.perk_set;
+    } else if (r.kind == FightRuleKind::no_perks) {
+        // `ej` ctor (L869): `Ba` = the `Name` attr; `zlb`/`BY` (L38366) put it
+        // in the side's `ZR` disable list (matched by name OR template).
+        const auto it = sr.attrs.find("Name");
+        if (it != sr.attrs.end()) r.perk_name = it->second;
     } else if (r.kind == FightRuleKind::random_area) {
         // `ij.parse` (L876-877): `zaa=u.H(Width)`; `Ei.pause=FramesOff`,
         // `Ei.Qy=pause+FadeIn`, `Ei.Bt=Qy+FramesOn`, `Ei.NJ=Bt+FadeOut`.

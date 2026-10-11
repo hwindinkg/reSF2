@@ -2519,6 +2519,12 @@ void FightController::rules_begin_round(int round) {
     }
     rules_apply_round_effects();  // JS `du.F1(a)` L897 (Zk) + `kZ` + `m_a`
     rules_show_markers();
+    // JS `ca.Pma` (L398) -> `ZOa` (L398-399): the perk trigger sets rebuild
+    // LAST, AFTER the rule pass (`IKa` L417), so this round's ACTIVE
+    // `ERulePerk`/`ERuleNoPerks` rules shape the live `parameters.Oa`
+    // (`rmb`/`Alb`/`zlb` L38376-38388). `setup_bus` re-registers both sides
+    // from `perk_setup_` + the gated `rules_`.
+    setup_bus(perk_setup_);
 }
 
 // JS `ca.$_a` L427 -> `du.Iwb` L898 (`c.stop()` on every active rule) +
@@ -3953,6 +3959,79 @@ void FightController::setup_bus(const PerkSetup& perks) {
     }
     player_refs.insert(player_refs.end(), perks.player_refs.begin(),
                        perks.player_refs.end());
+    // JS `ca.ZOa` (L398-399) + `du.rmb`/`Alb` (L38384-38385): every ACTIVE
+    // `ERulePerk` rule appends its resolved model to the side's live
+    // `parameters.Oa` (player `mX` / bot `HV`) so the perk's triggers fire for
+    // the round; every ACTIVE `ERuleNoPerks` puts its `Name` in the side's
+    // `ZR` disable list (`zlb`/`BY` L38366/L37992), and `Mja` (L34585) then
+    // drops any live perk whose `Gcb(Name)` holds — i.e. matching the perk's
+    // NAME or its TEMPLATE. `rules_` is already round/eclipse/random gated by
+    // `rules_begin_round` (JS `rob` L900 -> `rmb` L38376), which re-runs
+    // `setup_bus` at its end.
+    std::vector<sf2::scene::ItemPerkRef> enemy_refs = perks.enemy_refs;
+    std::vector<std::string> no_perk_me, no_perk_enemy;
+    int n_rule_me = 0, n_rule_enemy = 0;
+    for (const FightRule& r : rules_) {
+        if (!r.active) continue;  // JS `rmb` `c.active` (L38383)
+        if (r.kind == FightRuleKind::perk) {
+            if (r.perk_name.empty()) continue;
+            sf2::scene::ItemPerkRef ref;
+            ref.name = r.perk_name;
+            ref.set_str = r.perk_set;  // JS `clone(a.A("Set"))`
+            if (r.apply_to == 2) {
+                enemy_refs.push_back(std::move(ref));
+                ++n_rule_enemy;
+            } else {
+                player_refs.push_back(std::move(ref));
+                ++n_rule_me;
+            }
+        } else if (r.kind == FightRuleKind::no_perks) {
+            if (r.perk_name.empty()) continue;
+            if (r.apply_to == 2) no_perk_enemy.push_back(r.perk_name);
+            else no_perk_me.push_back(r.perk_name);
+        }
+    }
+    // `Mja(Oa, ZR)` (L34585): drop every ref whose name OR template is in the
+    // disable list (`u0a`/`Gcb` L34598).
+    if (n_rule_me > 0 || n_rule_enemy > 0 ||
+        !no_perk_me.empty() || !no_perk_enemy.empty()) {
+        std::fprintf(stdout,
+                     "[perk] rule perks: +%d player, +%d enemy; NoPerks "
+                     "%zu/%zu (round %d)\n",
+                     n_rule_me, n_rule_enemy,
+                     no_perk_me.size(), no_perk_enemy.size(),
+                     round_.number > 0 ? round_.number : 1);
+        std::fflush(stdout);
+    }
+    const auto perk_disabled =
+        [&perks](const sf2::scene::ItemPerkRef& ref,
+                 const std::vector<std::string>& no) {
+            for (const std::string& n : no) {
+                if (ref.name == n) return true;
+                if (perks.catalog != nullptr) {
+                    const auto it = perks.catalog->find(ref.name);
+                    if (it != perks.catalog->end() && it->second.templ == n)
+                        return true;
+                }
+            }
+            return false;
+        };
+    if (!no_perk_me.empty()) {
+        player_refs.erase(
+            std::remove_if(player_refs.begin(), player_refs.end(),
+                           [&](const sf2::scene::ItemPerkRef& r) {
+                               return perk_disabled(r, no_perk_me);
+                           }),
+            player_refs.end());
+    }
+    if (!no_perk_enemy.empty()) {
+        enemy_refs.erase(
+            std::remove_if(enemy_refs.begin(), enemy_refs.end(),
+                           [&](const sf2::scene::ItemPerkRef& r) {
+                               return perk_disabled(r, no_perk_enemy);
+                           }),
+            enemy_refs.end());
+    }
     // Stash the merged live perk NAMES per side (JS `parameters.Oa`) for the
     // condition ctx fill (`fill_ctx_cond_state`): `Bm.he` (`<Perk>`) scans
     // this set, and `FightFighter::fighter.perks()` only holds the learned
@@ -3962,14 +4041,14 @@ void FightController::setup_bus(const PerkSetup& perks) {
         if (!r.name.empty()) perk_names_me_.push_back(r.name);
     }
     perk_names_enemy_.clear();
-    for (const sf2::scene::ItemPerkRef& r : perks.enemy_refs) {
+    for (const sf2::scene::ItemPerkRef& r : enemy_refs) {
         if (!r.name.empty()) perk_names_enemy_.push_back(r.name);
     }
     bus_.register_side(
         0, sf2::scene::build_side_triggers(player_refs, *perks.catalog, bus_.log),
         player_items_);
     bus_.register_side(
-        1, sf2::scene::build_side_triggers(perks.enemy_refs, *perks.catalog, bus_.log),
+        1, sf2::scene::build_side_triggers(enemy_refs, *perks.catalog, bus_.log),
         enemy_items_);
 
     // The live `<Set>` operands (JS statics) the trigger `<Random Chance>`

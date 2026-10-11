@@ -108,6 +108,14 @@ struct StageRule {
     int random_choice = -1;
     bool random_no_doubles = false;
     bool random_each_round = false;
+    // `<Perk Name=".."><Set a="b"/><RatingEvaluation .../></Perk>` (JS
+    // `fj.parse` L868: `Lc = v.Rg.jn(Name)` then
+    // `Lc.clone(a.A("Set"), a.A("RatingEvaluation"))`). Only the `<Perk>` rule
+    // carries these; every other tag leaves them empty. `Alb`/`rmb`
+    // (L38384-38385) then append the resolved model to the side's live
+    // `parameters.Oa`, so the perk's triggers fire (JS `ca.ZOa` L398-399).
+    std::map<std::string, std::string> perk_set;
+    std::map<std::string, std::string> perk_rating;
 };
 
 // One <Reward> row. The JS fields are float64 (`Yg.Tb`/`Uo`/`exp`/`ph`); the
@@ -382,6 +390,18 @@ inline void parse_rule_children(const pugi::xml_node& el, StageRule& rule) {
         z.min = static_cast<float>(xml_num(zn, "Min", z.min));
         z.max = static_cast<float>(xml_num(zn, "Max", z.max));
         rule.zones.push_back(std::move(z));
+    }
+    // JS `fj.parse` (L868): the `<Perk>` rule's `<Set>`/`<RatingEvaluation>`
+    // children (cloned onto the resolved perk model). Direct children only.
+    if (el.name() == std::string("Perk")) {
+        for (const pugi::xml_node st : el.children("Set")) {
+            for (const pugi::xml_attribute a : st.attributes())
+                rule.perk_set[a.name()] = a.value();
+        }
+        for (const pugi::xml_node rt : el.children("RatingEvaluation")) {
+            for (const pugi::xml_attribute a : rt.attributes())
+                rule.perk_rating[a.name()] = a.value();
+        }
     }
 }
 
