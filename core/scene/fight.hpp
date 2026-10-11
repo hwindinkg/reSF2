@@ -2023,6 +2023,11 @@ public:
         int style_value = 0;       // `b6`: EAa style index 0..5 (JS `Fh.HNa`)
         std::int64_t coins_bonus = 0;   // m6 minus base (display)
         std::int64_t coins_total = 0;   // m6: what the player receives
+        // `oc.PY` (`Fh.lXa` L1058251 `this.oc.PY+=v.Vk(b)`): the reward row's
+        // `Tb` (money) folded by `Vk` = `ceil(money / 10^p.o.kq)`. This is the
+        // `goldPrize` row value (`Lr.ZMa` L1070009 `vI("goldPrize",a.oc.PY,..)`).
+        // Equals the raw row money only when `DenominationDigits==0`.
+        std::int64_t coins_base = 0;    // oc.PY
         std::int64_t gems_bonus = 0;    // mOa = OY: the reward row's `Bonus`
         // Per-category bonus COINS (`Fh.lXa` L2054-2056 `oc.P3/ep/Ui/DZ/Ub`).
         // The `goldPerfect`/`goldFirstStrike`/`goldCombo`/`goldShock`/style
@@ -2039,8 +2044,11 @@ public:
     // dl.ph : bool ? ceil(money*xya) : 0`, `xya` = internal_settings
     // `<DefaultPrizeBaseFactor Value="0.003">`), the row's `Tb` (money) and
     // the row's `Uo` (bonus).
+    // `kq` = the save `<Warrior DenominationDigits>` (JS `p.o.kq`), the digit
+    // count `v.Vk` divides by (`ceil(a / 10^kq)`). Threaded from the caller so
+    // `Fh.lXa` matches the JS exactly; default 0 = the shipped save.
     BattlePrize prize(std::int64_t prize_base, std::int64_t money,
-                      std::int64_t bonus) const;
+                      std::int64_t bonus, int kq = 0) const;
     int phase() const { return static_cast<int>(phase_); }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }

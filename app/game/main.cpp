@@ -2516,12 +2516,26 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 pbase > 0 ? pbase
                           : static_cast<std::int64_t>(
                                 std::ceil(static_cast<double>(money) * xya));
+            // `Fh.lXa` folds the row money through `v.Vk` = `ceil(x/10^p.o.kq)`
+            // (`p.o.kq` = the save `<Warrior DenominationDigits>`); with a fresh
+            // per-battle `Fh` the performance part is 0, so `oc.PY = Vk(money)`
+            // is the whole prize and `oc.m6 == oc.PY`.
+            int probe_kq = 0;
+            try {
+                probe_kq = sf2::app::SaveSystem(save_path, save_path)
+                               .load()
+                               .denomination_digits;
+            } catch (const std::exception&) {
+            }
+            const double vk_money = std::ceil(
+                static_cast<double>(money) / std::pow(10.0, probe_kq));
             std::printf(
                 "[reward-probe] %s -> money=%lld exp=%lld bonus=%lld "
-                "prizeBase=%lld (Fh.lXa base %lld)\n",
+                "prizeBase=%lld (Fh.lXa base %lld) kq=%d Vk(money)=%.0f\n",
                 t.c_str(), static_cast<long long>(money),
                 static_cast<long long>(exp), static_cast<long long>(bonus),
-                static_cast<long long>(pbase), static_cast<long long>(pb_used));
+                static_cast<long long>(pbase), static_cast<long long>(pb_used),
+                probe_kq, vk_money);
             // JS `v.kD` (L622187) `f.pwa(b.D0(c),...)` on a LOSS: `c = PU`
             // (no `++c`), `PU = wi.length-2` at setup -> the SECOND-TO-LAST
             // `<Reward>` (the participation row). The SAME `dmb`/`emb`

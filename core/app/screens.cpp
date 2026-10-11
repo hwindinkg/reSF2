@@ -13806,8 +13806,18 @@ void FightScreen::update_impl(float dt) {
         // Snapshot the breakdown into pending_battle, then set the reward
         // to the lXa TOTAL (m6, base included) — not base+bonus.
         {
-            const auto prize =
-                fight_->prize(pb.reward_prize_base, pb.reward_money, pb.reward_bonus);
+            // JS `Fh.lXa`'s `v.Vk` reads the LIVE `p.o.kq` = the save
+            // `<Warrior DenominationDigits>` (`u.I(attr)` at L124846; the
+            // `On`/`S` Denomination quest effect rewrites it + `Bya` rescales
+            // money, quest_engine.cpp:4964). Thread it so every `ceil(x/10^kq)`
+            // in the prize math matches the JS save exactly.
+            int prize_kq = 0;
+            try {
+                prize_kq = app().save().load().denomination_digits;
+            } catch (const std::exception&) {
+            }
+            const auto prize = fight_->prize(pb.reward_prize_base, pb.reward_money,
+                                             pb.reward_bonus, prize_kq);
             std::fprintf(stdout,
                          "[fight] prize: perfect=%d first=%d combo=%d shocks=%d "
                          "rowMoney=%lld rowBonus=%lld prizeBaseAttr=%lld "
@@ -13819,7 +13829,10 @@ void FightScreen::update_impl(float dt) {
                          static_cast<long long>(pb.reward_prize_base),
                          static_cast<long long>(prize.coins_total),
                          static_cast<long long>(prize.gems_bonus));
-            pb.prize_base_coins = pb.reward_money;
+            // `Lr.ZMa` L1070009 `vI("goldPrize",a.oc.PY,a.oc.OY)` — the row
+            // value is `oc.PY` = `Vk(rowMoney)`, NOT the raw row money (they
+            // differ once `DenominationDigits>0`).
+            pb.prize_base_coins = prize.coins_base;
             pb.prize_bonus = prize.coins_bonus;
             pb.prize_gems = prize.gems_bonus;
             pb.prize_combo = prize.max_combo;

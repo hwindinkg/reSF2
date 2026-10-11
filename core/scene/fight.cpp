@@ -6206,7 +6206,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
 // internal_settings `<RewardsPrize>` values verified 2026-09-04).
 FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
                                                     std::int64_t money,
-                                                    std::int64_t bonus) const {
+                                                    std::int64_t bonus,
+                                                    int kq) const {
     BattlePrize p;
     // JS `Fh.d6` (the Perfect multiplier/count, set by the battle-end `Pf`
     // -> `gXa` chain; see `end_battle`). A no-hit LOSS leaves it 0, so the
@@ -6236,8 +6237,9 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
                           : std::ceil(static_cast<double>(money) * xya);
     // Exact `Fh.lXa` (L1058250): `(prizeBase, coins, bonus, Ia, epF, UiF,
     // UbF, pk)`; Ia/epF/UiF/UbF = `v.hF.$Ia/ep/Ui/Ub` (Perfect/FirstStrike/
-    // ComboCount/Shock); pk = `v.hF.pk` (Styles document order); kq = 0
-    // (DenominationDigits absent in seed).
+    // ComboCount/Shock); pk = `v.hF.pk` (Styles document order). Every `v.Vk`
+    // call inside `lXa` reads `p.o.kq` (the save `<Warrior DenominationDigits>`),
+    // so `kq` is threaded through here (`ceil(x / 10^kq)`).
     double pk[6] = {0.0, 3.0, 6.0, 9.0, 12.0, 15.0};
     for (std::size_t i = 0; i < fp.prize_styles.size() && i < 6; ++i) {
         pk[i] = static_cast<double>(fp.prize_styles[i]);
@@ -6247,9 +6249,10 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
            static_cast<double>(bonus), static_cast<double>(fp.prize_perfect),
            static_cast<double>(fp.prize_first_strike),
            static_cast<double>(fp.prize_combo_count),
-           static_cast<double>(fp.prize_shock), pk, 0);
+           static_cast<double>(fp.prize_shock), pk, kq);
     p.coins_total = static_cast<std::int64_t>(kx.m6);
-    p.coins_bonus = p.coins_total - static_cast<std::int64_t>(prize_vk(prize_base, 0));
+    p.coins_base = static_cast<std::int64_t>(kx.py);  // oc.PY = Vk(money)
+    p.coins_bonus = p.coins_total - static_cast<std::int64_t>(prize_vk(prize_base, kq));
     p.gems_bonus = static_cast<std::int64_t>(kx.mOa);  // `mOa` = `OY` = bonus
     // The per-category `Fh.Kx` rows (JS `oc.P3/ep/Ui/DZ/Ub`): the Results
     // breakdown shows each bonus, not the 0/1 flag or the combo count.
