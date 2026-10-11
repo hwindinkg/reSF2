@@ -80,9 +80,18 @@ font font_parse(const std::uint8_t* data, std::size_t size) {
         if (block_size < 14) {
             throw std::runtime_error("font: short info block");
         }
-        const std::uint16_t font_size = rd16(data + off);  // i16 fontSize (always positive here)
-        line_height_candidate = static_cast<int>(font_size);
-        result.size = static_cast<int>(font_size);  // JS `charset.eF` (L1672)
+        // JS `tq.ek` (L70366) reads the info-block fontSize with `Zd()` — a
+        // SIGNED i16 — and stores its ABSOLUTE value (`b.info = new jx(d<0?-d:d,
+        // ...)`, L70379). The shipped digits/round .fnt carry NEGATIVE sizes
+        // (digits -90, round -140); the old unsigned `rd16` gave 65446/65486,
+        // so every `fontSize/charset.eF` ratio built on `fnt->size` was wrong
+        // (the callout/timer code hardcoded 90/140 as a workaround).
+        const std::int16_t font_size_signed = rdi16(data + off);
+        const int font_size = font_size_signed < 0
+                                  ? -static_cast<int>(font_size_signed)
+                                  : static_cast<int>(font_size_signed);
+        line_height_candidate = font_size;
+        result.size = font_size;  // JS `charset.eF` (L1672/L70470)
         off += block_size;  // skip the whole payload
     }
 

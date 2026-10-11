@@ -4625,6 +4625,24 @@ void FightController::run_bus_hit(int slot, const sf2::scene::TrigVars& vars,
         sf2::scene::crit_mult(atk.params, rec.critical);
     cur_hit_damage_ = hit_dmg;
     cur_hit_base_damage_ = hit_base_damage;
+    // [hitbase-probe] TASK B: prove `?Hit[].BaseDamage` (JS `xgb` L56083
+    // `d.ODa`) is threaded NON-ZERO into the perk-bus evaluation.
+    // `hit_base_damage` is EXACTLY the operand that `?Hit[].BaseDamage` reads
+    // (`sc.hit_base_damage`, damage.cpp L1024-1025) and it feeds the shipped
+    // `perks.xml` rows L912 (`?Hit[].Damage`), L926 (`RegularDefenseBaseDamage
+    // += ?Hit[].BaseDamage`) and L947 (`?Variable[EffectChanceFactor] *
+    // ?Hit[].BaseDamage * ...`). Log the first strikes of the fight.
+    {
+        static int hitbase_logs = 0;
+        if (hitbase_logs < 12) {
+            ++hitbase_logs;
+            std::fprintf(stdout,
+                         "[hitbase] slot=%d side=%d base=%.6f damage=%.6f "
+                         "(?Hit[].BaseDamage)\n",
+                         slot, fired_side, hit_base_damage, hit_dmg);
+            std::fflush(stdout);
+        }
+    }
     bus_.fire(slot, vars, true, fired_side & 1,
               cond_ctx(0, hit_dmg, hit_base_damage),
               cond_ctx(1, hit_dmg, hit_base_damage), oba_phase(phase_), frame_);

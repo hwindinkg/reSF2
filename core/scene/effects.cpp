@@ -167,11 +167,14 @@ void EffectSystem::update() {
         p.rotation_deg = spark_rotation_deg(p.vx, p.vy);
         p.age += 1.0f;
     }
-    pool_age_ += 1.0f;
+    // JS `Ut.Cnb` (L34964-34974) tests `uba > 90` BEFORE incrementing and
+    // `dKa` (the clear) does NOT reset `uba` — only a fresh `ryb` spawn does
+    // (`this.uba = 0`, L34962). The old port incremented first (clearing one
+    // frame early) and reset the clock, diverging from the JS.
     if (pool_age_ > kSparkPoolLife) {
         live_.clear();
-        pool_age_ = 0.0f;
     }
+    pool_age_ += 1.0f;
 
     const float dt = 1.0f / 60.0f;  // one fixed 60 Hz tick
     // JS `Hyb` one-shot completion (`gJa(..., function(){g.lo.R(!1)})`): step

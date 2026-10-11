@@ -4617,10 +4617,22 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     if (kind == sf2::scene::banner_kind::none) return;
 
     const float cx = kViewW * 0.5f;
-    // JS Cr.layout (L2027): 	his.content.setPosition(a.F5a()) where
-    //  = ma.Kq and gb.F5a() (L1552) is the rect CENTRE - the plate is
-    // centred on screen, not at 35%. The old 0.35 anchor sat it too high.
-    const float cy = kViewH * 0.5f;
+    // JS `Cr.layout` (L84359-84361): `this.content.setPosition(a.F5a())` with
+    // `a = ma.Kq` and `gb.F5a()` (L65068) = `((J+N)/2, (P+W)/2)` — the rect
+    // CENTRE. `ma.Kq` is the per-frame ARENA-PROJECTED band, set by the fight
+    // view (`ma.Tya`, L76962-76964): `N = width`, `P = height/2 - 576*d`,
+    // `W = height/2 + 426*d`, with `d = height/1152` (L76946) adjusted for the
+    // aspect `N.lc = width/height` (L3281). So the plate's centre is
+    // `height/2 - 75*d`, NOT the screen centre. 1280x720: d = 0.625 +
+    // (1.7778-1.7)/0.5*0.2 = 0.6561 -> cy = 360 - 49.2 = 310.8.
+    const float lc = kViewW / kViewH;                // JS `N.lc` (L3281)
+    float bd = kViewH / 1152.0f;                     // JS `N.height/1152` (L76946)
+    if (lc <= 1.0f) {
+        bd *= lc;                                    // JS `d *= min(c,1)` (L76951)
+    } else if (lc > 1.7f) {
+        bd += (std::min(std::max(lc, 1.7f), 2.2f) - 1.7f) / 0.5f * 0.2f;  // L76955
+    }
+    const float cy = kViewH * 0.5f - 75.0f * bd;     // `(P+W)/2` (L65069)
     // JS Cr.Qa (L2022, init L2026 	his.Qa.R(!0)): the plate's full-screen
     // backdrop is the E.q1a() VERTICAL gradient (E.Eua stops
     // #00000020/80/80/80/20, L93-94) - semi-transparent, NOT a black box. The
@@ -4933,8 +4945,10 @@ bool draw_fx_frame_source(App& app, const std::string& frame_name, float cx,
 }
 
 // Magic containers (JS `Xm`/`cv` L836-839, Phase 7.2): the REAL `ni` frame
-// runs (JS `ni` L1141-1144 via `cv.lwb` L838-839) for each live instance,
-// faded by age/life — the same world->screen path the hit sparks use, with
+// runs (JS `ni` L1141-1144 via `cv.lwb` L838-839) for each live instance, at
+// CONSTANT alpha — the JS has NO effect fade (`MagicEffects::alpha_for`
+// returns 1; `cv.lwb`/`cv.WL` never write the node alpha) — the same
+// world->screen path the hit sparks use, with
 // the same `tl` container offset (`xoff`/`yoff`, JS `tl.init` L843).
 // `background_pass` routes by JS `tl.Nt` (L842): `a.Gfb ? Gq : Hq` — the
 // Gq (`background_for()==true`) pass draws first, the Hq (air) pass second,
@@ -15206,7 +15220,19 @@ void FightScreen::render_impl(App& app) {
                     // (255,183,57) with the ×1.2 box (`Fa(100, c)`, c =
                     // `image.qa()*1.2`) and the extra `D(-((c-b)/2))` lift.
                     if ((ct == 3 || ct == 4) && cfnt != nullptr && ctex != 0) {
-                        const float nscale = (ct == 4 ? nat_h * 1.2f : nat_h) / 90.0f;
+                        // JS `Hx.init` (L85312-85323) + `Qh.print` (L68704):
+                        // the glyph scale is `fontSize / charset.eF` (`eF` = the
+                        // font's info.size — `abs(i16)`, L70379; 90 for digits).
+                        //  * hot_ground (`t1a` = type 4) sets `c = image.qa()*1.2`
+                        //    then `label.ua(c)`; `qa()` is the plate's drawn
+                        //    HEIGHT (`fa.y*|Rm|`, L68122) = `nat_h/hud_c`, so
+                        //    `fontSize = 1.2*nat_h/hud_c` -> scale `1.2*nat_h/eF`.
+                        //  * combo (`f1a` = type 3) calls NO `ua` -> fontSize
+                        //    stays the charset default `eF` -> scale `1.0` (the
+                        //    node-chain scale here is `hud_c`).
+                        const float eF =
+                            (cfnt->size > 0) ? static_cast<float>(cfnt->size) : 90.0f;
+                        const float nscale = (ct == 4) ? (nat_h * 1.2f / eF) : hud_c;
                         float lr = 1.0f, lg = 1.0f, lb = 1.0f;
                         if (ct == 3) {
                             lb = 127.0f / 255.0f;
