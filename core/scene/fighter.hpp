@@ -557,6 +557,13 @@ public:
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
     int move_frame() const { return move_frame_; }
+    // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED
+    // clip's frame count when `EndFrame` is absent (see `move_end_frame_`).
+    // Read by the `MoveModel` (`Ow`) tween to floor its per-frame step
+    // (`Ow` ctor: `e = a.Ua.q7a()-1; a = 1/e; this.s2 = max(this.s2, a)`,
+    // readable 57871-57877) — the SelfUninterrupt-clamped `q7a()` is bounded
+    // above by this same `Lj`, so it is the exact bound for the shipped moves.
+    int move_end_frame() const { return move_end_frame_; }
     // JS `wd.ip()` (L264899) = `Nd.nk ? Nd.frameCount : (Sj()!=null ?
     // da.ip() : -1)`, and `da.ip()` (L279031) = `Ua.MS ? fG : M0()`. `M0()`
     // is the clip frame (`move_frame_`); `fG` is the physics-frame counter

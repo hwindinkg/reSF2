@@ -4406,8 +4406,11 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         FightFighter& opp = (owner_side == 0) ? enemy_ : player_;
         const std::string from_s = str("FromPlayer");
         const std::string to_s = str("ToPlayer");
-        const bool from_foe = (from_s == "Enemy" || from_s == "2");
-        const bool to_foe = (to_s == "Enemy" || to_s == "2");
+        // JS `$ea` (readable 54217-54225): "" / "Me" -> 1, "Enemy" -> 2, else 0.
+        // `b = RV==2 ? a.jb : a` (start = foe ONLY for "Enemy"); `c = TX==1 ? a
+        // : a.jb` (target = owner ONLY for ""/"Me").
+        const bool from_foe = (from_s == "Enemy");
+        const bool to_foe = !(to_s.empty() || to_s == "Me");
         FightFighter& sf = from_foe ? opp : own;
         FightFighter& tf = to_foe ? opp : own;
         const float dx = static_cast<float>(
@@ -4421,8 +4424,21 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
         tw.dx = dx;
         tw.dy = dy;
         tw.progress = 0.0f;
-        const double ls = num("LerpSpeed", 0.05);
-        tw.step = static_cast<float>(ls > 0.0 ? ls : 0.05);
+        // JS `Ow` ctor (readable 57871-57877): `e = a.Ua.q7a()-1; if(e<=0) e =
+        // a.Ua.zD(false)-1; a = 1/e; this.s2 = d!=null ? d.Wb().ou() : 0.05;
+        // this.s2 = this.s2 < a ? a : this.s2`. The tween must finish within
+        // the animation's frame span, so the per-frame step is floored at
+        // `1/(lastFrame-1)`. `q7a()`/`zD(false)` are both bounded by the
+        // animation's last frame (`jc.Lj`), which the port exposes as
+        // `move_end_frame()`; `LerpSpeed` absent -> 0.05 (`num` default).
+        double step = num("LerpSpeed", 0.05);
+        int e = own.fighter.move_end_frame() - 1;
+        if (e <= 0) e = own.fighter.move_end_frame() - 1;  // `zD(false)-1` (same bound)
+        if (e > 0) {
+            const double amin = 1.0 / static_cast<double>(e);
+            if (step < amin) step = amin;
+        }
+        tw.step = static_cast<float>(step);
         const std::string ax = str("Axis");
         tw.axis_x = ax.find('X') != std::string::npos;
         tw.axis_y = ax.find('Y') != std::string::npos;
