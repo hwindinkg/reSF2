@@ -4707,14 +4707,19 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
 
 // Draws the live hit-spark particles (world space -> screen through the SAME
 // camera the fighters use, factor 1.0 — the shake/framing is already baked
-// into the camera the caller passes). Each spark is a small screen-space
-// quad of the particle's world `size` scaled by the camera zoom, tinted
-// `color` (0xRRGGBB), fading by age/life. Draw order: AFTER the fighters,
-// BEFORE the fg floor layers (bg -> fighters -> SPARKS -> fg floor — the
-// b615a1bf layer order).
+// into the camera the caller passes). Each spark is the REAL `ui/misc`
+// (JS `E.get(260)`) frame `y.xRa` = "drop_blood" (sourceSize 26x26) at the
+// CONSTANT node scale `la(.3)` (JS `Ut.ryb` L34958), rotated `Wg(deg)` and
+// tinted `color` (0xRRGGBB). Draw order: AFTER the fighters, BEFORE the fg
+// floor layers (bg -> fighters -> SPARKS -> fg floor — the b615a1bf order).
+//
+// JS `av` (L35287-35294) has NO per-particle alpha (`wa`) and NO scale
+// change: the sprite holds `la(.3)` and full alpha until `Ut.Cnb` (L34964)
+// drops the WHOLE burst when `uba > 90`. The old port drew a flat tinted
+// quad that faded + shrank by age/life — an invention.
 //
 // `color` is the location Root Color (JS `Na.cd(Lb.N2)` at the `av` ctor
-// L833 and the `ryb` spawn L824: every spark is filled with the location
+// L35281 and the `ryb` spawn L34955: every spark is filled with the location
 // colour, the same as the fighter silhouettes). FightController's spawn
 // (`fx_.spawn_hit_sparks`, fight.cpp) does not thread it yet — cross-file
 // OPEN; the draw site passes the loaded location's `root_color()`.
@@ -4722,31 +4727,75 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
 // `xoff`/`yoff` are the `tl` container offset (JS `tl.init` L843:
 // translate.x = -width/2, translate.y = height/2 - Floor) — the SAME offset
 // `project()` applies to the fighters, so effects sit in the container.
-void draw_hit_sparks(sf2::render::Renderer& ren, const sf2::render::Camera& camera,
+void draw_hit_sparks(App& app, sf2::render::Renderer& ren,
+                     const sf2::render::Camera& camera,
                      const sf2::scene::EffectSystem& fx, std::uint32_t color,
                      float xoff = 0.0f, float yoff = 0.0f) {
     const std::vector<sf2::scene::particle>& parts = fx.particles();
+    if (parts.empty()) return;
+    const float r = static_cast<float>((color >> 16) & 0xFFu) * (1.0f / 255.0f);
+    const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
+    const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    const bool have = app.get_atlas_frame("drop_blood", &fr, &tw, &th, &gl) &&
+                      fr.w > 0 && fr.h > 0;
     for (const sf2::scene::particle& p : parts) {
-        if (p.life <= 0.0f || p.age >= p.life) continue;
-        const float t = p.age / p.life;          // 0..1 lived
-        const float alpha = 1.0f - t;            // fade out by age/life
-        if (alpha <= 0.02f) continue;
-        const float r = static_cast<float>((color >> 16) & 0xFFu) * (1.0f / 255.0f);
-        const float g = static_cast<float>((color >> 8) & 0xFFu) * (1.0f / 255.0f);
-        const float b = static_cast<float>(color & 0xFFu) * (1.0f / 255.0f);
+        if (p.life <= 0.0f) continue;
         // World -> screen (factor 1.0: the sparks live in the fight plane),
         // container offset applied (JS `tl.init` L843).
         const float sx = camera.world_to_screen_x(p.x - xoff, 1.0f);
         const float sy = camera.world_to_screen_y(p.y + yoff);
-        // The spark's world size -> screen px (the same zoom the capsule
-        // strokes use); shrink slightly as it fades.
-        const float half = p.size * camera.zoom * 0.5f * (0.4f + 0.6f * alpha);
-        if (half < 0.5f) continue;
+        // JS `la(.3)` * sourceSize (26) * the container zoom.
+        const float size = p.size * camera.zoom;
+        if (have) {
+            const float src_w = fr.source_w > 0 ? static_cast<float>(fr.source_w)
+                                                : static_cast<float>(fr.w);
+            const float src_h = fr.source_h > 0 ? static_cast<float>(fr.source_h)
+                                                : static_cast<float>(fr.h);
+            sf2::scene::Sprite s;
+            s.texture_name = "drop_blood";
+            s.frame_x = static_cast<float>(fr.x);
+            s.frame_y = static_cast<float>(fr.y);
+            s.frame_w = static_cast<float>(fr.w);
+            s.frame_h = static_cast<float>(fr.h);
+            s.tex_w = static_cast<float>(tw);
+            s.tex_h = static_cast<float>(th);
+            s.solid = false;
+            s.color_r = r;
+            s.color_g = g;
+            s.color_b = b;
+            s.color_a = 1.0f;  // JS `Na.cd(Lb.N2)` alpha — no per-particle fade
+            s.rotated = fr.rotated;
+            s.trim_x = static_cast<float>(fr.offset_x);
+            s.trim_y = static_cast<float>(fr.offset_y);
+            s.source_w = static_cast<float>(fr.source_w);
+            s.source_h = static_cast<float>(fr.source_h);
+            s.transform.set_pos(sx, sy);
+            s.transform.set_scale(size / src_w, size / src_h);
+            s.transform.rotation = p.rotation_deg;  // JS `Wg(atan2(..)*deg)`
+            // Screen-projected already: draw through the identity camera.
+            sf2::render::Camera ui_cam;
+            ui_cam.center_x = 640.0f;
+            ui_cam.center_y = 360.0f;
+            ui_cam.zoom = 1.0f;
+            ui_cam.view_w = 1280.0f;
+            ui_cam.view_h = 720.0f;
+            ui_cam.arena_h = 720.0f;
+            ui_cam.arena_floor = 0.0f;
+            ui_cam.arena_center_x = 640.0f;
+            ren.draw_sprite(s, ui_cam);
+            continue;
+        }
+        // Genuine atlas/frame miss: a flat tinted quad at the SAME constant
+        // size and full alpha (never the old fade/shrink).
+        const float half = size * 0.5f;
         const float verts[] = {
             sx - half, sy - half, sx + half, sy - half, sx - half, sy + half,
             sx + half, sy - half, sx + half, sy + half, sx - half, sy + half,
         };
-        ren.draw_triangles(verts, 6, r, g, b, alpha);
+        ren.draw_triangles(verts, 6, r, g, b, 1.0f);
     }
 }
 
@@ -14231,8 +14280,8 @@ void FightScreen::render_impl(App& app) {
     // Root Color — the same colour the fighter silhouettes use. The fight
     // spawn (FightController, fight.cpp:1565) does not thread it yet
     // (cross-file OPEN), so pass the loaded location's root colour here.
-    draw_hit_sparks(ren, camera, fight_->fx(), assets.fight_location.root_color(), arena_half,
-                    cont_y);
+    draw_hit_sparks(app, ren, camera, fight_->fx(), assets.fight_location.root_color(),
+                    arena_half, cont_y);
     // JS `tl.init` (L843-844): the container order is qh (fighters) -> Gq
     // (`Gfb` = OnBackground) -> Hq (air), both z=+.01 over the fighters.
     // Route by `MagicEffects::background_for` (JS `tl.Nt` L842): the
@@ -15165,8 +15214,14 @@ void FightScreen::render_impl(App& app) {
                             lg = 183.0f / 255.0f;
                             lb = 57.0f / 255.0f;
                         }
-                        float ly = ey - nat_h * 0.5f;
-                        if (ct == 4) ly -= 0.1f * nat_h;
+                        // JS `Hx.init` (L85312-85323): `label.D` is an ABSOLUTE
+                        // set (`Ke.D` -> `this.ra = a`), NOT additive. It runs
+                        // `D(-h/2)` first, but the type-4 branch re-runs
+                        // `D(-((1.2h - h)/2))` = `D(-0.1h)`, REPLACING it. The
+                        // old port kept `-h/2 - 0.1h`, sitting the hot_ground
+                        // number 0.5h too high.
+                        const float ly = (ct == 4) ? (ey - 0.1f * nat_h)
+                                                   : (ey - nat_h * 0.5f);
                         app.draw_text_centered(*cfnt, ctex, ex, ly,
                                                std::to_string(e.value), nscale, lr, lg,
                                                lb, 1.0f);
