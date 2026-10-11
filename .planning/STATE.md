@@ -66,12 +66,31 @@ that char-offset grep missed:
   plate `-a/2`).
 - `ece1c4f0` `MoveModel` tween floor + `$ea`; `d5853fdf` `kq` prize fold;
   `6b965e49` `BossAbilityState`; `7b6f1ca3` `Nwa` total.
+- `c4681366` map `Xr` caption (`H0a` `stage{N}{M}`) + pip lit state.
+- `3dabbcc8` `Bl.strike` split uses the **live span** `|Zs.ma−sx.ma|` (alias on the
+  endpoint `ma`), not the XML rest-length.
+- `4577c026` `$k`/`anim_names` (own name + transitive `<Template>` chain) at 7 AI
+  sites; `Fh.jU` combo bonus was never set; `Vk` wrap order.
+- `90b0f3e5` `SetRangeVariable` `MinValue`/`MaxValue`; `SetModVariable` live value;
+  vars written to the **target** model (`UKa`); `<Random Chance>` ctx
+  (`vars`/`hit_damage`/health); `MoveModel Axis` exact `split("|")` token.
+- `87501954` achievements/tutorial/save/profile sweep — all JS-exact (docs).
+- `8f24d467` shop discount **liveness** (`I.N1`: `yf.fE`/`yn`) + `nn()` scales the
+  Ruby price by the same live discount.
+- `ed587c31` re-verify of the pre-Wakaru fixes vs the readable JS — none wrong
+  (only a ground-death attribution comment corrected).
 
 ## Open items (documented, not invented)
-- `vd` sub-fighters (`gea b==1`/`VAa`/`Tba`) — shipped fights are single-part.
-- `StealMagicMod` — needs a model-node graph + `parameters.Mg`.
+- `vd` sub-fighters (`gea b==1`/`VAa`/`Tba`/`fCa`) — shipped fights are single-part;
+  needs a new sub-fighter subsystem (`Qda`/`M2`/`Iha`/per-part bones).
+- `StealMagicMod`(27) — needs a model-node graph + magic item slot.
+- `?Hit[].BaseDamage` in `<Random Chance>` — `CondCtx` has no base-damage field.
+- `?PlayerAttribute[Me|Enemy]` in the `<Random Chance>` path uses the setup
+  snapshot (`rt.me_attrs`), not live `params.attributes` (the action-value path is
+  already live).
 - Latent (0 shipped uses): `ChangeScene CallEvents`, `ShowBattle Instant`,
-  `ClickButton UseArrow`.
+  `ClickButton UseArrow`; `Pa.y2a` `DeliveryTime>0`; `<Attributes>` `Alias`/`Point`/
+  `Format` (no consumer); `Bl.strike` inner `Fixed`-node gate.
 - HP-bar segment stripes, per-language `eF` font split.
 
 ## Process
