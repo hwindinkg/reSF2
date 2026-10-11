@@ -1800,6 +1800,13 @@ public:
         // `ApplyModEffect` handler key on it.
         std::string action_name;
         bool show_expiration = false;  // action `ShowExpiration` (`jp.kx`)
+        // The owning mod's live `Uf` total/remaining, copied each frame by
+        // `advance_perk_icons` (JS `Ir.Pfa()`=`action.Uf`, `Ir.wCa()`=
+        // `action.Iv`). After the mod expires the JS action object persists by
+        // reference, so the port keeps the last copy (the overlay freezes
+        // through the fade-out, as the JS does).
+        int timer_uf = 0;        // remaining (`uf`)
+        int timer_uf_total = 0;  // `Uf`
         int stack_count = 0;      // `Ir.V5`
         float alpha = 0.0f;       // `Pk` (0..1)
         int pulse_left = 0;       // `ZS`
@@ -1835,6 +1842,19 @@ public:
             std::vector<PerkIconView>& list = perk_icons_[side];
             for (std::size_t i = 0; i < list.size();) {
                 PerkIconView& ic = list[i];
+                // `Ir.wCa`/`Ir.Pfa` (L84992/L84998): the expiry overlay reads
+                // the owning mod's live elapsed/total off the action object.
+                // Copy them here (this runs in the fixed 60 Hz `update`) so the
+                // render is a pure replay; a missing mod = expired -> keep the
+                // last copy (the JS action reference outlives removal).
+                {
+                    const sf2::scene::BusSide& bs = bus_.side(side);
+                    const auto mit = bs.mods.find(ic.action_name);
+                    if (mit != bs.mods.end()) {
+                        ic.timer_uf = mit->second.uf;
+                        ic.timer_uf_total = mit->second.uf_total;
+                    }
+                }
                 // JS `Ir.ia` (L2043): `iI && (yta ? Kab() : t2a(), ..., Pk==0 &&
                 // B())`. Fade in (`Kab`, `yta`) until `Pk>=1` (then idle), or
                 // fade out (`t2a`) once `MMa(!1)` set `removing`; remove at 0.

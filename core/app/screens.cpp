@@ -15026,16 +15026,47 @@ void FightScreen::render_impl(App& app) {
                                                1.0f, 1.0f, ic.alpha);
                     }
                 }
-                // `Ir.ss` (L2042-2043): the expiry overlay at `TI * Pk`.
+                // `Ir.ss` (L1051540-1051552): the expiry overlay. The JS sprite
+                // is the atlas-246 (`E.get(246)`) frame `y.fTa` = "fill/0001"
+                // (L102735), switched each tick to `fill/00NN` where
+                //   `a = Pfa()!=0 ? wCa()/Pfa() : 0` (clamped 0..1),
+                //   `NN = 1 + round(a*72)` -> "fill/0001".."fill/0073"
+                // (`a<10 ? "0" : ""` pads the 4-digit name). `Pfa()`=`Uf`
+                // (total), `wCa()`=`Iv` (elapsed); the port stores the mod's
+                // remaining `uf` + `uf_total`, so elapsed = `uf_total - uf`.
+                // Alpha = `TI * Pk` (`ss.wa`), node scale 2 (`ss.la(2)`) on top
+                // of the `Ir` container scale (`l4` -> `la(g*.5)` = `ic.scale`);
+                // `xo`/`ss` are both `Ga()`-centred, so the overlay shares the
+                // icon centre. `TI` = `expiration_opacity`.
                 if (ic.show_expiration) {
+                    const float ratio =
+                        ic.timer_uf_total > 0
+                            ? std::clamp(static_cast<float>(ic.timer_uf_total -
+                                                            ic.timer_uf) /
+                                             static_cast<float>(ic.timer_uf_total),
+                                         0.0f, 1.0f)
+                            : 0.0f;
+                    int nn = 1 + static_cast<int>(ratio * 72.0f + 0.5f);
+                    if (nn < 1) nn = 1;
+                    else if (nn > 73) nn = 73;
+                    char fill_name[16];
+                    std::snprintf(fill_name, sizeof(fill_name), "fill/00%s%d",
+                                  nn < 10 ? "0" : "", nn);
                     const float ex = pip.expiration_opacity * ic.alpha;
-                    const float q[] = {cx - iw * 0.5f, cy - ih * 0.5f,
-                                       cx + iw * 0.5f, cy - ih * 0.5f,
-                                       cx + iw * 0.5f, cy + ih * 0.5f,
-                                       cx - iw * 0.5f, cy - ih * 0.5f,
-                                       cx + iw * 0.5f, cy + ih * 0.5f,
-                                       cx - iw * 0.5f, cy + ih * 0.5f};
-                    ren.draw_triangles(q, 6, 1.0f, 0.1f, 0.1f, ex);
+                    sf2::data::atlas_frame sfr;
+                    int stw = 0, sth = 0;
+                    unsigned int sgl = 0;
+                    if (app.get_atlas_frame(fill_name, &sfr, &stw, &sth, &sgl)) {
+                        const float sw =
+                            static_cast<float>(sfr.source_w > 0 ? sfr.source_w
+                                                                : sfr.w) *
+                            2.0f * ic.scale * hud_c;
+                        const float sh =
+                            static_cast<float>(sfr.source_h > 0 ? sfr.source_h
+                                                                : sfr.h) *
+                            2.0f * ic.scale * hud_c;
+                        try_draw_atlas_button(app, fill_name, cx, cy, sw, sh, ex);
+                    }
                 }
                 if (traced++ < 6) {
                     std::fprintf(stdout,

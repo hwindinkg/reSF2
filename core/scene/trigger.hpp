@@ -796,6 +796,9 @@ struct ModState {
     std::string parent;  // `ParentPerk` (`Wa`, stamped at install)
     std::string kind;  // action type that installed it
     int uf = 0;  // remaining frames (`Uf`; 0 = untimed/persistent)
+    int uf_total = 0;  // `Uf` at install/retime. JS `Uf` is the constant
+                       // TOTAL and `Iv` the elapsed; the port decrements `uf`,
+                       // so JS elapsed `Iv` = `uf_total - uf` (Ir.wCa/Pfa).
     int iv = 0;  // interval (`Iv`)
     double per_frame = 0.0;  // `Tp` heal/damage per frame
     std::map<std::string, std::string> vars;  // `SetModVariable` Q3 store
@@ -951,6 +954,7 @@ class TrigBus {
     // a fresh `jp`; the map keeps one entry per name).
     void install_mod(int side, ModState m) {
         BusSide& s = sides_[side & 1];
+        m.uf_total = m.uf;  // JS `Uf` = the constant total (`Iv` starts 0)
         s.mods[m.name] = std::move(m);
     }
 
@@ -971,7 +975,13 @@ class TrigBus {
         for (auto& kv : s.mods) {
             if (kv.first != name) continue;
             if (!ns.empty() && kv.second.namespc != ns) continue;
-            if (uf >= 0) kv.second.uf = uf;
+            // `dpb` (L53916): `e.Uf = b; e.Iv = 0` - retime the TOTAL and
+            // restart elapsed. `uf` is the remaining counter, so setting it to
+            // the new total (+ `uf_total`) restarts elapsed at 0.
+            if (uf >= 0) {
+                kv.second.uf = uf;
+                kv.second.uf_total = uf;
+            }
             if (iv >= 0) kv.second.iv = iv;
         }
     }
