@@ -710,9 +710,12 @@ struct EngineItemOffer {
     // (0 = no expiry). `tz = trunc(ed.getTimezoneOffset())` — a hardcoded
     // `return 0` (L2204), so the port adds no timezone term.
     long long end_time = 0;
-    // `yf.fE`: `Pn.S` writes `h.G>0`, but the shipped bundle never READS it
-    // (only the ctor default `!0`, L28C, and the `from` copy) — the port keeps
-    // the default.
+    // `yf.fE`: `Pn.S` L1065 writes `h.G > 0` (Period > 0). It IS read by
+    // `I.N1` (L13939): `fE ? (now > Wla ? now < yn : false) : true` — a
+    // Period-less offer is always live, a Period offer only before `yn`
+    // (`end_time`). `offer_live` keys off `end_time` alone (0 = no expiry),
+    // which is equivalent since `fE == (end_time != 0)`. The port keeps the
+    // ctor default `!0`; `offer_live` does the gating.
     bool active = true;
     // `yf.Aw`: `Pn.S` L1065/1066 builds `new yf(og, Q2a, yn, g.G, k.G)` where
     // `g.G` is the resolved `NewAmount` (`Math.trunc(l.Ie)`, getParameters
@@ -1192,8 +1195,12 @@ public:
     // The live `p.o.xa.<item>.Gp` offer, or null when the item carries none.
     // `offer_price` is the `item.uu(p.o.bb())` read (`p.o.xa.vu()` L301): the
     // `yf.KA` override while an active offer exists, else the list.xml base.
+    // `offer_bonus_price` is the `nn()` (L13385) read: the Ruby/crystal price
+    // (`od`) scaled by the SAME discount `DCa()` (`yf.KA / Ofa()`), i.e.
+    // `trunc(od * (100 - Percent)/100)` while the offer is live, else `od`.
     const EngineItemOffer* offer_for(const std::string& item) const;
     std::int64_t offer_price(const std::string& item, std::int64_t base) const;
+    int offer_bonus_price(const std::string& item, int base) const;
     std::size_t offer_count() const { return offers_.size(); }
     // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, L178): the game clock in
     // SECONDS — the SAME `quest_now()` the offer deadlines use. Public so the

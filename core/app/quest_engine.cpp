@@ -917,7 +917,7 @@ void QuestEngine::apply_discount(App& app, const std::string& item, int percent,
     // L2204).
     o.sale = sale;
     o.end_time = period > 0 ? static_cast<long long>(now_seconds()) + period : 0;
-    o.active = true;  // `yf.fE` (written `h.G>0`, never read in the bundle)
+    o.active = period > 0;  // `yf.fE` = `h.G>0` (`I.N1` reads it; see offer_live)
     // `new yf(og, Q2a, yn, g.G, k.G)` (L1065/1066): `yf.Aw = NewAmount`,
     // `yf.KA` initial = `"" + NewPrice`.
     o.new_amount = new_amount;
@@ -1003,10 +1003,38 @@ const EngineItemOffer* QuestEngine::offer_for(const std::string& item) const {
     return it == offers_.end() ? nullptr : &it->second;
 }
 
+// JS `I.N1(offer, now)` (L13939) is the live gate `PAa` -> `am()` uses:
+//   `a.fE ? (now > a.Wla ? now < a.yn : false) : true`
+// `fE = Period > 0` and `yn = Period>0 ? p.Dc + Period : 0` (`Pn.S` L1065), and
+// `Wla` is 0 for the 5-arg `new yf(og,"",yn,Aw,?)` ctor. So a Period-less offer
+// is ALWAYS live, and a Period offer is live only while `now < yn`. The port
+// keyed off `end_time` alone: `end_time == 0` (no Period) -> always live,
+// `end_time > 0` -> live only before it. Previously `end_time` was ignored, so
+// a `Period` discount kept overriding the price forever (the shipped
+// `test_quests.xml` `Discount ... Period="?Timer[...]"` shape).
+static bool offer_live(const EngineItemOffer& o) {
+    return o.end_time == 0 ||
+           QuestEngine::now_seconds() < static_cast<double>(o.end_time);
+}
+
 std::int64_t QuestEngine::offer_price(const std::string& item, std::int64_t base) const {
     const EngineItemOffer* o = offer_for(item);
-    if (o == nullptr || !o->active) return base;
+    if (o == nullptr || !offer_live(*o)) return base;
     return o->price;
+}
+
+// JS `nn()` (L13385): `am() != null ? trunc(od * DCa()) : od`, with
+// `DCa() = parseFloat(yf.KA) / Ofa()` (L13423) and `Ofa() = Hfa() ? od : mi`
+// (L13369). For a Ruby row (`od > 0`, `Hfa()` true) `Ofa() == od`, so
+// `nn() = trunc(od * ((100 - Percent)/100 * od) / od) = trunc(od*(100-Percent)/100)`.
+// The SAME `yf.Gp` discount that scales the gold `jp()` therefore also scales
+// the Ruby `nn()`; the port previously returned the raw `BonusPrice`.
+int QuestEngine::offer_bonus_price(const std::string& item, int base) const {
+    const EngineItemOffer* o = offer_for(item);
+    if (o == nullptr || !offer_live(*o)) return base;
+    return static_cast<int>(std::trunc(static_cast<double>(base) *
+                                       (100.0 - static_cast<double>(o->percent)) /
+                                       100.0));
 }
 
 

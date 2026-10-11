@@ -16712,11 +16712,11 @@ std::int64_t shop_effective_price(App& app, const CatalogItem& it) {
 
 // `nn()` (item ctor L168907): the Ruby/crystal price (`od`). `Ne.Wub` L2254
 // shows it at the `pVa` RubyButton and `Pa.EYa` L1228 charges it
-// (`p.o.fd >= a.nn()`). No shipped `Discount` offer carries a gem override,
-// so the raw `BonusPrice` is the effective value (a `ShopHide`-free row).
+// (`p.o.fd >= a.nn()`). `nn()` scales `od` by the SAME live discount `DCa()`
+// the gold `jp()` uses (`am() != null ? trunc(od * DCa()) : od`), so an active
+// `Discount` percent applies to the Ruby price too (not just the gold price).
 int shop_effective_bonus(App& app, const CatalogItem& it) {
-    (void)app;
-    return it.bonus_price;
+    return app.quest_engine().offer_bonus_price(it.name, it.bonus_price);
 }
 
 // `ie.Or(a)` = `We.Sfa(a)` (JS L633556 / L1257554): the display number, with a
@@ -22642,6 +22642,34 @@ int run_shell_probe(App& app) {
         fire_discount("0", "3600", "1");
         check(qe.offer_for(kDisc) == nullptr,
               "(iv) Discount Toggle=0 -> offer cleared (E4)");
+    }
+    // (iv-b) `nn()` (L13385): `am() != null ? trunc(od * DCa()) : od` — the
+    // SAME live `yf.Gp` discount that scales the gold `jp()` also scales the
+    // Ruby price. Fire a Period discount on a Ruby row (`Energy_Refill`,
+    // `BonusPrice=5`) and read the effective Ruby price through the shop path:
+    // `trunc(5 * (100 - 25)/100) = 3`. `Pa.EYa` L1228 charges this `nn()`.
+    {
+        const std::vector<CatalogItem> full = load_full_catalog(app);
+        const CatalogItem* ruby = nullptr;
+        for (const CatalogItem& it : full) {
+            if (it.name == "Energy_Refill") ruby = &it;
+        }
+        QuestAction act;
+        act.tag = "Discount";
+        act.attrs["Item"] = "Energy_Refill";
+        act.attrs["Percent"] = "25";
+        act.attrs["Toggle"] = "1";
+        act.attrs["Period"] = "3600";
+        QuestJournal j;
+        app.quest_engine().run_action_probe(app, {act}, j);
+        const int gem_off = ruby != nullptr ? shop_effective_bonus(app, *ruby) : -1;
+        std::fprintf(stdout, "[sps] discount ruby nn(): base=%d effective=%d\n",
+                     ruby != nullptr ? ruby->bonus_price : -1, gem_off);
+        std::fflush(stdout);
+        check(ruby != nullptr && ruby->bonus_price == 5 && gem_off == 3,
+              "(iv-b) Discount scales the Ruby price (nn: 5 -> 3 @ 25%)");
+        act.attrs["Toggle"] = "0";
+        app.quest_engine().run_action_probe(app, {act}, j);
     }
     // (v) UPGRADE model + cost (JS `I.zz` L337 / `I.vu` L340 / `zf.uu` L1260):
     // `WEAPON_KNIVES` (`Tg`=100, `D6=Weapon_Bonus`) -> `zz(true)` first row
