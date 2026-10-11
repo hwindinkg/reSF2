@@ -1053,3 +1053,48 @@ Gates (this sweep, RULE 0 hidden + --watchdog, save backed up + restored):
 --tutorial-real-verify PASS; --settings-profile-shop-probe PASS (0 fail);
 --save-fields-probe PASS. Incremental Release build 0 errors.
 VERDICT: no new confirmed code divergence in the seven areas; docs-only commit.
+
+## FRESH VERBATIM SWEEP - fight/round/reaction, AI, rewards, quest, map/shop/profile UI, model/animation (2026-10-11, HEAD ece1c4f0)
+
+Scope: the six areas named in this wave, re-read VERBATIM from
+reference/www/sf2.readable.js (and cross-checked against the byte-truth
+reference/www/sf2.502f0946.js where a value looked suspicious) and compared
+term-for-term to the port. Result: NO new confirmed code divergence. Every
+check resolved in the port's favour; the single candidate that looked like a
+bug (`Q6a`'s `d` term) is EXACT in the port (see NOTE-A). One pre-existing,
+already-reported remainder stands (the `vd` sub-fighter path; see NOTE-B).
+
+| # | area | port | JS (readable.js) | verdict |
+|---|------|------|------------------|---------|
+| 1 | fight controller `ca` | fight.cpp (round/`Onb`/`Ewb`/`FNa`/`h4a`), damage.cpp:189-191 (`Cgb` lethal `hp+0.01f`/`Iza`), fighter.cpp:2695 (`nzb` `a?30:100`/`a?100:30`) | `ca` L15465; `Cgb` L16082 (`d<b.bR -> Zi=d+0.01, Iza=true` L16090); `Ewb` L16506; `FNa` L16715; `Onb` L16795 (`b=qb&&Rk<pf.length-1` L16800); `h4a` L16907; `nzb` L15937 (`rMa(a?30:100,a?100:30)`) | JS-exact |
+| 1b | solver `Al` / ragdoll | fighter.cpp:636-758 (`start`/`stop`), 3087 (`O9a` `kGravitation/(HD*HD)`), 3160-3212 (`fha`/`P6a` via `fha_body` + `jE` relax), physics.cpp `apply_impulse`/`strike_midpoint_smooth` | `Al` L24385 (`O9a` L24406, `sk`/`jE`/`fdb`/`fha`/`P6a` L24422-24499); `Bl.strike` L24667 + `s2a` L24710; `Te.hd`/`dw`/`Pta` L22782/22788/23244 | JS-exact |
+| 2 | AI `de` (decision core) | ai_controller.cpp:332-374 (`t0`/`wea`/`oxb`/`bma`), 1019-1051 (`Q6a`/`yaa`), 1106-1124 (`XAa`/`xaa`), 1162-1255 (`Gea`/`gea`), 1902 (`1-1/wait<roll01`), 25385+ (`Pqb`) | `de` L24766; `Wea` L25235 (FLT_MAX fallback), `Uea` L25094, `V1` L25301, `Q6a` L25652, `XAa` L25715, `Gea` L25803, `QJa` L24955, `iwb`/`jwb` L24994/25007, `mQ` L26119, `Pqb` L25385 (`1-1/b<Da.jf()` L25521) | JS-exact |
+| 3 | rewards / achievements | fight.hpp:1514-1536 (`fh_lxa`/`prize_vk`), fight.cpp:6207-6261; screens.cpp:13805-13834; save_system.cpp:193-195 (`DenominationDigits`) | `Fh.lXa` L85593 (`oc.P3=trunc(ceil(a*d)*d6+0.5)` … L85597-85601, `m6` L85602), `Fh.EAa` L85608, `Vk` L50921 (`ceil(a/10**(p.o.kq-b))`) | JS-exact |
+| 4 | quest engine `_$` queries | quest_engine.hpp:69-122 (`Bj` journal fields + `_$` refs), quest_engine.cpp:4091/4503-4520/4964-4992; main.cpp:4355-4371 | `_$` dispatch L40696-40833 (`_$BestAcquiredWeaponLevel` L40709 -> `f!=null?f.value:"0"` L40713; `_$Purchase` L40789; `_$SceneTo` L40811; `_$SetItem` L40814), `L3`/`Sjb` L7569/7590 | JS-exact |
+| 5 | map/shop/profile UI | screens.cpp (`Rr`/InfoBattle, shop `Oa`, profile grid), item_catalog.cpp | `Rr` L87262 (InfoBattle panel; `wc`/`oq`/`tj` layout L87294-87341), `Oa` L94838, `Pa` L51177, `vb` L90885 | JS-exact |
+| 6 | model/animation | model.cpp, fighter.cpp (`Te`/`Al`/`Bl`), anim_archive.cpp | `Te` L22739 (`Erb` builds `Nd`/`IH`/`da`/`nf` L20779-20784), `tu` L24505, `Eu` L24607, `jl`/`Jl.xea` L26841 | JS-exact |
+
+NOTE-A (`Q6a` `d` term — near-miss, port CORRECT): the readable `de.YAa`
+(L25626) calls `Q6a(a, this.cs, this.ds, this.Ji.dw(), a.da.dw(), ...)`, so the
+4th param `d` is `Ji.dw()`; the port's `yaa` (ai_controller.cpp:1041) multiplies
+the `xea` sub-frame term by `st.my_facing` (= `Ji.hd()`). This LOOKS wrong, but
+`Q6a` REASSIGNS `d = this.Ji.hd()` at L25698 (minified sf2.502f0946.js:610
+`...;this.wb.length=0;d=this.Ji.hd();c=0;...`) before the row loop that uses it;
+the `dw()` value is consumed only by the earlier `gcb` branch (L25680). So
+`my_facing` is exact. No change made.
+
+NOTE-B (pre-existing reported remainder, NOT fixed): `de.Gea(a,b=1)`'s `b==1`
+sub-fighter path (`de.VAa(a,1)` L26000-26013 iterates `a.vd`, each `g.da` a full
+`wd`) is a placeholder (`gea` returns 0 for `variant!=0`, ai_controller.cpp:1172).
+It is BLOCKED on modelling `vd` (the body-part sub-fighters) and is only reached
+through the sub-fighter list the port does not build; unchanged this wave.
+
+Gates (this sweep, RULE 0 hidden + --watchdog, save backed up + restored):
+--verify-input 7/7 PASS; --input-tape PASS (0 FAIL); --flow-verify 20/20;
+--ui-tour ALL 15 STEPS DONE; --fidelity-tour ALL 40 STEPS DONE;
+--headless-loop ALL 13 STEPS DONE; --boss-hit-probe HIT; --quest-verify PASS;
+--quest-verify-buy PASS (needs --watchdog >=400; 120 too tight);
+--dialog-verify PASS; --tutorial-real-verify PASS;
+--settings-profile-shop-probe PASS (0 fail); --save-fields-probe PASS.
+Incremental Release build 0 errors.
+VERDICT: no new confirmed code divergence in the six areas; docs-only commit.
