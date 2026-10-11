@@ -3876,6 +3876,18 @@ void FightController::setup_bus(const PerkSetup& perks) {
     }
     player_refs.insert(player_refs.end(), perks.player_refs.begin(),
                        perks.player_refs.end());
+    // Stash the merged live perk NAMES per side (JS `parameters.Oa`) for the
+    // condition ctx fill (`fill_ctx_cond_state`): `Bm.he` (`<Perk>`) scans
+    // this set, and `FightFighter::fighter.perks()` only holds the learned
+    // subset (empty for the enemy).
+    perk_names_me_.clear();
+    for (const sf2::scene::ItemPerkRef& r : player_refs) {
+        if (!r.name.empty()) perk_names_me_.push_back(r.name);
+    }
+    perk_names_enemy_.clear();
+    for (const sf2::scene::ItemPerkRef& r : perks.enemy_refs) {
+        if (!r.name.empty()) perk_names_enemy_.push_back(r.name);
+    }
     bus_.register_side(
         0, sf2::scene::build_side_triggers(player_refs, *perks.catalog, bus_.log),
         player_items_);
@@ -3912,27 +3924,17 @@ void FightController::setup_bus(const PerkSetup& perks) {
     // `Ha.he`, i.e. `Tl` conditions: `<Perk>`/`<Item>`/`<ModExists>`/...).
     {
         using FC = sf2::scene::FightContext;
-        auto fill = [](FC& ctx, const std::vector<std::string>& own_items,
-                       const std::vector<std::string>& foe_items,
-                       const std::vector<sf2::scene::ItemPerkRef>& own_refs,
-                       const std::vector<sf2::scene::ItemPerkRef>& foe_refs) {
-            for (const std::string& n : own_items) ctx.items.push_back(FC::item_info{"", "", n});
-            for (const std::string& n : foe_items) {
-                ctx.items_enemy.push_back(FC::item_info{"", "", n});
-            }
-            for (const sf2::scene::ItemPerkRef& r : own_refs) {
-                ctx.perks_me.push_back(FC::perk_info{"", r.name});
-            }
-            for (const sf2::scene::ItemPerkRef& r : foe_refs) {
-                ctx.perks_enemy.push_back(FC::perk_info{"", r.name});
-            }
-            ctx.health_ratio = 1.0f;  // fresh fight: both sides at full HP
-        };
+        // JS `ra.e9a`/`Z6a` (L28964): the global-trigger lock scan builds the
+        // ctx from `v.cw().jt()` — the CURRENT fighter's equipped slots (the
+        // SAME `parameters.jt()` list `ra.Hza` uses), its live perks (`Wk`'s
+        // `Oa`) and mods (`Sia`/`S3`). `fill_ctx_cond_state` fills the REAL
+        // item triples (Type/SubType/Name) so the typed `<Item>`/`<Weapon>`
+        // conditions match; the old fill passed ""/"" and never did.
         FC me_ctx, foe_ctx;
-        fill(me_ctx, perks.player_items, perks.enemy_items, perks.player_refs,
-             perks.enemy_refs);
-        fill(foe_ctx, perks.enemy_items, perks.player_items, perks.enemy_refs,
-             perks.player_refs);
+        fill_ctx_cond_state(me_ctx, player_, enemy_, 0);
+        fill_ctx_cond_state(foe_ctx, enemy_, player_, 1);
+        me_ctx.health_ratio = 1.0f;  // fresh fight: both sides at full HP
+        foe_ctx.health_ratio = 1.0f;
         // The global set's condition rolls must NOT touch a shared stream
         // (the fight's `Da.pg` replay stream, or conditions.cpp's static
         // fallback): a build-time lock scan that consumed them desynced the
@@ -5003,6 +5005,70 @@ void FightController::fill_ctx_geometry(FightContext& ctx, const FightFighter& m
             }
             return false;  // MapCenter/unknown -> root-gap fallback
         };
+    }
+    // Stamp the item/perk/mod state too, so EVERY FightContext site that
+    // routes through `fill_ctx_geometry` carries it (the `<Item>`/`<Weapon>`/
+    // `<Perk>`/`<ModExists>` conditions). `me.is_player` selects the bus side.
+    fill_ctx_cond_state(ctx, me, foe, me.is_player ? 0 : 1);
+}
+
+void FightController::fill_ctx_cond_state(FightContext& ctx, const FightFighter& me,
+                                          const FightFighter& foe, int me_side) const {
+    using FC = sf2::scene::FightContext;
+    // JS `parameters.jt()` (L34160) = the 6 equipped slots [Skeleton, Weapon,
+    // Ranged, Magic, Armor, Helm]; the port's `FightFighter::owned_items` is
+    // the SAME list `ra.Hza` (L684-685) tests the move `<Locks>` against
+    // (`Hm.he` L758 reads Type/SubType/Name of each). `um.he`/`Hm.he` iterate
+    // `a.items` comparing `b.type`/`b.Yb`/`b.name`, so the port must carry the
+    // real triple — the old fill passed ""/"" and every typed `<Item>` failed.
+    ctx.items.clear();
+    for (const sf2::scene::OwnedItem& oi : me.owned_items) {
+        ctx.items.push_back(FC::item_info{oi.type, oi.subtype, oi.name});
+    }
+    ctx.items_enemy.clear();
+    for (const sf2::scene::OwnedItem& oi : foe.owned_items) {
+        ctx.items_enemy.push_back(FC::item_info{oi.type, oi.subtype, oi.name});
+    }
+    // JS `parameters.Wk()`/`Oa` (`a.EA`/`a.lz`): the fighter's LIVE perk set
+    // (learned + warrior + equipped-item perks). `perk_names_me_`/
+    // `perk_names_enemy_` hold it (filled in `setup_bus`); `Bm.he` matches
+    // `this.name` against each element's `.name` (the perk name), carried in
+    // `perk_info.perk_name`. Fall back to the fighter's own `perks()` (the
+    // learned subset) if `setup_bus` has not run yet.
+    const std::vector<std::string>& me_perks =
+        (me_side == 0) ? perk_names_me_ : perk_names_enemy_;
+    const std::vector<std::string>& foe_perks =
+        (me_side == 0) ? perk_names_enemy_ : perk_names_me_;
+    ctx.perks_me.clear();
+    if (!me_perks.empty()) {
+        for (const std::string& p : me_perks) ctx.perks_me.push_back(FC::perk_info{"", p});
+    } else {
+        for (const std::string& p : me.fighter.perks()) {
+            ctx.perks_me.push_back(FC::perk_info{"", p});
+        }
+    }
+    ctx.perks_enemy.clear();
+    if (!foe_perks.empty()) {
+        for (const std::string& p : foe_perks) ctx.perks_enemy.push_back(FC::perk_info{"", p});
+    } else {
+        for (const std::string& p : foe.fighter.perks()) {
+            ctx.perks_enemy.push_back(FC::perk_info{"", p});
+        }
+    }
+    // Cases 3/4/6/7 read OTHER fighters' lists; the port builds a ctx only for
+    // top-level fighters (JS `lb==null` -> `b(null)` -> false), so they stay
+    // empty (JS-exact).
+    ctx.perks_parent.clear();
+    ctx.perks_child.clear();
+    ctx.perks_enemy_child.clear();
+    ctx.perks_super_parent.clear();
+    // JS `yma` (L28651-28654): `Sia` = the mods of this ctx's fighter, `S3` =
+    // the opponent's. `xm.he` (ModExists) selects by `Player`.
+    ctx.mods.clear();
+    for (const auto& kv : bus_.side(me_side & 1).mods) ctx.mods.insert(kv.first);
+    ctx.mods_enemy.clear();
+    for (const auto& kv : bus_.side(1 - (me_side & 1)).mods) {
+        ctx.mods_enemy.insert(kv.first);
     }
 }
 
@@ -6969,6 +7035,23 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // them (`de.V1` shares the fight context; `tm.he` selects by Player).
         for (const std::string& n : foe.fighter.active_intervals()) {
             st.enemy_intervals.push_back({n, foe.fighter.interval_type(n)});
+        }
+        // Item/perk/mod state for the AI's tactics conditions (`de.V1`
+        // L601-602 shares the fight's `Ae`): the equipped items
+        // (`parameters.jt()` — the SAME `owned_items` `ra.Hza` tests), the
+        // live perk sets (`Oa`, stashed by `setup_bus`) and the live mods
+        // (`Sia`/`S3`). Mirrors `fill_ctx_cond_state`.
+        st.my_items = me.owned_items;
+        st.enemy_items = foe.owned_items;
+        st.my_perks = (me.is_player) ? perk_names_me_ : perk_names_enemy_;
+        st.enemy_perks = (me.is_player) ? perk_names_enemy_ : perk_names_me_;
+        if (st.my_perks.empty()) st.my_perks = me.fighter.perks();
+        if (st.enemy_perks.empty()) st.enemy_perks = foe.fighter.perks();
+        for (const auto& kv : bus_.side(me.is_player ? 0 : 1).mods) {
+            st.my_mods.insert(kv.first);
+        }
+        for (const auto& kv : bus_.side(me.is_player ? 1 : 0).mods) {
+            st.enemy_mods.insert(kv.first);
         }
         // JS `Tba` (L595): `b=0,c=a.vd.length; for(d=0;d<c;){e=a.vd[d++];
         // e!=null&&(e=e.da.M2,e>b&&(b=e))} return b`. `a.vd` is the fighter's

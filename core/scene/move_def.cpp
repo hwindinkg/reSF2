@@ -314,7 +314,8 @@ void parse_interval(pugi::xml_node node, int end_frame_default, Interval& out) {
     }
 }
 
-void parse_cond_children(pugi::xml_node parent, std::vector<Cond>& out);
+void parse_cond_children(pugi::xml_node parent, std::vector<Cond>& out,
+                         const pugi::xml_node* attr_src = nullptr);
 
 // JS `Nd.ol` (L705): the `Player` attribute -> the side enum. Me=1, Enemy=2,
 // Both=5, Child=4, Parent=3, EnemyChild=6, SuperParent=7, default 0.
@@ -382,7 +383,11 @@ void parse_action(pugi::xml_node node, MoveAction& out) {
                                       ? node.attribute("Player").value()
                                       : nullptr);
     if (pugi::xml_node cond = node.child("Conditions")) {
-        parse_cond_children(cond, out.conditions);
+        // JS `cb.parse` (L30616): `d.parse(a)` with `a` = THIS action node, so
+        // the direct children inherit its `Not`/`Player` (all shipped action
+        // conditions carry neither, so this is behavior-neutral for the
+        // shipped set — but it is the JS-exact source).
+        parse_cond_children(cond, out.conditions, &node);
     }
     // `fm` (Sound, L735): Name + Volume + Looped + Voice + PackName.
     if (out.js_type == 2) {
@@ -593,20 +598,30 @@ void merge_actions(const std::vector<pugi::xml_node>& templates, pugi::xml_node 
 
 // JS `Fa.H3`/`Fa.HS`: parse a <Conditions>/<Locks> list of child nodes into
 // Cond trees. `create` mirrors `Tl.create` (element name -> typed cond).
-void parse_cond_node(pugi::xml_node node, Cond& out);
+void parse_cond_node(pugi::xml_node node, Cond& out,
+                     const pugi::xml_node* attr_src = nullptr);
 
-void parse_cond_children(pugi::xml_node parent, std::vector<Cond>& out) {
+// JS `cb.parse` (L724-725) calls `d.parse(a)` with `a` = the ACTION element:
+// `Ha.parse` reads `Not`/`Player` from THAT node, so an action's direct
+// `<Conditions>` children INHERIT the action's Not/Player (not their own).
+// `attr_src` (non-null for action children) supplies them; nested Operator
+// children pass nullptr and read their own nodes (JS `Tl.J3` builds them).
+void parse_cond_children(pugi::xml_node parent, std::vector<Cond>& out,
+                         const pugi::xml_node* attr_src) {
     for (pugi::xml_node child : parent.children()) {
         Cond c;
-        parse_cond_node(child, c);
+        parse_cond_node(child, c, attr_src);
         out.push_back(std::move(c));
     }
 }
 
-void parse_cond_node(pugi::xml_node node, Cond& out) {
+void parse_cond_node(pugi::xml_node node, Cond& out,
+                     const pugi::xml_node* attr_src) {
     out.type = node.name();
-    out.not_ = data::xml_attr_bool(node, "Not", false);
-    const char* player = node.attribute("Player") ? node.attribute("Player").value() : nullptr;
+    // JS `Ha.parse`: `Not`/`Player` come from the node `parse` was called on.
+    const pugi::xml_node& attrs = attr_src != nullptr ? *attr_src : node;
+    out.not_ = data::xml_attr_bool(attrs, "Not", false);
+    const char* player = attrs.attribute("Player") ? attrs.attribute("Player").value() : nullptr;
     // JS `Nd.ol`: Me=1, Enemy=2, Both=5, Child=4, Parent=3, ... default 0.
     if (player != nullptr) {
         if (std::strcmp(player, "Me") == 0) out.player = 1;
@@ -768,7 +783,9 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
         out.value_int = data::xml_attr_int(node, "Number", 1);
     } else if (out.type == "CurrentAnimation") {
         // JS `lg`: Name + Physics attr + $Move/$NoAnimation$ special values.
-        // (handled by evaluator)
+        // (handled by evaluator). `PG = u.ka(a.attributes.get("Physics"))` is
+        // read only when `Name` is absent/empty (`lg.he` else-branch).
+        out.physics = data::xml_attr_bool(node, "Physics", false);
     } else if (out.type == "Combo") {
         // JS `mp`: Range via Ag (Combo counter).
         out.has_min = node.attribute("Min") != nullptr;
@@ -809,6 +826,15 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
             out.from_part = from.attribute("Part") ? from.attribute("Part").value() : "";
             out.from_prev = from.attribute("Frame") &&
                             std::strcmp(from.attribute("Frame").value(), "Previous") == 0;
+        } else {
+            // No `From`: JS `Fa.Zca` calls `b.from.Ij(a.A("From"))` with a NULL
+            // node -> `ee.Ij(null)` leaves `pe=Nd.ol("Null")`, `object=HQ(1,"")=0`,
+            // and `ee.nt` default returns (0,0,0,1), so `OQ(a) == 0`. Mark the
+            // ref EMPTY so `ref_x` resolves it to 0 (the 7 shipped
+            // `<Direction Player="Enemy">` carry no From/To; the old "Pivot"
+            // default read `me_x`/`enemy_x` and made `SBa` the raw facing).
+            out.from_obj.clear();
+            out.from_player = 0;
         }
         if (pugi::xml_node to = node.child("To")) {
             out.to_player_set = to.attribute("Player") != nullptr;
@@ -819,6 +845,9 @@ void parse_cond_node(pugi::xml_node node, Cond& out) {
             out.to_part = to.attribute("Part") ? to.attribute("Part").value() : "";
             out.to_prev = to.attribute("Frame") &&
                           std::strcmp(to.attribute("Frame").value(), "Previous") == 0;
+        } else {
+            out.to_obj.clear();
+            out.to_player = 0;
         }
     } else if (out.type == "Hit") {
         // JS `sm`: Type + Name (last-hit type/animation).

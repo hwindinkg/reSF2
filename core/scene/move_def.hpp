@@ -85,6 +85,10 @@ struct Cond {
     // The parser's `to_player` default (2 = Enemy) is a convenience for the
     // legacy root-gap path; COM/Floor refs must use `Me` when absent.
     bool from_player_set = false, to_player_set = false;
+    // `<CurrentAnimation Physics="1">` (JS `lg.PG`, `u.ka`): used only when
+    // the condition has no `Name` (`lg.he` else-branch compares it to the
+    // per-player physics flag `d7a`).
+    bool physics = false;
     std::string keys;    // Keys: comma-joined "<Type>:<PressType>" list
     // Children (Operator And/Or only).
     std::vector<Cond> children;

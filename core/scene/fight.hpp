@@ -2191,6 +2191,13 @@ private:
     const std::map<std::string, sf2::scene::TacticDef>* tactic_defs_ = nullptr;
     std::vector<std::string> player_items_;  // equipped names (Item conds)
     std::vector<std::string> enemy_items_;
+    // The LIVE perk set per side (JS `parameters.Oa` = `Wk()`'s merged
+    // learned + warrior + equipped-item perks). This is what `Bm.he`
+    // (`<Perk>`) scans; `FightFighter::fighter.perks()` only carries the
+    // learned subset (and is empty for the enemy), so the merged set is
+    // stashed here in `setup_bus` for the condition ctx fill.
+    std::vector<std::string> perk_names_me_;
+    std::vector<std::string> perk_names_enemy_;
     // Item name -> its perk names (`PerkSetup::item_perk_names`), for `bc.FE`
     // (the disarm drop disables the DROPPED weapon's triggers, JS L700207).
     std::map<std::string, std::vector<std::string>> item_perk_names_;
@@ -2483,6 +2490,15 @@ private:
     // L788). `me`/`foe` are the two sides in `To - From` = `foe - me` order.
     void fill_ctx_geometry(FightContext& ctx, const FightFighter& me,
                            const FightFighter& foe) const;
+    // Stamps the CONDITION STATE the item/perk/mod conditions read: the two
+    // fighters' equipped items (JS `parameters.jt()` — the SAME list
+    // `ra.Hza` tests, i.e. `FightFighter::owned_items`), their live perk sets
+    // (`parameters.Oa`) and the live mod names per side (`Sia`/`S3`).
+    // `me_side` = 0 for the player, 1 for the enemy (the `bus_` index).
+    // Without this the `<Item>`/`<Weapon>`/`<Perk>`/`<ModExists>` conditions
+    // evaluated against EMPTY sets and never matched.
+    void fill_ctx_cond_state(FightContext& ctx, const FightFighter& me,
+                             const FightFighter& foe, int me_side) const;
     // Builds one fighter (shared init helper). `weapon_subtype` selects the
     // TacticWeapon-based move list; `owned` (when non-empty) selects the
     // Locks-based list (JS `ra.Hza`). `not_ai` = JS `Fj==false` (NotAI, no

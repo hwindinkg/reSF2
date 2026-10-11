@@ -157,8 +157,15 @@ bool eval_current_animation(const Cond& c, const FightContext& ctx) {
     const std::string& name = c.name;
     bool result = false;
     if (name.empty()) {
-        // Physics flag match (JS d7a). Not exercised by moves.xml.
-        result = true;  // conservative: no anim constraint
+        // JS `lg.he` else-branch: `b = this.d7a(a); b = b == this.PG` —
+        // compare the condition's `Physics` against the player-selected
+        // physics flag (`d7a`: case 1 -> a.Oga, case 2 -> a.BEa, case 3 ->
+        // a.CEA, default -> a.Oga). Not exercised by shipped moves.xml
+        // (no `<CurrentAnimation>` lacks a Name), but JS-exact.
+        bool flag = ctx.physics_me;
+        if (c.player == 2) flag = ctx.physics_enemy;
+        else if (c.player == 3) flag = ctx.physics_other;
+        result = (flag == c.physics);
     } else if (name == "$Move") {
         // JS `lg.he` (L378489): `"$Move"==this.Ba ? 0<c.length && (b=lg.xEa(
         // c[0], a.xK))` where `c = tb.vQ(a.rb, this.Ob)` is the CURRENT
@@ -360,6 +367,9 @@ float ref_x(const Cond& c, bool to_end, const FightContext& ctx) {
     const std::string& obj = to_end ? c.to_obj : c.from_obj;
     const std::string& part = to_end ? c.to_part : c.from_part;
     const int player = to_end ? c.to_player : c.from_player;
+    // EMPTY object = a NULL `ee` (no From/To child): JS `ee.nt` default
+    // returns (0,0,0,1) -> x == 0 (the 7 shipped `<Direction Player="Enemy">`).
+    if (obj.empty()) return 0.0f;
     if (obj == "Wall") return wall_ref_x(ctx, player, part);
     // `Object="Nodes"|"Pivot"|...` -> the owning fighter's root X.
     return player == 2 ? ctx.enemy_x : ctx.me_x;
@@ -512,43 +522,71 @@ bool eval_round_result(const Cond& c, const FightContext& ctx) {
     return b;
 }
 
-// JS `lp.isEqual` (L673495): `b = this.Lh(a)` selects the fighter by the
-// condition's `Player`/`Ob` (1=Me default from `Jf.parse` L667647, 2=Enemy
-// -> its `jb` opponent), then `Type=="MagicBullet" -> b.bh`;
-// `Type=="RaidChargeBullet" -> b.dO`; any other Type -> `return !1`.
-// `Lh(a){return this.Ob==1?a:this.Ob==2?a.jb:null}` (L668014). `xE` range
-// (`Oc.xE` L669732) leaves open ends passing.
+// JS `om.he` (Bullets, super(14) — NOT `lp`, which is a perk-action class):
+//   ctor: `jV = Type=="MagicBullet" ? 0 : Type=="RaidChargeBullet" ? 1 : undefined`;
+//         `Wra/VUa = Zf(a, 0, 2147483647)` (Min/Max defaults).
+//   he:   `b=0; switch(jV){case 0: b=a.cl; break; case 1: b=a.Glb;}` then
+//         `a = Wra <= b && b <= VUa`. `om` reads `a.cl`/`a.Glb` (MY magic /
+//         raid bullets) and IGNORES the Player attr. An UNKNOWN `Type` leaves
+//         `jV` undefined -> `b=0` -> the RANGE is tested against 0 (the old
+//         port returned false outright).
 bool eval_bullets(const Cond& c, const FightContext& ctx) {
-    const bool enemy = (c.player == 2);
     int count = 0;
     if (c.subtype == "MagicBullet") {
-        count = enemy ? ctx.bullets_enemy : ctx.bullets_me;
+        count = ctx.bullets_me;      // `a.cl`
     } else if (c.subtype == "RaidChargeBullet") {
-        count = enemy ? ctx.raid_enemy : ctx.raid_me;
-    } else {
-        return false;  // JS: unknown Type -> isEqual false
+        count = ctx.raid_me;         // `a.Glb`
     }
+    // unknown Type: `jV` undefined -> `b` stays 0, range still applied.
     bool ok = (!c.has_min || c.min <= count) && (!c.has_max || count <= c.max);
     return ok;
 }
 
-// JS `tp.he`: ModExists — name in the mod set (or Namespace-prefixed).
+// JS `xm.he` (ModExists, super(20)): selects the mod list by `dl` (Player):
+//   case 1 -> a.Sia (my mods)   case 2 -> a.S3 (enemy mods)
+//   case 5 -> both concatenated
+// then matches `this.name` against each live mod's action name. The
+// `Namespace`-prefixed form (`bc.YZa`, JS `tp.isEqual`) is handled by the
+// port's `value` + `name` pair.
 bool eval_mod_exists(const Cond& c, const FightContext& ctx) {
+    auto in = [&c](const std::set<std::string>& s) {
+        if (!c.value.empty()) return s.count(c.value + "." + c.name) != 0 ||
+                                    s.count(c.name) != 0;
+        return s.count(c.name) != 0;
+    };
     bool ok = false;
-    if (!c.value.empty()) {
-        // Namespace-prefixed check (JS bc.YZa).
-        ok = ctx.has_mod(c.value + "." + c.name) || ctx.has_mod(c.name);
-    } else {
-        ok = ctx.has_mod(c.name);
+    switch (c.player) {
+        case 2: ok = in(ctx.mods_enemy); break;        // `a.S3`
+        case 5: ok = in(ctx.mods) || in(ctx.mods_enemy); break;  // both
+        default: ok = in(ctx.mods); break;             // `a.Sia` (Me)
     }
     return ok;
 }
 
-// JS `Bm.he`: Perk — my/enemy perks by name.
+// JS `Bm.he` (Perk, super(15)): switch on `dl` (Player):
+//   1 -> a.EA (my perks)    2 -> a.lz (enemy perks)
+//   3 -> a.rr.lb.parameters.Oa (PARENT)   4 -> a.rr.hBa().parameters.Oa (CHILD)
+//   5 -> b(a.EA) && b(a.lz) (BOTH)        6 -> a.rr.jb.hBa().parameters.Oa
+//   7 -> a.rr.Kf().parameters.Oa (SUPERPARENT)
+// `b(d)` matches `this.name` against each element's `.name` (the perk name).
+// The port builds a ctx only for top-level fighters, so cases 3/4/6/7 read
+// the (empty) parent/child lists -> false, matching the JS `lb==null` path.
 bool eval_perk(const Cond& c, const FightContext& ctx) {
-    const bool enemy = c.player == 2;
-    bool ok = ctx.has_perk("", c.name, enemy);
-    return ok;
+    auto has = [&c](const std::vector<FightContext::perk_info>& list) {
+        for (const FightContext::perk_info& p : list) {
+            if (c.name == p.perk_name) return true;
+        }
+        return false;
+    };
+    switch (c.player) {
+        case 2: return has(ctx.perks_enemy);
+        case 3: return has(ctx.perks_parent);
+        case 4: return has(ctx.perks_child);
+        case 5: return has(ctx.perks_me) && has(ctx.perks_enemy);
+        case 6: return has(ctx.perks_enemy_child);
+        case 7: return has(ctx.perks_super_parent);
+        default: return has(ctx.perks_me);  // case 1 (Me)
+    }
 }
 
 // JS `sp.isEqual` (L673800): `b = this.Lh(a)` (Ob 1=Me / 2=Enemy via

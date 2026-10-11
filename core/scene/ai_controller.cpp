@@ -631,6 +631,21 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     for (const auto& iv : st.enemy_intervals) {
         ctx.intervals_enemy.push_back({iv.first, iv.second, true});
     }
+    // JS `de.V1` shares the fight's `Ae` context: stamp the item/perk/mod
+    // state (`items`/`EA`/`lz`/`Sia`/`S3`) the `<Item>`/`<Weapon>`/`<Perk>`/
+    // `<ModExists>` conditions read. The caller (fight.cpp) fills `st` from
+    // the SAME sources `fill_ctx_cond_state` uses (the equipped `owned_items`,
+    // the live perk sets, the live mods).
+    for (const sf2::scene::OwnedItem& oi : st.my_items) {
+        ctx.items.push_back({oi.type, oi.subtype, oi.name});
+    }
+    for (const sf2::scene::OwnedItem& oi : st.enemy_items) {
+        ctx.items_enemy.push_back({oi.type, oi.subtype, oi.name});
+    }
+    for (const std::string& p : st.my_perks) ctx.perks_me.push_back({"", p});
+    for (const std::string& p : st.enemy_perks) ctx.perks_enemy.push_back({"", p});
+    ctx.mods = st.my_mods;
+    ctx.mods_enemy = st.enemy_mods;
     // JS `de.V1` (L601-602): `a.Yz(this.model,null,a.FQ(2))` evaluates the
     // MOVE's condition tree (`va.rb`) — the main `<Conditions>` (Distance /
     // CurrentAnimation / …), not only the `<Tactics>` wrapper. The port used

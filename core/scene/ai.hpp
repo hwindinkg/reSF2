@@ -419,6 +419,17 @@ struct AiFightState {
     // so the AI must see the opponent's too; without this the throw gate read
     // an empty enemy list and the AI could never throw.
     std::vector<std::pair<std::string, int>> enemy_intervals;
+    // Item/perk/mod condition state (JS `Ae.items`/`EA`/`lz`/`Sia`/`S3`).
+    // `de.V1` (L601-602) shares the fight's `Ae` context, so the AI's tactics
+    // conditions (`<Item>`/`<Weapon>`/`<Perk>`/`<ModExists>`) must see the
+    // SAME equipped items / live perks / mods the fight ctx does. Without
+    // this the AI's typed item/perk gates read EMPTY sets.
+    std::vector<sf2::scene::OwnedItem> my_items;      // `parameters.jt()`
+    std::vector<sf2::scene::OwnedItem> enemy_items;
+    std::vector<std::string> my_perks;                // `parameters.Oa`
+    std::vector<std::string> enemy_perks;
+    std::set<std::string> my_mods;                    // `Sia`
+    std::set<std::string> enemy_mods;                 // `S3`
     // Enemy's highest body-part animation frame (`Tba` L595: max over
     // `vd` parts of `da.M2`).
     int enemy_max_part_frames = 0;

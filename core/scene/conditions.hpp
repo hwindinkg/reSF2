@@ -119,18 +119,38 @@ struct FightContext {
     std::vector<item_info> items_enemy;      // enemy items (Hm.he Enemy slot)
     std::vector<std::string> fighter_names;  // "me" fighter names (Am.he)
 
-    // --- mods present (ModExists, tp) ------------------------------------
-    std::set<std::string> mods;
+    // --- mods present (ModExists, xm.he) ----------------------------------
+    // JS `xm.he` reads `a.Sia` (Me) / `a.S3` (Enemy) — filled per side by
+    // `yma` (`c.tb.Qea(b,a.Sia); c.tb.Qea(d,a.S3)` L28651-28654). `Sia` is
+    // the mod set of THIS ctx's fighter, `S3` the opponent's; the condition's
+    // `Player` (`dl`) picks case 1=Me / 2=Enemy / 5=Both.
+    std::set<std::string> mods;         // `Sia` — my live mod names
+    std::set<std::string> mods_enemy;   // `S3` — the opponent's mod names
 
     // --- perks (Bm.he Perk condition) ------------------------------------
-    // The game keeps EA (my perks) and lz (enemy perks); each perk has an
-    // action name + owning perk name.
+    // JS `Bm.he` switch on `dl` (Player):
+    //   case 1 -> a.EA      (my perks)              case 2 -> a.lz (enemy)
+    //   case 3 -> a.rr.lb.parameters.Oa  (Parent)   case 4 -> a.rr.hBa().Oa (Child)
+    //   case 5 -> b(a.EA) && b(a.lz)  (Both)        case 6 -> a.rr.jb.hBa().Oa
+    //   case 7 -> a.rr.Kf().parameters.Oa (SuperParent)
+    // Each perk carries the action name + owning perk name; the `Perk`
+    // condition matches `this.name` against the element's `.name` (the perk
+    // name), so the port keeps that in `perk_name`.
     struct perk_info {
         std::string action_name;
         std::string perk_name;
     };
-    std::vector<perk_info> perks_me;
-    std::vector<perk_info> perks_enemy;
+    std::vector<perk_info> perks_me;            // `EA`
+    std::vector<perk_info> perks_enemy;         // `lz`
+    // Cases 3/4/6/7 reference OTHER fighters' perk lists (the spawner / a
+    // spawned child / the spawner's opponent / the super-parent). The port
+    // builds a ctx only for top-level fighters (whose `lb` is null), so these
+    // stay EMPTY — JS `b(null)` -> `Fd(null)` -> false, matching the shipped
+    // top-level semantics exactly.
+    std::vector<perk_info> perks_parent;        // case 3 (`a.rr.lb`)
+    std::vector<perk_info> perks_child;         // case 4 (`a.rr.hBa()`)
+    std::vector<perk_info> perks_enemy_child;   // case 6 (`a.rr.jb.hBa()`)
+    std::vector<perk_info> perks_super_parent;  // case 7 (`a.rr.Kf()`)
 
     // --- distance to enemy (qm.he Distance) ------------------------------
     // Precomputed distance between the From/To object refs. JS computes it
@@ -185,6 +205,14 @@ struct FightContext {
 
     // --- physics frame number (Cm.he) -------------------------------------
     int physics_frame = 0;
+    // `<CurrentAnimation>` with NO `Name` (JS `lg.he` else-branch):
+    //   `b = this.d7a(a); b = b == this.PG`
+    // `d7a` returns the per-player physics flag (`a.Oga`/`a.BEa`/`a.CEA`),
+    // `PG` = the condition's `Physics` attr (`u.ka`). The port carries the
+    // three flags; an absent-Name condition compares by `player`.
+    bool physics_me = false;     // `Oga`
+    bool physics_enemy = false;  // `BEa`
+    bool physics_other = false;  // `CEa`
 
     // --- misc (not used by moves.xml but present in the JS) --------------
     bool model_mirrored = false;  // zm.he ModelMirrored (`sa.oe.set(...19)` L706)
