@@ -29,7 +29,8 @@
 //   - Screen     `Gm`  g="13C": screen enum == Name.
 //   - ModelMirrored `zm` g="135": fighter is mirrored.
 //   - BattleType `lm`  g="126": battle type == Value.
-//   - BossAbilityState `nm` g="128": Value flag (always false when set).
+//   - BossAbilityState `nm` g="128": `Value` parsed but unread -> always false
+//     (unless `Not`; see eval_boss_ability_state).
 //   - Hit        `sm`  g="12E": last-hit type/animation match.
 //   - ModelExists `ym` g="134": model by name exists on the field.
 //   - Combo      `mp`  g="2B9": combo counter in [Min,Max].
@@ -639,10 +640,20 @@ bool eval_battle_type(const Cond& c, const FightContext& ctx) {
     return ok;
 }
 
-// JS `nm.he`: BossAbilityState — Value flag.
-bool eval_boss_ability_state(const Cond& c, const FightContext& ctx) {
-    bool ok = ctx.boss_ability_state == (c.value_int != 0);
-    return ok;
+// JS `nm.he` (L31260) VERBATIM:
+//   he(){ if(this.cb){ return true; } return false; }
+// The result is the `Not` flag (`this.cb`, set in `Ha.parse` L31194) ALONE:
+// `Value` is parsed into `this.state` (L31258) but NEVER read, and no live
+// state is consulted. The port folds `Not` into `cond.not_` (applied by the
+// caller, `eval_conditions` L826), so the RAW leaf value must be the JS
+// `he()` with `cb=false`, i.e. ALWAYS false. This matters: a shipped
+// `<BossAbilityState Value="0"/>` (moves.xml WaspFlyHintsOn_PvP /
+// WaspFlyHintsOff_PvP) is FALSE in the JS — the old
+// `state == (value!=0)` compare made it TRUE and let those PVP hint moves
+// fire (their `<EnableBossAbility>` action is itself a no-op, `wd.$vb` ->
+// the `dS` signal whose sole listener `Pi.dS` L16211 is `{debugger}`).
+bool eval_boss_ability_state(const Cond& /*c*/, const FightContext& /*ctx*/) {
+    return false;
 }
 
 // JS `sm.he` (L380440) VERBATIM:
