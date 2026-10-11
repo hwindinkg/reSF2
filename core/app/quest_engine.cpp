@@ -3264,8 +3264,16 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                 // ba.Pc(a,this.image)` — the `Title`/`Image` attrs run the SAME
                 // quest-variable resolution as the `Line` text (xml quests.xml
                 // L313 `Title="_Title_Assistant" Image="_Avatar_Assistant_1"`).
-                dlg.title = quest_var(app, locals, attr_or(a.attrs, "Title"));
-                dlg.image = quest_var(app, locals, attr_or(a.attrs, "Image"));
+                // `ba.Pc` resolves BOTH `?`-queries and `_`-refs (JS `He.S`
+                // L44004/L44006: `f=ba.Pc(a,this.title); f=ba.Fz(f,a)`,
+                // `r=ba.Pc(a,this.image)`). The port used `quest_var` (the
+                // `_`-only resolver), so a shipped `?`-form title/image
+                // (`?Offer[_CurrentOffer].Title`, `?Concat[scavenger_,...]`)
+                // stayed literal. `resolve_attr` runs the full expression
+                // engine (a literal passes through untouched, so `NAME_LYNX`
+                // is unaffected).
+                dlg.title = resolve_attr(attr_or(a.attrs, "Title"));
+                dlg.image = resolve_attr(attr_or(a.attrs, "Image"));
                 // D10 `He` L1043-1045 parse (see the appliers at `He.S` L1051).
                 dlg.mirrored = attr_bool01(attr_or(a.attrs, "Mirrored"));
                 // `He.S` L1047: `this.n4a&&(r+="|Flip")` — the mirror rides the
@@ -3331,12 +3339,15 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                             eval_expr_num(app, locals, journal, iterator, hide) > 0.0) {
                             continue;
                         }
-                        std::string text = attr_or(c.attrs, "Text");
-                        // `_`-refs: run-locals then the global quest variables
-                        // (see `quest_var`). An unresolved ref drops the row.
-                        if (!text.empty() && text[0] == '_') {
-                            text = quest_var(app, locals, text);
-                        }
+                        // `He.S` L44035: `F.text=ba.cg(a,F.text)` — the row
+                        // text runs the FULL expression resolver (`?`-query +
+                        // `_`-ref), not just `_`. Shipped `?Concat[...]` /
+                        // `?Offer[...].Description` rows stayed literal before.
+                        // A literal passes through (`resolve_attr` returns it
+                        // raw when it carries no `?` and does not start with
+                        // `_`); a `{...}` template is left for the draw-time
+                        // `ba.Fz`.
+                        std::string text = resolve_attr(attr_or(c.attrs, "Text"));
                         // `He.jkb` (L1042): the row keeps its own caption.
                         dlg.line_buttons.push_back(attr_or(c.attrs, "ButtonText"));
                         if (!text.empty()) {
