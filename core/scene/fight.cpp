@@ -3345,10 +3345,15 @@ void FightController::enter_end_stance() {
     // "darkening") and a real plate shifted the whole break late. Raise it
     // here, display-only (`vhb` has no case for the GZ type), and let the
     // end-stance gate advance the round directly (JS `Onb` `ZK(); NA(); Z2()`).
-    if (result_plate_ != banner_kind::none) {
-        banner_show(result_plate_, kJsBannerHoldSeconds, banner_action::none,
-                    false);
-    }
+    // [FIX results-plate timing] The plate is NOT raised here. JS `ca.Pf`
+    // (L15718) raises it on the FIRST EndStance `AnimationStart` after `eu`
+    // becomes 3 (`i4a` L16719 -> `xF(3)` L15810): the NEXT frame, when
+    // `Bg.ia()` (L15886) drains the `Bg.Ih(1,d.Vb)` stage event (L15827) and
+    // the EndStance move starts (`Te.Skb` L508 -> `x3` -> `Pf`). Raising it
+    // here (the phase-3 start — the very frame HP hits 0) showed the plate
+    // while the loser was still falling. Arm it; the `end_stance` update
+    // raises it on the AnimationStart frame.
+    end_stance_plate_armed_ = (result_plate_ != banner_kind::none);
     // Root `<Triggers>` `RoundStageStart Name="EndStance"` (`Tm` L772,
     // stage code 3) — 3 of the 4 shipped RoundStageStart triggers use it.
     dispatch_global_triggers("RoundStageStart", "RoundStageStart", "EndStance");
@@ -3676,9 +3681,17 @@ void FightController::end_battle(const FightFighter& winner) {
     // JS `tl.fB` (L844) / `ca.kD`: the effect containers drain at the battle
     // end (`fB()` -> `Gq.fB()`/`Hq.fB()`).
     magic_fx_.clear();
-    banner_show(result_plate_, kJsBannerHoldSeconds, banner_action::end_battle,
-                false);
-    std::fprintf(stdout, "[fight] banner: %s (F%d)\n",
+    // [FIX results-plate timing] JS `bea` (L413) does NOT raise a plate and
+    // does NOT carry the fight-end. `enter_end_stance` already ARMED the
+    // plate (raised on the EndStance AnimationStart, `ca.Pf` L15718), and
+    // `bea` runs at the ROUND TRANSITION (`Onb` L411 `h9` -> `Ewb` -> the next
+    // frame's `a ? this.bea(wo.nB)`), AFTER the end-stance animation finished;
+    // only the following frame's `xJ` branch runs `kD` (L415) and the Results
+    // appear. Tying the Results to the plate's `fu(1.166)` hold here showed
+    // the stats while the loser was still falling. `battle_end_pending_` is
+    // consumed by the `end_stance` gate, which finalizes the battle when the
+    // loser's KO/knockdown chain ends.
+    std::fprintf(stdout, "[fight] battle end armed: %s (F%d)\n",
                  result_plate_ == banner_kind::victory ? "PERFECT"
                  : result_plate_ == banner_kind::defeat ? "GREAT" : "none",
                  frame_);
@@ -8031,7 +8044,40 @@ void FightController::update(float dt) {
             // `next_round`) runs `NA` + `Z2` (the ROUND plate). This is the
             // DELAY that lets the loser finish its KO/knockdown animation
             // before the round changes.
-            if (end_stance_pending_ && stance_ended) {
+            // [FIX results-plate timing] Raise the armed plate on THIS frame —
+            // the EndStance AnimationStart (JS `ca.Pf` L15718, fired by
+            // `Te.x3` L508 when `Bg.ia()` drains the stage event and the
+            // EndStance move starts). NOT at the phase-3 start.
+            if (end_stance_plate_armed_) {
+                end_stance_plate_armed_ = false;
+                banner_show(result_plate_, kJsBannerHoldSeconds,
+                            banner_action::none, false);
+                std::fprintf(stdout, "[fight] result plate: %s (F%d)\n",
+                             result_plate_ == banner_kind::victory ? "PERFECT"
+                             : result_plate_ == banner_kind::defeat ? "GREAT"
+                             : result_plate_ == banner_kind::timesup ? "TIMESUP"
+                             : result_plate_ == banner_kind::ringout ? "RINGOUT"
+                             : result_plate_ == banner_kind::label_win ? "WIN"
+                             : result_plate_ == banner_kind::label_lose ? "LOSE"
+                             : "none",
+                             frame_);
+                std::fflush(stdout);
+            }
+            // JS `Onb` (L411) `h9` -> `Ewb` (`h9=!0`) -> the NEXT frame's
+            // `if(a) this.bea(wo.nB)` (L413) or the `else` round transition.
+            // BOTH wait for the end-stance animation to finish (`kg` L387 ->
+            // `h4a` -> `JJ` -> `Ewb`). `bea` does NOT hide the view; only the
+            // round-transition branch runs `Ta.XF(!1); ZK(); NA(); Z2()`.
+            if ((end_stance_pending_ || battle_end_pending_) && stance_ended) {
+                if (battle_end_pending_) {
+                    // JS `bea` (L413) + the next frame's `xJ` -> `kD` (L415):
+                    // the battle ends HERE, after the end-stance animation —
+                    // NOT at the plate's `fu(1.166)` expiry.
+                    battle_end_pending_ = false;
+                    battle_over_ = true;
+                    std::fflush(stdout);
+                    break;
+                }
                 end_stance_pending_ = false;
                 set_scene_visible(false);  // JS `Ta.XF(!1)`
                 // JS `ZK()` (L206859 `c.L4()` -> `wd.reset()` + `oL(position)`):

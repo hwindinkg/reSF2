@@ -2328,6 +2328,14 @@ private:
     // BEFORE the round hides the arena and advances. While true, phase 3
     // advances the fighters' clips and watches for the clip end.
     bool end_stance_pending_ = false;
+    // [FIX results-plate timing] JS `ca.Pf` (L15718) raises the KO/PERFECT/
+    // GREAT/TIMESUP/RINGOUT plate on the FIRST EndStance `AnimationStart`
+    // after `eu` becomes 3 (`i4a` L16719 -> `xF(3)` L15810), i.e. ONE frame
+    // after the phase-3 start, when `Bg.ia()` (L15886) drains the
+    // `Bg.Ih(1,d.Vb)` stage event (L15827) and the EndStance move starts
+    // (`Te.Skb` L508 -> `x3` -> `Pf`). `enter_end_stance` only ARMS this; the
+    // `end_stance` update raises the plate on that AnimationStart frame.
+    bool end_stance_plate_armed_ = false;
     // The round result of the round that just ended (used to pick the K.O.
     // plate art when the deferred `end_stance_pending_` raises it).
     round_result last_round_result_ = round_result::ko;
