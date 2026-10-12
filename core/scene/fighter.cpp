@@ -1974,10 +1974,19 @@ void Fighter::advance(float dt) {
     sub_frac_ = 0.0f;  // integer samples are JS-exact (frac 0)
     for (int i = 0; i < steps; ++i) advance_step();
     sub_frac_ = scale_acc_;
-    // No integer step this frame (the slow-mo case): re-pose at the
-    // fractional sub-frame position so the motion keeps advancing smoothly
-    // instead of holding the previous pose.
-    if (steps == 0 && sub_frac_ > 0.0f && !not_animation_ &&
+    // [FIX slow-mo jitter] Re-pose at the fractional sub-frame position
+    // WHENEVER a fractional remainder is left — not only when the integer step
+    // count is zero. The JS animator is fed a continuous TIME delta
+    // (`Qi.ia` L248219 `c[b].update(1/60 * 1/v.on())`) and always samples the
+    // pose at the current sub-frame position; there is no "integer sample then
+    // hold" cadence. `advance_step()` samples at `sub_frac_ == 0` (integer), so
+    // with `steps >= 1` the leftover fraction was previously DROPPED for that
+    // frame: during the finishing-blow slow-mo (`rate = 1/7`, `sub = 3`) every
+    // 7th fight-frame snapped the pose back to the integer clip frame and the
+    // next frame jumped forward — the reported per-slow-mo jerk. Resampling
+    // here keeps the ramp smooth on the step frame too. A non-slow-mo frame has
+    // `sub_frac_ == 0`, so nothing changes there.
+    if (sub_frac_ > 0.0f && !not_animation_ &&
         current_move_ != nullptr && current_clip_ != nullptr) {
         sample_current();
     }
