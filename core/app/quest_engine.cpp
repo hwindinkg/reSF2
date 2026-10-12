@@ -6817,28 +6817,28 @@ void QuestEngine::drain_deferred_fight(App& app) {
         const QuestJournal& journal = entry.second;
         if (i >= quests_.size()) continue;
         const QuestDef& q = quests_[i];
-        QuestSideEffects fx;
+        // `run_chain_effects` may `AttachQuestFile` (append to `quests_`), which
+        // REALLOCATES the vector and invalidates `q`. Snapshot the name + action
+        // list before the run (the port used to print `q.name` afterwards — a
+        // dangling read that logged an empty quest name for `FirstGuardBeaten`).
+        const std::string qname = q.name;
+        const std::vector<QuestAction> qactions = q.actions;
         std::map<std::string, std::string> locals;
-        const ActionRest rest =
-            run_actions(app, q.actions, journal, fx, locals, q.name, 0);
-        apply_effects(app, fx);
-        enqueue_effects(app, fx, journal, locals, q.name);
-        if (rest.dialog_parked) {
-            attach_dialog_park(rest, locals);
-        } else if (rest.suspended) {
-            PendingRun run;
-            run.actions = rest.rest;
-            run.journal = journal;
-            run.locals = locals;
-            run.quest = q.name;
-            run.frames = rest.frames;
-            pending_.push_back(std::move(run));
-        }
-        if (!fx.flash_targets.empty()) flash_target_ = fx.flash_targets.back();
-        if (!fx.menu_flashes.empty()) nav_flash_ = fx.menu_flashes.back();
-        if (fx.has_map_focus) last_map_focus_ = fx.map_focus;
+        // JS `ha.qT`/`eLa` (L523000) runs the SAME `Yb`-serialized chain as a
+        // normal match — the `sa()` continuation reaches EVERY action, so the
+        // post-run bookkeeping (`Mn` ClearQuestQueue, `Bn` AttachQuestFile,
+        // `Ge` Activate) MUST run too. The old inline block only replayed
+        // dialog/pending/flash, so `FirstGuardBeaten` (quests.xml L260-285,
+        // matched on `FightEnd` while scene==Fight -> deferred) never ran its
+        // `<AttachQuestFile quest_extensions/zone_1/core.xml|story.xml>`: the
+        // whole zone_1 story set stayed unloaded after the Lynx/Kenji boss
+        // fight until a RESTART re-attached it via `AttachScripts_Zone1`
+        // (ApplicationStart) — the reported "after Kenji the quests do not
+        // continue, a restart is needed".
+        run_chain_effects(app, qactions, journal, locals, qname,
+                          std::vector<QuestAction>(), nullptr);
         std::fprintf(stdout, "[quest] FIRED %s (deferred Fight match, scene=%s)\n",
-                     q.name.c_str(), current_scene_.c_str());
+                     qname.c_str(), current_scene_.c_str());
         std::fflush(stdout);
     }
 }

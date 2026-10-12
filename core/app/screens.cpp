@@ -17033,6 +17033,15 @@ bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     WarriorSave::OwnedItem oi;
     oi.name = bit.name;
     oi.count = 1;
+    // JS `p.o.xa.$o(b,!0)` -> `setItem` (`$o` L12129 / `setItem` L10729): the
+    // owned entry is built from the catalog item, so its `Ce`
+    // (`Ji.Ce` = `UpgradeLevel`, ctor L11448) is the item's `Tg`. The port
+    // left it at the struct default 0, so a fresh `WEAPON_KNIVES` (list.xml
+    // L154 `UpgradeLevel="100"`) read `?Purchase[_$Purchase].UpgradeLevel = 0`
+    // and `UpgradeToLevelReminder` (quests.xml L1666
+    // `(100*Level) - UpgradeLevel >= 100`; level 1 -> 100-0=100) wrongly
+    // FIRED the "outdated equipment" dialog after the tutorial buy.
+    oi.upgrade_level = bit.upgrade_level;  // `Np`/`Ce` = catalog `Tg`
     shop_apply_slot(bw, bit.type, bit.name);
     oi.equipped = true;
     // JS `Ao.Qg` (sf2.502f0946.js L1121) does NOT write the story step: the
@@ -17106,6 +17115,10 @@ bool ShopScreen::purchase_gem_price_plate(App& app, const CatalogItem& bit) {
     WarriorSave::OwnedItem oi;
     oi.name = bit.name;
     oi.count = 1;
+    // Ruby path: `Pa.gI` -> `$o` -> `setItem` builds the owned entry from the
+    // catalog item, so `Ce` = the item's `UpgradeLevel` (`Tg`); see the gold
+    // path above (the missing write made `UpgradeToLevelReminder` fire).
+    oi.upgrade_level = bit.upgrade_level;
     shop_apply_slot(bw, bit.type, bit.name);
     oi.equipped = true;
     bw.items.push_back(oi);
