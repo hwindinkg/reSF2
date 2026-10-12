@@ -2354,7 +2354,7 @@ void Fighter::clear_move() {
 // `(clipLen-FirstFrame)*(MidFrames+1)+1` 60 Hz frames — NOT one clip frame per
 // tick (the old raw `++frame` was 3x too fast for MidFrames=2).
 void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
-                                 float node_x, float node_y) {
+                                 float node_x, float node_y, bool reseat) {
     // [FIX shop idle drift — JS `Pi.Ex`/`wd.wI`/`Pi.job`] The JS `Pi` does NOT
     // keep one `wd` riding a looping clip: every state (re)entry runs
     // `Pi.Ex`/`XOa` (L2301/L2300) -> `new wd(this.Ca)` + `this.Jc.wI()` (a
@@ -2397,7 +2397,7 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // (probe: HighBlockProfile world_y -93 -> -29 vs the JS clip y).
     {
         const int seat_a = model_.bone_by_name(fighter_pivot_bone());
-        if (seat_a >= 0 && solver_init_ &&
+        if (reseat && seat_a >= 0 && solver_init_ &&
             sol_ma_.size() == model_.bones.size() * 3 &&
             sol_mf_.size() == sol_ma_.size()) {
             const std::size_t u = static_cast<std::size_t>(seat_a) * 3;

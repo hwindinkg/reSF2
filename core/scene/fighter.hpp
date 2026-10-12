@@ -478,8 +478,13 @@ public:
     // first sample (`render_offset_valid_ == false`). Without this the preview
     // was re-anchored to the clip pivot (the armor/helm try-on sank and the
     // profile idle legs floated).
+    // `reseat` mirrors the JS `Pi.job`/`wd.oL` seat: it runs ONLY on a `Pi`
+    // STATE ENTRY (`Ex`/`XOa` -> `L4`), NOT on the `wd`'s internal move
+    // re-selection (`Gka` loop restart / `lS` selector). A caller restarting the
+    // idle loop in place passes `false` so the accumulated root motion carries.
     void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
-                            float node_x = 0.0f, float node_y = -93.0f);
+                            float node_x = 0.0f, float node_y = -93.0f,
+                            bool reseat = true);
     bool preview_active() const { return current_clip_ != nullptr; }
 
     // --- move-frame action dispatch (JS `Te.Lwa` L563-564) -----------------

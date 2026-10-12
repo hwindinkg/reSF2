@@ -6484,13 +6484,22 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
                                std::vector<std::string>& out_names,
                                std::vector<sf2::scene::ItemPerkRef>& out_refs,
                                std::map<std::string, std::vector<std::string>>&
-                                   out_item_perks) {
+                                   out_item_perks,
+                               bool include_catalog_enchant) {
         for (const std::string& name : names) {
             if (name.empty()) continue;
             for (const CatalogItem& ci : catalog) {
                 if (ci.name != name) continue;
                 out_names.push_back(name);
                 for (const ItemPerkRef& ref : ci.perks) {
+                    // JS `xc.Wk` L811-812 pushes `g.Oa` = the item's catalog
+                    // `<Perks>` PLUS any warrior-node `<Enchantments>`, NOT the
+                    // catalog `<Enchantments>` (`GF`). `GF` is only the `p.BD`
+                    // fallback for an UNOWNED item, and `Wk` reaches `p.BD` only
+                    // when `this.qb` (the owner) exists — never for the enemy.
+                    // The catalog `<Enchantments>` is added explicitly by the
+                    // caller where the JS owned-`be` path applies.
+                    if (ref.enchant && !include_catalog_enchant) continue;
                     sf2::scene::ItemPerkRef scene_ref;
                     scene_ref.name = ref.name;
                     scene_ref.set_num = ref.set_num;
@@ -6517,7 +6526,8 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
         ref.set_str = pr.set;
         ps.enemy_refs.push_back(std::move(ref));
     }
-    add_items(enemy.items, ps.enemy_items, ps.enemy_refs, ps.item_perk_names);
+    add_items(enemy.items, ps.enemy_items, ps.enemy_refs, ps.item_perk_names,
+              /*include_catalog_enchant=*/false);
     std::fprintf(stdout,
                  "[perk] enemy loadout: warrior perks=%zu items=%zu -> refs=%zu\n",
                  enemy.perks.size(), enemy.items.size(), ps.enemy_refs.size());
@@ -6545,7 +6555,40 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
         ref.set_str = pr.set;  // `<Set>` override (JS `Ji.vva`)
         ps.learned_refs.push_back(std::move(ref));
     }
-    add_items(equipped, ps.player_items, ps.player_refs, ps.item_perk_names);
+    add_items(equipped, ps.player_items, ps.player_refs, ps.item_perk_names,
+              /*include_catalog_enchant=*/false);
+    // JS `Wk` L811-812 + `p.BD(g, qb)` L111598: for an OWNED equipped item the
+    // live enchant list is the save's `<Enchantments>` (`be`), NOT the catalog
+    // `<Enchantments>` (`GF`, the UNOWNED fallback). `Wk` reaches `p.BD` only
+    // when `p.o.xa.te(g) != null` (the owner's save owns the item), so a
+    // freshly bought item carries NO enchant until the forge writes one. The
+    // port previously fed the catalog `<Enchantments>` here AND to the enemy
+    // (the reported "Шин получил Перегрев от каталожного HELM_GREEN_MASK").
+    for (const auto& oi : w.items) {
+        if (oi.count <= 0 || oi.enchantments.empty()) continue;
+        if (std::find(equipped.begin(), equipped.end(), oi.name) == equipped.end())
+            continue;
+        for (const auto& enc : oi.enchantments) {
+            if (enc.name.empty()) continue;
+            sf2::scene::ItemPerkRef ref;
+            ref.name = enc.name;
+            ref.enchant = true;
+            ps.item_perk_names[oi.name].push_back(enc.name);  // `ud.Oa` per item
+            for (const auto& kv : enc.sets) {
+                try {
+                    std::size_t pos = 0;
+                    const double d = std::stod(kv.value, &pos);
+                    if (pos == kv.value.size()) {
+                        ref.set_num[kv.key] = d;
+                        continue;
+                    }
+                } catch (...) {
+                }
+                ref.set_str[kv.key] = kv.value;
+            }
+            ps.player_refs.push_back(std::move(ref));
+        }
+    }
     return ps;
 }
 
@@ -7329,9 +7372,15 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         shop_dispatch_model_sounds(*fighter, "idle");
     } else if (move_loop != nullptr && idle_loop != nullptr &&
                !idle_loop->frames.empty()) {
-        fighter->start_preview_clip(*move_loop, *idle_loop);
+        // JS `wd.ia` L22813/22834 `Gka(...)` (the `OG` loop restart) re-selects
+        // the SAME idle move in place: NO `Pi.job`/`oL` re-seat. Re-seating here
+        // lifted the model a few units every loop (the reported "подбрасывает
+        // вверх").
+        fighter->start_preview_clip(*move_loop, *idle_loop, 0.0f, -93.0f, false);
     } else if (move != nullptr) {
-        fighter->start_preview_clip(*move, *idle);
+        // JS `wd.ia` L22817/22829 `lS(Ua)` (the selector): the draw's end picks
+        // the idle on the SAME `wd`, again with NO re-seat.
+        fighter->start_preview_clip(*move, *idle, 0.0f, -93.0f, false);
     }
 }
 
@@ -15468,6 +15517,7 @@ struct AchievementCounterDef {
     std::string fight2;                     // `Fight2` attr
     std::string eclipse;                    // `EclipseMode` attr ("0"/"1")
     std::vector<std::string> win_battles;   // `<WinBattle Name>` children
+    int value = 0;                          // `Value` (the `Style`/`ComboCount` threshold)
 };
 
 // Parse internal_settings.xml `<AchievementCounter><Counter>` (JS `iY.parse`).
@@ -15487,6 +15537,7 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
         d.fight = c.attribute("Fight").value();
         d.fight2 = c.attribute("Fight2").value();
         d.eclipse = c.attribute("EclipseMode").value();
+        d.value = sf2::data::xml_attr_int(c, "Value", 0);
         for (pugi::xml_node wb : c.children("WinBattle")) {
             const std::string n = wb.attribute("Name").value();
             if (!n.empty()) d.win_battles.push_back(n);
@@ -15525,7 +15576,7 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
 // inert), so they are SKIPPED (no invention).
 static std::map<std::string, int> fight_result_counter_deltas(
     const std::string& ids, bool player_won, bool reached_max_level,
-    bool player_shocked) {
+    bool player_shocked, int style_level = 0) {
     std::map<std::string, int> deltas;
     for (const AchievementCounterDef& d : load_achievement_counter_defs()) {
         // `EclipseMode="1"` counters need the fight's eclipse state, which the
@@ -15553,6 +15604,14 @@ static std::map<std::string, int> fight_result_counter_deltas(
             deltas[d.name] += 1;  // `zrb`
         }
         if (reached_max_level && d.type == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
+        // JS `fe.Dsb(a)` L15185 (`$l("Style")`, `a >= d.counter.value` -> `Nk`):
+        // `fe.Dsb(Uwb)` runs on EVERY player style change (`z3` L17296:
+        // `a.model==0`), win OR loss. The shipped `internal_settings.xml`
+        // `<AchievementCounter>` ships `StyleCrazy`/`StyleAggressive`/
+        // `StyleFantastic` (Type="Style", Value 4/3/5) and `achievements.xml`
+        // ships the matching rows, so reaching style level `v` raises every
+        // `Style` counter with `Value <= v` by 1 (`Xt.Rab` `value++` -> `ika`).
+        if (d.type == "Style" && style_level >= d.value) deltas[d.name] += 1;
     }
     return deltas;
 }
@@ -15739,7 +15798,7 @@ bool apply_fight_reward(App& app) {
         const bool reached_max_level = leveled_up && w.level == max_level;
         const std::map<std::string, int> deltas =
             fight_result_counter_deltas(cids, player_won, reached_max_level,
-                                        pb.player_shocked);
+                                        pb.player_shocked, pb.prize_style_level);
         std::vector<PendingBattle::AchievementToastRow>& toasts =
             pb.achievement_toasts;
         toasts.clear();
@@ -17609,6 +17668,13 @@ std::string wielding_line(App& app, const WarriorSave& seen) {
 
 ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
     items_ = load_catalog(app());
+    // JS `Oa` ctor (L2291) -> `new Pi` -> `Pi.Ex`/`XOa` (`new xc(v.cw())` +
+    // `Ca.cM` L809-810) builds the destination body from the player's CURRENT
+    // save gear on shop ENTRY. The port's shared `assets.merged` was seeded at
+    // boot from the hardcoded Fists body (app.cpp:900-914), so the equipped
+    // WEAPON model only appeared after a purchase re-merged it (the reported
+    // "модель оружия появится только если купить что-то ещё"). Rebuild here.
+    shop_rebuild_player_model(app());
     std::fprintf(stdout, "[shop] %zu shop items\n", items_.size());
     for (const auto& it : items_) {
         // `price` = `jp()` (gold), `bonus` = `nn()` (Ruby/crystal, `od`). A
@@ -21851,6 +21917,13 @@ void ShopScreen::refresh_items() {
     // `p.o.qC` (the WARRIOR `ShowUpgrades` save attr) — read once here, like
     // the JS world ctor (`Oa.Imb` L2295 -> `jAa`). Gates the upgrade plates.
     show_upgrades_ = shop_show_upgrades(app());
+    // JS `Oa` ctor (L2291) -> `new Pi` -> `Pi.Ex`/`XOa` (`new xc(v.cw())` +
+    // `Ca.cM`) builds the destination body from the player's CURRENT save gear
+    // on EVERY shop entry. The port's shared `assets.merged` was seeded at boot
+    // from the hardcoded Fists body (app.cpp), so the equipped WEAPON model only
+    // appeared after a purchase re-merged it (the reported "модель оружия
+    // появится только если купить что-то ещё"). Rebuild it here from the save.
+    shop_rebuild_player_model(app());
     try {
         seen_ = app().save().load();  // `refresh()` L2248
     } catch (const std::exception&) {
