@@ -724,6 +724,23 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
         sol_mf_[i * 3 + 1] = (!old_seed && have_prev) ? prev_pos_[i * 2 + 1] : wy;
         sol_mf_[i * 3 + 2] = model_.bones[i].z;
     }
+    // JS `Lwb` (L21121) -> `Bva(b)` (L21136): `this.IH.strike(...);
+    // this.Nd.jE()` — the ragdoll `jE` wall/floor clamp runs IMMEDIATELY at
+    // ragdoll start, so a body seeded OUTSIDE the arena (the throw victim,
+    // whose `<Align><Position Player="Enemy" Object="Animation"/>` placement
+    // copies the thrower's `Fk` and can land beyond the wall) is clamped on the
+    // SAME frame it is placed. The port only clamped inside the per-frame
+    // solver step, so the victim was drawn one frame outside before the first
+    // step pulled it back (the reported "throw victim flies out of the arena
+    // for 1 frame"). `Al.fha` clamps the node `ma.x` to `[NO,MO]` = the arena
+    // walls; mirror that on the seed.
+    if (ragdoll_wall_min_ != ragdoll_wall_max_) {
+        for (std::size_t i = 0; i < n; ++i) {
+            float& x = sol_ma_[i * 3];
+            if (x < ragdoll_wall_min_) x = ragdoll_wall_min_;
+            else if (x > ragdoll_wall_max_) x = ragdoll_wall_max_;
+        }
+    }
     solver_init_ = true;
     solver_world_ = true;
     // `pos = px - px[anchor] + world_x` with `world_x = px[anchor] +

@@ -7961,11 +7961,24 @@ void FightController::update(float dt) {
                 // knockdown chain (`PhysicalFall` -> `PhysicalGroundHit` ->
                 // `PhysicalLying`) instead of standing on its last attack clip.
                 update_fighter(*f, foe, dt);
-                // JS `xF(3)` -> `Gc` stage re-selection: when the fighter has no
-                // move, pick the EndStance family move (`Loss_fall` for the KO'd
-                // loser, `Win_Fists` for the winner) so a fighter that died
-                // STANDING still plays its KO/victory clip. Attempted once.
-                if (!f->end_stance_selected && f->fighter.current_move() == nullptr) {
+                // JS `xF(3)` (L15810) -> `Bg.Ih(1, d.Vb)` (L15827): the stage
+                // transition QUEUES a type-1 (`RoundStageStart`) event per
+                // fighter, and `Bg.ia()` (L15886, called in the SAME `Hnb` pass
+                // as the hit/AI) drains it ONCE on the NEXT frame via
+                // `Gnb`->`Rwa`->`EZa`/`dxa`->`DK` -> the EndStance move pick.
+                // That pick is ONE-SHOT and runs on the FIRST frame after the
+                // round-over, NOT when the fighter has no move. At that point
+                // the KO'd loser's killing reaction (`jJa`/`qs` queued by the
+                // killing hit, drained by `wd.ia`/`Qnb` at the top of THIS same
+                // `update_fighter`) has ALREADY started the ragdoll, so the
+                // loser's `<CurrentAnimation Name="Physical" Not="1"/>` gate
+                // (`Loss_fall`, moves.xml:8871) FAILS and `Loss_fall` is
+                // rejected -> the ground death is the EveryFrame `Loss_1`/
+                // `Loss_2` chain. The old `current_move()==nullptr` gate
+                // deferred the pick until the whole ragdoll chain had FINISHED
+                // (anim back to `Loss_*`, no longer `Physical`), so `Loss_fall`
+                // was wrongly admitted (the reported "applied loose_fall").
+                if (!f->end_stance_selected) {
                     f->end_stance_selected = true;
                     sf2::scene::FightContext esctx;
                     esctx.roll01 = [this]() { return draw01(); };
