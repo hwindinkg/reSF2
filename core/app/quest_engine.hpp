@@ -885,6 +885,33 @@ public:
     // Drops every queued dialog (tutorial handoff / scene reset).
     void clear_dialogs() { dialogs_.clear(); }
 
+    // JS `L.K.reload()` (offset 27162: `window.location.reload(!0)`) destroys
+    // the whole JS context, so `ha` (the quest hub singleton), `p.o.AG` (the
+    // Global/CH1 session map) and every scene-scoped UI-guidance signal are
+    // REBUILT EMPTY on the reloaded page. The port's reload analogue
+    // (`App::reload_language`) reused the SAME engine instance, so a dialog
+    // queued before the reload (`dialogs_`), a Fight-deferred match
+    // (`deferred_fight_quests_`), a parked lesson (`tutorial_gate_`) or a
+    // stale nav/flash lock SURVIVED and resurfaced over the fresh boot - the
+    // reported "after the reload the sensei said go to the shop but the Lynx
+    // (Shin) dialog opened". Clear that session state so the reloaded engine
+    // starts exactly like a fresh page.
+    void reset_session_for_reload() {
+        dialogs_.clear();
+        pending_.clear();
+        deferred_fight_quests_.clear();
+        tutorial_gate_ = TutorialGate{};
+        global_vars_.clear();
+        flash_target_.clear();
+        nav_flash_.clear();
+        lock_target_.clear();
+        controls_locked_ = false;
+        nav_locked_ = false;
+        last_fight_.clear();
+        last_result_.clear();
+        timer_end_name_.clear();
+    }
+
     // --- `Do`/`Eo`: the StoryTutorial lesson GATE (JS L1242/L1243) ----------
     // `StoryTutorialWelcome` (reference/extracted/xml/res/quest_extensions/
     // tutorial_quests.xml L26-42) is ONE serialized action list:

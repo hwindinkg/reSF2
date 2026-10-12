@@ -6527,7 +6527,15 @@ void QuestEngine::dismiss_dialog(App& app) {
     // `He.dhb(0)` with no `Ng` slot (L1061) / `He.gf` L1062: pop the top modal
     // and resume its parked chain.
     const std::size_t mi = modal_index();
-    if (mi >= dialogs_.size()) return;
+    if (mi >= dialogs_.size()) {
+        // No `Wb` modal queued: the only dialog left is a bar Notification
+        // (`He.S` L1050 posts it to `Ib`, NOT `Wb.Xob`). The `Ib` bar's own OK
+        // plate (`jgb` -> `y4(!1)`) / the spent `ReadTime` (`Ib.aa` L1905 ->
+        // `OZa`) collapse it, so `He.gf`'s `sa()` path pops the bar. Without
+        // this the bar was never removed by a press (the reported stuck bar).
+        if (has_notification()) pop_notifications();
+        return;
+    }
     EngineDialog dlg = std::move(dialogs_[mi]);
     dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(mi));
     resume_dialog_chain(app, dlg, nullptr);

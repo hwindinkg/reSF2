@@ -1466,7 +1466,7 @@ struct QuestVerifyDriver {
             }
             if (cooldown == 0) {
                 if (d.type == "Notification")
-                    tap(app, 640, 400);  // any tap advances
+                    tap(app, 1000, 185);  // the `Ib` bar's own OK plate
                 else
                     tap(app, 860, 549);  // tutorial_dialog_layout action plate
             }

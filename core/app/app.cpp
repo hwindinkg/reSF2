@@ -568,6 +568,13 @@ bool App::reload_language(const std::string& lang) {
     load_settings_fonts_();  // string table reloads via `ensure_lang`'s lang key
     if (screens_) {
         while (screens_->top() != nullptr) screens_->pop();
+        // JS `L.K.reload()` is a FULL page reload: the reloaded `ha` quest hub,
+        // the `p.o.AG` session map and every scene-scoped UI-guidance signal
+        // start EMPTY. Clear the engine's session state so a dialog/quest
+        // queued before the reload cannot resurface over the fresh boot (the
+        // reported "after the reload the sensei said go to the shop but the
+        // Lynx dialog opened").
+        quest_engine().reset_session_for_reload();
         screens_->push(make_screen(*screens_, kScreenDojo));
     }
     return !settings_fonts_.empty();

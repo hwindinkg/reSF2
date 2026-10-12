@@ -124,6 +124,19 @@ const EngineDialog* quest_modal_top(App& app) {
                                                  : nullptr;
 }
 
+// The `Ib` bar's screen rect (JS `Ib.layout` L1910: `c=clamp(min(W*.75,
+// H*.75)/600,.2,1.1)`, node `C(W-600*c)`, `D(oda*.78)`; the `Fg(600,250)`
+// content). A press INSIDE the bar is the `Ib` OK plate (the bar's own button,
+// `jgb` -> `y4(!1)`); a press OUTSIDE never catches the scene raycast
+// (`BlockRaycast=0`), so the menu/scene keeps it.
+bool notification_bar_contains(double x, double y) {
+    const float c =
+        std::clamp(std::min(kViewW * 0.75f, kViewH * 0.75f) / 600.0f, 0.2f, 1.1f);
+    const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.odb L1975
+    const float ox = kViewW - 600.0f * c;
+    return x >= ox && x <= ox + 600.0f * c && y >= sp && y <= sp + 250.0f * c;
+}
+
 // The `Ib` bar's content (`Ib.F().Qhb` L1050). `Ib` is one instance, so the
 // LAST queued Notification is what the bar shows.
 const EngineDialog* quest_notification_top(App& app) {
@@ -287,11 +300,19 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
     const bool bar_only = dialog_kind(d->type) == DialogKind::kIbBar;
     if (!app.pointer().pressed) return !bar_only;
     if (d->type == "Notification") {
+        // The `Ib` bar is a `BlockRaycast=0` overlay: only a press INSIDE the
+        // bar (its OK plate) is caught (`Ib.Dcb` L1906 tests the node bounds);
+        // a press OUTSIDE never catches the scene raycast, so the menu/nav/
+        // scene keeps it. The old code consumed ANY press while the 5 s
+        // `ReadTime` bar was up - the reported "during the sensei side dialogs
+        // I cannot use the menu".
+        const bool inside = notification_bar_contains(app.pointer().x, app.pointer().y);
+        if (!inside) return false;  // pass through to the scene/menu
         std::fprintf(stdout, "[quest] notification advanced: %s\n", d->title.c_str());
         std::fflush(stdout);
         dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
         app.quest_engine().dismiss_dialog(app);  // `He.gf` L1062
-        return true;
+        return true;  // the bar's own plate caught the press
     }
     // `He.dhb(a)` L1061 `a<this.eOa` (L1062): a row-button row (`He.jkb`
     // L1056-1057 `tv` in `this.ima`, id 5+) fires its OWN nested `Yb` by id,
@@ -3332,7 +3353,7 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
     // port kept the column expanded, so the nav dim stacked with the dialog dim
     // (0.502*0.502 = 0.25 backdrop instead of the oracle's 0.502).
     if (!st.PF && st.yI > 0.0f &&
-        (g_settings_dialog_open || quest_modal_top(app) != nullptr)) {
+        (g_settings_dialog_open || app.quest_engine().modal_top() != nullptr)) {
         za_nav_collapse_run(st, kZaNavAnimSeconds);
     }
     // `za.YA(!1)` (`Bo`/`Do`/`Eo`, L1121-1125): `this.LW.R(!0)` shows the nav
@@ -9151,7 +9172,7 @@ void DojoScreen::render_impl(App& app) {
         // oracle `settings`/`dojo_sensei` hide it (btn-strip variance 38.9 vs
         // the port's 51.0/48.3), the oracle `dojo_hub` shows it (59.6~62.4).
         if (app.screens().top() == this && !g_settings_dialog_open &&
-            quest_modal_top(app) == nullptr) {
+            app.quest_engine().modal_top() == nullptr) {
             // JS `Za.refresh(a,b)`: the Ranged/Magic buttons follow the
             // controller's own loadout (`kc.f$a()`/`kc.d$a()`).
             const bool d_ranged =
@@ -11581,7 +11602,7 @@ void MapScreen::render_impl(App& app) {
     // the row-a `bQ` at the state-machine `scroll_x`, the state-0 fade-in and
     // the state-3 selection ramp. Skipped while a quest modal is up (same
     // exclusivity rule as the Dojo — single voice, the modal wins).
-    if (roster_.active() && quest_modal_top(app) == nullptr) {
+    if (roster_.active() && app.quest_engine().modal_top() == nullptr) {
         draw_boss_roster(app, ren, roster_);
     }
     // Sensei dialog modal on top of the map.
@@ -18741,7 +18762,28 @@ void ShopScreen::render_impl(App& app) {
         };
         int slot = 0;
         if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
-        if (gold > 0) draw_price_plate(slot, "gold", gold);    // `M8` (L2254)
+        int gold_slot = -1;
+        if (gold > 0) {                                        // `M8` (L2254)
+            gold_slot = slot;
+            draw_price_plate(slot, "gold", gold);
+        }
+        // JS `Ao.S` (sf2.502f0946.js L574833, `StoryTutorialBuyItem`): the
+        // guided buy arms `M8` and calls `M8.Vg(!0)`, which shows the `db`
+        // flashing overlay (`Wm(null, y.qB)` -> the `highlightButton` frame,
+        // `y.qB="highlightButton"`) and `db.aa` L1849 pulses its alpha
+        // (`Tk.wa(bt/255)`). `Qg` clears it (`Vg(!1)`). The port only set the
+        // row/cell focus, so the buy plate never flashed - the reported "no
+        // highlight in the shop when buying the knives". The guided lock
+        // (`Sb.F().kk(!0)` + `M8.tk=!0`) is exactly
+        // `controls_locked() && lock_target()=="ShopBuy"`.
+        if (gold_slot >= 0 && app.quest_engine().controls_locked() &&
+            app.quest_engine().lock_target() == "ShopBuy") {
+            const float py = byy0 - static_cast<float>(gold_slot) * (bh + bpad);
+            if (!try_draw_atlas_button(app, "highlightButton", cx0 + cw0 * 0.5f, py,
+                                       cw0, bh, ui_flash_alpha(app))) {
+                draw_flash_tint(app, cx0 + cw0 * 0.5f, py, cw0, bh);
+            }
+        }
         // JS `Ne` draws NO caption over the `M8`/`pVa` plates. The old native
         // label keyed `loc(app,"btnShopBuy",...)`, but `btnShopBuy` does NOT
         // exist in sf2.502f0946.js (0 occurrences), so it always fell back to
