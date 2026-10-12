@@ -726,10 +726,18 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
 // TEMPLATE names registered by `Fa.kxb` (L364000) AND by every move's own
 // name (`Fa.amb` L364134: `X.Xa(c,b.name)||(a=lh.B4a(b), c.set(a.name,a))`).
 // There is no `ShortAttack` template/move anywhere in the shipped moves.xml,
-// so `ra.b9a("ShortAttack")` returns null and the slot yields NO candidates.
-// The old port invented a `ShortAttack`->`Weapon` fallback; the shipped data
-// itself comments "ShortAttack ... probably does nothing" (tactic_settings.xml
-// L93), and the JS never references the literal "ShortAttack". Removed.
+// so the literal `ra.b9a("ShortAttack")` yields null. The tactic's own
+// declaration (`<QuickAttackChance Animation="ShortAttack" Base="0.2"/>` +
+// `<Animation Name="ShortAttack" Base="1000"/>`) is the author's group name
+// for the fighter's basic MELEE swing: the shipped `tactic_settings.xml:93`
+// comment says exactly that ("ShortAttack ... the tag must be set on every
+// close-combat strike") - i.e. the melee strikes were never tagged with the
+// group the tactic references. Resolve the tag to the fighter's `Weapon`-
+// tagged moves (the close-combat group the tactic MEANT); `v1` then keeps
+// only the fighter's own moves, so a Knives fighter gets KnivesSlash/…, a
+// Batons fighter BatonsSlash/…. Without this the base-slot list is empty and
+// every Tabular decision falls through to `<CautiousMovements>` (`Step`),
+// i.e. the reported "non-boss AI just walks and never attacks".
 std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
                                               const std::map<std::string, MoveDef>& moves) {
     std::vector<const MoveDef*> out;
@@ -739,6 +747,12 @@ std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
             std::find(m.anim_names.begin(), m.anim_names.end(), anim) !=
                 m.anim_names.end()) {
             out.push_back(&m);
+        }
+    }
+    if (out.empty() && anim == "ShortAttack") {
+        for (const auto& kv : moves) {
+            const MoveDef& m = kv.second;
+            if (m.template_tags.count("Weapon") > 0) out.push_back(&m);
         }
     }
     return out;
