@@ -99,12 +99,24 @@ that char-offset grep missed:
 - `83026a6e` **death animation** (`EndStance` pick one-shot on the first frame
   while ragdolled → `Loss_fall` rejected, `Loss_2` plays) + **throw victim
   1-frame outside** (arena clamp at `ragdoll_start`).
-- NOT fixed (needs a follow-up): plate/stats timing (1b), passive Tabular AI
-  (3a — no divergence found in the candidate/weight/slot logic), Monkey instant
-  getup (3b), shop buy-plate flash highlight (2a), sensei side-dialog modality
-  (4 — port matches JS), wrong dialog after reload (5 — no divergence found).
-  ⚠ side effect of the death fix: a winner still mid-attack is rejected for
-  `Win_Katana` (one-shot pick semantics) — needs a human look.
+- `2881ccbc` plate/stats timing — the plate now rises on the first EndStance
+  `AnimationStart` (JS `ca.Pf` L15718), Results decoupled from the `fu(1.166)`.
+- `8fe4eeb0` **Monkey instant getup** — `strike_node` dropped the knockdown
+  impulse when no live solver existed → the ragdoll started at zero velocity and
+  settled in 1 frame → the `PhysicalLying` settle gate passed immediately. Now
+  the impulse seeds the ragdoll (getup waits 21 frames) + the global-trigger
+  event `Player`/`Ob` selector.
+- `8ba3c5b9` **sensei side dialogs** (the `BlockRaycast=0` `Ib` bar swallowed any
+  press; `dismiss_dialog` skipped bars; UI gates read the wrong modal slot),
+  **shop buy-plate flash** (`highlightButton`), **reload clears the stale quest
+  session** (the wrong dialog after a reload).
+- `ed54192d` **passive Tabular AI** — the tactic's `ShortAttack` group does not
+  exist in `moves.xml` (the data itself documents the hole), so the base slot
+  was empty for every `Standard` enemy → the port now resolves the declared
+  group to the owner's melee `Weapon` group (proven: a Standard enemy goes from
+  ~2 hits/600f to `E hits=87`).
+- ⚠ side effect of the death fix (83026a6e): a winner still mid-attack is
+  rejected for `Win_Katana` (one-shot pick semantics) — needs a human look.
 
 - `95a08c82` fight rules: `ERulePerk` — **195 shipped** `<Rules><Perk>` were inert
   (the rule perks never joined the live trigger set; `ca.ZOa`/`du.rmb`) +
