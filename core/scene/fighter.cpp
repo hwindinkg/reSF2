@@ -820,19 +820,35 @@ void Fighter::strike_node(int bone, const sf2::scene::Vec3& v) {
     if (u >= n) return;
     // JS `Bl.strike` (L587-588) writes the endpoint node `ma` ONLY —
     // `a.sx.XA(l)` / `a.Zs.XA(c)`, gated by `if(!d.MG||!e.MG)` and per-node
-    // `d.NG`/`e.NG`. There is NO clip-space array write in the JS; the old
-    // port write to `pos_` was overwritten by the next `sample()`'s `Te.eda`
-    // clip apply (L282908 re-poses every clip bone) and is removed.
-    // `sol_ma_` IS the node `ma` (JS `Vc.ma`). While `Al.nk` is set
-    // (`solver_world_`) the clip apply does not touch it, so the reaction
-    // persists — the JS `Al.sk`/`Al.jE` (L583) gate `!NG && (nk || jy ||
-    // oa.vc && c.vc)`. With `nk==0` the next `eda` overwrites a clip-driven
-    // bone; bones past the clip bone count (cloth/macro) keep their state —
-    // identical to the JS.
-    if (sol_ma_.size() != n * 3) return;  // no solver state yet
-    sol_ma_[u * 3] += v.x;
-    sol_ma_[u * 3 + 1] += v.y;
-    sol_ma_[u * 3 + 2] += v.z;
+    // `d.NG`/`e.NG`. The node `ma` is the CURRENT WORLD position: while the
+    // solver is world-space (`Al.nk`/`solver_world_`) that is `sol_ma_`;
+    // otherwise it is the drawn `pos_` (the clip-applied pose).
+    //
+    // [FIX lost knockdown impulse — JS `Bl.strike` L24667] The old guard
+    // `if(sol_ma_.size()!=n*3) return;` DROPPED the write whenever no live
+    // world-space solver existed — i.e. on the very knockdown that STARTS the
+    // ragdoll (the reaction is drained by `wd.Qnb` on the NEXT frame, so the
+    // strike lands with `nk=0`). `ragdoll_start` then seeded `sol_ma_` from
+    // the un-struck `pos_`, so the body began the fall with ZERO impulse
+    // velocity and settled within ~5 frames — the reported Monkey "instant
+    // getup" (`PhysicalLying` replaced by `StandupBack` on frame 1). The JS
+    // `Bl.strike` writes `ma` directly and the ragdoll start does NOT re-seed
+    // it (`Al.start` L24409 only re-arms `BKa`), so the impulse IS the
+    // ragdoll's initial velocity (`Vc.sk` L33706 `vel = ma - mf`).
+    if (solver_world_ && sol_ma_.size() == n * 3) {
+        sol_ma_[u * 3] += v.x;
+        sol_ma_[u * 3 + 1] += v.y;
+        sol_ma_[u * 3 + 2] += v.z;
+        return;
+    }
+    // No world-space solver: the node `ma` is the drawn `pos_`. The next
+    // `sample()`'s clip apply overwrites it (JS `Te.eda` L23256) — exactly
+    // like the JS while `Pe` is true — but the reaction start runs BEFORE
+    // that sample (`wd.ia` head `Qnb`), so the impulse reaches the seed.
+    if (pos_.size() == n * 2) {
+        pos_[u * 2] += v.x;
+        pos_[u * 2 + 1] += v.y;
+    }
 }
 
 // JS `wd.Wqb` (L268496): the shock-impulse fling. `d = this.oa.Va.all` (every

@@ -1583,7 +1583,6 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
     const std::vector<const sf2::scene::GlobalTrigger*>* lists[2] = {&global_me_,
                                                                     &global_enemy_};
     for (int s = 0; s < 2; ++s) {
-        if (side >= 0 && s != side) continue;
         const FightFighter& owner = *side_f[s];
         const FightFighter& other = *side_f[1 - s];
         sf2::scene::FightContext ctx;
@@ -1621,6 +1620,31 @@ void FightController::dispatch_global_triggers(const char* event_name, const cha
             bool event_ok = false;
             for (const sf2::scene::Cond& e : t->events) {
                 if (e.type != event_name) continue;
+                // [FIX event Player/Ob selector — JS `Gc.OGa(a.model, b, f.Ob)`
+                // L28729] The event's `Player` attribute (`Nd.ol`; the JS event
+                // default is "Me", L32252 `this.Ob=Nd.ol(b??"Me")`) filters the
+                // trigger by the EVENT OWNER (`b` = the side whose event fired)
+                // vs the TRIGGER OWNER (`a.model` = this list's side `s`):
+                //   Both(5)          -> always true
+                //   Me(1)/Null(0)    -> trigger owner == event owner
+                //   Enemy(2)         -> trigger owner != event owner
+                // The old port only filtered `s == side` (implicitly Me), so a
+                // shipped `Player="Enemy"` event (e.g. `WhirlEffectAllStop`
+                // `<AnimationStart Player="Enemy" Name="Loss"/>`) never fired.
+                // `side < 0` = the event is published for BOTH owners (the
+                // per-frame `EveryFrame`), so every selector fires once — skip
+                // the filter there.
+                if (side >= 0) {
+                    const bool same_owner = (s == side);
+                    const int sel = e.player;  // 0=Null,1=Me,2=Enemy,5=Both
+                    if (sel == 5) {
+                        // Both: always.
+                    } else if (sel == 2) {
+                        if (same_owner) continue;
+                    } else {
+                        if (!same_owner) continue;  // Me / Null / default
+                    }
+                }
                 // The per-subclass payload filter (JS `compare`):
                 //   `Sm` (ModExpires, L770): `typeof a.data!="string"&&(a="");
                 //      a=this.Ki==a` — EXACT `Name` equality.
