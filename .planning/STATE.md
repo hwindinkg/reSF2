@@ -86,6 +86,26 @@ that char-offset grep missed:
   callout scale `1.2·nat_h/eF` (hot_ground) vs `hud_c` (combo); banner Y =
   arena-projected centre `h/2 − 75·d`; spark-pool clear order (`Cnb` tests
   before increment, no reset); magic effects draw at constant alpha.
+## User-reported bug list (2026-10-12) — waves A–D
+- `52c37d10` slow-mo jitter (fractional re-sample).
+- `2bd3c00e` **quests stalled after the Kenji fight** (the deferred Fight-quest
+  drain never ran the `Yb` post-run bookkeeping → `zone_1` stayed unloaded until
+  a restart) + **stray "outdated equipment" dialog** (a fresh buy had no
+  `upgrade_level` → `?Purchase[].UpgradeLevel`=0) → map-unlock restored.
+- `848bf24d` **Shin's "Overheat"** (catalog `<Enchantments>` wrongly fed to the
+  enemy/player; the JS uses the SAVE enchantments for OWNED items) + shop/profile
+  preview no re-seat on loop (the "teleport/подбрасывает") + shop weapon model
+  rebuilt on entry + **`Style` achievement counter**.
+- `83026a6e` **death animation** (`EndStance` pick one-shot on the first frame
+  while ragdolled → `Loss_fall` rejected, `Loss_2` plays) + **throw victim
+  1-frame outside** (arena clamp at `ragdoll_start`).
+- NOT fixed (needs a follow-up): plate/stats timing (1b), passive Tabular AI
+  (3a — no divergence found in the candidate/weight/slot logic), Monkey instant
+  getup (3b), shop buy-plate flash highlight (2a), sensei side-dialog modality
+  (4 — port matches JS), wrong dialog after reload (5 — no divergence found).
+  ⚠ side effect of the death fix: a winner still mid-attack is rejected for
+  `Win_Katana` (one-shot pick semantics) — needs a human look.
+
 - `95a08c82` fight rules: `ERulePerk` — **195 shipped** `<Rules><Perk>` were inert
   (the rule perks never joined the live trigger set; `ca.ZOa`/`du.rmb`) +
   `ERuleNoPerks` (2 shipped `EndStanceClear`).
