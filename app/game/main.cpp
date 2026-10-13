@@ -1420,6 +1420,9 @@ struct QuestVerifyDriver {
     bool go_map = false;          // post-OpenShop: navigate to the Map
     bool bought_knives = false;   // the guided `Ao` buy completed
     int shop_buy_phase = 0;       // 0 = TRY plate, 1 = price plate
+    std::string last_step;        // frame-stamped story-step census
+    bool saw_buy_item = false;    // reached STEP_BUY_ITEM (the knives quest)
+    bool saw_map_step = false;    // reached MAP after the purchase
 
     // Queue an internal click at the view coordinate (no OS input).
     void tap(sf2::app::App& app, int x, int y, int cd = 8) {
@@ -1437,6 +1440,23 @@ struct QuestVerifyDriver {
             last_screen = cur;
             std::fprintf(stdout, "[qverify] f%d screen -> %d\n", frame, cur);
             std::fflush(stdout);
+        }
+        // Story-step census (frame-stamped): proves WHERE the tutorial chain
+        // advances (or stalls) across the fight -> shop -> map handoff.
+        {
+            std::string st;
+            try {
+                st = app.save().load().story_step();
+            } catch (const std::exception&) {
+            }
+            if (st != last_step) {
+                last_step = st;
+                std::fprintf(stdout, "[qverify] f%d step -> %s (screen=%d)\n", frame,
+                             st.c_str(), cur);
+                std::fflush(stdout);
+            }
+            if (st == "STEP_BUY_ITEM") saw_buy_item = true;
+            if (st == "MAP") saw_map_step = true;
         }
         if (app.quest_engine().scene_actions() > 0) saw_chain = true;
         if (app.quest_engine().shop_actions() > 0) go_map = true;
@@ -1717,6 +1737,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool fidelity_tour = false;
     bool quest_verify = false;  // --quest-verify: interactive action check
     bool quest_verify_buy = false;  // --quest-verify-buy: seeded STEP_BUY_ITEM
+    // --tutorial-chain-verify: the FULL fresh chain (NO seed) driven past the
+    // training fight -> the knives Shop quest -> the Map, WITHOUT the harness
+    // early break (the reported "after Kenji the knives quest never starts").
+    bool quest_chain_full = false;
     bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
     bool quest_query_probe = false;  // --quest-query-probe: Foreach query proof
     bool map_button_probe = false;   // --map-button-probe: Vb map-button proof
@@ -1940,6 +1964,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             map_difficulty_probe_mode = true;
         } else if (arg == "--quest-verify") {
             quest_verify = true;
+        } else if (arg == "--tutorial-chain-verify") {
+            quest_verify = true;
+            quest_chain_full = true;
         } else if (arg == "--changetab-probe") {
             changetab_probe = true;
         } else if (arg == "--quest-query-probe") {
@@ -4045,10 +4072,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      quest_verify_buy ? 1 : 0);
         std::fflush(stdout);
         const std::size_t quests_loaded = app.quest_engine().quest_count();
-        while (!glfwWindowShouldClose(app.renderer().window()) && drv.frame < 24000) {
+        const int qv_cap = quest_chain_full ? 2600 : 24000;
+        while (!glfwWindowShouldClose(app.renderer().window()) && drv.frame < qv_cap) {
             drv.tick(app);
             app.run_one_frame();
             if (drv.saw_lynx_dialog && drv.saw_shin && drv.saw_shop) break;
+            if (quest_chain_full && drv.saw_buy_item && drv.saw_map_step) break;
             // [harness] The fresh `--quest-verify` chain is bounded after its
             // first (training) fight: the shipped StoryTutorial* chain does not
             // reach the Shop/Lynx beat in the verify window (verified: without
@@ -4057,7 +4086,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // are therefore OUT OF SCOPE for the non-buy run and are reported
             // `n/a` (not FAIL) below; the full path is covered by
             // `--quest-verify-buy`, which seeds STEP_BUY_ITEM.
-            if (!quest_verify_buy && drv.saw_fight && drv.frame > 600) break;
+            if (!quest_chain_full && !quest_verify_buy && drv.saw_fight &&
+                drv.frame > 600) {
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(6));  // pace the 60 Hz steps
         }
         sf2::app::QuestEngine& q = app.quest_engine();
@@ -4137,6 +4169,71 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             }
             std::fflush(stdout);
         }
+        // [chain-full] Deterministic WIN replay: the auto-attack bot LOSES the
+        // training (Kenji/Punchbag) fight (P hits=0 -> TimeoutLoss), but the
+        // USER wins. Replay the exact Win `FightEnd` journal, then the
+        // Fight->Dojo `ChangeTab`, and check whether the knives Shop quest
+        // (`StoryTutorialShop` -> STEP_BUY_ITEM) starts — the reported stall.
+        if (quest_chain_full) {
+            sf2::app::QuestEngine& qc = app.quest_engine();
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                w.set_story_step("FIGHT");
+                // The real training-fight WIN grants coins (`v.kD` -> `dmb`);
+                // the replay below skips the reward, so fund the guided buy
+                // (the same device the STEP_BUY_ITEM seed uses).
+                w.money = 200;
+                app.save().save(w);
+            } catch (const std::exception&) {
+            }
+            for (int k = 0; k < 4; ++k) {
+                const int c = app.screens().current_id();
+                if (c != kScreenFight && c != kScreenResults) break;
+                app.screens().pop();
+            }
+            qc.set_current_scene("Fight");
+            sf2::app::QuestJournal j;
+            j.fight = "Punchbag|Bosses|1";
+            j.fight_result = "Win";
+            j.scene_from = "Fight";
+            j.scene_to = "Dojo";
+            qc.note_fight(j.fight, j.fight_result);
+            const std::vector<std::string> fired = qc.fire(app, "ChangeTab", j);
+            qc.set_current_scene("Dojo");
+            std::string step_after;
+            try {
+                step_after = app.save().load().story_step();
+            } catch (const std::exception&) {
+            }
+            bool shop_fired = false;
+            for (const std::string& f : fired) {
+                if (f == "StoryTutorialShop") shop_fired = true;
+            }
+            std::fprintf(stdout,
+                         "[chain-full] deterministic WIN ChangeTab Fight->Dojo "
+                         "fired=%zu shop=%d step=%s\n",
+                         fired.size(), shop_fired ? 1 : 0, step_after.c_str());
+            std::fflush(stdout);
+            // Drive the REST of the chain with the same driver: nav flash Shop
+            // -> Dojo->Shop ChangeTab -> StoryTutorialBuyItem -> the buy ->
+            // the tail Activate -> nav flash Map -> the Map + Lynx dialog.
+            // (With the Activate no longer wrongly deferred this must reach
+            // MAP and the Map screen WITHOUT a restart.)
+            for (int f2 = 0; f2 < 12000; ++f2) {
+                if (glfwWindowShouldClose(app.renderer().window())) break;
+                drv.tick(app);
+                app.run_one_frame();
+                if (drv.saw_buy_item && drv.saw_map_step && drv.saw_lynx_dialog) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            std::fprintf(stdout,
+                         "[chain-full] after drive: buyItem=%d mapStep=%d bought=%d "
+                         "shop=%d lynx=%d\n",
+                         drv.saw_buy_item ? 1 : 0, drv.saw_map_step ? 1 : 0,
+                         drv.bought_knives ? 1 : 0, drv.saw_shop ? 1 : 0,
+                         drv.saw_lynx_dialog ? 1 : 0);
+            std::fflush(stdout);
+        }
         const bool ok_chain = drv.saw_chain && quests_loaded > 0;
         const bool ok_change = q.scene_actions() > 0;
         const bool ok_flash = drv.saw_nav_flash;
@@ -4150,7 +4247,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      "OpenShop executed=%zu LynxDialog=%d ShinFight=%d trainingFight=%d\n",
                      ok_chain ? 1 : 0, q.scene_actions(), ok_flash ? 1 : 0, ok_shop ? 1 : 0,
                      q.shop_actions(), ok_lynx ? 1 : 0, ok_shin ? 1 : 0, ok_fight ? 1 : 0);
-        const bool all = quest_verify_buy
+        const bool all = quest_chain_full
+                             ? (drv.saw_buy_item && drv.saw_map_step)
+                             : quest_verify_buy
                              ? (ok_chain && ok_change && ok_flash && ok_shop && ok_open &&
                                 ok_lynx && ok_shin && ok_story_advance)
                              : (ok_chain && ok_change && ok_fight);
@@ -4172,6 +4271,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      in_scope(ok_shin, true), in_scope(ok_fight, false),
                      in_scope(ok_story_advance, true),
                      all ? "PASS" : "FAIL");
+        if (quest_chain_full) {
+            std::fprintf(stdout,
+                         "[qverify] CHAIN-FULL knivesShop(STEP_BUY_ITEM)=%d "
+                         "mapStep(MAP)=%d bought=%d shop=%d lynx=%d -> %s\n",
+                         drv.saw_buy_item ? 1 : 0, drv.saw_map_step ? 1 : 0,
+                         drv.bought_knives ? 1 : 0, drv.saw_shop ? 1 : 0,
+                         drv.saw_lynx_dialog ? 1 : 0, all ? "PASS" : "FAIL");
+        }
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;

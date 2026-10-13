@@ -6268,13 +6268,34 @@ void QuestEngine::fire_inner(App& app, const std::string& event,
         // JS `ha.add` (L522089): `a=wa.F().Td.Tf; this.EJ||this.xN||a==6||
         // (this.EJ=!0)`. While the mounted scene is Fight(6) the queue does
         // NOT auto-run; `RA` only queues + sorts (`Rla` L521963), and the run
-        // happens on the next `qT()` (`wa.ghb` L934, the scene load). So a
-        // quest matched on `FightEnd` (fired while scene=Fight, `v.kD`
-        // L622187) must run its actions when the next scene mounts — NOT on
-        // the results screen. The old port ran it immediately, playing the
-        // level-up `snd_learn` on the stats screen (the reported F).
-        if (current_scene_ == "Fight" && event != "SceneLoaded" &&
-            event != "ChangeTab") {
+        // happens on the next `qT()`. The ONLY event JS fires while the mounted
+        // scene is genuinely 6 is `FightEnd` (`v.kD` L50634: `RA(
+        // "QUEST_EVENT_FIGHT_END")` then a CONDITIONAL `qT()`); so a quest
+        // matched on `FightEnd` must run its actions when the next scene mounts
+        // — NOT on the results screen (the reported F: the level-up `snd_learn`
+        // played on the stats screen).
+        //
+        // DIVERGENCE (the reported "after Kenji the knives quest never starts"):
+        // the gate used to defer EVERY event except SceneLoaded/ChangeTab while
+        // `current_scene_ == "Fight"`. But the port runs a matched quest's whole
+        // action chain SYNCHRONOUSLY and only QUEUES its `ChangeScene` for the
+        // next `tick` (`nav_queue_`), whereas JS `Gn.qIa` (L1032) calls
+        // `wa.F().mp(...)` INLINE — so a later `<Activate>` in the SAME chain
+        // sees the NEW scene in JS but the stale "Fight" in the port. The
+        // shipped `StoryTutorialShop` (tutorial_quests.xml L89-95) ends with
+        // `<Activate ActionID="StoryTutorialOpenScene"/>` AFTER its
+        // `<ChangeScene>`; the port deferred that Activate to "the next scene
+        // load", which the `wa.mp` abort (the matched ChangeTab suppresses
+        // SceneLoaded) never delivered. The Activate (the shop nav guidance)
+        // then sat in `deferred_fight_quests_` forever AND latched
+        // `quest_active("StoryTutorialOpenScene")` (`quest_active` counts a
+        // deferred entry), so the post-purchase Activate — the Map guidance —
+        // was suppressed too (the second report: "after the purchase a restart
+        // is needed"). Restarting dropped the in-memory deferred entry, which
+        // is why it "fixed" it. `Activate` is fired via `Ge.Qob` L43170
+        // (`ha.F().RA("QUEST_EVENT_ACTIVATE")`), and JS's own `add` scene gate
+        // sees the already-Changed scene; deferring it is never JS-exact.
+        if (current_scene_ == "Fight" && event == "FightEnd") {
             deferred_fight_quests_.emplace_back(i, journal);
             std::fprintf(stdout,
                          "[quest] %s matched on %s (scene=Fight) -> deferred to next "
