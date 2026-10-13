@@ -1203,10 +1203,14 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // move's FIRST-frame actions fire (`Te.Lwa` L563-564).
     last_action_frame_ = -1;
     ended_move_ = nullptr;
-    // [FIX Phase 4a — pacing] Subframes per clip-frame (JS `Te.Gka`:
-    // `Tx = model.model.HD()`, `rpa.initialize((Ua.XJ+1)*Tx)`; `eda`
-    // advances `mo` by `Tx` per step with HD()==1). MidFrames=2 -> 3.
-    sub_ = std::max(1, (move.mid_frames + 1) * 1);
+    // [FIX Phase 4a — pacing / slow-mo] Subframes per clip-frame (JS
+    // `Te.Gka` L23485: `Tx = model.model.HD()`, `rpa.initialize((Ua.XJ+1)*Tx)`).
+    // `Tx` = the SlowModel `KT` scale (the finishing-blow slow-mo = `v.on()`
+    // = `1/anim_rate_`). MidFrames=2, no slow-mo -> 3.
+    sub_ = std::max(1, (move.mid_frames + 1) *
+                           std::max(1, static_cast<int>(std::lround(
+                                           time_scale_ /
+                                           std::max(0.0001f, anim_rate_)))));
     subframe_ = 0;
     sub_frac_ = 0.0f;  // [FIX slow-mo] JS-exact start sample (frac 0)
 
@@ -1982,47 +1986,40 @@ void Fighter::advance(float dt) {
     // `fha`/`P6a` ground friction. The former `kb_` pool + `decay_knockback`
     // exponential was a port-only invention (no JS counterpart) and is
     // REMOVED. The JS impulse path is `Bl.strike` (@299122) -> node `ma`.
-    // Timescale steps (SlowModel KT): scale>=1 verbatim (Speed<1 no-ops
-    // at apply); fractional remainder carries to the next tick.
-    // [FIX finishing-blow slow-mo — JS `de.ia` L248219] The GLOBAL timescale
-    // `v.on()` divides the animator rate (`a=1/v.on()`), and the per-fighter
-    // KT channel multiplies it. The old clamp `[1,4]` made a sub-1 rate
-    // STRUCTURALLY impossible, so `v.YT(v.kNa)` (on()=kNa) could never slow
-    // the clip. The old code then fed `int(scale_acc_)` INTEGER sub-steps:
-    // at 1/7 that is `0,0,0,0,0,0,1` — the pose froze six frames and jumped
-    // one subframe on the seventh (the reported jerky slow-mo).
+    // [FIX slow-mo jerk — JS `Te.eda` L23286 + `Te.Gka` L23485] The JS
+    // animator is a DENSELY RESAMPLED span, not a fractional step:
+    //   `Gka` L23485 `rpa.initialize((Ua.XJ+1) * Tx)` — `UM = (XJ+1)*Tx`
+    //     interpolated samples PER CLIP FRAME (`Tx = HD()` = the SlowModel
+    //     `KT`/`ePa` scale, L23480/23494);
+    //   `eda` L23286 `mo += Tx<=1 ? 1 : Tx/HD()|0` — with `Tx == HD()` that
+    //     is EXACTLY ONE subframe per fight frame, ALWAYS;
+    //   `eda` L23266 samples `fq[mo]`, i.e. `t = (mo+1)/UM` (L53504
+    //     `wu.curve` evaluates the span Bezier at `t = k/UM`, k=1..UM).
+    // So the slow-mo comes from a 7x DENSER span indexed by an INTEGER `mo`
+    // — never from a fractional re-pose. The previous port kept
+    // `UM = XJ+1` (=3) and faked the rate with a fractional accumulator
+    // (`scale_acc_`) plus a fractional re-pose (`sub_frac_`): it never used
+    // `t < 1/3` of a span and mixed two adjacent spans per clip frame, which
+    // is the reported residual slow-mo jerk. JS-exact: set the span length
+    // from `Tx` and step ONE subframe per frame.
     //
-    // [FIX slow-mo smoothness] JS-exact shape: the animated entities get a
-    // FRACTIONAL time delta (`Qi.ia` L248219 `c[b].update(1/60 * 1/v.on())`,
-    // `WD.WL` L427772 `d.animate.ia(L.K.sk.Bm * 1/v.on())`), not an integer
-    // step count. So: the INTEGER part of the accumulator fires the discrete
-    // `advance_step()` (frame/interval/action dispatch — JS `Te.ia` `Xh++`),
-    // and the FRACTIONAL remainder is fed to the pose sampler as the
-    // sub-frame position (`sub_frac_`), giving a smooth fractional ramp.
-    scale_acc_ += time_scale_ * anim_rate_;
-    int steps = static_cast<int>(scale_acc_);
-    if (steps < 0) steps = 0;
-    if (steps > 64) steps = 64;
-    scale_acc_ -= static_cast<float>(steps);
-    sub_frac_ = 0.0f;  // integer samples are JS-exact (frac 0)
-    for (int i = 0; i < steps; ++i) advance_step();
-    sub_frac_ = scale_acc_;
-    // [FIX slow-mo jitter] Re-pose at the fractional sub-frame position
-    // WHENEVER a fractional remainder is left — not only when the integer step
-    // count is zero. The JS animator is fed a continuous TIME delta
-    // (`Qi.ia` L248219 `c[b].update(1/60 * 1/v.on())`) and always samples the
-    // pose at the current sub-frame position; there is no "integer sample then
-    // hold" cadence. `advance_step()` samples at `sub_frac_ == 0` (integer), so
-    // with `steps >= 1` the leftover fraction was previously DROPPED for that
-    // frame: during the finishing-blow slow-mo (`rate = 1/7`, `sub = 3`) every
-    // 7th fight-frame snapped the pose back to the integer clip frame and the
-    // next frame jumped forward — the reported per-slow-mo jerk. Resampling
-    // here keeps the ramp smooth on the step frame too. A non-slow-mo frame has
-    // `sub_frac_ == 0`, so nothing changes there.
-    if (sub_frac_ > 0.0f && !not_animation_ &&
-        current_move_ != nullptr && current_clip_ != nullptr) {
-        sample_current();
+    // `Tx` = the last `KT` scale (JS `NMa` L20439 `Ita = a`): the SlowModel
+    // rule's `Speed` (`time_scale_`) or the global finishing-blow slow-mo
+    // `v.on()` (= `1/anim_rate_`). The shipped finishing blow sets only the
+    // latter, so `Tx = v.kNa` (=7) and `UM = 3*7 = 21`.
+    if (current_move_ != nullptr) {
+        const float tx = time_scale_ / std::max(0.0001f, anim_rate_);
+        const int span = std::max(1, (current_move_->mid_frames + 1) *
+                                         std::max(1, static_cast<int>(
+                                                         std::lround(tx))));
+        // JS `Gka` re-initializes `rpa` when the span is (re)built — i.e. at
+        // a span boundary (`mo == 0`) — so a mid-span `Tx` change keeps the
+        // running span (and the JS does the same).
+        if (subframe_ == 0 || sub_ <= 0) sub_ = span;
     }
+    scale_acc_ = 0.0f;   // no fractional accumulator (JS `mo` is an integer)
+    sub_frac_ = 0.0f;    // no fractional re-pose
+    advance_step();
 }
 
 void Fighter::advance_step() {
@@ -2061,9 +2058,13 @@ void Fighter::advance_step() {
     // reads this step. Clamps the clip buffer to the arena walls.
     wall_repulsion_step();
 
-    // Subframes per clip-frame: (XJ+1)*HD with HD=1 (JS `Gka` +
-    // `eda`: `mo += Tx`, `Tx = (Ua.XJ+1)`). MidFrames=2 -> 3.
-    const int sub = std::max(1, (current_move_->mid_frames + 1) * 1);
+    // Subframes per clip-frame: `UM = (XJ+1)*Tx` (JS `Gka` L23485
+    // `rpa.initialize((Ua.XJ+1) * Tx)`), where `Tx = HD()` is the SlowModel
+    // `KT` scale. `advance()` sets `sub_` at every span boundary, so the
+    // finishing-blow slow-mo (`Tx = 7`, `XJ = 2` -> UM = 21) resamples the
+    // span DENSELY and `mo` still advances 1 per fight frame (JS `eda`
+    // L23286) — smooth, no fractional re-pose. MidFrames=2, no slow-mo -> 3.
+    const int sub = std::max(1, sub_);
 
     // Clip frame (JS `Te.M0()`: `(Xh<=2?0:Xh-2)+Mq`): playback slot
     // `playhead_` maps to clip frame `FirstFrame + max(0, Xh-2)`. `move_frame_`
