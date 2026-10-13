@@ -839,6 +839,16 @@ private:
     // pick before the final `Aua` max-priority pick.
     static std::string keys_signature(const MoveDef& m);
     // `tG`/`wN` (JS `wd.tG`/`wd.wN`, L491/L500) for the `hJa` countdown.
+    // NOTE (findings, this wave): the JS arms this countdown on the OPPONENT
+    // (`wd.x3` L20990 `a=this.jb; ...; a.Mka(0)` with `Mka(a){this.tG=a}`
+    // L21331), so the Random-tactic enemy's cadence is set by the opponent's
+    // animation starts, NOT by its own move change. The port arms it on MY OWN
+    // move change, which re-decides the frame after each of my own move starts
+    // (`--enemy-move-probe --fight-ordinal 1`: `started` jumps by 2 per cycle,
+    // e.g. FrontFlip -> FrontJumpKick on consecutive frames) — see the report.
+    // The JS-exact OPPONENT-arm was implemented and measured (`started` 13 -> 3
+    // over 600 frames) but left the enemy fully passive in `--headless-loop`
+    // (0 hits), so it was reverted; this arm proxy is UNCHANGED.
     int tG_ = -1;
     bool wN_ = false;
     const MoveDef* last_random_move_ = nullptr;

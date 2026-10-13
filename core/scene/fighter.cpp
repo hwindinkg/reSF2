@@ -687,6 +687,10 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     // `PhysicalLying`). A FIRST start (no live solver) still seeds from the
     // current sampled pose with zero velocity.
     if (was_active && solver_init_ && !sol_ma_.empty()) {
+        // JS `Lwb` (L21121) ALWAYS runs `Bva` (when `Yga`): the impulse is
+        // applied on every physics-move start, even when `Al.start` re-arms an
+        // already-live solver.
+        apply_pending_impulses();
         return;
     }
     // JS `Al` ctor char 296286: `this.bQa=xd.bAa` — the per-location
@@ -724,6 +728,15 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
         sol_mf_[i * 3 + 1] = (!old_seed && have_prev) ? prev_pos_[i * 2 + 1] : wy;
         sol_mf_[i * 3 + 2] = model_.bones[i].z;
     }
+    // JS `Lwb` (L21121) -> `Bva(b)` (L21136): `this.IH.strike(this.Bb.KD,
+    // this.Bb.nJa, this.Bb.fg); this.Nd.jE()` — the impulse (`Bl.strike`, which
+    // writes the endpoint nodes' `ma`) runs AFTER `Nd.start` seeded the solver
+    // and BEFORE this same frame's `Nd.ia` solver step, so the struck nodes'
+    // Verlet velocity is `(clip pose + impulse) - previous pose`. The hit pass
+    // stashed the split vectors instead of writing the drawn `pos_` one frame
+    // early (the reported 1-frame knockover jerk). The `jE` clamp below mirrors
+    // the `Nd.jE()` that follows.
+    apply_pending_impulses();
     // JS `Lwb` (L21121) -> `Bva(b)` (L21136): `this.IH.strike(...);
     // this.Nd.jE()` — the ragdoll `jE` wall/floor clamp runs IMMEDIATELY at
     // ragdoll start, so a body seeded OUTSIDE the arena (the throw victim,
@@ -849,6 +862,47 @@ void Fighter::strike_node(int bone, const sf2::scene::Vec3& v) {
         pos_[u * 2] += v.x;
         pos_[u * 2 + 1] += v.y;
     }
+}
+
+void Fighter::stash_hit_impulse(int bone, const sf2::scene::Vec3& v) {
+    if (bone < 0 || model_.bones.empty()) return;
+    if (static_cast<std::size_t>(bone) >= model_.bones.size()) return;
+    pending_impulses_.push_back(PendingNodeImpulse{bone, v});
+}
+
+// JS `Bl.strike`'s `s2a()` (L24710) + the two endpoint writes (L24685-24706),
+// replayed at the ragdoll start (`Bva` L21136). `s2a()` midpoint-smooths every
+// body (`mf = (mf+ma)*0.5`) BEFORE the impulse add; then `ma = ma + split`.
+void Fighter::apply_pending_impulses() {
+    if (pending_impulses_.empty()) return;
+    const std::size_t n = model_.bones.size();
+    if (sol_ma_.size() == n * 3) {
+        // [probe, authorised] `[rdimp]` — the JS `Bva`/`Bl.strike` replay at
+        // the ragdoll start: the struck node's seed velocity `ma-mf` BEFORE and
+        // AFTER the impulse, proving the frame-0 velocity is the impulse (not
+        // gravity alone).
+        const PendingNodeImpulse& f0 = pending_impulses_.front();
+        const std::size_t u0 = static_cast<std::size_t>(f0.bone);
+        const float vx0 = (u0 < n) ? sol_ma_[u0 * 3] - sol_mf_[u0 * 3] : 0.0f;
+        const float vy0 = (u0 < n) ? sol_ma_[u0 * 3 + 1] - sol_mf_[u0 * 3 + 1] : 0.0f;
+        // JS `Bl.strike` (L24669) `this.s2a()` — runs on EVERY strike, even
+        // when the endpoint writes are gated.
+        strike_midpoint_smooth();
+        for (const PendingNodeImpulse& p : pending_impulses_) {
+            const std::size_t u = static_cast<std::size_t>(p.bone);
+            if (u >= n) continue;
+            sol_ma_[u * 3] += p.v.x;
+            sol_ma_[u * 3 + 1] += p.v.y;
+            sol_ma_[u * 3 + 2] += p.v.z;
+        }
+        const float vx1 = (u0 < n) ? sol_ma_[u0 * 3] - sol_mf_[u0 * 3] : 0.0f;
+        const float vy1 = (u0 < n) ? sol_ma_[u0 * 3 + 1] - sol_mf_[u0 * 3 + 1] : 0.0f;
+        std::fprintf(stdout,
+                     "[rdimp] bone=%d imp=(%.2f,%.2f) seedvel %.2f,%.2f -> %.2f,%.2f\n",
+                     f0.bone, f0.v.x, f0.v.y, vx0, vy0, vx1, vy1);
+        std::fflush(stdout);
+    }
+    pending_impulses_.clear();
 }
 
 // JS `wd.Wqb` (L268496): the shock-impulse fling. `d = this.oa.Va.all` (every

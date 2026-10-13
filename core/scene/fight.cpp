@@ -6259,6 +6259,16 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     const sf2::scene::MoveDef* def_move = def.fighter.current_move();
     const bool def_physics = def_move != nullptr && def_move->physics;
     const bool apply_strike = def_react_queued ? def_react_physics : def_physics;
+    // JS `wd.strike` (L21044) writes NO node `ma` at hit time: it only fills
+    // the reaction descriptor `this.Bb` (`fg` = the impulse). The impulse
+    // reaches the endpoint nodes via `Bva` (L21136), called from `Lwb` at the
+    // PHYSICS-reaction start (`Qnb` L20964 -> `Mwb` L21129 -> `Lwb`), i.e. the
+    // frame AFTER the hit, after `Nd.start` and before that frame's `Nd.ia`.
+    // For a queued PHYSICS reaction the port now defers the write (stash +
+    // replay inside `ragdoll_start`). The remaining `apply_strike` case is the
+    // already-live-ragdoll `RZa` path (L22072 `this.GM && this.da.Ua.MS ->
+    // Bva`), which keeps the immediate write.
+    const bool defer_strike = apply_strike && def_react_queued && def_react_physics;
 
     // Knockback (JS Kwb + bounds): interval impulse mirrored by facing,
     // scaled by the attacker JG (ChangeImpulse shapes FUTURE hits).
@@ -6280,7 +6290,7 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     // JS `Bl.strike` (L588) top: `this.s2a()` — midpoint-smooth every body
     // (`mf = (mf+ma)*0.5`) on the struck model before splitting the impulse.
     // Only when the gate above runs (`s2a` is INSIDE `Bl.strike`).
-    if (apply_strike) def.fighter.strike_midpoint_smooth();
+    if (apply_strike && !defer_strike) def.fighter.strike_midpoint_smooth();
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
@@ -6302,8 +6312,15 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         const float p1y = bag_probe && b1 >= 0 ? def.fighter.solver_ma_y(b1) : 0.0f;
         const float p2x = bag_probe && has2 ? def.fighter.solver_ma_x(b2) : 0.0f;
         const float p2y = bag_probe && has2 ? def.fighter.solver_ma_y(b2) : 0.0f;
-        if (apply_strike && b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
-        if (apply_strike && has2) def.fighter.strike_node(b2, imp.node2_vec);
+        if (apply_strike && defer_strike) {
+            // JS `Bva` order: stash the split vectors; `ragdoll_start` applies
+            // them (with `Bl.strike`'s `s2a` midpoint smooth) after the seed.
+            if (b1 >= 0) def.fighter.stash_hit_impulse(b1, imp.node1_vec);
+            if (has2) def.fighter.stash_hit_impulse(b2, imp.node2_vec);
+        } else {
+            if (apply_strike && b1 >= 0) def.fighter.strike_node(b1, imp.node1_vec);
+            if (apply_strike && has2) def.fighter.strike_node(b2, imp.node2_vec);
+        }
         std::fprintf(stdout,
                      "[strike] F%d %s->%s ax=%.1f dx=%.1f imp=(%.2f,%.2f,%.2f) "
                      "x1=%.2f x2=%.2f hd=%d fx=%d nk=%d frame=%d ap=%d\n",

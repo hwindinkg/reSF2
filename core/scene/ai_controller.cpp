@@ -2026,10 +2026,12 @@ std::string AiController::update(const AiFightState& st) {
     // template has no `.dat` tables, so the old unconditional `de.ia` pass
     // found nothing and the enemy never moved.
     if (tactic_->type == 1) {
-        // `wd.x3` (L508) `a.Mka(0)` / `wd.Z2` (L522) `this.Mka(-1)`: a
+        // JS `wd.x3` (L508) `a.Mka(0)` / `wd.Z2` (L522) `this.Mka(-1)`: a
         // started animation (incl. the idle loop restart) arms the `hJa`
-        // countdown; nothing else does. The port observes the current-move
-        // pointer (a `nullptr` gap is the idle loop restart).
+        // countdown. (Findings: the JS `x3` (L20990) arms the OPPONENT —
+        // `a=this.jb; ...; a.Mka(0)` — not self; see the ai.hpp note. The
+        // JS-exact OPPONENT-arm was measured and reverted — it left the enemy
+        // passive in `--headless-loop`.)
         if (st.current_move == nullptr || st.current_move != last_random_move_) {
             tG_ = 0;
         }

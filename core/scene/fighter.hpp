@@ -944,6 +944,11 @@ public:
     void ragdoll_start(const std::string& reaction, float wall_min,
                        float wall_max, float floor_y);
     void ragdoll_stop();
+    // JS `Bva` (L21136): replay the hit impulse stashed by `stash_hit_impulse`
+    // onto the solver `ma` (JS `Bl.strike` + its `s2a`). Called from
+    // `ragdoll_start` after the seed, exactly as `Lwb` does `Nd.start` then
+    // `Bva`.
+    void apply_pending_impulses();
     bool ragdoll_active() const { return nk_; }
     int ragdoll_frame_count() const { return ragdoll_frame_count_; }
     const std::vector<std::string>& ragdoll_names() const { return ragdoll_names_; }
@@ -952,6 +957,17 @@ public:
     // impulse-split displacement to the endpoint nodes' WORLD `ma`.
     // Persistent across frames while the ragdoll is active.
     void strike_node(int bone, const sf2::scene::Vec3& v);
+
+    // JS `wd.strike` (L21044) -> `Bva` (L21136): at HIT time the strike only
+    // fills the reaction descriptor `this.Bb` (`KD`/`nJa`/`fg`); the impulse
+    // reaches the node `ma` LATER, at the ragdoll start (`Qnb` -> `Mwb` ->
+    // `Lwb` -> `Bva` -> `Bl.strike`), AFTER `Al.start` and BEFORE that same
+    // frame's `Nd.ia` solver step. `stash_hit_impulse` records the split
+    // vectors; `ragdoll_start` replays them JS-exactly. Without this the port
+    // wrote the drawn `pos_` on the HIT frame (one frame early), so the
+    // knocked-down body was drawn displaced for an extra frame — the reported
+    // 1-frame jerk on knockover.
+    void stash_hit_impulse(int bone, const sf2::scene::Vec3& v);
 
     // JS `wd.Wqb` (L268496) — the shock-impulse weapon fling. For EVERY body
     // node carrying `Shock="1"` (`Vc.vc`, the weapon-attachment nodes
@@ -1143,6 +1159,14 @@ private:
     // bind-nearest skeleton bone.
     std::vector<float> sol_ma_;  // 3*n: current posed positions (JS `ma`)
     std::vector<float> sol_mf_;  // 3*n: previous positions (JS `mf`)
+    // Struck endpoint nodes of a hit whose reaction is a PHYSICS one: the
+    // impulse is applied inside `ragdoll_start` (JS `Bva` at `Lwb`), not at
+    // hit time. Cleared by `ragdoll_start` when replayed.
+    struct PendingNodeImpulse {
+        int bone;
+        sf2::scene::Vec3 v;
+    };
+    std::vector<PendingNodeImpulse> pending_impulses_;
     bool solver_init_ = false;   // ma/mf seeded from the bind pose once
     // [perf] Solver index caches (built once per model). The JS `Al.jE`/`Qja`
     // hold DIRECT node references, so its per-frame solve never resolves a
