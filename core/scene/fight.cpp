@@ -5400,8 +5400,22 @@ void FightController::fill_ctx_geometry(FightContext& ctx, const FightFighter& m
                 return f.fighter.node_world_xy(part, prev, x, y);
             }
             if (obj == "Pivot") {
-                x = f.fighter.world_x();
-                y = f.fighter.world_y();
+                // JS `ee.nt` case 2 (L33250) -> `ee.j8a` (L33329): `b =
+                // CBa(a).Yd` (the `vF`/`Bx`-stamped `Va.IF[align.UE]`) with
+                // the fallback `a.cJa = fighter.da.Fe()` — BOTH resolve to the
+                // CURRENT MOVE's `<Align><Pivot Part>` node (`Te.Mqb` L23543:
+                // `currentNode = model.Va.all[align.UE]`, `align.UE` from
+                // `x6` L21148-21150). It is NOT the NPivot render anchor
+                // (`Dl.Fe()` = `Va.Yd` = `fighter_pivot_bone()`): the boss's
+                // `FistsStartStance` aligns on `NHeel_2`, ~90 world units from
+                // NPivot, which is exactly the old distance error.
+                // `align.UE == -1` (no `<Align><Pivot Object="Nodes">` node)
+                // leaves `currentNode == null`, so `nt` case 2 keeps its
+                // `new H(0,0,0,1)` (x = ix*Wl, y = -jx; ShiftX/ShiftY 0
+                // shipped) -> (0, 0).
+                if (f.fighter.align_pivot_world_xy(prev, x, y)) return true;
+                x = 0.0f;
+                y = 0.0f;
                 return true;
             }
             return false;  // MapCenter/unknown -> root-gap fallback

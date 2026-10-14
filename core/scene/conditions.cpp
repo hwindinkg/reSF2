@@ -371,7 +371,18 @@ float ref_x(const Cond& c, bool to_end, const FightContext& ctx) {
     // returns (0,0,0,1) -> x == 0 (the 7 shipped `<Direction Player="Enemy">`).
     if (obj.empty()) return 0.0f;
     if (obj == "Wall") return wall_ref_x(ctx, player, part);
-    // `Object="Nodes"|"Pivot"|...` -> the owning fighter's root X.
+    // `Object="Nodes"|"Pivot"|"COM"|"Floor"` -> the SAME `ee.nt` resolution
+    // the two-ended path uses (`ctx.ref_pos`), so a `Pivot` end paired with a
+    // `Wall` end still reads the `<Align><Pivot Part>` node, not the NPivot
+    // anchor (`ee.j8a` L33329 -> `Te.Mqb` L23543).
+    if (ctx.ref_pos) {
+        float x = 0.0f, y = 0.0f;
+        if (ctx.ref_pos(obj, part, player, to_end ? c.to_prev : c.from_prev, x,
+                        y)) {
+            return x;
+        }
+    }
+    // Unknown/MapCenter -> the owning fighter's root X.
     return player == 2 ? ctx.enemy_x : ctx.me_x;
 }
 

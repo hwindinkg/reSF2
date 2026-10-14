@@ -825,6 +825,25 @@ public:
         y = p[static_cast<std::size_t>(i) * 2 + 1];
         return true;
     }
+    // JS `Te.Fe()` (L22894 `return this.currentNode`) — the node `Te.Mqb`
+    // (L23543) stores on every move start: `currentNode =
+    // model.Va.all[align.UE]`, the CURRENT MOVE's `<Align><Pivot Part>` node
+    // (`align.UE` resolved by `x6` L21148-21150). This is what `ee.j8a`
+    // (L33329) resolves `Object="Pivot"` to via `da.Fe()` — NOT the NPivot
+    // render anchor (`Dl.Fe()` = `Va.Yd` = `fighter_pivot_bone()`), which is
+    // a DIFFERENT node (e.g. the boss's `FistsStartStance` aligns on
+    // `NHeel_2`, ~90 world units from NPivot). `prev` selects the previous
+    // solver frame (JS `afa` `frame == 2` -> `.mf`). Returns false when the
+    // current move has no `<Align><Pivot Object="Nodes">` node (JS
+    // `align.UE == -1` -> `currentNode == null`).
+    bool align_pivot_world_xy(bool prev, float& x, float& y) const {
+        const int i = align_pivot_u_ >= 0 ? align_pivot_u_ : align_pivot_bone_u_;
+        const std::vector<float>& p = prev ? prev_pos_ : pos_;
+        if (i < 0 || p.size() < static_cast<std::size_t>(i) * 2 + 2) return false;
+        x = p[static_cast<std::size_t>(i) * 2];
+        y = p[static_cast<std::size_t>(i) * 2 + 1];
+        return true;
+    }
     // Clamps the fighter's world x to [min_x, max_x] (the arena walls).
     // Called each frame by the fight controller after the root-motion walk.
     void clamp_x(float min_x, float max_x) {
@@ -1292,6 +1311,13 @@ private:
     float render_offset_y_ = 0.0f;
     float prev_align_pivot_world_y_ = 0.0f;  // previous frame's world y of the Part
     int align_pivot_u_ = -1;                 // `<Align><Pivot Part>` bone index (`UE`)
+    // JS `Te.Mqb` (L23543): `currentNode = model.Va.all[align.UE]` where
+    // `align.UE = model.w0(<Align><Pivot Part>)` (`x6` L21148-21150). The
+    // RAW `<Align><Pivot Part>` index (JS `UE`), independent of the
+    // `solver_init_` guard that `align_pivot_u_` needs: `Te.Mqb` runs on
+    // EVERY move start, so `ee.j8a` (`Object="Pivot"`) resolves even when
+    // the solver state is not yet live.
+    int align_pivot_bone_u_ = -1;
     // [F1/F3] The bone the align actually reads after `Peb`'s `rw` node swap
     // (`Te.Peb` L560 `this.os = model.NQ(this.os)` -> `Gub` L558/559 read `os`,
     // i.e. the mirror PARTNER of `<Align><Pivot Part>` when `rw`). Used by the

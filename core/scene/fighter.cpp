@@ -1510,6 +1510,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // NPivot ride the clip — exactly like the JS. Without an align (JS
     // `Gla(0,0,0)`, no shift) the anchor stays where it was.
     align_pivot_u_ = -1;
+    align_pivot_bone_u_ = -1;
     render_offset_valid_ = true;  // default: anchor-continuous (no align)
     // [B1 FIX vertical anchor] No align / no Y axis -> the JS `Gla` y shift is
     // `eja` (`ShiftY`, 0 shipped), so the whole clip's own y stands. Without
@@ -1532,6 +1533,9 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         align_pivot_u_ = -1;
     } else if (move.align.has_align) {
         const int pv = model_.bone_by_name(move.align.pivot_part);
+        // JS `x6` L21148-21150: `align.UE = model.w0(<Align><Pivot Part>)` —
+        // the RAW index `Te.Mqb` puts in `currentNode` (`da.Fe()`).
+        align_pivot_bone_u_ = pv;
         const int an = model_.bone_by_name(fighter_pivot_bone());
         // [F1/F3] The `<Align><Pivot Part>` node the JS actually anchors on is
         // the POST-`Peb` one (`os`, i.e. `NQ(UE)` when `rw`) — see compute_align.
@@ -2288,6 +2292,7 @@ void Fighter::advance_step() {
         render_offset_y_ = 0.0f;
         render_offset_valid_ = true;
         align_pivot_u_ = -1;
+        align_pivot_bone_u_ = -1;
         return;
     }
 
@@ -2519,6 +2524,7 @@ void Fighter::clear_move() {
     render_offset_valid_ = true;
     preview_mode_ = false;
     align_pivot_u_ = -1;
+    align_pivot_bone_u_ = -1;
     // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too;
     // `Te.reset` L548 also restores the ctor default `FX = 1`.
     mirror_swap_ = false;
