@@ -156,9 +156,17 @@ that char-offset grep missed:
   unchanged; the `(xii)` probe re-derived from the JS; hit window F411 → F256).
 - `4f70866c` profile avatar idle loop in place (`Gka`), no `Pi.job` re-seat;
   hit impulse = the LAST strike (JS `Bb` is one overwritten descriptor).
-- OPEN (hunt): the oracle dummy's placement/ragdoll (bone 14 native y frozen vs
-  the oracle sliding; a +2.267 world-y offset); the seed clamp at `ragdoll_start`
-  over-clamps (all nodes vs the JS `cA` endpoints only); `m2()`/`Tba`.
+- `436ca606` hunt: pose-dump `clip` = the MOVE NAME (not the archive key); the
+  dummy stage move (`PhysicalDummy`); `ragdoll_start` seed clamp only the `cA`
+  endpoints (JS `fdb`/`fha`); `Te.M2` = a model-lifetime counter. Pose diff
+  improved: real-fighter bone mean **0.020** / max **1.360**, **0/68** over tol.
+- `21e08f9b` hunt: the `Physics="1"` stage move (the Punchbag) routes through the
+  ragdoll (`DK` L674 `jJa`/`Al.start`) — the dummy is no longer frozen
+  (over-tol 238/242 → 109/242, mean 264.8 → 7.9); the ragdoll `fx` reset
+  (`Qnb`'s `da.reset()`) — dummy fx mismatch 241/242 → **0/242**.
+- OPEN (hunt): the dummy's constant ~1.886 world-y bind/pivot offset (a placement
+  convention, not ragdoll); the dummy pair's `109/242` over-tol is a comparison
+  alignment artifact (a repeating idle cycle, `cf` always 0).
 - OPEN: the frame-exact AI cadence vs a JS oracle trace is unreachable (live
   oracle down); `BarelyAliveRounds` HP scale; `EclipseMode="1"` rows; the
   `{Uninterrupt,SelfUninterrupt}` interval set is a hardcoded pair (shipped-
