@@ -640,6 +640,15 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     // Distance refs (`ee.q9a` L788) fall back to the context defaults — the
     // shipped dojo walls (`FightController` `wall_min_`/`wall_max_`).
     ctx.dist_3d = std::fabs(ctx.dist_x);
+    // JS `Ae` (the SHARED fight condition context, `Gc.yma`/`zT` L347516):
+    // `de.V1`/`Gc.EZa` evaluate every candidate's `<Distance>` against the
+    // POSED bone refs (`ee.nt` L786 resolves `Object="Nodes"`/`"Pivot"` to the
+    // current skeleton nodes), not the Me->Enemy root gap. `qm.he` (L744):
+    // `b = this.GK.OQ(a) - this.FK.OQ(a)`. Wiring the resolver makes the
+    // Random path's candidate set use the same distance as the JS.
+    ctx.ref_pos = st.ref_pos;
+    ctx.wall_min = st.my_wall_min;
+    ctx.wall_max = st.my_wall_max;
     ctx.health_ratio = st.my_max_hp > 0.0f ? st.my_hp / st.my_max_hp : 1.0f;
     ctx.candidate_moves = {m.name};
     for (const auto& iv : st.my_intervals) {

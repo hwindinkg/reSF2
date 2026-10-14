@@ -7640,6 +7640,48 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.my_bone_world_x = [&me](const std::string& label, int facing) {
             return me.fighter.bone_world_x(label, facing);
         };
+        // JS `ee.nt` (L786): the `<Distance>` From/To ref resolver for the
+        // AI's condition context (`de.V1` L601-602 / `Gc.EZa` `f.Yz`). The
+        // SAME resolver `fill_ctx_geometry` installs for the condition
+        // evaluator — the Random path (`wd.hJa` -> `Gc.Pkb`) evaluates the
+        // candidate's `<Tactics>`/`<Conditions>` with the shared `Ae`, so its
+        // `Object="Nodes"`/`"Pivot"` refs must read the POSED bones, not the
+        // Me->Enemy root gap.
+        {
+            const float me_dir =
+                (foe.fighter.world_x() - me.fighter.world_x()) >= 0.0f ? 1.0f
+                                                                       : -1.0f;
+            const float foe_dir = -me_dir;
+            const float wmin = wall_min_;
+            const float wmax = wall_max_;
+            st.ref_pos = [&me, &foe, me_dir, foe_dir, wmin, wmax](
+                             const std::string& obj, const std::string& part,
+                             int player, bool prev, float& x, float& y) -> bool {
+                const FightFighter& f = (player == 2) ? foe : me;
+                if (obj == "COM") {
+                    x = prev ? f.fighter.com_prev_x() : f.fighter.com_x();
+                    y = prev ? f.fighter.com_prev_y() : f.fighter.com_y();
+                    return true;
+                }
+                if (obj == "Floor") { x = 0.0f; y = 0.0f; return true; }
+                if (obj == "Wall") {
+                    const float facing = (player == 2) ? foe_dir : me_dir;
+                    const bool back = (part == "Back");
+                    x = ((facing > 0.0f) == back) ? wmin : wmax;
+                    y = 0.0f;
+                    return true;
+                }
+                if (obj == "Nodes") {
+                    return f.fighter.node_world_xy(part, prev, x, y);
+                }
+                if (obj == "Pivot") {
+                    x = f.fighter.world_x();
+                    y = f.fighter.world_y();
+                    return true;
+                }
+                return false;
+            };
+        }
         // JS `de.oxb` (L618 `b.da.yu`/`b.da.zu`, b = this.model = ME): MY
         // arena walls (`Te.zLa` via `qMa`). The candidate-filter `bma`.
         st.my_wall_min = me.fighter.arena_wall_min();

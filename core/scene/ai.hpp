@@ -477,6 +477,18 @@ struct AiFightState {
     // models no pose) `wea` falls back to the pre-fix `enemy_x` proxy so the
     // ai_demo/golden paths stay byte-identical.
     std::function<float(const std::string&, int)> my_bone_world_x;
+    // JS `ee.nt` (L786) Distance ref resolver for the AI condition context:
+    // `de.V1` (L601-602) and `Gc.EZa`'s `f.Yz(b, null, g)` evaluate the
+    // candidate's `<Conditions>` with the SHARED fight context `Ae`, whose
+    // `<Distance>` refs resolve `Object="Nodes"`/`"Pivot"` to the POSED bone
+    // positions (`qm.he` L744: `To.OQ(a) - From.OQ(a)`). Without it the port's
+    // Random path (`wd.hJa` -> `Gc.Pkb`) collapsed every ref to the Me->Enemy
+    // ROOT gap, so the candidate set was gated on a different distance than
+    // the JS's. Injected by the fight (the same resolver `fill_ctx_geometry`
+    // installs).
+    std::function<bool(const std::string&, const std::string&, int, bool, float&,
+                       float&)>
+        ref_pos;
     // JS `Te.yu`/`Te.zu` (set by `Te.zLa` L279707 via `qMa`): MY arena walls.
     // Read by `de.oxb` (L618 `b.da.zu` / `b.da.yu` with b = this.model = me).
     // Set by the fight from the fighter's arena bounds; 0/0 in pose-less
