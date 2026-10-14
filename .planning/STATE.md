@@ -147,6 +147,18 @@ that char-offset grep missed:
   first seat `Pi.job` re-seats) — the "back→forward + jump" is gone
   (`--profile-avatar-probe`: `restart_step 0.155` vs `steady 0.142`) + the hit
   impulse now REPLACES per strike (JS `Bb` is one overwritten descriptor).
+## Hunt waves (2026-10-14) — verbatim inaccuracy sweep
+- `5bfd7d79` anim: `UM==1` samples the JS `p2` (the 3rd control point), not the
+  span's `p0` — 19 reaction/fall moves (MidFrames absent) drew one span behind.
+- `6a1a690f` anim: `move_frame_` = `ff + max(0, span-1) + Mq` (JS `Te.M0` reads
+  `Xh`, which is `span+1` for the whole span) — every move's interval/action
+  windows were opening ~1 frame early. **oracle-pose-validated** (pose diff
+  unchanged; the `(xii)` probe re-derived from the JS; hit window F411 → F256).
+- `4f70866c` profile avatar idle loop in place (`Gka`), no `Pi.job` re-seat;
+  hit impulse = the LAST strike (JS `Bb` is one overwritten descriptor).
+- OPEN (hunt): the oracle dummy's placement/ragdoll (bone 14 native y frozen vs
+  the oracle sliding; a +2.267 world-y offset); the seed clamp at `ragdoll_start`
+  over-clamps (all nodes vs the JS `cA` endpoints only); `m2()`/`Tba`.
 - OPEN: the frame-exact AI cadence vs a JS oracle trace is unreachable (live
   oracle down); `BarelyAliveRounds` HP scale; `EclipseMode="1"` rows; the
   `{Uninterrupt,SelfUninterrupt}` interval set is a hardcoded pair (shipped-
