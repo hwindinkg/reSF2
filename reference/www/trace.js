@@ -30,6 +30,28 @@
   "use strict";
 
   var MAX_FRAMES = 350; /* stop emitting after this many frame lines */
+  /* SCENARIO SELECTOR (state harness): `?maxFrames=N` raises the frame budget
+   * so the trace survives the hub navigation and covers a REAL fight. The
+   * default (350) keeps the legacy dojo/training pose window unchanged. */
+  try {
+    var qm = new URLSearchParams(window.location.search).get("maxFrames");
+    if (qm != null) {
+      var qn = parseInt(qm, 10);
+      if (isFinite(qn) && qn > 0) MAX_FRAMES = qn;
+    }
+  } catch (e) { /* no query string */ }
+  /* `?skipFightNone=1`: suppress emission while the live fight is the
+   * `FightNone` hub/dojo viewer (`fight.Da.type == "FightNone"`, JS `dl.type`
+   * L59254). A navigating scenario (hub -> Map -> battle) would otherwise
+   * interleave the viewer's frames with the real fight's; skipping them makes
+   * the state trace start exactly at the real fight, like the native
+   * `--fight` dump. Opt-in, so the dojo-demo (`postTutorial=0`) scenario —
+   * which IS the viewer — is unchanged. */
+  var SKIP_FIGHT_NONE = false;
+  try {
+    SKIP_FIGHT_NONE =
+      new URLSearchParams(window.location.search).get("skipFightNone") === "1";
+  } catch (e) { /* no query string */ }
   var MAX_CLIPS = 5; /* at most this many clip dumps per run */
 
   var tr = {
@@ -42,6 +64,7 @@
     clips: 0,
     cam: null, /* {cx,cy,zoom} set by the Ut.Al hook */
     seenClips: {}, /* clip label -> true (dump once per clip per run) */
+    lastFightFrame: -1, /* last emitted `fight.frame` (one line per fight frame) */
     lastClip: new WeakMap() /* fighter -> clip label seen last tick */
   };
 
@@ -200,6 +223,143 @@
     };
   }
 
+  /* ---------- full fight-state dump (mechanical differential harness) ------ */
+
+  /* Per-fighter LIVE combat state, read from the game objects:
+   *   hp/mhp   `parameters.gd` / `parameters.Zn`
+   *   combo    `Vx.tf`        (combo ladder)
+   *   style    `dz`           (style level)
+   *   unhit    `parameters.cE`(per-round "not hit yet" latch)
+   *   shock    `vc`           (shock/disarm latch)
+   *   block    `da.yD(5)`     (a Block interval active)
+   *   invuln   `da.yD(6)`     (an Invulnerable interval active)
+   *   move     `da.Ua.name`   (current move name)
+   *   af       `da.Xh`        (clip playhead)
+   *   iv       `da.xj`        (active intervals [name,type])
+   *   rag/ragf `Nd.nk` / `Nd.frameCount` (ragdoll solver)
+   * Every read is try/catch-guarded; the field NAMES/ORDER mirror the native
+   * `FightController::dump_state_frame` line exactly. */
+  function fighterState(f, id) {
+    var o = {
+      id: id, hp: null, mhp: null, combo: null, style: null, unhit: null,
+      shock: 0, block: 0, invuln: 0, move: null, af: null, rag: 0, ragf: 0,
+      iv: []
+    };
+    if (!f) return o;
+    try {
+      if (f.parameters) {
+        o.hp = r3(f.parameters.gd);
+        o.mhp = r3(f.parameters.Zn);
+        o.unhit = f.parameters.cE ? 1 : 0;
+      }
+    } catch (e) { /* ignore */ }
+    try { if (f.Vx) o.combo = f.Vx.tf | 0; } catch (e) { /* ignore */ }
+    try { o.style = f.dz | 0; } catch (e) { /* ignore */ }
+    try { o.shock = f.vc ? 1 : 0; } catch (e) { /* ignore */ }
+    try {
+      if (f.da) {
+        o.move = f.da.Ua && f.da.Ua.name != null ? String(f.da.Ua.name) : null;
+        o.af = typeof f.da.Xh === "number" ? f.da.Xh : null;
+        o.block = f.da.yD(5) != null ? 1 : 0;
+        o.invuln = f.da.yD(6) != null ? 1 : 0;
+        var xj = f.da.xj;
+        if (xj && xj.length) {
+          for (var i = 0; i < xj.length; i++) {
+            var it = xj[i];
+            o.iv.push([it && it.name != null ? String(it.name) : "",
+                       it && typeof it.type === "number" ? it.type : 0]);
+          }
+          o.iv.sort(function (a, b) {
+            if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+            return a[1] - b[1];
+          });
+        }
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      if (f.Nd) {
+        o.rag = f.Nd.nk ? 1 : 0;
+        o.ragf = typeof f.Nd.frameCount === "number" ? f.Nd.frameCount | 0 : 0;
+      }
+    } catch (e) { /* ignore */ }
+    return o;
+  }
+
+  /* Fight-level state:
+   *   nf       `Sf.NF`      (the HUD countdown seconds — `fight.ha.mb` is the
+   *                           `Sf` HUD, `Ar.E1` L83904; `Sf.iPa` L84739
+   *                           `NF = xU/60|0`, ticked while `round.Vt`)
+   *   timer    `Sf.NF`      (the raw countdown; the JS `$t.time` is
+   *                           write-once `0` (`ca.tx` L16643) so it is NOT a
+   *                           comparable quantity — the live countdown is)
+   *   result   `ey`        (the round result code)
+   *   rules    [n, n_active] over `fight.Da.jh()` (L59361: `p.o.Yh ? CV :
+   *            Ae`, the eclipse-filtered rule collection the port's
+   *            `rules_begin_round` mirrors), falling back to `ud.Ae`
+   *   callouts [n_me, n_en]  (`Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` — the live `Gr`
+   *                           display lists, ticked by `Gr.azb` inside
+   *                           `ca.ia`)
+   *   counters `m$` / `lW` */
+  function hudSf(fight) {
+    try {
+      if (fight.ha && fight.ha.mb) return fight.ha.mb;      // `Ar.mb` (Sf)
+      if (fight.mb && typeof fight.mb.NF === "number") return fight.mb;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function fightState(fight) {
+    var round = fight.round || null;
+    var sf = hudSf(fight);
+    var nf = null;
+    if (sf && typeof sf.NF === "number") nf = sf.NF | 0;
+    var result = null;
+    try { if (typeof fight.ey === "number") result = fight.ey | 0; } catch (e) { /* ignore */ }
+    var rules = [0, 0];
+    try {
+      var src = null;
+      try { if (fight.Da && typeof fight.Da.jh === "function") src = fight.Da.jh(); }
+      catch (e) { /* ignore */ }
+      if (!src) {
+        var ud = fight.ud;
+        if (ud && ud.Ae) src = ud.Ae;
+      }
+      if (src) {
+        rules[0] = src.length | 0;
+        var act = 0;
+        for (var i = 0; i < src.length; i++) {
+          if (src[i] && src[i].active) ++act;
+        }
+        rules[1] = act;
+      }
+    } catch (e) { /* ignore */ }
+    var callouts = [0, 0];
+    try {
+      var mb = sf || (fight.ha && fight.ha.mb);
+      if (mb) {
+        if (mb.Id && mb.Id.Jh && mb.Id.Jh.Gu) callouts[0] = mb.Id.Jh.Gu.length | 0;
+        if (mb.je && mb.je.Jh && mb.je.Jh.Gu) callouts[1] = mb.je.Jh.Gu.length | 0;
+      }
+    } catch (e) { /* ignore */ }
+    var counters = { "m$": 0, "lW": 0 };
+    try { counters["m$"] = fight.m$ ? 1 : 0; } catch (e) { /* ignore */ }
+    try { counters["lW"] = fight.lW ? 1 : 0; } catch (e) { /* ignore */ }
+    return {
+      t: "state",
+      f: typeof fight.frame === "number" ? fight.frame : 0,
+      phase: typeof fight.eu === "number" ? fight.eu : 0,
+      round: round ? round.round : null,
+      timer: nf,
+      nf: nf,
+      result: result,
+      cam: tr.cam || camFallback(fight),
+      counters: counters,
+      rules: rules,
+      callouts: callouts,
+      fighters: [fighterState(fight.pb, "Me"), fighterState(fight.yb, "Enemy")]
+    };
+  }
+
   /* ---------- clip dump ---------- */
 
   /* Once per played clip (throttled: first occurrence of each label per run,
@@ -268,8 +428,26 @@
     if (tr.done || !tr.enabled) return;
     var fight = fightObj();
     if (!fight) return;
+    if (SKIP_FIGHT_NONE) {
+      try {
+        if (fight.Da && fight.Da.type === "FightNone") return;
+      } catch (e) { /* ignore */ }
+    }
     ensureHooks(fight);
+    // One line per FIGHT frame, from the first LIVE frame — exactly like the
+    // native `dump_state_frame` (`if (phase_ == fight_phase::idle) return;`
+    // plus its once-per-update call). The JS `eu == 0` pre-round intro holds
+    // `fight.frame` at 0 for many app ticks (the VS overlay / round plate), so
+    // without this the trace would carry dozens of duplicate `f=0,phase=0`
+    // lines and the two-pointer alignment would stall.
+    try {
+      if (fight.eu === 0) return;
+      if (typeof fight.frame === "number" && fight.frame === tr.lastFightFrame)
+        return;
+      tr.lastFightFrame = fight.frame;
+    } catch (e) { /* ignore */ }
     console.log(JSON.stringify(frameJson(fight)));
+    console.log(JSON.stringify(fightState(fight)));
     tr.frameCount++;
     captureClips(fight);
     if (tr.frameCount >= MAX_FRAMES) finish();
