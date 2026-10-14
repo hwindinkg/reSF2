@@ -6373,6 +6373,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         if (apply_strike && defer_strike) {
             // JS `Bva` order: stash the split vectors; `ragdoll_start` applies
             // them (with `Bl.strike`'s `s2a` midpoint smooth) after the seed.
+            // JS `this.Bb` is a SINGLE descriptor overwritten per strike, so a
+            // second hit in the same frame REPLACES the first's impulse — clear
+            // before stashing this strike's (≤2) endpoints.
+            def.fighter.clear_pending_impulses();
             if (b1 >= 0) def.fighter.stash_hit_impulse(b1, imp.node1_vec);
             if (has2) def.fighter.stash_hit_impulse(b2, imp.node2_vec);
         } else {

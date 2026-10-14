@@ -1316,6 +1316,12 @@ public:
     int avatar_frame() const { return avatar_frame_; }
     std::string avatar_clip_name() const { return avatar_clip_name_; }
     bool avatar_ready() const { return avatar_ok_; }
+    // [probe] The avatar render anchor's world x/y (`Fighter::world_x/y`,
+    // i.e. JS `Dl.Fe().ma` = the `<PivotNode>` anchor the model is drawn on).
+    // The `--profile-avatar-probe` idle-loop block samples these across a loop
+    // to prove the anchor stays put (`Gka` in-place loop, NO `oL` re-seat).
+    float avatar_world_x() const;
+    float avatar_world_y() const;
     // The `$r.Op.pa` -> `Ad.kg` two-stage chain (`$r.mhb` L1150052 -> `vb.Zkb`
     // L1131024 -> `vb.DK` L1131507 -> `Pi.kg` -> `vb.lS` L1131503).
     // `trigger_show` performs the SAME `start_show` the VIEW click runs.

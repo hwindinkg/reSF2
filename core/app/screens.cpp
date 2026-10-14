@@ -20215,6 +20215,14 @@ bool EquipmentScreen::ensure_avatar(App& app) {
     return avatar_ok_;
 }
 
+float EquipmentScreen::avatar_world_x() const {
+    return avatar_fighter_ != nullptr ? avatar_fighter_->world_x() : 0.0f;
+}
+
+float EquipmentScreen::avatar_world_y() const {
+    return avatar_fighter_ != nullptr ? avatar_fighter_->world_y() : 0.0f;
+}
+
 // `$r.mhb` (L1150052) -> `vb.Zkb` (L1131024): store the SELECTED move (`q6`)
 // and start the Show chain (`qab` hides the UI, `Vp=2`). Guarded exactly like
 // the JS (`this.Vp!=0 || this.wga`).
@@ -20404,11 +20412,26 @@ void EquipmentScreen::update_impl(float dt) {
         // forever (the reported "profile loops the weapon-draw"). Advance
         // through the `Te.ia` subframe pacing, not one frame per tick.
         if (!avatar_fighter_->preview_active()) {
+            // [FIX profile idle-loop drift — JS `wd.ia` L22813/22834 `Gka(...)`]
+            // The idle clip's own end (`Te.KNa`) is followed by `Gka` (the `OG`
+            // buffer loop): the SAME `wd` re-selects the SAME idle move IN PLACE
+            // (`Gka` only re-initialises the span `rpa`, `mo=0` — it neither
+            // rebuilds the `Pi` (`Pi.Ex`/`new wd`) nor runs `Pi.job`/`wd.oL`).
+            // Re-seating here forced the render anchor back to `Pi.J9` on every
+            // loop: the anchor snapped BACK to x=0 while the idle's root motion
+            // had carried it FORWARD, then drifted forward again — the reported
+            // "в профиле сначала назад, потом вперёд и немного подпрыгивает при
+            // зацикливании". `advance_destination_model` (the shop/profile
+            // destination backdrop) already loops with `reseat=false`; the
+            // persistent `vb.Ad` avatar must match it. Only the FIRST seat
+            // (`ensure_avatar` L20205, the `Pi.Ex`/`Pi.job` state entry) re-seats.
             if (avatar_idle_move_ != nullptr && avatar_idle_clip_ != nullptr &&
                 !avatar_idle_clip_->frames.empty()) {
-                avatar_fighter_->start_preview_clip(*avatar_idle_move_, *avatar_idle_clip_);
+                avatar_fighter_->start_preview_clip(*avatar_idle_move_, *avatar_idle_clip_,
+                                                    0.0f, -93.0f, false);
             } else {
-                avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_);
+                avatar_fighter_->start_preview_clip(*avatar_move_, *avatar_clip_, 0.0f,
+                                                    -93.0f, false);
             }
         }
         avatar_fighter_->advance(dt);

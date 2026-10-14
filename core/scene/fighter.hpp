@@ -968,6 +968,12 @@ public:
     // knocked-down body was drawn displaced for an extra frame — the reported
     // 1-frame jerk on knockover.
     void stash_hit_impulse(int bone, const sf2::scene::Vec3& v);
+    // JS `this.Bb` is a SINGLE reaction descriptor, OVERWRITTEN by every
+    // `wd.strike` (L21044): a later hit this frame replaces the earlier one's
+    // impulse. The port accumulates `pending_impulses_`, so the caller clears
+    // it once before stashing a hit's split vectors (≤2), making the pending
+    // set exactly the LAST strike — JS-exact.
+    void clear_pending_impulses() { pending_impulses_.clear(); }
 
     // JS `wd.Wqb` (L268496) — the shock-impulse weapon fling. For EVERY body
     // node carrying `Shock="1"` (`Vc.vc`, the weapon-attachment nodes

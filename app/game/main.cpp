@@ -3712,6 +3712,63 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      model_ok ? "PLAYER-HERO" : "MISSING", bones,
                      av->avatar_clip_name().c_str(), clip_frames, f0, f1, animated ? 1 : 0);
         std::fflush(stdout);
+        // [probe] IDLE-LOOP ANCHOR STABILITY (this fix): the idle clip loops via
+        // `Gka` in place (NO `Pi.job`/`oL` re-seat), so the render anchor must
+        // stay anchored across a loop. Sample `Dl.Fe().ma` (world x/y) and the
+        // per-frame step: the old re-seat snapped the anchor back to `Pi.J9`
+        // (x=0) every loop (the reported "назад -> вперёд + подпрыгивает").
+        float wxmin = 0.0f, wxmax = 0.0f, wymin = 0.0f, wymax = 0.0f;
+        float max_step = 0.0f;
+        float max_step_restart = 0.0f;
+        float max_step_steady = 0.0f;
+        int loop_restarts = 0;
+        {
+            float pw = 0.0f, pwy = 0.0f;
+            bool have = false;
+            int prev_frame = av->avatar_frame();
+            for (int i = 0; i < 1500; ++i) {
+                app.run_one_frame();
+                if (!av->avatar_ready()) break;
+                const int f = av->avatar_frame();
+                const bool restart = have && f < prev_frame;
+                if (restart) ++loop_restarts;
+                prev_frame = f;
+                const float wx = av->avatar_world_x();
+                const float wy = av->avatar_world_y();
+                if (!have) {
+                    wxmin = wxmax = wx;
+                    wymin = wymax = wy;
+                    pw = wx;
+                    pwy = wy;
+                    have = true;
+                    continue;
+                }
+                const float dx = wx - pw;
+                const float dy = wy - pwy;
+                const float step = std::sqrt(dx * dx + dy * dy);
+                if (step > max_step) max_step = step;
+                if (restart) {
+                    if (step > max_step_restart) max_step_restart = step;
+                } else if (i > 300) {
+                    if (step > max_step_steady) max_step_steady = step;
+                }
+                if (wx < wxmin) wxmin = wx;
+                if (wx > wxmax) wxmax = wx;
+                if (wy < wymin) wymin = wy;
+                if (wy > wymax) wymax = wy;
+                pw = wx;
+                pwy = wy;
+            }
+        }
+        std::fprintf(stdout,
+                     "[avatarprobe] idle loop restarts=%d worldx[%.3f,%.3f] "
+                     "worldy[%.3f,%.3f] max_step=%.3f restart_step=%.3f "
+                     "steady_step=%.3f (JS `Gka` in-place loop)\n",
+                     loop_restarts, wxmin, wxmax, wymin, wymax, max_step,
+                     max_step_restart, max_step_steady);
+        std::fflush(stdout);
+        const bool loop_anchored =
+            loop_restarts >= 1 && max_step_restart <= max_step_steady * 1.5f;
         // `$r.Op.pa` -> `Ad.kg`: the VIEW button chain.
         const bool started = av->trigger_show(app);
         bool saw_run = false, saw_done = false;
@@ -3721,7 +3778,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             if (av->show_running()) saw_run = true;
             if (av->show_chain_completed()) { saw_done = true; break; }
         }
-        const bool ok = model_ok && animated && started && saw_run && saw_done;
+        const bool ok = model_ok && animated && loop_anchored && started && saw_run && saw_done;
         std::fprintf(stdout,
                      "[avatarprobe] %s show started=%d ran=%d done=%d move_frames=%d "
                      "frames=%d\n",
