@@ -143,9 +143,14 @@ that char-offset grep missed:
   **AI Random-path** `tG_` opponent-arm + `fIa` self-arm + round-start (the ~95 %
   double-attack / freeze); preview state re-entry re-seat (`Pi.L4`); new
   `--kick-ko` probe proving `KickFights` PASS.
-- OPEN: the profile idle-loop "back→forward + jump" is not numerically asserted;
-  the frame-exact AI cadence vs a JS oracle trace is unreachable (live oracle
-  down); `BarelyAliveRounds` HP scale; `EclipseMode="1"` rows.
+- `4f70866c` **profile avatar idle-loop** (JS `wd.ia` `Gka` loops IN PLACE; only the
+  first seat `Pi.job` re-seats) — the "back→forward + jump" is gone
+  (`--profile-avatar-probe`: `restart_step 0.155` vs `steady 0.142`) + the hit
+  impulse now REPLACES per strike (JS `Bb` is one overwritten descriptor).
+- OPEN: the frame-exact AI cadence vs a JS oracle trace is unreachable (live
+  oracle down); `BarelyAliveRounds` HP scale; `EclipseMode="1"` rows; the
+  `{Uninterrupt,SelfUninterrupt}` interval set is a hardcoded pair (shipped-
+  correct); `--quest-verify-buy` needs `--watchdog 1500` (harness pacing).
 
 - `95a08c82` fight rules: `ERulePerk` — **195 shipped** `<Rules><Perk>` were inert
   (the rule perks never joined the live trigger set; `ca.ZOa`/`du.rmb`) +
