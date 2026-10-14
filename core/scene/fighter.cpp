@@ -1266,7 +1266,12 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
     }
 
-    const bool prev_move_active = current_move_ != nullptr;
+    // JS `Te.Skb` (L280074) gates the interrupt event on `Pe` (a clip is
+    // PLAYING) — an ended-but-retained `Ua` is NOT playing, so it must not
+    // count as an interrupt. `move_ended_` (the `Pe=false` latch) is cleared
+    // here: this new move is now the live `Ua`.
+    const bool prev_move_active = current_move_ != nullptr && !move_ended_;
+    move_ended_ = false;
     current_move_ = &move;
     // JS `Te.Skb` (L280074): `this.Pe && this.gh("EAnimationInterruptedEvent",
     // a)` — a new clip interrupting a still-active one. `Pe` is the animator's
@@ -2261,12 +2266,16 @@ void Fighter::advance_step() {
         }
         ended_move_ = current_move_;
         ++move_end_count_;  // clip-end edge (the EndStance gate)
-        current_move_ = nullptr;
+        // JS `Te.KNa` (L548) sets `Pe=false` but does NOT clear `Ua`/`Xh`/`xj`:
+        // `da.Ua.name`/`da.Xh`/`da.xj` keep reporting the JUST-ENDED clip
+        // until the next move starts (`Te.Skb` -> `etb`). Keep them for the
+        // transition frame and mark the animator stopped (`playing()` false);
+        // `current_clip_` is dropped so `advance_step` takes its no-clip path
+        // exactly as before (the JS `stop()` resets `jc`, `Pe` gates `da.ia`).
         current_clip_ = nullptr;
-        active_intervals_.clear();
+        move_ended_ = true;
         last_action_frame_ = -1;
         subframe_ = 0;
-        playhead_ = 0;
         prepend_.clear();
         align_x_ = align_y_ = align_z_ = 0.0f;
         // JS `stop()`/`KNa()` call `jc.reset()`; `Skb` L551 zeroes `j8`.
@@ -2489,6 +2498,7 @@ void Fighter::clear_move() {
     ml_move_ = nullptr;
     current_move_ = nullptr;
     current_clip_ = nullptr;
+    move_ended_ = false;
     move_end_frame_ = 0;
     active_intervals_.clear();
     subframe_ = 0;

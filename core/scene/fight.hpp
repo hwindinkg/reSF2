@@ -2392,6 +2392,14 @@ private:
     bool hit_audit_ = false;  // `[hitaudit]` per-frame hit row probe
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
     int start_stance_frames_ = 0;  // phase 1 hold counter
+    // JS `xF(1)` (L15810) only QUEUES the `RoundStageStart` event
+    // (`this.Bg.Ih(1, d.Vb)` L15827); the bus dispatches it on the NEXT
+    // frame's `this.Bg.ia()` (L15886), so the stage-start move (the intro
+    // stance clip) starts on the SECOND phase-1 frame. The port fired the
+    // event synchronously, starting the clip one frame early (phase 1 one
+    // frame short). Armed after the first phase-1 update so the auto-play
+    // pick waits one frame, exactly like the deferred bus dispatch.
+    bool intro_pick_armed_ = false;
     int end_stance_frames_ = 0;    // phase 3 hold (the FIGHT!/KO banner)
     // JS `Onb` (L411) `h9` / `Ewb` (L404): a plain next-round holds phase 3
     // (the scene VISIBLE) until the end-stance animation ends (`kg` L387 ->

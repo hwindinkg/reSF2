@@ -105,11 +105,14 @@ constexpr float kJsBannerRoundBreakSeconds = 1.666f;  // `Cr.tca` L2023 fu(1.666
 constexpr float kJsBannerArmDelaySeconds = 0.5f;      // `Cr.tca` L2023
                                                       // `wh.delay(...,500)`
 constexpr float kJsBannerHoldSeconds = 1.166f;        // `Cr.Zy`/`Cr.GZ` L2024
-// The phase-1 StartStance hold. The oracle trace (`oracle_pose.jsonl`)
-// shows `phase` 1 -> 2 at f=134, so phase 1 is 133 port frames (phase 2
-// starts on frame 133 of the port's 1-based counter, matching the oracle's
-// 0-based 134).
-constexpr int kStartStanceFrames = 133;
+// The phase-1 StartStance hold. JS `kg` (L387) leaves phase 1 only when the
+// intro stance clip's `OCa()` fires, and the clip itself starts on the SECOND
+// phase-1 frame (the `RoundStageStart` bus dispatch lags `xF(1)` by one
+// frame, see `intro_pick_armed_`). The oracle trace shows phase 1 = f 0..133
+// (134 frames: two clip-less lead frames, then the 132-frame stance clip
+// f2..f133). The port's 1-based `start_stance_frames_` counter therefore fires
+// on its frame 134 (f=133), matching the oracle's last phase-1 frame.
+constexpr int kStartStanceFrames = 134;
 
 // [fx] Latch a fighter's current strike-capsule endpoints (`HitCapsule.r1/r2`
 // = JS `sx.ma`/`Zs.ma`) into `prev_cap_ends` (= JS `sx.mf`/`Zs.mf`). Called
@@ -3287,6 +3290,7 @@ void FightController::enter_start_stance() {
     round_live_ = false;
     start_stance_done_ = false;
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
+    intro_pick_armed_ = false;  // the bus dispatch lags `xF(1)` by one frame
     start_buffer_filled_ = false;  // fresh round, empty round-start buffer
     round_wait_ = false;   // the break plate expired -> the round is running
     end_stance_pending_ = false;  // phase 3 gate consumed (fresh round)
@@ -3317,20 +3321,16 @@ void FightController::enter_fight() {
     // per-round `kI`/`Ti` gates run in `rob` (L900) before `f_a`. Presentation
     // only - set_ringout_rule never touches the simulation / RNG.
     rules_begin_round(round_.number);
-    // [FIX idle-slide] Cut the intro stance clip (stance_1/stance_2,
-    // root-moving) so the fighters don't keep sliding 853 units into the
-    // idle phase. The intro clip was re-triggered at f130 because its
-    // 129-frame duration is 4 short of the 133-frame StartStance, so a
-    // right-facing fighter entered Fight still on stance_2 (delta -148.6).
-    // Clearing forces the next update_fighter to pick the static
-    // FistsStartStanceIdle-Left (fists1_stance_idle, 38f, delta 0).
-    player_.fighter.clear_move();
-    // [FIX dummy animation state] The JS keeps `da.Ua` on the NotAnimation
-    // Punchbag across the stage transition (the phase-2 `RoundStageStart
-    // Name="Fight"` event has no move for it, so its `PhysicalDummy` pick from
-    // the intro stays; the oracle `Me` reports `clip="PhysicalDummy"` through
-    // both phases). Clearing it would drop the label to "".
-    if (!battle_.enemy_not_animation) enemy_.fighter.clear_move();
+    // [FIX idle-slide — JS `xF(2)` keeps `da.Ua`] The old code called
+    // `clear_move()` on both fighters to cut the root-moving intro stance clip
+    // before the idle phase. `xF(2)` (L15810) does NOT clear `da.Ua` — it only
+    // sets `eu` and re-publishes the stage — so the transition frame keeps the
+    // fighter's current clip (`da.Ua`/`da.Xh`/`da.xj`): the oracle shows the
+    // intro stance (`FistsStartStance-Left` af=44) held through the phase-2
+    // transition frame for the dojo, and the already-playing stance idle for
+    // the boss. The intro clip can no longer slide into phase 2 anyway: the
+    // clip-end branch (`Te.KNa`) has already stopped it (`playing()` false,
+    // `current_clip_` dropped) by the time the transition fires.
     // [FIX transition continuity — Root 2] Do NOT pre-pose the fighters with
     // `sample_idle` here. `Fighter::sample` also advances the ragdoll solver
     // state (`sol_ma_`/`sol_mf_`/`sol_prev_com_`), so pre-posing the idle
@@ -3386,15 +3386,10 @@ void FightController::enter_fight_none() {
     round_live_ = true;      // `xF(2)` makes the fight phase live for hits/fx
     round_.running = false;  // NO `Sf.play()`: the round timer never ticks
     start_stance_done_ = true;
-    // Same idle hand-off as `enter_fight` (drop the intro stance clip so the
-    // static idle plays; keep the NotAnimation bag at bind pose).
-    player_.fighter.clear_move();
-    // [FIX dummy animation state] The JS keeps `da.Ua` on the NotAnimation
-    // Punchbag across the stage transition (the phase-2 `RoundStageStart
-    // Name="Fight"` event has no move for it, so its `PhysicalDummy` pick from
-    // the intro stays; the oracle `Me` reports `clip="PhysicalDummy"` through
-    // both phases). Clearing it would drop the label to "".
-    if (!battle_.enemy_not_animation) enemy_.fighter.clear_move();
+    // [FIX idle-slide — JS `xF(2)` keeps `da.Ua`] See `enter_fight`: the
+    // transition does NOT clear the fighters' current move, so the transition
+    // frame reports the held clip (the oracle's `FistsStartStance-Left` af=44
+    // for the dojo). The clip-end branch already stopped the intro clip.
     if (battle_.enemy_not_animation) sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
@@ -7030,8 +7025,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // played this round"; afterwards the IDLE templates are used, which is
     // what also stops the intro from being re-played.
     const bool intro = intro_phase && me.intro_played_round != round_.number;
-    const bool may_pick = !stance_locked || intro;
-    if (me.fighter.current_move() == nullptr && may_pick &&
+    // The stage-start move starts on the SECOND phase-1 frame (the JS bus
+    // dispatches `RoundStageStart` one frame after `xF(1)` queues it), so hold
+    // the intro pick until `intro_pick_armed_`.
+    const bool may_pick = (!stance_locked || intro) && (!intro || intro_pick_armed_);
+    if (!me.fighter.playing() && may_pick &&
         phase_ != fight_phase::end_stance) {
         // [FIX intro double-play] JS kg (L387) leaves the StartStance when the
         // intro clip's OCa() fires and never re-plays it. The port holds the
@@ -7491,7 +7489,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // independent stream (`conditions.cpp`'s private `DaPrng`, the documented
     // probe/demo fallback), so the demo's rolls stay off `draw01()`.
     if (auto_attack_ && me.is_player && phase_ == fight_phase::fight &&
-        me.fighter.current_move() == nullptr) {
+        !me.fighter.playing()) {
         const float dist = std::fabs(foe.fighter.world_x() - me.fighter.world_x());
         const std::string move_name =
             dist > 160.0f ? "StepForward" : "HighPunch";
@@ -7536,13 +7534,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // JS `a.da.dw()` (`Te.dw` L547): the OPPONENT's root world-x while its
         // clip plays (`Pe`), else 0. `st.enemy_playing` is set below, so gate
         // on the raw `Pe` state (non-null clip + not reacting) here.
-        st.enemy_dw = (foe.fighter.current_move() != nullptr &&
+        st.enemy_dw = (foe.fighter.playing() &&
                        !foe.fighter.ragdoll_active())
                           ? foe.fighter.world_x()
                           : 0.0f;
         // JS `this.Ji.dw()` (`Te.dw` L547) — MY OWN root world-x while MY
         // clip plays (`Pe`), else 0. Read by `Gea`'s `cs` branch.
-        st.my_dw = (me.fighter.current_move() != nullptr &&
+        st.my_dw = (me.fighter.playing() &&
                     !me.fighter.ragdoll_active())
                        ? me.fighter.world_x()
                        : 0.0f;
@@ -7555,11 +7553,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // `kJ()` gates on `Pe`; the port's `Pe` proxy is `current_move &&
         // !ragdoll` (the same expression `st.playing`/`st.enemy_playing`
         // use below), so gate here.
-        st.move_kj = (me.fighter.current_move() != nullptr &&
+        st.move_kj = (me.fighter.playing() &&
                       !me.fighter.ragdoll_active())
                          ? me.fighter.played_steps()
                          : 0;
-        st.enemy_kj = (foe.fighter.current_move() != nullptr &&
+        st.enemy_kj = (foe.fighter.playing() &&
                        !foe.fighter.ragdoll_active())
                           ? foe.fighter.played_steps()
                           : 0;
@@ -7618,12 +7616,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // pose. With `Pe=!1` `de.hcb` (L598) returns false and `de.ia`
         // (L593) issues NO move — the reaction runs to completion instead of
         // being replaced by the AI the very next frame.
-        st.playing = me.fighter.current_move() != nullptr &&
+        st.playing = me.fighter.playing() &&
                      !me.fighter.ragdoll_active();  // JS `Ji.Pe`
         // JS `a.Pe` — the ENEMY's clip must be playing for `de.Ycb`/`de.Lbb`
         // (L620-621) and the `Pqb` nG wait (L605). A reaction forces it false
         // (`Te.Sca`/`da.reset`) while `Ua` can still be set.
-        st.enemy_playing = foe.fighter.current_move() != nullptr &&
+        st.enemy_playing = foe.fighter.playing() &&
                            !foe.fighter.ragdoll_active();
         st.my_reacting = me.fighter.ragdoll_active();  // JS `Nd.nk`
         st.magic_bullets = 0;
@@ -8079,6 +8077,10 @@ void FightController::update(float dt) {
                     std::fflush(stdout);
                 }
             }
+            // The deferred `Bg.ia()` dispatch has now run (this frame's
+            // fighters' update above), so the stage-start pick may fire from
+            // the NEXT phase-1 frame (see `intro_pick_armed_`).
+            intro_pick_armed_ = true;
             break;
         }
         case fight_phase::fight: {
@@ -8264,7 +8266,7 @@ void FightController::update(float dt) {
                 // clip-end edge of the EndStance move / knockdown chain. Once
                 // the EndStance pick has been attempted and the fighter holds no
                 // move, its KO/victory animation is done.
-                if (f->end_stance_selected && f->fighter.current_move() == nullptr) {
+                if (f->end_stance_selected && !f->fighter.playing()) {
                     stance_ended = true;
                 }
             }

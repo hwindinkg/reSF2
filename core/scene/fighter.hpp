@@ -576,6 +576,13 @@ public:
 
     // --- state accessors (Phase 3.2b) -------------------------------------
     const MoveDef* current_move() const { return current_move_; }
+    // JS `Te.Pe` — a clip is PLAYING (as opposed to merely SET). After a clip
+    // ends, `Te.KNa` (L548) sets `Pe=false` but leaves `Ua`/`Xh`/`xj` set, so
+    // `da.Ua.name`/`da.Xh` keep reporting the JUST-ENDED clip until the next
+    // move starts. The port used to conflate the two (`current_move_=nullptr`
+    // at clip end), which dropped the transition frame's move/af/iv.
+    bool playing() const { return current_move_ != nullptr && !move_ended_; }
+    bool move_ended() const { return move_ended_; }
     int move_frame() const { return move_frame_; }
     // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED
     // clip's frame count when `EndFrame` is absent (see `move_end_frame_`).
@@ -1136,6 +1143,10 @@ private:
     // needed because the `Aua` group is a singleton (value-free).
     std::function<float()> math_random_;
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
+    // JS `Te.Pe` complement: true after the clip finished (`Te.KNa` L548)
+    // while `Ua`/`Xh`/`xj` stay set. Cleared by `clear_move` and every move
+    // start (`Te.Skb`). See `playing()`/`move_ended()`.
+    bool move_ended_ = false;
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf
     // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED
