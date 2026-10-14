@@ -421,6 +421,29 @@ const MoveDef* Fighter::end_stance_move(FightContext& ctx) {
     return group.empty() ? nullptr : group.front();
 }
 
+// JS stage-transition move pick (`Gc.nr`/`Gnb` -> `dxa` -> `DK`): the
+// max-`<Priority>` unlocked move whose `<Events>` contains a
+// `<RoundStageStart>` trigger (the JS matches the event DATA — `a.data ==
+// this.Nta` — but the port stores the event NAMES only; the stage is
+// disambiguated by the `<RoundStage>` CONDITIONS, which the caller sets on
+// `ctx.stage`). `ctx.stage` must be StartStance. `hb_` already carries only
+// the unlocked moves (`ra.Hza`), so the lock test is done.
+const MoveDef* Fighter::stage_start_move(FightContext& ctx) {
+    std::vector<const MoveDef*> group;
+    for (const MoveDef* m : hb_) {
+        if (m == nullptr) continue;
+        if (!m->has_event("RoundStageStart")) continue;
+        if (!move_conditions_pass(*m, ctx, nullptr)) continue;
+        if (group.empty() || m->priority > group.front()->priority) {
+            group.clear();
+            group.push_back(m);
+        } else if (m->priority == group.front()->priority) {
+            group.push_back(m);
+        }
+    }
+    return group.empty() ? nullptr : group.front();
+}
+
 // JS `Pi.Ex` (L2301 region): the shop's try-on animation state is `LX=7`
 // (`iz.XBa("TryOn")=7`, L444). The move that plays is resolved by the normal
 // move machinery against the WORN items + the open shop screen: a move whose
@@ -747,11 +770,32 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     // step pulled it back (the reported "throw victim flies out of the arena
     // for 1 frame"). `Al.fha` clamps the node `ma.x` to `[NO,MO]` = the arena
     // walls; mirror that on the seed.
+    // [FIX over-clamp — JS scope] The JS `Bva` (L21136) -> `Nd.jE()` (L24422)
+    // -> `fdb` (L24454) -> `fha` (L24468) clamps ONLY a CONSTRAINT's two
+    // ENDPOINT nodes (`a.sx`/`a.Zs`) and only when that endpoint's `cA` is
+    // set: `d.cA = d.nh && !d.NG && (this.nk || d.jy || oa.vc && d.vc)`
+    // (L24429). With `nk` just set by `Nd.start`, `cA` is true for every
+    // NON-`NG` endpoint — but `NG = MG || !nh` (Fixed or MacroNode) stays
+    // FALSE for a Fixed node and a MacroNode, so those are NEVER clamped.
+    // The old port clamped EVERY node's `ma.x` into `[NO,MO]`, dragging the
+    // derived macro/fixed nodes (head, ceiling attach) to the arena wall on
+    // the start frame. Mirror the per-frame `jE` edge walk exactly: same
+    // `shock_latch_ && e.shock` edge skip, same `!fixed && !is_macro` `cA`.
     if (ragdoll_wall_min_ != ragdoll_wall_max_) {
-        for (std::size_t i = 0; i < n; ++i) {
-            float& x = sol_ma_[i * 3];
-            if (x < ragdoll_wall_min_) x = ragdoll_wall_min_;
-            else if (x > ragdoll_wall_max_) x = ragdoll_wall_max_;
+        for (const EdgeDef& e : model_.edges) {
+            if (shock_latch_ && e.shock) continue;
+            const int bi[2] = {model_.bone_by_name(e.end1),
+                               model_.bone_by_name(e.end2)};
+            for (int k = 0; k < 2; ++k) {
+                if (bi[k] < 0) continue;
+                const std::size_t u = static_cast<std::size_t>(bi[k]);
+                if (u >= n) continue;
+                const Bone& b = model_.bones[u];
+                if (b.fixed || b.is_macro) continue;  // JS `!d.NG`
+                float& x = sol_ma_[u * 3];
+                if (x < ragdoll_wall_min_) x = ragdoll_wall_min_;
+                else if (x > ragdoll_wall_max_) x = ragdoll_wall_max_;
+            }
         }
     }
     solver_init_ = true;
@@ -1249,6 +1293,11 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     }
 
     ++move_start_count_;  // JS `Te.Skb` L551 -> `x3` -> `Fu.hob()` (dW=null)
+    // JS `Xqb` (L23245-23250): the once-only `M2 = -4` seat, latched at the
+    // FIRST clip start (`yra` never re-arms). The port's domain: the tick
+    // counter is read AFTER this tick's `M2++`, exactly as the JS reads it
+    // (`ia` incremented `M2` before `Xqb` overwrote it).
+    if (first_start_tick_ < 0) first_start_tick_ = ia_ticks_;
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     active_intervals_.clear();
@@ -2077,6 +2126,10 @@ void Fighter::advance(float dt) {
 }
 
 void Fighter::advance_step() {
+    // JS `Te.ia` L22797: `this.M2++` runs on EVERY `da.ia()` tick, before the
+    // `this.Pe` branch. `da.ia()` itself is gated on `parameters.QD` (L499),
+    // so a NotAnimation fighter (QD false) never ticks `M2`.
+    if (!not_animation_) ++ia_ticks_;
     // JS `ia` L499: `this.parameters.QD && (this.da.ia(), ...)` — the clip
     // advance runs ONLY when `QD` (NotAnimation attribute ABSENT) is true. A
     // NotAnimation dummy (`parameters.QD == false`, `mdl_skeleton_punching_bag`

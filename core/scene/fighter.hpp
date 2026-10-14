@@ -219,6 +219,21 @@ public:
     // passing candidate, or nullptr. `ctx.stage` must be EndStance and
     // `ctx.round_victory` set to this fighter's `is_winner`.
     const MoveDef* end_stance_move(sf2::scene::FightContext& ctx);
+    // JS stage-transition move pick (`Gc.nr`/`Gnb` -> `dxa`/`DK`, the same
+    // dispatch `end_stance_move` models): the max-`<Priority>` move in the
+    // unlocked list (`hb_`) whose `<Events>` carries `<RoundStageStart
+    // Name="StartStance"/>` and whose `<Conditions>` pass at `ctx.stage ==
+    // start_stance`. This is the pick that gives the NotAnimation Punchbag
+    // dummy its `PhysicalDummy` move (moves.xml L10427: `Events RoundStageStart
+    // StartStance` + `Hit`, `Locks Skeleton/SkeletonPunchingBag`, no
+    // `Template`/`FileName`): `FistsStartStance-Left` is locked out for the
+    // dummy (`<Item Type="Skeleton" SubType="Skeleton"/>`) and gated by
+    // `<Player Number="1"/>`, so `PhysicalDummy` is the only candidate. The
+    // JS `da.Ua` is then set even though its `Kk` is empty (`Te.Skb` L23018
+    // `if (Ua.Kk == null || Ua.Kk.length == 0) return this.Pe = false`) — the
+    // dummy holds the bind pose but reports `da.Ua.name == "PhysicalDummy"`
+    // (the oracle trace).
+    const MoveDef* stage_start_move(sf2::scene::FightContext& ctx);
 
     // --- shop `TryOn` preview (JS `Pi.Ex` L2301; `iz.XBa("TryOn")=7` L444) --
     // The item's TryOn move from the loaded table: a move whose Template
@@ -623,19 +638,26 @@ public:
     // Event`). The EndStance gate uses the edge to know the KO/lying chain (or
     // the `Loss_fall`/`Win_Fists` clip) has finished.
     int move_end_count() const { return move_end_count_; }
-    // JS `Te.M2` — the anim controller move-frame counter. `Te.ia`
-    // (L547-548) opens with `this.M2++` and later in the SAME call does
-    // `this.Xh++`, so the two counters advance in LOCKSTEP: `M2 == Xh - 4`
-    // (`Xqb` L282808 seats `M2 = -4`, `Skb` L280606 seats `Xh = 0`). `Xh` is
-    // this port's `playhead_`. `Tba` (L595) = the max `M2` over the enemy's
-    // spawned CHILD models (`a.vd`, filled by `zWa`/`fya`); a single-part
-    // fighter's `vd` is empty so `Tba` is 0 (computed in fight.cpp, not from
-    // this body's `M2`). NOTE the shipped
-    // `Xqb` guards the `M2=-4` seat with `yra` (`this.yra||(...)`) and `yra`
-    // is never re-armed, so a literal reading would make `M2` a
-    // model-lifetime counter; the port re-seats it per move start (the only
-    // reading that keeps `Tba`/`Gea` a move-frame quantity). Reported OPEN.
-    int m2() const { return playhead_ - 4; }
+    // JS `Te.M2` — the anim controller's MODEL-LIFETIME move-frame counter,
+    // NOT a per-move quantity. `Te.ia` (L22797) opens with `this.M2++` (run
+    // on EVERY `da.ia()` tick, `Pe` or not), and `Xqb` (L23245-23250) seats
+    // `this.M2 = -4` exactly ONCE: `if (!this.yra) { this.M2 = -4;
+    // this.yra = true; }` — `yra` starts false (L22766) and is NEVER reset,
+    // so the `-4` seat happens at the FIRST clip start only. `M2` therefore
+    // keeps counting after every later move start (`M2 = ia_ticks -
+    // first_start_tick - 4`), which is why `Tba`/`Gea(a,1)` (its only two
+    // readers, L24986/L25811) can compare a SUB-FIGHTER's `M2` against the
+    // main body's. The old port returned `playhead_ - 4` (re-seated per move
+    // start) — the reading that kept `Tba` a move-frame quantity, which the
+    // JS never does. NOTE `da.ia()` is gated on `parameters.QD` (L499), so a
+    // NotAnimation fighter (the Punchbag dummy) never ticks `M2` at all:
+    // `ia_ticks_` likewise stays 0 for it. `Tba` (L595) = the max `M2` over
+    // the enemy's spawned CHILD models (`a.vd`, filled by `zWa`/`fya`); a
+    // single-part fighter's `vd` is empty so `Tba` is 0 (computed in
+    // fight.cpp, not from this body's `M2`).
+    int m2() const {
+        return (first_start_tick_ < 0 ? ia_ticks_ : ia_ticks_ - first_start_tick_) - 4;
+    }
     // Subframe state (JS `Te.mo`): `subframe()` is the current subframe
     // index within the clip-frame, `sub()` the subframes per clip-frame.
     // Pose-trace accessors only — no behavior change.
@@ -1120,6 +1142,12 @@ private:
     int move_end_frame_ = 0;
     // Incremented in `start_move_impl` (JS `Te.Skb` L551 -> `x3` -> `hob`).
     int move_start_count_ = 0;
+    // JS `Te.M2` model-lifetime counters: `ia_ticks_` = the number of
+    // `da.ia()` clip-advance ticks (incremented once per `advance_step` while
+    // `!not_animation_`), `first_start_tick_` = its value at the first clip
+    // start (`Xqb`'s once-only `M2 = -4` seat; -1 = not yet). See `m2()`.
+    int ia_ticks_ = 0;
+    int first_start_tick_ = -1;
     // Incremented in `start_move_impl` when a move starts while another was
     // still active (`Te.Skb` L280074: `this.Pe && gh("EAnimationInterrupted
     // Event", a)`). The `EAnimationInterruptedEvent` -> fighter `kK` -> `lK`

@@ -3207,6 +3207,10 @@ void FightController::enter_start_stance() {
     // state. Clearing the clip here (the `da.reset` analogue) lets the intro
     // auto-play (`StanceLeft/Right`) start fresh this round.
     player_.fighter.clear_move();
+    // `ZK` -> `wd.reset()` clears `da` (`Ua=null`) for EVERY fighter, the
+    // dummy included; the intro re-picks its stage move right after. Do NOT
+    // skip the dummy here (unlike the phase-2 hand-off below, which is a
+    // port-only idle fix, not a JS reset).
     enemy_.fighter.clear_move();
     player_.fighter.teleport(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.teleport(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
@@ -3278,7 +3282,12 @@ void FightController::enter_fight() {
     // Clearing forces the next update_fighter to pick the static
     // FistsStartStanceIdle-Left (fists1_stance_idle, 38f, delta 0).
     player_.fighter.clear_move();
-    enemy_.fighter.clear_move();
+    // [FIX dummy animation state] The JS keeps `da.Ua` on the NotAnimation
+    // Punchbag across the stage transition (the phase-2 `RoundStageStart
+    // Name="Fight"` event has no move for it, so its `PhysicalDummy` pick from
+    // the intro stays; the oracle `Me` reports `clip="PhysicalDummy"` through
+    // both phases). Clearing it would drop the label to "".
+    if (!battle_.enemy_not_animation) enemy_.fighter.clear_move();
     // [FIX transition continuity — Root 2] Do NOT pre-pose the fighters with
     // `sample_idle` here. `Fighter::sample` also advances the ragdoll solver
     // state (`sol_ma_`/`sol_mf_`/`sol_prev_com_`), so pre-posing the idle
@@ -3337,7 +3346,12 @@ void FightController::enter_fight_none() {
     // Same idle hand-off as `enter_fight` (drop the intro stance clip so the
     // static idle plays; keep the NotAnimation bag at bind pose).
     player_.fighter.clear_move();
-    enemy_.fighter.clear_move();
+    // [FIX dummy animation state] The JS keeps `da.Ua` on the NotAnimation
+    // Punchbag across the stage transition (the phase-2 `RoundStageStart
+    // Name="Fight"` event has no move for it, so its `PhysicalDummy` pick from
+    // the intro stays; the oracle `Me` reports `clip="PhysicalDummy"` through
+    // both phases). Clearing it would drop the label to "".
+    if (!battle_.enemy_not_animation) enemy_.fighter.clear_move();
     if (battle_.enemy_not_animation) sample_enemy_idle();
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
@@ -6947,15 +6961,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // (L499) gates `da.ia`, and the idle move would otherwise register as a
     // started move. It stays exactly where `sample_enemy_idle` left it.
     const bool stance_locked = battle_.enemy_not_animation && &me == &enemy_;
-    // [FIX intro double-play] JS kg (L387) leaves the StartStance when the
-    // intro clip's OCa() fires and never re-plays it. The port holds the
-    // 133-frame phase-1 clock, so once the intro clip has been auto-played for
-    // THIS round do NOT start it again - the old code re-played the intro for
-    // the final frames of the StartStance (the reported "plays a bit more").
+    // [FIX dummy animation state — JS `da.Ua`] `stance_locked` no longer
+    // SKIPS the pick outright. The JS starts the dummy's stage move from the
+    // `<RoundStageStart Name="StartStance"/>` EVENT (`Gc.nr`/`Gnb` ->
+    // `dxa`/`DK`): `PhysicalDummy` (moves.xml L10427, `Locks
+    // Skeleton/SkeletonPunchingBag`) is the only candidate that passes for
+    // the Punchbag, and `Te.Skb` (L23018) then leaves `Pe=false` (its `Kk` is
+    // empty) so the dummy keeps the bind pose while `da.Ua.name ==
+    // "PhysicalDummy"` (the oracle `Me` clip label). Only the INTRO has such
+    // an event for the dummy; the phase-2 `Fight` stage has none, so the
+    // dummy gets no move there and stays put.
     const bool intro = phase_ == fight_phase::start_stance;
-    if (me.fighter.current_move() == nullptr && !stance_locked &&
+    const bool may_pick = !stance_locked || intro;
+    if (me.fighter.current_move() == nullptr && may_pick &&
         phase_ != fight_phase::end_stance &&
         !(intro && me.intro_played_round == round_.number)) {
+        // [FIX intro double-play] JS kg (L387) leaves the StartStance when the
+        // intro clip's OCa() fires and never re-plays it. The port holds the
+        // 133-frame phase-1 clock, so once the intro clip has been auto-played for
+        // THIS round do NOT start it again - the old code re-played the intro for
+        // the final frames of the StartStance (the reported "plays a bit more").
         // The mirror variant is picked from the direction to the enemy
         // (JS `wd.NS` L506: facing = sign(enemyX - myX); the move's
         // MirrorNode maps it to the -Left/-Right variant). The FIRST
@@ -7008,7 +7033,35 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          : std::vector<std::string>{"IdleStance"});
         const sf2::scene::MoveDef* idle_move =
             me.fighter.stance_move(stance_templates, me.is_player);
-        if (idle_move != nullptr) {
+        if (stance_locked) {
+            // [FIX dummy animation state — JS `da.Ua`/`Gc.nr`->`Gnb`->`dxa`]
+            // The NotAnimation Punchbag gets its move from the
+            // `<RoundStageStart Name="StartStance"/>` EVENT pick
+            // (`stage_start_move`), NOT the `Template` family (its move
+            // `PhysicalDummy` carries no `Template`). `ai_start_move` resolves
+            // no clip (`PhysicalDummy` has no `FileName`), so the dummy keeps
+            // the bind pose — exactly the JS (`Te.Skb` L23018 `Kk == null` ->
+            // `Pe = false`) — while `current_move()` (and thus the `da.Ua.name`
+            // dump) is set. Only the intro has such an event; `may_pick`
+            // already barred the other phases.
+            sf2::scene::FightContext dctx;
+            dctx.roll01 = [this]() { return draw01(); };
+            dctx.stage = static_cast<sf2::scene::round_stage>(phase_);
+            dctx.qb = me.is_player;
+            dctx.anims_me.push_back(me.is_player ? "StanceLeft" : "StanceRight");
+            dctx.anims_enemy = anim_names_of(foe.fighter);
+            fill_ctx_geometry(dctx, me, foe);
+            dctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+            const sf2::scene::MoveDef* dm = me.fighter.stage_start_move(dctx);
+            if (dm != nullptr && me.fighter.ai_start_move(*dm, dctx)) {
+                std::fprintf(stdout,
+                             "[stance] F%d %s intro=%d move=%s (dummy stage)\n",
+                             frame_, me.name.c_str(), intro ? 1 : 0,
+                             dm->name.c_str());
+                std::fflush(stdout);
+            }
+            if (intro) me.intro_played_round = round_.number;
+        } else if (idle_move != nullptr) {
             const std::string& idle_name = idle_move->name;
             sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
@@ -8383,22 +8436,21 @@ void FightController::dump_pose_frame() {
     for (int i = 0; i < 2; ++i) {
         const Fighter& f = fighters[i]->fighter;
         const std::vector<float>& pos = f.positions();
-        // The clip identifier (JS `da.Ua.name`): the ARCHIVE clip name —
-        // MoveDef::file_name (the XML FileName) minus any ".bytes" suffix
-        // (fighter.cpp strips the same suffix before the archive lookup),
-        // falling back to the move label when no file is attached. The
-        // mirror variant (if any) is reflected in `fx`; the clip is the
-        // archive name of the clip actually playing.
+        // The clip identifier (JS `da.Ua.name`). `Ua` is the MOVE object
+        // (`jc`, L29123: its ctor seats `this.name = this.fileName = null` at
+        // L29144 and attaches the loaded clip frames on the SAME object as
+        // `this.Kk`), so `da.Ua.name` is the MOVE NAME — the oracle dumps
+        // "FistsStartStance-Left" for the move whose `FileName` is
+        // `stance_1.bytes`, and "PhysicalDummy" for the dummy's move (which
+        // has no FileName at all). The old port dumped `MoveDef::file_name`
+        // (the archive key, e.g. "stance_1") and relied on compare_pose.py's
+        // CLIP_ALIASES map to recover the move name; it could never label a
+        // FileName-less move. Dump `m->name` (JS-exact); `file_name` is only
+        // the archive lookup key.
         std::string clip_name;
         if (const sf2::scene::MoveDef* m = f.current_move()) {
-            clip_name = m->file_name;
-            const std::string suffix = ".bytes";
-            if (clip_name.size() > suffix.size() &&
-                clip_name.compare(clip_name.size() - suffix.size(), suffix.size(),
-                                  suffix) == 0) {
-                clip_name = clip_name.substr(0, clip_name.size() - suffix.size());
-            }
-            if (clip_name.empty()) clip_name = m->name;
+            clip_name = m->name;
+            if (clip_name.empty()) clip_name = m->file_name;
         }
         // [trace] `fx` = JS `da.hd()` (trace.js L176), NOT `facing()`. The
         // oracle hook dumps `da.hd()` = `Te.FX` = `hd(){return this.FX}`
