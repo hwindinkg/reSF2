@@ -168,6 +168,14 @@ methods; only 1225 are explicitly mapped in the port's comments (36%).
   diverging** (`fighters.Enemy.ragf` 108/241 — the ragdoll frame counter);
   everything else 0/241. Found + fixed `counters.lW` (the port stored the
   complement of JS `ca.lW`). Report: `reference/traces/state_gap_report.txt`.
+- `14d1864e` harness: `ragf` → **0/241** (the port-only re-pose ticked the JS
+  `Al.ia` `frameCount`); `callouts` → 0/241; `nf`/`timer` from the JS HUD
+  (`Sf.NF`); `rules` from `dl.jh()`; a scenario selector
+  (`OracleShell --query postTutorial=0`); `reference/traces/README.md` documents
+  how to run the whole harness. **Remaining:** `rules.total/active` (241/241 — the
+  port splits `ApplyTo="All"` into 2 copies where `dl.jh()` is 1); the boss/
+  tournament/survival oracle runs need a hub→fight navigation script (the 350-
+  frame cap stops at the hub viewer).
 
 ## Hunt waves (2026-10-14) — verbatim inaccuracy sweep
 - `5bfd7d79` anim: `UM==1` samples the JS `p2` (the 3rd control point), not the
