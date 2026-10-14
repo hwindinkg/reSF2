@@ -3073,7 +3073,29 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         const bool ha = ctl(0, i, ax, ay, az);
         const bool hb = ctl(1, i, bx, by, bz);
         const bool hc = ctl(2, i, cx, cy, cz);
-        if (i < nclip && hb && hc && sub_i > 1) {
+        // [FIX `wu.curve` at UM==1 — JS `wu.initialize`/`wu.curve`/`wu.f6a`
+        // L53451-53505 + `Te.Gka` L23485 + `Te.eda` L23256]
+        // The old guard `sub_i > 1` made the UM==1 case (MidFrames absent ->
+        // 0 subframes, 19 shipped moves: PhysicalFall / PhysicalGroundHit /
+        // PhysicalLying / PhysicalDummy / *Hit reactions / GatekeeperLoss ...,
+        // `moves.xml`) take the LINEAR fallback at `t_lin = 0`, i.e. the span's
+        // FIRST control point `p0 = mid(Kh(Xh),Kh(Xh+1))`. The JS is exact
+        // here: `rpa.initialize(UM)` with UM=1 gives
+        //   DB=1, BX=-1, nta=2 -> f=-1+2=1, d=1-(2-1)=0, g=0+(2-1-1)=0, h=1
+        // i.e. weights (0,0,1) = the Bezier at `t = (mo+1)/UM = 1/1 = 1`, which
+        // is the THIRD control point `p2 = mid(Kh(Xh+1),Kh(Xh+2))` — one span
+        // AHEAD of what the port drew. `wu.f6a(L53495)` builds exactly
+        // `curve(mid(a,b), b, mid(b,c), UM, out)`, so `p2 = mid(Kh(Xh+1),
+        // Kh(Xh+2))`; the port's `p2x` below is the same term. This also
+        // restores the tie the slow-mo ramp relies on: `p2(Span S)` ==
+        // `p0(Span S+1)` (both `mid(Kh(S+1),Kh(S+2))`), so the fractional
+        // `++play` roll is continuous for UM==1 too.
+        // `w0/w1/w2` above already evaluate `t_bez = t_num/sub_i = 1/1 = 1`, so
+        // letting UM==1 into the Bezier branch yields (0,0,1) -> `p2`.
+        // Only the REAL clip-playback path (`interp`) changes; the port-only
+        // static mapping (`interp=false`, dojo/bag poses) keeps its legacy
+        // `sub_i > 1` behaviour.
+        if (i < nclip && hb && hc && (sub_i > 1 || interp)) {
             const float p0x = (ax + bx) * 0.5f, p0y = (ay + by) * 0.5f, p0z = (az + bz) * 0.5f;
             const float p2x = (bx + cx) * 0.5f, p2y = (by + cy) * 0.5f, p2z = (bz + cz) * 0.5f;
             px[i] = w0 * p0x + w1 * bx + w2 * p2x;
