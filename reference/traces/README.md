@@ -121,7 +121,64 @@ replay. Full input-path reference: `reference/AI_STATIC.md` §6.
   f=150/160/200/210) → all four `[INPUT-REC]` at exact frames, 0 tracer
   ERRs → `record_inputs.py` round-trips the 4 lines byte-identically.
 
+## Fight-LOGIC state differential (`compare_state.py`)
+
+`compare_pose.py` diffs the RENDERED pose; `compare_state.py` diffs the full
+FIGHT LOGIC STATE both builds hold each frame, so logic divergences are found
+by diffing instead of by reading code. One JSONL line per live fight frame,
+same schema on both sides:
+
+```
+{"t":"state","f":F,"phase":P,"round":R,"timer":T,"nf":NF,"result":E,
+ "cam":{...},"counters":{"m$":0|1,"lW":0|1},"rules":[total,active],
+ "callouts":[n_me,n_en],
+ "fighters":[{"id":"Me",...},{"id":"Enemy",...}]}
+```
+
+Field sources (both sides read the SAME JS quantity):
+
+| field | oracle (JS) | native (port) |
+| --- | --- | --- |
+| `nf` | `Sf.NF` (`fight.ha.mb`, `Sf.iPa` L84739) | `hud_timer()` = `max(0,round_.time_nf)` |
+| `timer` | `Sf.NF` (raw countdown; `$t.time` is write-once 0) | `round_.time_nf` |
+| `rules` | `fight.Da.jh()` (L59361 `p.o.Yh ? CV : Ae`) | `rules_` (`rules_begin_round`) |
+| `callouts` | `Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` (live `Gr` lists) | `callout_display_` (the screen's `combo_callout_`) |
+| `rag`/`ragf` | `Nd.nk` / `Nd.frameCount` (`Al.ia`) | `ragdoll_active()` / `ragdoll_frame_count()` |
+| `af`/`move`/`iv` | `da.Xh` / `da.Ua.name` / `da.xj` | `playhead_xh()` / `current_move()` / `active_intervals()` |
+
+Alignment: a greedy two-pointer walk over `(phase, normalized move name, af)`
+of the driver fighter; the dojo/training viewer swaps roles (native Me <->
+oracle Enemy), detected automatically.
+
+### Usage
+
+```powershell
+# native side (armed by the fight screen; writes reference/traces/native_state.jsonl)
+build\app\game\Release\game.exe --fight --headless 640 --dump-state 400 --watchdog 900 reference/www/res reference/saves/save.xml
+# oracle side (trace.js is copied into reference/www by the shell)
+shell\bin\Release\net9.0-windows\OracleShell.exe --timeout-ms 95000
+python reference/tools/extract_state.py            # console.log -> oracle_state.jsonl
+python reference/tools/compare_state.py --label dojo-demo
+```
+
+### Scenario selector
+
+The oracle scenario is selected with `--query postTutorial=<0|1>` (appended to
+the served URL; `reference/runner/index.html` reads it):
+
+| scenario | oracle command | native command | state harness |
+| --- | --- | --- | --- |
+| `dojo-demo` (Training / `FightNone` dummy viewer) | `OracleShell.exe --query postTutorial=0 --timeout-ms 95000` | `game.exe --fight --headless 640 --dump-state 400 ...` | FULL (fight logic) |
+| `boss-lynx` (ZONE_1 BOSS_LYNX) | `OracleShell.exe --input-script reference/tools/ui_tour_oracle.txt --timeout-ms 300000` | `game.exe --fight --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --auto-attack --headless N --dump-state M ...` | fight logic |
+| tournament ladder / survival | needs a recorded navigation script (hub -> Map -> fight) | `game.exe --fight --battle <name> --zone <zone> --fight-ordinal N ...` | fight logic |
+| shop / quests / profile | `--input-script reference/tools/ui_tour_oracle.txt` (taps) | `--settings-profile-shop-probe`, `--quest-verify`, `--quest-verify-buy` | N/A - these are NOT fights, so the fight-state harness emits nothing; they are covered by the UI/flow gates |
+
+Note: the JS `FightNone` viewer is created via `v.m1a` (L50365) with `ha=null`,
+so it has NO `Sf` HUD timer: `nf`/`timer` are structurally absent there and the
+report marks them informational for that scenario (never silently dropped).
+
 ## READY FOR USER PLAYTHROUGH (manual tutorial run)
+
 
 > Why manual: `--input-script` mode injects scripted inputs (the drench in
 > `input_phase1.txt` "plays itself") and auto-closes at fight.frame 600 —

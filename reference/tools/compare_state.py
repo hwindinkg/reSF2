@@ -57,22 +57,15 @@ FLOAT_TOL = 0.001
 # Fields emitted but NOT counted toward the divergence total, with the reason.
 # (A field is only informational when the two sides structurally CANNOT hold
 # the same quantity; this is reported explicitly, never silently dropped.)
-INFORMATIONAL = {
-    "nf": "oracle HUD-timer singleton (`fight.ha.mb.NF`) not reachable in this "
-          "build; native nf == native timer (the live HUD countdown)",
-    "timer": "native timer == the live HUD countdown (`round.time_nf`); the JS "
-             "`$t.time` is write-once (never incremented) so the two are "
-             "different quantities under one name (compare_pose.py ignores it "
-             "too)",
-    "callouts": "JS `Gr.Gu` is a sliding display queue (survives frames); the "
-                "native `callouts_` is drained every tick - not a stable "
-                "per-frame quantity",
-    "rules.total": "the JS `ca.ud.Ae` list and the native eclipse-filtered "
-                   "`rules_` (fight.cpp rules_begin_round) are not provably the "
-                   "same collection (the JS split is `dl.jh()` = `Yh ? CV : Ae`), "
-                   "so a count mismatch is not yet attributable to a logic gap",
-    "rules.active": "see rules.total",
-}
+#
+# EMPTY as of the state-harness extension: every emitted field now holds the
+# SAME JS quantity on both sides, so all of them are counted.
+#   nf       -> oracle `Sf.NF` (HUD countdown, `fight.ha.mb`)  == native `hud_timer()`
+#   timer    -> oracle `Sf.NF` (raw countdown)                 == native `round_.time_nf`
+#               (the JS `$t.time` is write-once 0 — NOT the countdown)
+#   rules.*  -> oracle `fight.Da.jh()` (`p.o.Yh ? CV : Ae`)    == native `rules_`
+#   callouts -> oracle `Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` (live)    == native `callout_display_`
+INFORMATIONAL = {}
 
 # clip/move name normalization (same rule as compare_pose.py)
 CLIP_ALIASES = {
@@ -285,6 +278,8 @@ def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
     w = L.append
     w("State gap report - native port vs web oracle (FIGHT LOGIC)")
     w("=" * 72)
+    if getattr(args, "label", ""):
+        w("scenario: %s" % args.label)
     w("native:  %s" % args.native)
     w("oracle:  %s" % args.oracle)
     w("role map: %s" % ("native Me <-> oracle Enemy (auto: oracle Me is the "
@@ -313,7 +308,14 @@ def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
     counted_total = 0
     rows = []
     for field, s in stats.items():
-        info = field in INFORMATIONAL
+        # A field is informational when the two sides structurally cannot hold
+        # the same quantity: either it is listed in INFORMATIONAL, or the
+        # oracle exposed NO value at all for the matched frames (e.g. the
+        # tutorial fight is built with `ha == null` (`v.m1a` L50365), so it has
+        # no `Sf` HUD timer at all — `nf`/`timer` are then structurally absent,
+        # not divergent).
+        info = field in INFORMATIONAL or (
+            s.get("oracle_none", 0) > 0 and s["oracle_none"] == s["compared"])
         if s["mismatch"] and not info:
             counted_total += s["mismatch"]
         rows.append((field, s, info))
@@ -335,8 +337,15 @@ def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
     w("  fields compared:      %d" % sum(1 for f, s, i in rows if not i))
     w("  fields diverging:     %d" % sum(1 for f, s, i in rows if not i and s["mismatch"]))
     w("  total divergences:    %d" % counted_total)
-    w("  informational fields (emitted, not counted): %s"
-      % ", ".join(sorted(INFORMATIONAL)))
+    if INFORMATIONAL:
+        w("  informational fields (emitted, not counted): %s"
+          % ", ".join(sorted(INFORMATIONAL)))
+    else:
+        w("  informational fields: none (every emitted field is counted)")
+    dyn = sorted(f for f, s, i in rows if i and f not in INFORMATIONAL)
+    if dyn:
+        w("  informational (oracle exposes no value in this scenario): %s"
+          % ", ".join(dyn))
     w("")
 
     # first-divergence detail: which fields break first, in frame order
@@ -398,6 +407,8 @@ def run(args):
                 s["mismatch"] += 1
                 if s["first"] is None:
                     s["first"] = (native_frames[ni].get("f"), oracle_frames[oi].get("f"), nv, ov)
+            if ov is None:
+                s["oracle_none"] = s.get("oracle_none", 0) + 1
 
     lines = build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
                          matches, un_nat, un_ora, stats, swap)
@@ -425,6 +436,10 @@ def main(argv=None):
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--map-native-me-to", dest="map_native_me_to", default="auto",
                     choices=["auto", "oracle-enemy"])
+    ap.add_argument("--label", default="",
+                    help="scenario label shown in the report header "
+                         "(e.g. 'dojo-demo', 'tournament-ladder', "
+                         "'boss-lynx', 'survival', 'shop', 'quests')")
     args = ap.parse_args(argv)
     return run(args)
 

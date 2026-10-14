@@ -13849,6 +13849,14 @@ void FightScreen::update_impl(float dt) {
     // (reported: "too fast"). Ticked here, once per fixed step, `Ix.move`'s
     // 0.5 s slide + `count` frames + the 0.5 s retract are rate-independent.
     tick_callouts();
+    // [state harness] Publish the live per-side `Gr.Gu` display lengths and
+    // emit the state-dump line HERE (after the drain + tick): the JS `Gr.azb`
+    // tick runs inside the same `ca.ia` pass as the sim, so the oracle's
+    // `Gu.length` at the end of its frame is exactly this post-tick value.
+    fight_->set_callout_display_counts(
+        static_cast<int>(combo_callout_[0].elements.size()),
+        static_cast<int>(combo_callout_[1].elements.size()));
+    fight_->emit_state_dump();
     // [child-model probe] The shipped fights reach 0 `<CreatePlayer>` rows
     // (the action-kind census), so `SF2_CHILD_PROBE=1` drives one synthetic
     // create -> render -> delete cycle through the EXACT dispatch path and

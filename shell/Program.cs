@@ -21,6 +21,7 @@ internal static class Program
         string tracesDir = Path.Combine(repoRoot, "reference", "traces");
 
         string? inputScript = ParseInputScriptArg(args);
+        string? urlQuery = ParseQueryArg(args);
         int timeoutMs = ParseTimeoutArg(args);
         if (inputScript is not null)
         {
@@ -53,6 +54,10 @@ internal static class Program
         server.Start();
 
         string url = $"http://127.0.0.1:{port}/";
+        if (!string.IsNullOrEmpty(urlQuery))
+        {
+            url += "?" + urlQuery;
+        }
         Console.WriteLine($"[shell] serving {wwwRoot} at {url}");
 
         ApplicationConfiguration.Initialize();
@@ -80,6 +85,24 @@ internal static class Program
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (string.Equals(args[i], "--input-script", StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// <c>--query &lt;k=v&amp;...&gt;</c>: appended to the served URL so the
+    /// page (reference/runner/index.html) can select a SCENARIO (post-tutorial
+    /// hub vs the stock tutorial fight, etc.). No query -> stock behaviour.
+    /// </summary>
+    private static string? ParseQueryArg(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--query", StringComparison.OrdinalIgnoreCase))
             {
                 return args[i + 1];
             }

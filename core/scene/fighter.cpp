@@ -3028,7 +3028,7 @@ void Fighter::ensure_solver_caches() {
 
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      float y, int mirror_sign, bool interp, int first_frame,
-                     int playhead, float sub_frac) {
+                     int playhead, float sub_frac, bool tick_ragdoll) {
     if (clip.frames.empty()) {
         return;
     }
@@ -3435,7 +3435,11 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             }
         }
         // JS `Al.ia` (L582) tail: `sk(); jE(); nk&&frameCount++`.
-        if (nk_) ++ragdoll_frame_count_;
+        // Only the once-per-frame `ia()` path ticks the counter: the
+        // port-only re-pose calls (`sample_idle`/`sample_enemy_idle`) pass
+        // `tick_ragdoll=false`, so the JS-exact `Al.frameCount` (= the number
+        // of `ia()` calls since `Al.start`) is preserved.
+        if (nk_ && tick_ragdoll) ++ragdoll_frame_count_;
         // JS `Al.fha` (L582) now runs INSIDE the `jE` loop above (via `fdb`),
         // on the joint endpoints that carry `cA` — the JS call site/cadence.
         // Only the world-space ragdoll state needs it (the clip-space solver

@@ -263,38 +263,56 @@
   }
 
   /* Fight-level state:
-   *   nf       `ha.mb.NF`  (the HUD countdown seconds — Ar.mb is the Sf timer)
+   *   nf       `Sf.NF`      (the HUD countdown seconds — `fight.ha.mb` is the
+   *                           `Sf` HUD, `Ar.E1` L83904; `Sf.iPa` L84739
+   *                           `NF = xU/60|0`, ticked while `round.Vt`)
+   *   timer    `Sf.NF`      (the raw countdown; the JS `$t.time` is
+   *                           write-once `0` (`ca.tx` L16643) so it is NOT a
+   *                           comparable quantity — the live countdown is)
    *   result   `ey`        (the round result code)
-   *   rules    [n, n_active] over `ud.Ae`
-   *   callouts [n_me, n_en]  (`Id.Jh.Gu` / `je.Jh.Gu` — INFORMATIONAL, the
-   *                           JS list slides across frames while the native
-   *                           queue is drained per tick; not diffed)
+   *   rules    [n, n_active] over `fight.Da.jh()` (L59361: `p.o.Yh ? CV :
+   *            Ae`, the eclipse-filtered rule collection the port's
+   *            `rules_begin_round` mirrors), falling back to `ud.Ae`
+   *   callouts [n_me, n_en]  (`Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` — the live `Gr`
+   *                           display lists, ticked by `Gr.azb` inside
+   *                           `ca.ia`)
    *   counters `m$` / `lW` */
+  function hudSf(fight) {
+    try {
+      if (fight.ha && fight.ha.mb) return fight.ha.mb;      // `Ar.mb` (Sf)
+      if (fight.mb && typeof fight.mb.NF === "number") return fight.mb;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
   function fightState(fight) {
     var round = fight.round || null;
+    var sf = hudSf(fight);
     var nf = null;
-    try {
-      if (fight.ha && fight.ha.mb && typeof fight.ha.mb.NF === "number") {
-        nf = fight.ha.mb.NF | 0;
-      }
-    } catch (e) { /* ignore */ }
+    if (sf && typeof sf.NF === "number") nf = sf.NF | 0;
     var result = null;
     try { if (typeof fight.ey === "number") result = fight.ey | 0; } catch (e) { /* ignore */ }
     var rules = [0, 0];
     try {
-      var ud = fight.ud;
-      if (ud && ud.Ae) {
-        rules[0] = ud.Ae.length | 0;
+      var src = null;
+      try { if (fight.Da && typeof fight.Da.jh === "function") src = fight.Da.jh(); }
+      catch (e) { /* ignore */ }
+      if (!src) {
+        var ud = fight.ud;
+        if (ud && ud.Ae) src = ud.Ae;
+      }
+      if (src) {
+        rules[0] = src.length | 0;
         var act = 0;
-        for (var i = 0; i < ud.Ae.length; i++) {
-          if (ud.Ae[i] && ud.Ae[i].active) ++act;
+        for (var i = 0; i < src.length; i++) {
+          if (src[i] && src[i].active) ++act;
         }
         rules[1] = act;
       }
     } catch (e) { /* ignore */ }
     var callouts = [0, 0];
     try {
-      var mb = fight.ha && fight.ha.mb;
+      var mb = sf || (fight.ha && fight.ha.mb);
       if (mb) {
         if (mb.Id && mb.Id.Jh && mb.Id.Jh.Gu) callouts[0] = mb.Id.Jh.Gu.length | 0;
         if (mb.je && mb.je.Jh && mb.je.Jh.Gu) callouts[1] = mb.je.Jh.Gu.length | 0;
@@ -308,7 +326,7 @@
       f: typeof fight.frame === "number" ? fight.frame : 0,
       phase: typeof fight.eu === "number" ? fight.eu : 0,
       round: round ? round.round : null,
-      timer: round ? round.time : null,
+      timer: nf,
       nf: nf,
       result: result,
       cam: tr.cam || camFallback(fight),

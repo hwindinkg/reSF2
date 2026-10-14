@@ -887,9 +887,15 @@ public:
     // `1/60 * 1/v.on()`; `Qi.ia` L248219 / `WD.WL` L427772). It shifts the
     // Bezier parameter continuously between the JS integer samples so the
     // slow-mo pose ramps instead of stepping.
+    // `tick_ragdoll` (JS `Al.ia` tail `nk&&frameCount++`): TRUE for the
+    // once-per-60Hz-frame pose path (`advance_step` -> `sample_current` /
+    // `sample_bind_pose`), FALSE for the port-only re-pose calls
+    // (`FightController::sample_idle` / `sample_enemy_idle`), which have NO
+    // JS `ia()` counterpart and must not advance `Al.frameCount`.
     void sample(const sf2::data::anim_clip& clip, int frame, float x, float y,
                 int mirror_sign, bool interp = false, int first_frame = 0,
-                int playhead = 0, float sub_frac = 0.0f);
+                int playhead = 0, float sub_frac = 0.0f,
+                bool tick_ragdoll = true);
 
     // Flat fill color (RGB, 0..255).
     void set_color(std::uint32_t rgb) {

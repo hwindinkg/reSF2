@@ -1946,6 +1946,21 @@ public:
     }
     // Non-draining read of the pending HUD callout signals (state harness).
     const std::vector<CalloutSignal>& pending_callouts() const { return callouts_; }
+    // The live per-side `Gr.Gu` DISPLAY list length (JS `Sf.Id.Jh.Gu.length` /
+    // `Sf.je.Jh.Gu.length`). The screen owns the sliding element lists
+    // (`FightScreen::combo_callout_`); it publishes their lengths here once
+    // per fixed step, AFTER the drain + `tick_callouts()`, and then calls
+    // `emit_state_dump()` so the state trace reads the SAME end-of-frame
+    // `Gu.length` the oracle reads (JS `Gr.ia`/`azb` runs inside `ca.ia`).
+    void set_callout_display_counts(int me, int en) {
+        callout_display_[0] = me;
+        callout_display_[1] = en;
+    }
+    // [trace] Emit one state-dump line (a no-op unless `--dump-state` armed
+    // it). Called by the fight screen at the END of its fixed step, after the
+    // callout drain + tick, so the `callouts` field matches the oracle's
+    // end-of-frame `Gr.Gu`.
+    void emit_state_dump();
     // [probe, authorised] `--tactic <Name>`: force the ENEMY's tactic by
     // name (the tactic_settings.xml `<Tactic Name=..>`) on the live fight,
     // overriding the battle's shipped tactic. Returns false when the name
@@ -2486,6 +2501,7 @@ private:
     int state_dump_frames_ = 0;     // frames left to dump (0 = off)
     int state_dump_written_ = 0;    // lines written so far
     std::FILE* state_dump_file_ = nullptr;
+    int callout_display_[2] = {0, 0};  // live `Gr.Gu` lengths (per side)
     void dump_state_frame();
 
     // --- fight helpers (JS ca methods) ------------------------------------

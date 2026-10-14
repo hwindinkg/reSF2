@@ -3958,7 +3958,8 @@ void FightController::sample_idle(FightFighter& f) {
     sf2::data::anim_clip bind_clip;
     bind_clip.frames.resize(1);
     f.fighter.sample(bind_clip, 0, f.fighter.world_x(), f.fighter.world_y(),
-                     f.fighter.facing());
+                     f.fighter.facing(), /*interp=*/false, 0, 0, 0.0f,
+                     /*tick_ragdoll=*/false);
 }
 
 void FightController::sample_enemy_idle() {
@@ -3970,7 +3971,9 @@ void FightController::sample_enemy_idle() {
         sf2::data::anim_clip bind_clip;
         bind_clip.frames.resize(1);
         enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
-                              enemy_.fighter.world_y(), enemy_.fighter.facing());
+                              enemy_.fighter.world_y(), enemy_.fighter.facing(),
+                              /*interp=*/false, 0, 0, 0.0f,
+                              /*tick_ragdoll=*/false);
         return;
     }
     sample_idle(enemy_);
@@ -8399,8 +8402,11 @@ void FightController::update(float dt) {
     // [trace] The per-frame pose dump (a no-op unless --dump-pose armed it).
     dump_pose_frame();
 
-    // [trace] The per-frame state dump (a no-op unless --dump-state armed it).
-    dump_state_frame();
+    // [trace] The per-frame STATE dump is emitted by the fight screen at the
+    // END of its fixed step (after the callout drain + tick), NOT here: the
+    // `callouts` field is the live `Gr.Gu` display length, which the JS
+    // `Gr.azb` tick updates inside the same `ca.ia` pass. See
+    // `FightScreen::update_impl` -> `emit_state_dump()`.
 }
 
 // --- pose dump (trace infrastructure, Phase 0) -------------------------------
@@ -8553,6 +8559,8 @@ void FightController::dump_pose_frame() {
 //                at fight start, the port's raw flag = 0.)
 //
 // Read-only over the simulation: nothing here mutates the fight state.
+void FightController::emit_state_dump() { dump_state_frame(); }
+
 void FightController::dump_state_frame() {
     if (state_dump_frames_ <= 0) return;
     // The oracle's tracer only emits frames while the fight controller is
@@ -8595,17 +8603,15 @@ void FightController::dump_state_frame() {
     }
     std::fprintf(state_dump_file_, "],\"callouts\":[");
     {
-        // Pending HUD callout signals this frame, counted per side (JS
-        // `Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` lengths). NOTE: the JS `Gr.Gu` list is
-        // a sliding DISPLAY queue (elements survive several frames), while the
-        // port's `callouts_` is drained every tick — so this field is emitted
-        // for visibility but is NOT part of the mechanical divergence count
-        // (see compare_state.py INFORMATIONAL).
-        int n_me = 0, n_en = 0;
-        for (const CalloutSignal& s : callouts_) {
-            if (s.side == 0) ++n_me; else ++n_en;
-        }
-        std::fprintf(state_dump_file_, "%d,%d", n_me, n_en);
+        // The live per-side `Gr.Gu` display list length (JS
+        // `Sf.Id.Jh.Gu.length` / `Sf.je.Jh.Gu.length`), published by the
+        // fight screen after its drain + `tick_callouts()` (see
+        // `set_callout_display_counts`). The JS `Gr.Gu` is a SLIDING display
+        // queue whose elements survive several frames, so this is the count
+        // of currently-displayed callouts — the SAME quantity the oracle
+        // reads at the end of its frame.
+        std::fprintf(state_dump_file_, "%d,%d", callout_display_[0],
+                     callout_display_[1]);
     }
     std::fprintf(state_dump_file_, "],\"fighters\":[");
     const FightFighter* fighters[2] = {&player_, &enemy_};
