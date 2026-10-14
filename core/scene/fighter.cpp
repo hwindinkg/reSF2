@@ -690,6 +690,17 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
                             float wall_max, float floor_y) {
     const bool was_active = nk_;
     nk_ = true;
+    // [FIX dummy/ragdoll mirror — JS `Qnb` L258045 `da.reset()`] The physics
+    // (`MS`) branch reaches the ragdoll via `jJa` -> `Qnb`, which runs
+    // `this.da.reset()` (L22880) BEFORE `da.etb(qs.animation)`. `Te.reset`
+    // restores the ctor default `this.FX = 1` (L22882), so a physics move
+    // NEVER carries the facing-derived clip mirror that `Te.Skb`'s `rub(b)`
+    // (L23010) seats for a normal `NS` start. The oracle dumps `da.hd()` =
+    // `Te.FX` and reads +1 for the clip-less `PhysicalDummy` bag; the port's
+    // `ai_start_move` left `clip_mirror_` at -1 (facing term,
+    // `start_move_impl`). Reset it here, exactly as `Qnb` does.
+    clip_mirror_ = 1;
+    mirror_x_ = false;
     ragdoll_frame_count_ = 0;
     ragdoll_names_.clear();
     if (!reaction.empty()) ragdoll_names_.push_back(reaction);

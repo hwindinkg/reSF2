@@ -7054,6 +7054,22 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             dctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
             const sf2::scene::MoveDef* dm = me.fighter.stage_start_move(dctx);
             if (dm != nullptr && me.fighter.ai_start_move(*dm, dctx)) {
+                // [FIX dummy ragdoll — JS `Gc.DK` L674 `e.animation.MS ?
+                // a.jJa(e.animation,e.R1) : ...`] A `Physics="1"` stage move
+                // (`PhysicalDummy`, moves.xml L10427) takes the `jJa` branch,
+                // so the NEXT `wd.ia` runs `Qnb` (L258045) -> `Mwb`/`Lwb`
+                // (L258114) -> `Nd.start` = `Al.start` (L24409, `nk=!0`).
+                // `Al.ia` (L24395) then integrates the WHOLE non-`NG` body
+                // every frame (`Al.sk` L24443 gates on `nk`), i.e. the bag is a
+                // RAGDOLL, not a cloth-only swing. The port's direct
+                // `ai_start_move` skipped this branch, so the bag kept the
+                // `1.886` world-y bind offset and a partly-frozen chain
+                // (oracle `Me` swings from f=2). Route it through the SAME
+                // `ragdoll_start` the reaction path uses
+                // (`process_reaction_queues`, fighter.cpp:2038).
+                if (dm->physics) {
+                    me.fighter.ragdoll_start(dm->name, wall_min_, wall_max_, 0.0f);
+                }
                 std::fprintf(stdout,
                              "[stance] F%d %s intro=%d move=%s (dummy stage)\n",
                              frame_, me.name.c_str(), intro ? 1 : 0,
