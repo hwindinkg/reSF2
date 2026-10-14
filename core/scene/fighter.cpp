@@ -2120,12 +2120,26 @@ void Fighter::advance_step() {
     // L23286) — smooth, no fractional re-pose. MidFrames=2, no slow-mo -> 3.
     const int sub = std::max(1, sub_);
 
-    // Clip frame (JS `Te.M0()`: `(Xh<=2?0:Xh-2)+Mq`): playback slot
-    // `playhead_` maps to clip frame `FirstFrame + max(0, Xh-2)`. `move_frame_`
-    // stays this CLIP frame for the interval/cf consumers, while `sample()`
-    // reads the play buffer (prepend slots 0/1 then clip[FirstFrame..]).
+    // Clip frame (JS `Te.M0()` `(Xh<=2?0:Xh-2)+Mq`, L22871-22873). The JS
+    // `Te.Xh` is `playhead_ + 1` for the WHOLE span: `ia` increments it in the
+    // `else` branch (L22841 `this.Xh++`) and NOWHERE else — the `isBuffer()`
+    // branch (L22807-22820, the span's own `sub` frames) does `eda`+`lq++` and
+    // NEVER `Xh++`. Offsets: the JS reads the span's control points as
+    // `Kh(Xh),Kh(Xh+1),Kh(Xh+2)` with the PRE-increment `Xh` (L22834 `Gka()`
+    // -> L23476-23484), and the port's `sample()` reads slots
+    // `playhead_, playhead_+1, playhead_+2` — so the port's `playhead_` IS the
+    // JS pre-increment `Xh`, i.e. the JS `Xh` DURING this frame is
+    // `playhead_ + 1`. That is the value `M0` must use, and it is CONSTANT per
+    // span (`Xh == slot+1` on every frame of the span). The old
+    // `ff + max(0, playhead_ - 2)` was 1 LOW on the `sub-1` non-wrap frames
+    // (the interval/action windows opened ~1 frame early) and the wrap-frame
+    // recompute below then swung it 1 HIGH — the `active_intervals_` set
+    // flickered inside a span, which the JS never does (`rrb` runs once per
+    // span). Capture `Xh` HERE (before the wrap below bumps `playhead_`) so
+    // both sites see the same per-frame constant.
     const int ff = std::max(0, current_move_->first_frame);
-    move_frame_ = ff + std::max(0, playhead_ - 2);
+    const int xh = playhead_ + 1;      // JS `Te.Xh` for THIS frame
+    move_frame_ = ff + std::max(0, xh - 2);  // JS `Te.M0()`
 
     // Interval update: active when max(start,qx) <= frame <= min(finish,Lj).
     active_intervals_.clear();
@@ -2219,7 +2233,11 @@ void Fighter::advance_step() {
         subframe_ = 0;
         ++playhead_;  // JS `Xh++` (once per `sub` steps)
     }
-    move_frame_ = ff + std::max(0, playhead_ - 2);
+    // The JS `vp()` -> `rrb()`/`Lwa()` read `ip()` = `M0` with the SAME
+    // per-span `Xh` (the `else` branch bumps it, then calls `vp()`); the port
+    // therefore keeps the frame's constant `ff + max(0, xh - 2)` — recomputing
+    // from the just-bumped `playhead_` would add 1 on the wrap frame.
+    move_frame_ = ff + std::max(0, xh - 2);  // JS `M0` (see above)
     // JS `Te.ia` L547-548 order: `eda()` (the pose apply) THEN `vp()`
     // (L563) which detects the frame change (`a != this.cX`) and runs
     // `rrb()` + the action pass `Lwa()` (L563-564:

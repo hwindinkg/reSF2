@@ -23523,7 +23523,15 @@ int run_shell_probe(App& app) {
         const int sub = shop.preview_sub();
         const int f_after_sub = shop.probe_preview_frame_after(app, *wp, sub);
         const int f_after_3sub = shop.probe_preview_frame_after(app, *wp, 3 * sub);
-        const bool paced = armed && sub >= 1 && f_after_sub == ff && f_after_3sub == ff + 1;
+        // The expected `Te.M0()` values follow from the JS verbatim:
+        // `M0(){return (this.Xh<=2?0:this.Xh-2)+this.Mq}` (L22871-22873) and
+        // `Te.ia`'s ONLY `Xh++` is the `else`-branch one (L22841), so
+        // `Xh == span+1` (the `isBuffer()` branch L22807-22820 never bumps it).
+        // The arm tick is span 0 (`Xh=1` -> `M0 == Mq` == `ff`); `sub` ticks
+        // later we are on span 1 (`Xh=2` -> `M0 == ff`); `3*sub` ticks later on
+        // span 3 (`Xh=4` -> `M0 == ff+2`). (The old `ff+1` pinned the pre-fix
+        // one-low `max(0, playhead_-2)` value.)
+        const bool paced = armed && sub >= 1 && f_after_sub == ff && f_after_3sub == ff + 2;
         std::fprintf(stdout,
                      "[sps] preview pacing item=%s sub=%d frame ff=%d after %dt=%d after "
                      "%dt=%d (JS 1 clip frame per %d ticks)\n",
