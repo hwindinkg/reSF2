@@ -49,6 +49,7 @@
 #include "anim_archive.hpp"
 #include "atlas.hpp"
 #include "render/gl_types.hpp"
+#include "scene/achievement_session.hpp"
 #include "scene/ai.hpp"
 #include "scene/damage.hpp"
 #include "scene/effects.hpp"
@@ -2109,6 +2110,24 @@ public:
     // `Bq("ShockWin")`, L372) — the `Achievement_Name_Win_After_Shock`
     // unlock. The port previously never set/read this flag (port-only gap).
     bool player_shocked() const { return player_shocked_; }
+    // --- achievement-counter session (JS `fe` = Vt, L15084) ---------------
+    // The per-round hit + outcome records `wqb`/`Cqb`/`JZa` feed; the app
+    // layer maps them onto the internal_settings.xml counter defs.
+    const std::vector<sf2::scene::AchievementRoundRecord>& achievement_rounds()
+        const { return achievement_rounds_; }
+    // JS `ca.lW` (L15513 init true; cleared L16519/L16865 when the ENEMY wins
+    // a round): drives `BossNoLose` (`KZa` L17232 `if (c && this.lW)`).
+    bool achievement_lost_round() const { return achievement_lost_round_; }
+    // JS `fe.Brb(a.Vx.j2)` calls (L15174) — the combo-window signal payloads.
+    const std::vector<int>& achievement_brb() const { return achievement_brb_; }
+    // JS `round.eL` = the ROUNDS-TO-WIN; `complete(round.eL)` (L15310) uses it
+    // to normalise a `CounterSpan="Fight"` session value to 0/1.
+    int rounds_to_win() const { return round_.length; }
+    // JS `Da.type` (the canonical fight type) + `Da.index`/`lg.Kz().length`
+    // -- the `KZa` fight-end ladder + the `<Battle Type Not>` counter gate.
+    const std::string& fight_type() const { return battle_.type; }
+    // JS `Fsb(a ? this.Rk + 1 : this.Rk)` (L17250): the survival wave reached.
+    int survival_wave() const { return battle_.enemy_wave; }
     // JS `bea`/`kD` (L413/L415): the result plate's `fu(1.166)` hold is the
     // fight-end sequence; `battle_over_` flips only on its expiry, so the
     // caller's Results push (and reward) happen AFTER the K.O./end stance.
@@ -2292,6 +2311,13 @@ private:
     // (set in the `Cgb` hit path, cleared at each round start `Z2`). Read by
     // the battle-end `ShockWin` counter (`JZa` -> `vsb`).
     bool player_shocked_ = false;
+    // --- achievement-counter session state (JS `fe`, L15084) --------------
+    // One record per round (JS `fe.Ob.Hv` per-round latches + the `wqb` hits).
+    std::vector<sf2::scene::AchievementRoundRecord> achievement_rounds_;
+    // JS `ca.lW` (L15513/L16519): false once the ENEMY wins a round.
+    bool achievement_lost_round_ = false;
+    // JS `fe.Brb(a.Vx.j2)` (L15174) calls (the combo-window signal, per call).
+    std::vector<int> achievement_brb_;
     bool round_wait_ = false;      // JS: between a round's end and `FNa`
                                    // (the round-break banner holds it)
     // JS `ca.o1a` L403 / `kg` L387: the `FightNone` viewer (the Dojo hub)
@@ -2514,6 +2540,9 @@ private:
     // `true` = the player (kc) wins; `false` = the enemy (Zb).
     bool rule_winner_is_player(const FightRule& r) const;
     // JS `E3a` (L412): apply a round result (rounds-won, winner flags).
+    // The current round's achievement record (created on demand; the
+    // `round_.number` keys it so a fresh round gets a fresh record).
+    sf2::scene::AchievementRoundRecord& achievement_cur_round();
     void apply_round_result(round_result result, const FightFighter& winner,
                             const FightFighter& loser);
     // JS `bea` (L413): the battle end.

@@ -424,6 +424,11 @@ void FightController::init_locks(
     battle_ = battle;
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_shocked_ = false;  // JS `ca.m$` ctor init (L379 `this.m$=!1`)
+    // JS `ca.lW` ctor init (L15513 `this.lW = true`) + a fresh `fe` session
+    // (the JS creates a new `Vt` with the fight, `fe.init` L15093).
+    achievement_lost_round_ = false;
+    achievement_rounds_.clear();
+    achievement_brb_.clear();
     player_.style = StyleMeter();  // style meters reset per battle
     enemy_.style = StyleMeter();
     model_ = model;
@@ -3477,6 +3482,20 @@ void FightController::check_round_end() {
 // rounds-won (`ng`) increments, both fighters get the winner flags, and
 // the round enters phase 3. When the winner has won `round.eL` rounds
 // (Rounds), the battle ends (JS Onb `a` -> bea).
+// JS `fe.Ob.Hv` (L15084) keyed per round: a fresh `Xt` session-counter set is
+// built for each round (the `CounterSpan="Round"` `cb` latch resets via `$K`
+// L15341). The port lazily materialises one `AchievementRoundRecord` per
+// `round_.number`.
+sf2::scene::AchievementRoundRecord& FightController::achievement_cur_round() {
+    if (achievement_rounds_.empty() ||
+        achievement_rounds_.back().round_number != round_.number) {
+        sf2::scene::AchievementRoundRecord r;
+        r.round_number = round_.number;
+        achievement_rounds_.push_back(std::move(r));
+    }
+    return achievement_rounds_.back();
+}
+
 void FightController::apply_round_result(round_result result, const FightFighter& winner,
                                          const FightFighter& loser) {
     RoundOutcome oc;
@@ -3510,6 +3529,17 @@ void FightController::apply_round_result(round_result result, const FightFighter
     w.rounds_won++;
     w.is_winner = true;
     l.is_winner = false;
+
+    // JS `JZa` (L420) + `ca.lW` (L16519): record the round's counter facts and
+    // the "player lost a round" latch (`BossNoLose`).
+    {
+        sf2::scene::AchievementRoundRecord& rr = achievement_cur_round();
+        rr.player_won = winner.is_player;         // `a.qb`
+        rr.player_round_unhit = player_.round_unhit;  // `a.cE` -> `Rrb`
+        rr.player_hp_end = player_.hp;            // `a.gd` -> `xrb`
+        rr.duration = round_.gma - round_.time_nf;  // `R4 - Pz()` -> `setTime`
+        if (!winner.is_player) achievement_lost_round_ = true;  // `this.lW=!1`
+    }
 
     // JS `E3a` (L413): `a.kh=!0; b.kh=!0;` — both fighters latch the
     // round-over flag, which gates the attack pass in `ca.Hnb` (L389).
@@ -6049,6 +6079,26 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rec.hp_after = def.hp;    // `aM(model, -0)` leaves HP untouched
     }
     def.hp = rec.hp_after;
+    // JS `ca.Cgb` L16187/L16189: feed the `fe` session tracker.
+    //   attacker == player -> `fe.wqb(Sj(), Uq, ep, Yi, a_data, block)`
+    //   attacker != player -> `fe.Cqb(block)` (the `O1` + BlockedRound latches)
+    {
+        sf2::scene::AchievementRoundRecord& rr = achievement_cur_round();
+        if (atk.is_player) {
+            sf2::scene::AchievementHitRecord h;
+            h.anim_names = move.anim_names;  // `Sj().xl`
+            h.weapon = player_.weapon;       // `fe.Hha.Hd.name`
+            h.head = rec.head_hit;           // `Uq`
+            h.first = rec.first_hit;         // `ep`
+            h.disarm = rec.disarm;           // `Yi`
+            h.blocked = hit_blocked;         // `b.block`
+            h.lethal = (def.hp <= 0.0f);     // `a_data` = `gd <= 0`
+            rr.player_hits.push_back(std::move(h));
+        } else if (def.is_player) {
+            rr.player_hit_at_all = true;                       // `O1`
+            if (!hit_blocked) rr.player_hit_unblocked = true;  // `cb` disqualifier
+        }
+    }
     // JS `strike` (L259058): `++this.lU` on the ATTACKER, and
     // `LWa(a,b,c)` (L519, called at L260105 `this.LWa(e, this.Bb.aI,
     // this.Bb.Zi)`): `this.Kf().Cn.nY(!0,b,c)` (my attack map) +
@@ -6553,6 +6603,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             if (atk.is_player && atk.combo_j2 > prize_fh_.jU) {
                 prize_fh_.jU = atk.combo_j2;
             }
+            // JS `ca.Ihb` (L17317) `this.fe.Brb(a.Vx.j2)` on the combo signal.
+            if (atk.is_player) achievement_brb_.push_back(atk.combo_j2);
             // Perk-bus slot 4 (Combo): JS `Gc.Ihb` (L215492) -> `this.tb.Gj(a,4)`
             // (no `withInfo`, so the `Hc` gate is skipped — `xG.info=null`).
             fire_bus_slot(sf2::scene::kEvCombo, sf2::scene::TrigVars(),
@@ -7959,6 +8011,8 @@ void FightController::update(float dt) {
                         fr->combo_run = 0;
                         fr->combo_announced = 0;
                         if (fr->combo_j2 >= combo_min_hits) {
+                            // JS `ca.Ihb` (L17323) `this.fe.Brb(a.Vx.j2)`.
+                            if (fr->is_player) achievement_brb_.push_back(fr->combo_j2);
                             // Perk-bus slot 4 (Combo), the `iu.wyb` window-expiry
                             // signal (`Jt.Z(Ui)` -> `Gc.Ihb` L215492 `Gj(a,4)`).
                             fire_bus_slot(sf2::scene::kEvCombo,

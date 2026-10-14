@@ -13969,6 +13969,20 @@ void FightScreen::update_impl(float dt) {
         // JS `ca.m$` -> `JZa` (L420) `this.m$ && this.fe.vsb()`: the player
         // was shocked in the final round (the `ShockWin` counter hook).
         pb.player_shocked = fight_->player_shocked();
+        // JS `fe` session snapshot for the fight-end counter flush (`COa` L17328
+        // -> `ika`): the per-round hit/outcome records (`wqb`/`Cqb`/`JZa`), the
+        // `Brb` combo triggers, `lW`, `Da.type`, `Fsb`'s wave and the `KZa`
+        // ladder `index == last` test (`Da.index == Da.lg.Kz().length-1`).
+        pb.achievement_rounds = fight_->achievement_rounds();
+        pb.achievement_lost_round = fight_->achievement_lost_round();
+        pb.achievement_fight_type = fight_->fight_type();
+        pb.achievement_survival_wave = fight_->survival_wave();
+        pb.achievement_brb = fight_->achievement_brb();
+        pb.achievement_rounds_to_win = fight_->rounds_to_win();
+        pb.achievement_ladder_final =
+            mode_active_ && !mode_battle_.fights.empty() &&
+            mode_series_.fight_index ==
+                static_cast<int>(mode_battle_.fights.size()) - 1;
         // The terminal mode win grants the final row's reward (JS `D0(Rk)`).
         if (mode_active_ && player_won) {
             pb.reward_money = fight_->mode_reward().money;
@@ -15534,11 +15548,20 @@ static bool load_res_doc(const char* path, sf2::data::xml_doc& doc) {
 struct AchievementCounterDef {
     std::string name;                       // `Counter Name`
     std::string type;                       // `Counter Type` (the `e.type`)
+    std::string animation;                  // `Animation` (RestrictedAnimation/HeadHit)
+    std::string weapon;                     // `Weapon` (RestrictedAnimation, "Fists")
+    int counter_span = 0;                   // `CounterSpan` -> `kca` (Round 1/Fight 2/else 0)
     std::string fight;                      // `Fight` attr ("zone|battle|index")
     std::string fight2;                     // `Fight2` attr
     std::string eclipse;                    // `EclipseMode` attr ("0"/"1")
     std::vector<std::string> win_battles;   // `<WinBattle Name>` children
-    int value = 0;                          // `Value` (the `Style`/`ComboCount` threshold)
+    // `<Battle Type="X" Not="Y"/>` (the `eh` condition, L12738). Only the
+    // shipped counters use ONE `<Battle>`; AND-combined children beyond it are
+    // not shipped.
+    std::string battle_type;                // the `<Battle Type>` KIND token
+    bool battle_not = false;                // the `<Battle Not>` inverter
+    int value = 0;                          // `Value` (the Style/ComboCount/... threshold)
+    float value_f = 0.0f;                   // `Value` as a number (HealthRemained 0.1)
 };
 
 // Parse internal_settings.xml `<AchievementCounter><Counter>` (JS `iY.parse`).
@@ -15555,10 +15578,23 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
         d.name = c.attribute("Name").value();
         if (d.name.empty()) continue;
         d.type = c.attribute("Type").value();
+        d.animation = c.attribute("Animation").value();
+        d.weapon = c.attribute("Weapon").value();
+        // JS `Jt.ysb` L12833: `a == "Round" ? 1 : a == "Fight" ? 2 : 0`.
+        const std::string span = c.attribute("CounterSpan").value();
+        d.counter_span = span == "Round" ? 1 : span == "Fight" ? 2 : 0;
         d.fight = c.attribute("Fight").value();
         d.fight2 = c.attribute("Fight2").value();
         d.eclipse = c.attribute("EclipseMode").value();
         d.value = sf2::data::xml_attr_int(c, "Value", 0);
+        d.value_f = static_cast<float>(c.attribute("Value").as_double(0.0));
+        for (pugi::xml_node bt : c.children("Battle")) {
+            const std::string t = bt.attribute("Type").value();
+            if (!t.empty()) {
+                d.battle_type = t;
+                d.battle_not = bt.attribute("Not").as_int(0) != 0;
+            }
+        }
         for (pugi::xml_node wb : c.children("WinBattle")) {
             const std::string n = wb.attribute("Name").value();
             if (!n.empty()) d.win_battles.push_back(n);
@@ -15568,71 +15604,220 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
     return out;
 }
 
-// Build the per-fight counter deltas the native hooks can source. Each mapped
-// delta is the JS `tP=1` flag value the session tracker yields for that TYPE
-// (`Bq`/`Nk` set `Ob.Hv` 0/1; `COa` copies it into `tP`):
-//   WinBattle    -> `Xsb(record)` when the win's `hb` name matches a
-//                   `<WinBattle Name>` (`IZa` -> `uga`, L189588).
-//   FightBeaten  -> `Ysb(record)` when `RI(counter.T3a/U3a)` matches
-//                   `Fight`/`Fight2` (L189533).
-//   Losses       -> `zrb()` on a lost fight (`Bq("Losses")`, L188930).
-//   MaximumLevel -> `Psb()` ONLY when THIS fight's exp grant pushes the
-//                   player TO the max level (`x_a` L219096: `b=p.o.rs`,
-//                   `c=p.o.Oz()`, `a=v.S6a(this.Da,a)` (the reward row exp),
-//                   `d=p.o.bb()`; `b+a>=c && d+1==v.$0() && this.fe.Psb()`).
-//                   The old port fired it on ANY level-up (`leveled_up`), so
-//                   the Monkey tutorial fight's 1->2 level-up unlocked the
-//                   level-cap achievement `Achievement_Name_Level_Cap`
-//                   ("Повелитель Теней").
-// ShockWin  -> `JZa(a)` (L420) on a WIN: `this.m$ && this.fe.vsb()`, where
-//              `m$` (L397) = the player was shocked by an enemy hit in the
-//              final round. Only the shipped `ShockWin` (EclipseMode="0") row
-//              has a matching achievements.xml achievement
-//              (`Achievement_Name_Win_After_Shock`).
-// The other shipped TYPES (PerfectRound, ComboCount, Style, FirstHits, Disarm,
-// HeadHitRound, SurvivalRounds, HealthRemained, RoundQuicker/Longer,
-// RestrictedAnimation, BodyguardsWin, BossWin, TournamentsBeaten,
-// ChallangesBeaten, DailyBeaten, BossNoLose, Enchantments, Quest) have NO
-// matching achievement in the shipped achievements.xml (their counter rows are
-// inert), so they are SKIPPED (no invention).
+// Build the per-fight counter deltas the native fight hooks source. Each delta
+// is the session-tracker value `COa`/`ika` adds to the saved `<Counter>`
+// (`yt.ika` L11896: `f.AB + e.tP`; `WinBattle` capped at 1). The session
+// tracker is the JS `fe` = Vt (L15084) fed by `wqb`/`Cqb`/`Dsb`/`Brb`/`Fsb`/
+// `setTime`/`xrb`/`Bq` (`Nk` L15354) and flushed at the fight end. The port
+// records the raw per-hit/per-round facts in the FightController session
+// (scene/achievement_session.hpp) and maps them onto the counter DEFS here:
+//   WinBattle    -> `Xsb(record)` (`<WinBattle Name>` match; `IZa` -> `uga`).
+//   FightBeaten  -> `Ysb(record)` (`Fight`/`Fight2` match; `RI`).
+//   Losses       -> `zrb()` on a lost fight (`Bq("Losses")`).
+//   MaximumLevel -> `Psb()` ONLY when the exp grant reaches the max level.
+//   ShockWin     -> `JZa` (L420) `this.m$ && this.fe.vsb()` on a WIN.
+//   Style        -> `Dsb(level)` (L15185) `level >= Value`.
+//   ComboCount   -> `Brb(j2)` (L15174) `j2 >= Value` per fired signal.
+//   SurvivalRounds -> `Fsb(wave)` (L15207) `wave >= Value`.
+//   FirstHits/Disarm/HeadHitRound/HeadHit(HeadKick) -> `wqb` (L15253).
+//   RestrictedAnimation (KickFights/PunchFights/Unarmed) -> `wqb` `cb` latch.
+//   BlockedRound -> `HAa`/`wqb` (L15288) + `Cqb` (L15246).
+//   PerfectRound -> `Rrb` (L15136); HealthRemained -> `xrb` (L15218);
+//   RoundQuicker/Longer -> `setTime` (L15229) — all on the PLAYER-won round
+//   (`JZa` L420 `if (a.qb)`).
+//   BossWin/BodyguardsWin/BossNoLose/TournamentsBeaten/ChallangesBeaten ->
+//   the `KZa` fight-end ladder (L17219), reachable from a mode fight.
+// Bounds (no invention): `EclipseMode="1"` rows need the fight's eclipse
+// state, which PendingBattle does not carry -> skipped; `DifficultyWin`
+// (`Vqb`, `Da`'s difficulty ratio), `DailyBeaten`, `NoLose`, `Enchantments`
+// (forge) and `Quest` are not fight-generated -> skipped.
+// Whether the counter DEF's condition (`Ti(Iu)`, JS `Jt.Ti` L12845 ->
+// `eh.isEqual` L12748) passes for this fight. The shipped rows use ONLY the
+// single `<Battle Type Not>` child (`eh.ajb`); the AND/OR multi-child form is
+// not shipped.
+static bool counter_battle_gate_ok(const AchievementCounterDef& d,
+                                   const std::string& fight_type) {
+    if (d.battle_type.empty()) return true;
+    // JS `p.F().b0(<Battle Type>)`: the KIND token -> the canonical `Da.type`.
+    const std::string want = sf2::scene::battle_type_for_kind(d.battle_type);
+    const bool match = (fight_type == want);
+    // `Not="1"` inverts the leaf (`<Battle Type=\"SURVIVAL\" Not=\"1\"/>` means
+    // "any type EXCEPT FightSurvival").
+    return d.battle_not ? !match : match;
+}
+
+// JS `jc.d2` (L29525): exact string membership in the attack move's `xl`.
+static bool hit_has_anim(const sf2::scene::AchievementHitRecord& h,
+                         const std::string& anim) {
+    for (const std::string& a : h.anim_names)
+        if (a == anim) return true;
+    return false;
+}
+
 static std::map<std::string, int> fight_result_counter_deltas(
     const std::string& ids, bool player_won, bool reached_max_level,
-    bool player_shocked, int style_level = 0) {
+    bool player_shocked, int style_level = 0,
+    const std::vector<sf2::scene::AchievementRoundRecord>& rounds = {},
+    bool lost_round = false, const std::string& fight_type = std::string(),
+    int survival_wave = 0, const std::vector<int>& combo_triggers = {},
+    bool ladder_final = false, int rounds_to_win = 0) {
     std::map<std::string, int> deltas;
     for (const AchievementCounterDef& d : load_achievement_counter_defs()) {
         // `EclipseMode="1"` counters need the fight's eclipse state, which the
         // native `PendingBattle` does not carry -> SKIP (no invention). The
         // `EclipseMode="0"` / absent rows are the normal-mode hooks.
         if (d.eclipse == "1") continue;
-        if (player_won) {
-            if (d.type == "WinBattle") {
-                for (const std::string& wb : d.win_battles) {
-                    if (wb == ids) {
-                        deltas[d.name] += 1;  // `Xsb` -> capped at 1 by `ika`
-                        break;
+        // The `<Battle>` condition gate (`Ti`).
+        if (!counter_battle_gate_ok(d, fight_type)) continue;
+        {
+            const std::string& t = d.type;
+            // --- fight-end ladder (JS `KZa` L17219, win only) -------------
+            if (player_won) {
+                if (t == "WinBattle") {
+                    for (const std::string& wb : d.win_battles) {
+                        if (wb == ids) {
+                            deltas[d.name] += 1;
+                            break;
+                        }
                     }
+                } else if (t == "FightBeaten") {
+                    if ((!d.fight.empty() && d.fight == ids) ||
+                        (!d.fight2.empty() && d.fight2 == ids)) {
+                        deltas[d.name] += 1;
+                    }
+                } else if (t == "ShockWin") {
+                    if (player_shocked) deltas[d.name] += 1;
+                } else if (t == "BossWin") {
+                    // `KZa` L17224: boss types, `index == last` -> `Eqb`.
+                    if (ladder_final &&
+                        (fight_type == "FightBosses" ||
+                         fight_type == "FightBossesReplayable" ||
+                         fight_type == "FightFinalTitan"))
+                        deltas[d.name] += 1;
+                } else if (t == "BodyguardsWin") {
+                    // `KZa` L17230: boss types, not the last -> `Dqb`.
+                    if (!ladder_final &&
+                        (fight_type == "FightBosses" ||
+                         fight_type == "FightBossesReplayable" ||
+                         fight_type == "FightFinalTitan"))
+                        deltas[d.name] += 1;
+                } else if (t == "BossNoLose") {
+                    // `KZa` L17232: `if (c && this.lW)` -> `Fqb`.
+                    if (ladder_final && !lost_round &&
+                        (fight_type == "FightBosses" ||
+                         fight_type == "FightBossesReplayable" ||
+                         fight_type == "FightFinalTitan"))
+                        deltas[d.name] += 1;
+                } else if (t == "TournamentsBeaten") {
+                    // `KZa` L17240 `else -> Msb`: `(Tournament||PVP) && last`.
+                    if (ladder_final && (fight_type == "FightTournament" ||
+                                         fight_type == "FightPVP"))
+                        deltas[d.name] += 1;
+                } else if (t == "ChallangesBeaten") {
+                    // `KZa` L17237: `FightChallenge && index == last` -> `Iqb`.
+                    if (ladder_final && fight_type == "FightChallenge")
+                        deltas[d.name] += 1;
                 }
-            } else if (d.type == "FightBeaten") {
-                if ((!d.fight.empty() && d.fight == ids) ||
-                    (!d.fight2.empty() && d.fight2 == ids)) {
-                    deltas[d.name] += 1;
-                }
-            } else if (d.type == "ShockWin") {
-                // JS `JZa` L420 `this.m$ && this.fe.vsb()` on a win.
-                if (player_shocked) deltas[d.name] += 1;
+            } else if (t == "Losses") {
+                deltas[d.name] += 1;  // `zrb`
             }
-        } else if (d.type == "Losses") {
-            deltas[d.name] += 1;  // `zrb`
+            if (reached_max_level && t == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
+            // JS `fe.Dsb` L15185 (`$l("Style")`, `a >= d.counter.value`): fires
+            // on every player style change; the port's `style_level` is the
+            // battle-best EAa index (monotone) so `>= value` yields one `+1`.
+            if (t == "Style" && style_level >= d.value) deltas[d.name] += 1;
+            // JS `fe.Brb` L15174 (`$l("ComboCount")`, `j2 >= value`): one `+1`
+            // per fired combo-window signal.
+            if (t == "ComboCount") {
+                for (int j : combo_triggers)
+                    if (j >= d.value) deltas[d.name] += 1;
+            }
+            // JS `fe.Fsb` L15207 (`$l("SurvivalRounds")`, `wave >= value`).
+            if (t == "SurvivalRounds" && survival_wave >= d.value)
+                deltas[d.name] += 1;
+            // --- the per-hit `wqb` types (JS L15253) ----------------------
+            if (t == "FirstHits") {
+                // `if (!f && c)` — an unblocked round-first hit.
+                for (const auto& r : rounds)
+                    for (const auto& h : r.player_hits)
+                        if (!h.blocked && h.first) deltas[d.name] += 1;
+            } else if (t == "Disarm") {
+                for (const auto& r : rounds)
+                    for (const auto& h : r.player_hits)
+                        if (h.disarm) deltas[d.name] += 1;
+            } else if (t == "HeadHitRound") {
+                // `if (e) { if (b) ... }` — the LETHAL hit was a head hit.
+                for (const auto& r : rounds)
+                    for (const auto& h : r.player_hits)
+                        if (h.lethal && h.head) deltas[d.name] += 1;
+            } else if (t == "HeadHit") {
+                // HeadKick (`if (!f && b)` + the counter's `Animation`).
+                for (const auto& r : rounds)
+                    for (const auto& h : r.player_hits)
+                        if (!h.blocked && h.head && hit_has_anim(h, d.animation))
+                            deltas[d.name] += 1;
+            } else if (t == "RestrictedAnimation") {
+                // KickFights (Round) / PunchFights / Unarmed (Fight). L15267:
+                // `cb` disqualifies unless EVERY hit's move carries `Animation`
+                // AND the wield matches `Weapon`; `if (e && !cb) Nk`.
+                const auto eligible = [&](const sf2::scene::AchievementHitRecord& h) {
+                    if (!hit_has_anim(h, d.animation)) return false;   // `a.d2(anim)`
+                    if (!d.weapon.empty() && !h.weapon.empty() && h.weapon != d.weapon)
+                        return false;                                  // `Hha.Hd.name != h`
+                    return true;
+                };
+                if (d.counter_span == 1) {
+                    for (const auto& r : rounds) {
+                        bool ok = !r.player_hits.empty();
+                        int lethal = 0;
+                        for (const auto& h : r.player_hits) {
+                            if (!eligible(h)) ok = false;
+                            if (h.lethal) ++lethal;
+                        }
+                        if (ok) deltas[d.name] += lethal;
+                    }
+                } else if (d.counter_span == 2) {
+                    bool ok = true;
+                    int lethal = 0;
+                    for (const auto& r : rounds)
+                        for (const auto& h : r.player_hits) {
+                            if (!eligible(h)) ok = false;
+                            if (h.lethal) ++lethal;
+                        }
+                    // `complete(round.eL)` L15310: `value = value == eL ? 1 : 0`.
+                    if (ok && lethal == rounds_to_win) deltas[d.name] += 1;
+                }
+            } else if (d.name == "BlockedRound") {
+                // `HAa`/`wqb` L15288: a lethal player hit + the player was hit
+                // at least once (`O1`, `Cqb`) but NEVER unblocked (`!cb`).
+                for (const auto& r : rounds) {
+                    bool lethal = false;
+                    for (const auto& h : r.player_hits)
+                        if (h.lethal) lethal = true;
+                    if (lethal && r.player_hit_at_all && !r.player_hit_unblocked)
+                        deltas[d.name] += 1;
+                }
+            }
+            // --- the round-end types (`JZa` L17254) -----------------------
+            if (t == "PerfectRound") {
+                // `Rrb` L15136: the player won the round without being hit.
+                for (const auto& r : rounds)
+                    if (r.player_won && r.player_round_unhit) deltas[d.name] += 1;
+            } else if (t == "HealthRemained") {
+                // `xrb` L15218: `a <= value` on the round winner's `gd`.
+                for (const auto& r : rounds)
+                    if (r.player_won && r.player_hp_end <= d.value_f)
+                        deltas[d.name] += 1;
+            } else if (t == "RoundQuicker") {
+                // `setTime` L15229: `a <= value`.
+                for (const auto& r : rounds)
+                    if (r.player_won && r.duration <= d.value) deltas[d.name] += 1;
+            } else if (t == "RoundLonger") {
+                // `setTime` L15238: `a >= value`.
+                for (const auto& r : rounds)
+                    if (r.player_won && r.duration >= d.value) deltas[d.name] += 1;
+            }
         }
-        if (reached_max_level && d.type == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
-        // JS `fe.Dsb(a)` L15185 (`$l("Style")`, `a >= d.counter.value` -> `Nk`):
-        // `fe.Dsb(Uwb)` runs on EVERY player style change (`z3` L17296:
-        // `a.model==0`), win OR loss. The shipped `internal_settings.xml`
-        // `<AchievementCounter>` ships `StyleCrazy`/`StyleAggressive`/
-        // `StyleFantastic` (Type="Style", Value 4/3/5) and `achievements.xml`
-        // ships the matching rows, so reaching style level `v` raises every
-        // `Style` counter with `Value <= v` by 1 (`Xt.Rab` `value++` -> `ika`).
-        if (d.type == "Style" && style_level >= d.value) deltas[d.name] += 1;
     }
     return deltas;
 }
@@ -15818,8 +16003,12 @@ bool apply_fight_reward(App& app) {
         // level-up must NOT touch the `MaximumLevel` counter.
         const bool reached_max_level = leveled_up && w.level == max_level;
         const std::map<std::string, int> deltas =
-            fight_result_counter_deltas(cids, player_won, reached_max_level,
-                                        pb.player_shocked, pb.prize_style_level);
+            fight_result_counter_deltas(
+                cids, player_won, reached_max_level, pb.player_shocked,
+                pb.prize_style_level, pb.achievement_rounds,
+                pb.achievement_lost_round, pb.achievement_fight_type,
+                pb.achievement_survival_wave, pb.achievement_brb,
+                pb.achievement_ladder_final, pb.achievement_rounds_to_win);
         std::vector<PendingBattle::AchievementToastRow>& toasts =
             pb.achievement_toasts;
         toasts.clear();

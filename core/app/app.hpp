@@ -35,6 +35,7 @@
 #include "atlas.hpp"
 #include "font.hpp"            // `sf2::data::font` (settings_fonts_ map value)
 #include "scene/move_def.hpp"  // `scene::OwnedItem` (the PendingBattle.owned row)
+#include "scene/achievement_session.hpp"  // the `fe` session snapshot
 
 struct GLFWwindow;
 
@@ -116,6 +117,19 @@ struct PendingBattle {
     // (`vsb` -> `Bq("ShockWin")`, internal_settings `<Counter Name="ShockWin"
     // Type="ShockWin" EclipseMode="0">` -> `Achievement_Name_Win_After_Shock`).
     bool player_shocked = false;
+    // JS `fe` = Vt (L15084) session snapshot, copied from the FightController
+    // at battle end for `apply_fight_reward`'s counter flush: the per-round hit
+    // + outcome records (`wqb`/`Cqb`/`JZa`), the `Brb` combo triggers, the
+    // `lW` "no round lost" latch, `Da.type` and `Fsb`'s survival wave.
+    std::vector<sf2::scene::AchievementRoundRecord> achievement_rounds;
+    std::vector<int> achievement_brb;
+    bool achievement_lost_round = false;
+    std::string achievement_fight_type;
+    int achievement_survival_wave = 0;
+    // The `KZa` fight-end ladder (L17219): the win was the mode's LAST fight
+    // (`Da.index == Da.lg.Kz().length-1`).
+    bool achievement_ladder_final = false;
+    int achievement_rounds_to_win = 0;  // `round.eL` (the `complete` normaliser)
     // JS `v.kD` (L622187) -> `v.F().dmb(f)` -> `emb` (L93552): the reward
     // (money/exp + battle record + level-up) is committed AT THE FIGHT END,
     // before the results dialog, so dismissing/skipping the dialog never
