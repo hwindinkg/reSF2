@@ -118,6 +118,35 @@ that char-offset grep missed:
 - ⚠ side effect of the death fix (83026a6e): a winner still mid-attack is
   rejected for `Win_Katana` (one-shot pick semantics) — needs a human look.
 
+## User bug list #2 (2026-10-13/14) — waves J–M
+- `60fe6da0` **post-Kenji knives quest / post-purchase restart** — `fire_inner`
+  deferred EVERY event except SceneLoaded/ChangeTab in the Fight scene; JS
+  suppresses only `FightEnd`, so the `StoryTutorialShop` trailing `<Activate
+  ActionID="StoryTutorialOpenScene"/>` was deferred forever (the knives quest
+  never activated). Gate now restricted to `FightEnd` + new
+  `--tutorial-chain-verify` (full chain, no restart).
+- `e364a3b7` **slow-mo still jerky** — the JS animator is a densely re-sampled
+  span (`Te.Gka` `UM=(UJ+1)*Tx`, `Te.eda` 1 subframe/frame); the port faked the
+  rate with `sub_frac_`/mixed spans. Now `UM=(XJ+1)*Tx`, integer `mo`.
+- `2b1cc1a7` **knockover 1-frame jerk** — the impulse was written to the drawn
+  `pos_` on the hit frame; JS `wd.Bva` puts it on the node `ma` INSIDE the
+  ragdoll start. Now `stash_hit_impulse`/`apply_pending_impulses` replay it in
+  `ragdoll_start` after the seed (frame-0 velocity = the impulse).
+- `a7cb5905` **achievement counters** — the port implemented only 6 types and its
+  comment FALSELY claimed the rest have no achievement. Ported the JS
+  fight-session tracker (`fe`): parses `Animation`/`Weapon`/`CounterSpan`/the
+  `<Battle>` gate; implements `PerfectRound/FirstHits/ComboCount/HeadHitRound/
+  Disarm/**RestrictedAnimation (KickFights/PunchFights/Unarmed)**/HeadHit
+  (HeadKick)/BlockedRound/HealthRemained/RoundQuicker/Longer/BossNoLose/
+  TournamentsBeaten/ChallangesBeaten/SurvivalRounds`.
+- `5daf4c19` shop buy highlight spans the full M8 plate (`draw_bb_plate`);
+  **AI Random-path** `tG_` opponent-arm + `fIa` self-arm + round-start (the ~95 %
+  double-attack / freeze); preview state re-entry re-seat (`Pi.L4`); new
+  `--kick-ko` probe proving `KickFights` PASS.
+- OPEN: the profile idle-loop "back→forward + jump" is not numerically asserted;
+  the frame-exact AI cadence vs a JS oracle trace is unreachable (live oracle
+  down); `BarelyAliveRounds` HP scale; `EclipseMode="1"` rows.
+
 - `95a08c82` fight rules: `ERulePerk` — **195 shipped** `<Rules><Perk>` were inert
   (the rule perks never joined the live trigger set; `ca.ZOa`/`du.rmb`) +
   `ERuleNoPerks` (2 shipped `EndStanceClear`).
