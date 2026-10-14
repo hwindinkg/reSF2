@@ -163,14 +163,42 @@ python reference/tools/compare_state.py --label dojo-demo
 
 ### Scenario selector
 
-The oracle scenario is selected with `--query postTutorial=<0|1>` (appended to
-the served URL; `reference/runner/index.html` reads it):
+The oracle scenario is selected with `--query` (appended to the served URL;
+`reference/runner/index.html` / `reference/runner/trace.js` read it). Three
+query keys exist:
+
+| key | effect |
+| --- | --- |
+| `postTutorial=0` | boot the stock fresh-profile tutorial (`FightNone` dojo viewer) instead of the post-tutorial hub |
+| `skipFightNone=1` | suppress the `{"t":"state"}`/`{"t":"frame"}` lines while the live fight is the `FightNone` hub/dojo viewer (`fight.Da.type == "FightNone"`), so a NAVIGATING scenario's trace starts exactly at the real fight |
+| `maxFrames=N` | raise `trace.js`'s frame budget (default 350) so the trace survives the hub -> Map -> battle navigation and covers a real fight |
+
+`trace.js` emits ONE line per FIGHT frame (dedup on `fight.frame`) from the
+first LIVE frame (`fight.eu != 0`), matching `dump_state_frame` exactly.
+
+`compare_state.py --align auto` (default) pairs the traces by FIGHT FRAME plus
+a constant offset found by a bounded search over `(f+off, phase, move, af)`;
+`--align walk` forces the legacy greedy `(phase, move, af)` two-pointer walk.
+
+**The native side never uses `--auto-attack`** for the state harness: both
+builds must see the SAME input stream (an idle player vs the enemy AI), so the
+scenario scripts inject NO attack.
+
+| scenario | oracle command (from `E:\reSF2`) | native command |
+| --- | --- | --- |
+| `dojo-demo` (Training / `FightNone` dummy viewer) | `OracleShell.exe --query postTutorial=0 --input-script reference/tools/state_dojo_demo.txt --timeout-ms 40000` | `game.exe --fight --headless 640 --dump-state 400 --watchdog 900 reference/www/res reference/saves/save.xml` |
+| `boss-lynx` (ZONE_1 BOSS_LYNX, real fight) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000" --input-script reference/tools/state_boss_lynx.txt --timeout-ms 60000` | `game.exe --fight --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location moon --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
+| tournament ladder / survival / challenge | needs a per-battle navigation script (hub -> Map -> the battle node -> "В БОЙ"); the harness is the same: seed the battle into the save (`reference/runner/index.html`) or tap its Map node, then `skipFightNone=1&maxFrames=N` | `game.exe --fight --battle <name> --zone <zone> --fight-ordinal N --location <loc> --headless N --dump-state M ...` |
+
+Then, for EVERY scenario:
+
+```powershell
+python reference/tools/extract_state.py   # console.log -> oracle_state.jsonl
+python reference/tools/compare_state.py --native <native.jsonl> --oracle <oracle.jsonl> --label <scenario>
+```
 
 | scenario | oracle command | native command | state harness |
 | --- | --- | --- | --- |
-| `dojo-demo` (Training / `FightNone` dummy viewer) | `OracleShell.exe --query postTutorial=0 --timeout-ms 95000` | `game.exe --fight --headless 640 --dump-state 400 ...` | FULL (fight logic) |
-| `boss-lynx` (ZONE_1 BOSS_LYNX) | `OracleShell.exe --input-script reference/tools/ui_tour_oracle.txt --timeout-ms 300000` | `game.exe --fight --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --auto-attack --headless N --dump-state M ...` | fight logic |
-| tournament ladder / survival | needs a recorded navigation script (hub -> Map -> fight) | `game.exe --fight --battle <name> --zone <zone> --fight-ordinal N ...` | fight logic |
 | shop / quests / profile | `--input-script reference/tools/ui_tour_oracle.txt` (taps) | `--settings-profile-shop-probe`, `--quest-verify`, `--quest-verify-buy` | N/A - these are NOT fights, so the fight-state harness emits nothing; they are covered by the UI/flow gates |
 
 Note: the JS `FightNone` viewer is created via `v.m1a` (L50365) with `ha=null`,

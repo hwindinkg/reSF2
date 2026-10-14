@@ -30,6 +30,28 @@
   "use strict";
 
   var MAX_FRAMES = 350; /* stop emitting after this many frame lines */
+  /* SCENARIO SELECTOR (state harness): `?maxFrames=N` raises the frame budget
+   * so the trace survives the hub navigation and covers a REAL fight. The
+   * default (350) keeps the legacy dojo/training pose window unchanged. */
+  try {
+    var qm = new URLSearchParams(window.location.search).get("maxFrames");
+    if (qm != null) {
+      var qn = parseInt(qm, 10);
+      if (isFinite(qn) && qn > 0) MAX_FRAMES = qn;
+    }
+  } catch (e) { /* no query string */ }
+  /* `?skipFightNone=1`: suppress emission while the live fight is the
+   * `FightNone` hub/dojo viewer (`fight.Da.type == "FightNone"`, JS `dl.type`
+   * L59254). A navigating scenario (hub -> Map -> battle) would otherwise
+   * interleave the viewer's frames with the real fight's; skipping them makes
+   * the state trace start exactly at the real fight, like the native
+   * `--fight` dump. Opt-in, so the dojo-demo (`postTutorial=0`) scenario —
+   * which IS the viewer — is unchanged. */
+  var SKIP_FIGHT_NONE = false;
+  try {
+    SKIP_FIGHT_NONE =
+      new URLSearchParams(window.location.search).get("skipFightNone") === "1";
+  } catch (e) { /* no query string */ }
   var MAX_CLIPS = 5; /* at most this many clip dumps per run */
 
   var tr = {
@@ -42,6 +64,7 @@
     clips: 0,
     cam: null, /* {cx,cy,zoom} set by the Ut.Al hook */
     seenClips: {}, /* clip label -> true (dump once per clip per run) */
+    lastFightFrame: -1, /* last emitted `fight.frame` (one line per fight frame) */
     lastClip: new WeakMap() /* fighter -> clip label seen last tick */
   };
 
@@ -405,7 +428,24 @@
     if (tr.done || !tr.enabled) return;
     var fight = fightObj();
     if (!fight) return;
+    if (SKIP_FIGHT_NONE) {
+      try {
+        if (fight.Da && fight.Da.type === "FightNone") return;
+      } catch (e) { /* ignore */ }
+    }
     ensureHooks(fight);
+    // One line per FIGHT frame, from the first LIVE frame — exactly like the
+    // native `dump_state_frame` (`if (phase_ == fight_phase::idle) return;`
+    // plus its once-per-update call). The JS `eu == 0` pre-round intro holds
+    // `fight.frame` at 0 for many app ticks (the VS overlay / round plate), so
+    // without this the trace would carry dozens of duplicate `f=0,phase=0`
+    // lines and the two-pointer alignment would stall.
+    try {
+      if (fight.eu === 0) return;
+      if (typeof fight.frame === "number" && fight.frame === tr.lastFightFrame)
+        return;
+      tr.lastFightFrame = fight.frame;
+    } catch (e) { /* ignore */ }
     console.log(JSON.stringify(frameJson(fight)));
     console.log(JSON.stringify(fightState(fight)));
     tr.frameCount++;

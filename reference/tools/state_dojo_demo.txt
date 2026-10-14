@@ -1,0 +1,13 @@
+# Dojo-demo STATE scenario: the stock tutorial fight (FightNone viewer).
+# `postTutorial=0` boots the fresh-profile tutorial (no hub navigation), the
+# exact counterpart of the native `--fight --headless N --dump-state M`
+# default Training boot. No inputs are injected (the tutorial plays itself).
+#
+# The script only arms OracleShell's auto-close timer; the run ends on
+# `--timeout-ms` because the trace never reaches its frame budget.
+#
+# Run (from E:\reSF2):
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=0" ^
+#     --input-script reference/tools/state_dojo_demo.txt --timeout-ms 40000
+wait 3000

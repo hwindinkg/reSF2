@@ -191,6 +191,85 @@ def is_dummy(fr, fid):
     return f.get("rag") == 1 and (f.get("ragf") or 0) > 0
 
 
+def align_by_frame(native_frames, oracle_frames, oracle_fid="Me"):
+    """Pair the two traces by FIGHT FRAME (plus a constant offset).
+
+    Both producers emit exactly ONE line per fight frame from their first LIVE
+    frame, so `f` is the strongest alignment key. The offset is found by a
+    bounded search for the shift that maximises `(f + offset, phase)` matches
+    (the traces' first frames differ by their intro length — e.g. BOSS_LYNX
+    131 — and the dojo viewer carries one extra move-less lead frame, so the
+    raw first-frame delta is not reliable). Returns (matches, un_nat, un_ora)
+    or None when `f` is unusable.
+    """
+    if not native_frames or not oracle_frames:
+        return None
+    try:
+        d0 = int(oracle_frames[0].get("f")) - int(native_frames[0].get("f"))
+    except (TypeError, ValueError):
+        return None
+    o_by = {}
+    for j, of in enumerate(oracle_frames):
+        key = (of.get("f"), of.get("phase")) + frame_key(of, oracle_fid)[1:]
+        if key not in o_by:
+            o_by[key] = j
+    n_keys = []
+    for nf in native_frames:
+        try:
+            fnum = int(nf.get("f"))
+        except (TypeError, ValueError):
+            n_keys.append(None)
+            continue
+        n_keys.append((fnum, nf.get("phase")) + frame_key(nf, "Me")[1:])
+
+    def count(off):
+        c = 0
+        for k in n_keys:
+            if k is not None and (k[0] + off,) + k[1:] in o_by:
+                c += 1
+        return c
+
+    best_off, best_key = d0, (-1, 0)
+    for off in range(d0 - 300, d0 + 301):
+        c = count(off)
+        # Tie-break toward the raw first-frame delta (the traces repeat short
+        # frames, so several shifts can match equally well).
+        key = (c, -abs(off - d0))
+        if key > best_key:
+            best_key, best_off = key, off
+    # Final pairing uses (frame, phase) only: the offset is pinned by the
+    # strict key above, and the field comparison must still SEE a divergent
+    # frame (matching it is the point) rather than drop it as "unaligned".
+    o_by2 = {}
+    for j, of in enumerate(oracle_frames):
+        k2 = (of.get("f"), of.get("phase"))
+        if k2 not in o_by2:
+            o_by2[k2] = j
+    matches = []
+    used = set()
+    for i, nf in enumerate(native_frames):
+        try:
+            k2 = (int(nf.get("f")) + best_off, nf.get("phase"))
+        except (TypeError, ValueError):
+            continue
+        j = o_by2.get(k2)
+        if j is not None and j not in used:
+            matches.append((i, j))
+            used.add(j)
+    matched_i = set(m[0] for m in matches)
+    un_nat = [i for i in range(len(native_frames)) if i not in matched_i]
+    un_ora = [j for j in range(len(oracle_frames)) if j not in used]
+    return matches, un_nat, un_ora
+
+
+def move_set(fr, fid):
+    f = get_fighter(fr, fid)
+    if not isinstance(f, dict):
+        return set()
+    m = normalize_move(f.get("move"))
+    return {m} if m else set()
+
+
 def detect_swap(native_frames, oracle_frames):
     """True when native Me holds the real fighter and oracle Me the dummy."""
     n_me = sum(1 for fr in native_frames if is_dummy(fr, "Me"))
@@ -198,7 +277,22 @@ def detect_swap(native_frames, oracle_frames):
     o_en = sum(1 for fr in oracle_frames if is_dummy(fr, "Enemy"))
     if o_me > o_en and n_me < len(native_frames) // 2:
         return True
-    return False
+    # Non-dummy fights (a real BOSS/tournament bout): the JS labels
+    # `fight.pb` as "Me", but for the shipped battles `pb` is the ENEMY side
+    # (the dojo dummy and the BOSS_LYNX claws both sit in the oracle's "Me").
+    # Decide by move-name overlap: does the native Me look more like the
+    # oracle's Enemy or its Me?
+    n_moves = set()
+    for fr in native_frames:
+        n_moves |= move_set(fr, "Me")
+    o_me_moves = set()
+    o_en_moves = set()
+    for fr in oracle_frames:
+        o_me_moves |= move_set(fr, "Me")
+        o_en_moves |= move_set(fr, "Enemy")
+    if not n_moves:
+        return False
+    return len(n_moves & o_en_moves) > len(n_moves & o_me_moves)
 
 
 def align(native_frames, oracle_frames, swap):
@@ -282,9 +376,10 @@ def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
         w("scenario: %s" % args.label)
     w("native:  %s" % args.native)
     w("oracle:  %s" % args.oracle)
-    w("role map: %s" % ("native Me <-> oracle Enemy (auto: oracle Me is the "
-                        "ragdoll dummy)" if swap else "native Me <-> oracle Me"))
-    w("alignment key: (phase, normalized move name, clip frame `af`)")
+    w("role map: %s" % ("native Me <-> oracle Enemy (oracle Me holds the "
+                        "enemy-side fighter: the dojo dummy / the boss)"
+                        if swap else "native Me <-> oracle Me"))
+    w("alignment key: %s" % getattr(args, "align_kind", "auto"))
     w("")
     w("[inputs]")
     w("  native state frames: %d  (skipped lines: %d)" % (len(native_frames), native_bad))
@@ -390,6 +485,17 @@ def run(args):
             swap = detect_swap(native_frames, oracle_frames)
 
     matches, un_nat, un_ora = align(native_frames, oracle_frames, swap)
+    if args.align in ("auto", "frame"):
+        fm = align_by_frame(native_frames, oracle_frames,
+                            "Enemy" if swap else "Me")
+        if fm is not None and (args.align == "frame" or len(fm[0]) > len(matches)):
+            matches, un_nat, un_ora = fm
+            align_kind = "fight frame + offset"
+        else:
+            align_kind = "(phase, move, af) walk"
+    else:
+        align_kind = "(phase, move, af) walk"
+    args.align_kind = align_kind
 
     stats = {}
     for ni, oi in matches:
@@ -436,6 +542,12 @@ def main(argv=None):
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--map-native-me-to", dest="map_native_me_to", default="auto",
                     choices=["auto", "oracle-enemy"])
+    ap.add_argument("--align", default="auto", choices=["auto", "frame", "walk"],
+                    help="alignment strategy: 'frame' pairs by fight frame plus "
+                         "a constant offset (the strongest key — both producers "
+                         "emit one line per fight frame), 'walk' is the greedy "
+                         "(phase, move, af) two-pointer walk, 'auto' picks "
+                         "whichever yields more matched frames")
     ap.add_argument("--label", default="",
                     help="scenario label shown in the report header "
                          "(e.g. 'dojo-demo', 'tournament-ladder', "

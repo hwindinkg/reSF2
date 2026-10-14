@@ -1,0 +1,23 @@
+# Real-fight STATE scenario: ZONE_1 BOSS_LYNX (ТЕНЬ vs ШИН, moon).
+# The seed (reference/runner/index.html, ORACLE_POST_TUTORIAL=true) unlocks
+# `ZONE_1|BOSS_LYNX|`, so the same hub -> Map -> "В БОЙ" taps as the fidelity
+# tour reach the boss. NO player attack is injected: the player idles while
+# the enemy AI fights, exactly like the native
+#   game.exe --fight --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0
+#            --location moon --headless N --dump-state M
+# run (which never sets --auto-attack), so the two state traces are the same
+# input stream and align 1:1.
+#
+# Run (from E:\reSF2):
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=1&skipFightNone=1&maxFrames=6000" ^
+#     --input-script reference/tools/state_boss_lynx.txt --timeout-ms 60000
+# `skipFightNone=1` drops the hub/dojo `FightNone` viewer frames so the state
+# trace starts exactly at the real BOSS_LYNX fight.
+wait 8000
+tap 180 98
+wait 1500
+tap 140 250
+wait 2500
+tap 1130 580
+wait 40000

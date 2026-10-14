@@ -808,6 +808,15 @@ struct BattleParams {
     // from StageFight.rules; the controller runs the sim-relevant subset
     // (Ringout/TimeOutWin) with JS-exact result mapping.
     std::vector<FightRule> rules;
+    // The SAME `<Rules>` set WITHOUT the ApplyTo=All split: one entry per
+    // dispatched `bb.OE` child (`bb.M3`/`bb.xe`), which is exactly what the
+    // battle config's own list holds (JS `dl.OK` L59472 -> `dl.Ae`/`dl.CV`;
+    // `dl.jh()` L59361 = `p.o.Yh ? CV : Ae`). A `<RandomRule>` wrapper counts
+    // as ONE entry (JS `du.OK` L38451 pushes the `pn` wrapper into `dl.Ae`,
+    // never its children). The split lives only in the runtime dispatcher
+    // (`du.o4` L38526 -> `du.Ae`), NOT in `Da.jh()`. `dump_state_frame`
+    // reports THIS list so the diff matches the oracle's `fight.Da.jh()`.
+    std::vector<FightRule> rule_children;
     // Fight-level spawn positions. JS `Bf.zjb` L476 stores the ModelsViewer
     // `PlayerPositionX/Y` into `location.Yia` and `EnemyPositionX/Y` into
     // `location.B_`; JS L381 then spawns the player (`kc`) at `Yia` and the
@@ -946,9 +955,20 @@ inline void apply_stage_ringout_rule(BattleParams& b,
     // Full dispatch (`bb.OE` L887-888): every child -> kind, ApplyTo=All
     // split into the two `BLa(1)`/`BLa(2)` copies (`du.o4` L909).
     b.rules.clear();
+    b.rule_children.clear();
+    std::map<int, int> group_seen;  // random_group -> index in rule_children
     for (const StageRule& sr : rules) {
         const FightRule r = parse_fight_rule(sr);
         if (r.kind == FightRuleKind::none) continue;
+        // The unsplit mirror of `Da.jh()`: non-random rules are one entry
+        // each; a `<RandomRule>` wrapper is ONE entry (the group's first
+        // child), so its flattened children do not inflate the count.
+        if (r.random_group < 0) {
+            b.rule_children.push_back(r);
+        } else if (group_seen.find(r.random_group) == group_seen.end()) {
+            group_seen[r.random_group] = static_cast<int>(b.rule_children.size());
+            b.rule_children.push_back(r);
+        }
         for (const FightRule& copy : fight_rules_split(r)) {
             b.rules.push_back(copy);
         }
@@ -2431,6 +2451,12 @@ private:
     bool invert_joystick_ = false;
     // --- stage <Rules> engine (JS `du` L894-910) --------------------------
     std::vector<FightRule> rules_;  // parsed rules (JS `du.Ae`)
+    // The UNSPLIT mirror of `battle_.rule_children` after the eclipse filter
+    // and the Round/Level gate — i.e. exactly the list the oracle reads as
+    // `fight.Da.jh()` (`dl.jh` L59361). `dump_state_frame` reports this, so
+    // the counted `rules.total/active` match JS (an ApplyTo=All rule is ONE
+    // entry here, split into two only in `rules_` for the runtime effects).
+    std::vector<FightRule> rule_report_;
     // JS `pn.CB` (L879): the chosen RandomRule child per group. The pick is
     // drawn once per fight (`EachFight`) or every round (`EachRound`); it is
     // cached here so `EachFight` groups keep the same choice across rounds.
@@ -2533,6 +2559,12 @@ private:
     // activation by the `kI`/`Ti` gates; then `du.f_a` L896-897 shows the
     // Ringout markers (`ca.H1a` L390 -> `sXa`).
     void rules_begin_round(int round);
+    // Build `rule_report_` (the unsplit `Da.jh()` mirror) from
+    // `battle_.rule_children`: the SAME eclipse filter + Round/Level gate the
+    // runtime pass uses. Called at fight init (round 1, JS `ca.F1` in the
+    // ctor) and from `rules_begin_round` (every round), so the reported list
+    // is live from the first frame — exactly like the JS `Da.Ae`.
+    void rebuild_rule_report(int round);
     // JS `ca.$_a` L427 -> `du.Iwb` L898 + `ca.onb` L390: round-end cleanup.
     void rules_end_round();
     // JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` L896: the per-frame rule

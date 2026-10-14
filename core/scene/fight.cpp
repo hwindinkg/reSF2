@@ -532,6 +532,20 @@ void FightController::init_locks(
     // The fight start (JS ggb L383): round 0 -> the first round init.
     round_.number = 0;
     round_init();
+    // JS `bob` (L16352): a REAL fight (`Da.type != "FightNone"`) resets
+    // `round.round = 0` and then runs `tx()` -> `Ar.wca` -> `ca.vhb` case 1 ->
+    // `Z2()` (the port's `round_start`), which increments `round.round` to 1
+    // BEFORE the first phase-1 frame. `Z2`'s remaining work (magic/bus/style/
+    // latch resets) is a no-op on the fresh fighters here — `init_magic()` and
+    // `setup_bus()` already ran above — so only the increment is observable.
+    // The `FightNone` hub viewer (`v.m1a` L50365) never runs `bob`: its round
+    // stays 0 (and it has no `Sf` HUD at all, `ha == null`). Without this the
+    // port reported `round` 0 for every real fight while the oracle reports 1.
+    if (battle_.type != "FightNone") round_.number = 1;
+    // The battle's rule list (`Da.jh()`) is live from the fight's first frame
+    // (JS parses `<Rules>` into `Da.Ae` at battle load and runs `rob(1)` in
+    // the ctor), so build the reported mirror here — NOT only at phase 2.
+    rebuild_rule_report(round_.number > 0 ? round_.number : 1);
     // [ROUND-plate lead-in] The controller idles at frame 0 until the `ik` VS
     // overlay ends (`release_intro`, called by the fight screen once
     // `!vs_active_`): the JS creates the fight only after `ik.kg` (L2071), so
@@ -561,8 +575,11 @@ void FightController::init_locks(
     banner_arm_delay_ = kJsBannerArmDelaySeconds;  // ... until the 500 ms delay
     banner_action_ = banner_action::begin_round;
     banner_start_ = frame_;
-    banner_round_ = round_.number;   // 0 -> "ROUND 1"
-    std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
+    // JS `Cr.tca` (L84218): `this.round.V(\`${a}\`)` shows the number VERBATIM
+    // — `tca(this.round.round)` with `round.round` 1-based. So display the
+    // round number itself (the FightNone viewer keeps its own plate at 1).
+    banner_round_ = round_.number == 0 ? 1 : round_.number;
+    std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_, frame_);
     std::fflush(stdout);
 
     // JS `rb.Wkb()` (L1277: `ta.ak("snd_gong")`), called from the
@@ -2416,6 +2433,26 @@ void FightController::rules_show_markers() {
 // JS `ca.F1` L428 -> `du.rob(round>0?round:1)` L900 (mxa/cz/osb/qob/rmb) +
 // `du.f_a` L896-897. Per-round: reload the rule set, apply the `kI`/`Ti`
 // gates (`du.osb` L898), then the marker pass.
+// The UNSPLIT `Da.jh()` mirror (`dl.jh` L59361): `battle_.rule_children` after
+// the eclipse filter (`dl.OK` L59472 routes each rule by `a.mode`: 0 -> `CV`
+// only, 1 -> `Ae` only, 2 -> both; `jh` picks `p.o.Yh ? CV : Ae`) and the
+// `du.osb` (L898) Round/Level gate. One entry per `<Rules>` child, so an
+// ApplyTo=All rule stays ONE (the `du.o4` split lives only in `du.Ae`).
+void FightController::rebuild_rule_report(int round) {
+    const bool eclipse = fight_params().eclipse;
+    const long power = static_cast<long>(player_.params.level);
+    const int rr = round > 0 ? round : 1;
+    rule_report_.clear();
+    for (const FightRule& r : battle_.rule_children) {
+        if (!(r.eclipse_mode == 2 ||
+              (eclipse ? r.eclipse_mode == 0 : r.eclipse_mode == 1)))
+            continue;
+        FightRule c = r;
+        c.active = fight_rule_gate(r, rr, power);
+        rule_report_.push_back(c);
+    }
+}
+
 void FightController::rules_begin_round(int round) {
     rule_round_ = round > 0 ? round : 1;  // JS `rob` L900
     rule_pending_ = false;
@@ -2546,6 +2583,12 @@ void FightController::rules_begin_round(int round) {
                 r.active = false;  // `pn.CB`: only the chosen child is active
         }
     }
+    // The UNSPLIT `Da.jh()` mirror (see `rule_report_` in fight.hpp): the
+    // battle config's own list after the SAME eclipse filter and gate. One
+    // entry per `<Rules>` child; a `<RandomRule>` wrapper is one entry whose
+    // `active` mirrors the wrapper (`pn.active`, default true — `du.osb`
+    // L898 only gates `du.Ae`, which excludes the `pn` wrapper).
+    rebuild_rule_report(rule_round_);
     rules_apply_round_effects();  // JS `du.F1(a)` L897 (Zk) + `kZ` + `m_a`
     rules_show_markers();
     // JS `ca.Pma` (L398) -> `ZOa` (L398-399): the perk trigger sets rebuild
@@ -3166,8 +3209,8 @@ void FightController::round_start() {
     banner_arm_delay_ = kJsBannerArmDelaySeconds;   // ... for 500 ms
     banner_action_ = banner_action::begin_round;    // vhb case 2 -> `FNa`
     banner_start_ = frame_;
-    banner_round_ = round_.number;
-    std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_ + 1, frame_);
+    banner_round_ = round_.number == 0 ? 1 : round_.number;
+    std::fprintf(stdout, "[fight] banner: ROUND %d (F%d)\n", banner_round_, frame_);
     std::fflush(stdout);
     // NOTE: phase 1 does NOT start here — the JS `FNa` (L409) runs when the
     // break plate expires (`banner_expire`), exactly as `vhb` case 2 does.
@@ -6974,11 +7017,22 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // "PhysicalDummy"` (the oracle `Me` clip label). Only the INTRO has such
     // an event for the dummy; the phase-2 `Fight` stage has none, so the
     // dummy gets no move there and stays put.
-    const bool intro = phase_ == fight_phase::start_stance;
+    const bool intro_phase = phase_ == fight_phase::start_stance;
+    // The intro stance clip auto-plays ONCE per round. When it ENDS the JS
+    // animator advances straight into the idle (`da` picks the next move)
+    // while `eu` is STILL 1 — the FIGHT plate's `fu(1.166)` hold keeps phase 1
+    // alive for ~70 more frames, and the oracle shows the real fighter on
+    // `FistsStartStanceIdle-Left` from the frame the intro clip ends. The old
+    // guard (`!(intro && me.intro_played_round == round_.number)`) blocked
+    // EVERY pick for the rest of phase 1, so the port's fighter sat move-less
+    // for the whole plate hold (the state diff's `fighters.Me.move/af/iv/block`
+    // divergence). So `intro` here means "the intro clip still needs to be
+    // played this round"; afterwards the IDLE templates are used, which is
+    // what also stops the intro from being re-played.
+    const bool intro = intro_phase && me.intro_played_round != round_.number;
     const bool may_pick = !stance_locked || intro;
     if (me.fighter.current_move() == nullptr && may_pick &&
-        phase_ != fight_phase::end_stance &&
-        !(intro && me.intro_played_round == round_.number)) {
+        phase_ != fight_phase::end_stance) {
         // [FIX intro double-play] JS kg (L387) leaves the StartStance when the
         // intro clip's OCa() fires and never re-plays it. The port holds the
         // 133-frame phase-1 clock, so once the intro clip has been auto-played for
@@ -8590,15 +8644,15 @@ void FightController::dump_state_frame() {
                  camera_.go_x_, camera_.go_y_, camera_.zoom_layer,
                  player_shocked_ ? 1 : 0, achievement_lost_round_ ? 0 : 1);
     {
-        // Parsed rules + how many are ACTIVE this frame (JS `fight.ud.Ae`
-        // length + the `Ga.active` count). The JS rule objects carry no
-        // stable XML-tag label (minified classes), so the diff compares the
-        // (total, active) counts, not per-kind identity.
+        // The oracle reads `fight.Da.jh()` (L59361 `p.o.Yh ? CV : Ae`): the
+        // battle config's OWN list — one entry per `<Rules>` child, the
+        // ApplyTo=All split living only in the runtime dispatcher (`du.o4`).
+        // `rule_report_` mirrors that list exactly (eclipse filter + gate).
         int n_active = 0;
-        for (const FightRule& r : rules_) {
+        for (const FightRule& r : rule_report_) {
             if (r.active) ++n_active;
         }
-        std::fprintf(state_dump_file_, "%d,%d", static_cast<int>(rules_.size()),
+        std::fprintf(state_dump_file_, "%d,%d", static_cast<int>(rule_report_.size()),
                      n_active);
     }
     std::fprintf(state_dump_file_, "],\"callouts\":[");
