@@ -147,6 +147,28 @@ that char-offset grep missed:
   first seat `Pi.job` re-seats) — the "back→forward + jump" is gone
   (`--profile-avatar-probe`: `restart_step 0.155` vs `steady 0.142`) + the hit
   impulse now REPLACES per strike (JS `Bb` is one overwritten descriptor).
+## METHOD (root cause + fix) — 2026-10-14
+**Why "new divergences keep appearing":** the port is a hand-transcription (read
+JS → understand → write C++); verification was manual sampling; the only
+mechanical check (the oracle) covered just the POSE. So coverage never
+converged — each pass sampled new areas. The JS is 106205 lines / 3394 named
+methods; only 1225 are explicitly mapped in the port's comments (36%).
+
+**The fix — a MECHANICAL DIFFERENTIAL STATE HARNESS (built):**
+- `reference/runner/trace.js` now emits a `{"t":"state"}` JSONL line per live
+  fight frame (hp/mhp/combo/style/unhit/shock/block/invuln/move/af/intervals/
+  ragdoll/phase/round/result/counters/rules/callouts) from the LIVE web objects.
+- The port: `--dump-state N` (+ `FightController::dump_state_frame`).
+- `reference/tools/extract_state.py` + `reference/tools/compare_state.py` diff
+  the two, aligned by `(phase, move, af)`, like `compare_pose.py`.
+- Run: `game.exe --fight --headless 600 --dump-state 400 --watchdog 150 …`;
+  `shell\bin\Release\net9.0-windows\OracleShell.exe --timeout-ms 95000`;
+  `python reference/tools/extract_state.py && python reference/tools/compare_state.py`.
+- **First real diff** (dojo, 241 aligned frames, 89.9% coverage): 31 fields, **1
+  diverging** (`fighters.Enemy.ragf` 108/241 — the ragdoll frame counter);
+  everything else 0/241. Found + fixed `counters.lW` (the port stored the
+  complement of JS `ca.lW`). Report: `reference/traces/state_gap_report.txt`.
+
 ## Hunt waves (2026-10-14) — verbatim inaccuracy sweep
 - `5bfd7d79` anim: `UM==1` samples the JS `p2` (the 3rd control point), not the
   span's `p0` — 19 reaction/fall moves (MidFrames absent) drew one span behind.
