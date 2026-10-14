@@ -520,6 +520,13 @@ public:
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
     // move name, or "" when no move should start this frame.
     std::string update(const AiFightState& st);
+    // JS `wd.ctb(!0)` (L20376-20380, reached from `swb`->`Eaa(!0)` L16637):
+    // `if (this.sN = a) { this.Kl.reset(); this.Mka(0); }` — arming the `hJa`
+    // countdown (`tG`) at the ROUND boundary (`Z2` L21617 first sets `tG=-1`).
+    // The port's `tG_` starts at -1 and is otherwise only armed by the
+    // opponent-animation arm, so without this the enemy would never make its
+    // first decision. Called by `FightController::enter_start_stance` (JS `swb`).
+    void begin_round() { tG_ = 0; }
     // The tactic's `type` (JS `Md.getType` L642): 0=Normal, 1=Random,
     // 2=Tabular. `wd.Anb` (L499) dispatches on it: `type==1` -> `hJa`
     // (the Random path), `type==2` -> `Ykb` (the `de.ia` / Tabular path).
@@ -839,19 +846,33 @@ private:
     // pick before the final `Aua` max-priority pick.
     static std::string keys_signature(const MoveDef& m);
     // `tG`/`wN` (JS `wd.tG`/`wd.wN`, L491/L500) for the `hJa` countdown.
-    // NOTE (findings, this wave): the JS arms this countdown on the OPPONENT
-    // (`wd.x3` L20990 `a=this.jb; ...; a.Mka(0)` with `Mka(a){this.tG=a}`
-    // L21331), so the Random-tactic enemy's cadence is set by the opponent's
-    // animation starts, NOT by its own move change. The port arms it on MY OWN
-    // move change, which re-decides the frame after each of my own move starts
-    // (`--enemy-move-probe --fight-ordinal 1`: `started` jumps by 2 per cycle,
-    // e.g. FrontFlip -> FrontJumpKick on consecutive frames) — see the report.
-    // The JS-exact OPPONENT-arm was implemented and measured (`started` 13 -> 3
-    // over 600 frames) but left the enemy fully passive in `--headless-loop`
-    // (0 hits), so it was reverted; this arm proxy is UNCHANGED.
+    // JS-exact arming (re-derived this wave), three independent arms:
+    //   (a) OPPONENT-arm — `wd.x3` (L20990) is the `wd` handler of the MODEL's
+    //       `EStartAnimationEvent` (`Te.x3` L23097 -> `gh("EStartAnimation…")`,
+    //       fired from `Te.Skb` L23058): on MY animation start it does
+    //       `a=this.jb; a.mwb(this.da.Ua); a.Mka(0)` (L20994-20997), i.e. it
+    //       arms the OPPONENT's `tG` (`Mka(a){this.tG=a}` L21331). So MY `tG`
+    //       is armed when the OPPONENT starts an animation.
+    //   (b) SELF `fIa` arm — `wd.fIa` (L21016) is the `EStopIntervalEvent`
+    //       handler: when MY stopped interval name is in the `<Random>
+    //       <Intervals>` set (`v.u4.ncb(a.name)`, tactic_settings.xml L366-369 =
+    //       {Uninterrupt, SelfUninterrupt}) it sets `this.tG = 0` (again). So MY
+    //       `tG` is re-armed when MY `Uninterrupt`/`SelfUninterrupt` window ENDS.
+    //   (c) Round-start arm — `ctb(true)` (L20376, via `swb`->`Eaa(!0)` L16637)
+    //       does `Mka(0)`; `Z2` (L21617) resets it to -1 first.
+    // The port previously armed on MY OWN move change (the reverse of (a)), so
+    // the enemy re-decided the frame after each of its OWN move starts — the
+    // reported ~95% DOUBLE attack (`started` step 2 per cycle). All three arms
+    // above are now modelled; the prior "opponent-arm only" attempt was passive
+    // because it omitted (b)/(c) (with the `--enemy-move-probe` statue player
+    // never starting a move, (a) alone never fires again after the first pick).
     int tG_ = -1;
     bool wN_ = false;
-    const MoveDef* last_random_move_ = nullptr;
+    const MoveDef* last_random_opp_move_ = nullptr;
+    std::string last_random_opp_anim_;
+    // `fIa`-arm edge state: was an `Uninterrupt`/`SelfUninterrupt` interval
+    // active on the previous frame (so its STOP is detected this frame).
+    bool my_uninterrupt_prev_ = false;
     // `Math.random` analog for the `Pkb` tail's uniform pick (`uf.sja`).
     std::function<float()> math_random_fn_;
     float math_roll() const {

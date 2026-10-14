@@ -3229,6 +3229,14 @@ void FightController::enter_start_stance() {
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     set_phase(fight_phase::start_stance);
+    // JS `swb` (L16634-16638): `IKa(); FNa(); Eaa(!0); v.FU()` — the round
+    // boundary runs each fighter's `ctb(!0)` (L20376) which does
+    // `if (this.sN = a) { this.Kl.reset(); this.Mka(0); }`, arming the
+    // Random-tactic `hJa` countdown (`tG`) so `wd.Anb` (L20631) issues the
+    // enemy's FIRST decision without waiting for an opponent animation start.
+    // (`Z2` L21617 already set `tG = -1` in the hidden reposition.)
+    if (player_.ai != nullptr) player_.ai->begin_round();
+    if (enemy_.ai != nullptr) enemy_.ai->begin_round();
     round_live_ = false;
     start_stance_done_ = false;
     start_stance_frames_ = 0;   // reset so every round re-plays the intro

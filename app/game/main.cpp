@@ -1816,6 +1816,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // internal `player_input` path (no OS input), land an attack, and log the
     // boss's per-frame hit reaction (move/ragdoll/world_x).
     bool boss_hit_probe = false;
+    // --kick-ko [probe]: boot a BOSS fight, drive the player into range via the
+    // internal `player_input` path (no OS input), and land a KICK-ONLY KO
+    // (control 10) so the `KickFights` achievement counter
+    // (`RestrictedAnimation` span=2, achievements.xml L46-49) fires its
+    // `[counter] KickFights +1` line: the kick branch of the pipeline is then
+    // proven end-to-end. The existing `--boss-hit-probe` alternated Punch(9)/
+    // Kick(10), so a round could never be kick-only.
+    bool kick_ko_probe = false;
     // --boss-loss-probe: boot a BOSS fight and drive a COMPETENT scripted
     // player (approach + punch/kick via `inject_game_key`, NO OS input) until
     // the battle ends, so the per-second `[fight]` HP log, the `[hit]` damage
@@ -2460,6 +2468,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             round_log = true;
         } else if (arg == "--boss-hit-probe") {
             boss_hit_probe = true;
+        } else if (arg == "--kick-ko") {
+            kick_ko_probe = true;
         } else if (arg == "--wave-probe") {
             wave_probe = true;
         } else if (arg == "--fight-ordinal" && i + 1 < argc) {
@@ -8624,6 +8634,100 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // `Bag` assertion above); the default boss probe keeps HIT/NO-HIT.
         if (bag_probe) return bag_reaction_ok ? 0 : 1;
         return react_at >= 0 ? 0 : 1;
+    } else if (kick_ko_probe) {
+        // [probe] `--kick-ko`: boot a BOSS fight and land a KICK-ONLY KO
+        // (control 10). `KickFights` is a `RestrictedAnimation` achievement
+        // counter (`achievements.xml` L46-49); its fight-span branch requires
+        // EVERY player hit in EVERY round to carry the counter's `<Animation>`
+        // (a kick) AND the lethal-hit count to equal `rounds_to_win`
+        // (`compute_achievement_deltas`, screens.cpp L15759-15789). Only kicks
+        // are injected, so every round is kick-only and the flush prints
+        // `[counter] KickFights +1`. The existing `--boss-hit-probe` alternated
+        // Punch(9)/Kick(10), so a round could never be kick-only.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("BOSS_LYNX") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
+        }
+        auto kick_fights = [&]() -> int {
+            try {
+                const sf2::app::WarriorSave w = app.save().load();
+                const sf2::app::WarriorSave::AchievementCounter* c =
+                    w.counter("KickFights");
+                return c != nullptr ? c->value : -1;
+            } catch (const std::exception&) {
+                return -1;
+            }
+        };
+        const int kf0 = kick_fights();
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[kickko] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        // Past the StartStance.
+        for (int g = 0; g < 20000 && app.screens().current_id() == kScreenFight &&
+                        fs->fight_frame() < 140;
+             ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        int ko_frame = -1;
+        int kicks = 0;
+        for (int f = 0; f < 9000; ++f) {
+            glfwPollEvents();
+            if (app.screens().current_id() != kScreenFight) {
+                ko_frame = f;
+                break;
+            }
+            const float px = fs->player_world_x();
+            const float ex = fs->enemy_world_x();
+            if (std::fabs(ex - px) > 40.0f) {
+                const float side = (ex >= px) ? 1.0f : -1.0f;
+                fs->place_fighters(px, px + side * 28.0f);
+            }
+            const std::string my_move = fs->player_current_move();
+            const std::string bo = fs->enemy_current_move();
+            const bool player_idle =
+                my_move.empty() || my_move.find("StanceIdle") != std::string::npos;
+            const bool boss_idle = bo.empty() || bo.find("Idle") != std::string::npos;
+            // Kick Tap (control 10) ONLY — never control 9. Drive every 4th
+            // frame so the buffer doesn't chain a kick combo into a punch; when
+            // the boss sits in its block-idle, kick a bit less often so the
+            // pose can leave the idle.
+            if (player_idle && (f % 4) == 0 && (!boss_idle || (f % 12) == 0)) {
+                fs->inject_game_key(10, true);
+                fs->inject_game_key(10, false);
+                ++kicks;
+            }
+            app.run_one_frame();
+        }
+        // Drain the fight-end so the achievement-counter flush runs.
+        for (int i = 0; i < 300 && app.screens().current_id() == kScreenFight; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const int kf1 = kick_fights();
+        const bool ok = (kf1 > kf0);
+        std::fprintf(stdout,
+                     "[kickko] ko_frame=%d kicks=%d KickFights %d -> %d -> %s\n",
+                     ko_frame, kicks, kf0, kf1, ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
     } else if (mode_enemy_probe) {
         // [probe, authorised] `--mode-enemy-probe`: boot a TOURNAMENT mode
         // fight (default Tournament/ZONE_1 -> the "monkey", `Man_Fist`) and

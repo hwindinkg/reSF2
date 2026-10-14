@@ -7399,9 +7399,16 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         // вверх").
         fighter->start_preview_clip(*move_loop, *idle_loop, 0.0f, -93.0f, false);
     } else if (move != nullptr) {
-        // JS `wd.ia` L22817/22829 `lS(Ua)` (the selector): the draw's end picks
-        // the idle on the SAME `wd`, again with NO re-seat.
-        fighter->start_preview_clip(*move, *idle, 0.0f, -93.0f, false);
+        // JS `Oa.lS` (L91178-91190, the shop's `Ad.kg` move-END listener): the
+        // TryOn preview's end runs `this.Ad.L4()` — `Pi.L4` L18359 =
+        // `Bg.reset(); job(); CNa()` where `job()` (L18364) RE-SEATS the live
+        // `Jc` at `Pi.J9` (`this.Jc.oL(new H(J9.x, J9.y, 0, 1))`). So the state
+        // RE-ENTRY after a one-shot preview DOES re-seat (unlike the in-place
+        // `Gka` loop). The port passed `reseat=false`, so the TryOn clip's root
+        // motion stayed in the solver and the model sat offset ("после
+        // воспроизведения анимации перемещается чуть назад"). Mirror `Pi.L4`
+        // here: re-seat on the state re-entry.
+        fighter->start_preview_clip(*move, *idle, 0.0f, -93.0f, true);
     }
 }
 
@@ -18968,8 +18975,24 @@ void ShopScreen::render_impl(App& app) {
         if (gold_slot >= 0 && app.quest_engine().controls_locked() &&
             app.quest_engine().lock_target() == "ShopBuy") {
             const float py = byy0 - static_cast<float>(gold_slot) * (bh + bpad);
-            if (!try_draw_atlas_button(app, "highlightButton", cx0 + cw0 * 0.5f, py,
-                                       cw0, bh, ui_flash_alpha(app))) {
+            // [FIX shop buy highlight geometry] JS `gi` (L93307) builds M8 as a
+            // `Qf` (`extends Bb extends db`) whose ctor calls
+            // `c.Wm(null, y.qB)` -> `Bb.Wm` (L77437-77441):
+            //   `super.Wm(...)` (`db.Wm` L77211) builds `Tk = R.$(E.get(244),
+            //   "highlightButton")` + `Tk.Ga()`;
+            //   `this.Tk.wl(vc.qM(new Ec((this.Y.fa.x/2|0)-2, 0, 4,
+            //   this.Y.fa.y|0), Th.SU))` -> the SAME 9-slice insets
+            //   `draw_bb_plate` derives (`l = nat_w/2-2`, `r = nat_w-l-4`, top/
+            //   bottom 0); `this.Tk.xc(this.width)` (`R.xc` L68119 sets
+            //   scale_x = w/fa.x) SM-STRETCHES it across the FULL M8 plate.
+            // `try_draw_atlas_button` (fill=false) instead ASPECT-FITTED the
+            // frame inside (cw0,bh), so a wide plate got a small centred square
+            // - the reported "the outline appeared but did not cover the whole
+            // button". Draw the sliced plate (identical geometry to the
+            // `btnGreen` plate above) so the flash spans the whole M8 button.
+            if (!(load_sliced_atlas(app) &&
+                  draw_bb_plate(app, "highlightButton", cx0 + cw0 * 0.5f, py, cw0, bh,
+                                ui_flash_alpha(app)))) {
                 draw_flash_tint(app, cx0 + cw0 * 0.5f, py, cw0, bh);
             }
         }

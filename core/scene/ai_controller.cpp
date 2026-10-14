@@ -2026,16 +2026,42 @@ std::string AiController::update(const AiFightState& st) {
     // template has no `.dat` tables, so the old unconditional `de.ia` pass
     // found nothing and the enemy never moved.
     if (tactic_->type == 1) {
-        // JS `wd.x3` (L508) `a.Mka(0)` / `wd.Z2` (L522) `this.Mka(-1)`: a
-        // started animation (incl. the idle loop restart) arms the `hJa`
-        // countdown. (Findings: the JS `x3` (L20990) arms the OPPONENT —
-        // `a=this.jb; ...; a.Mka(0)` — not self; see the ai.hpp note. The
-        // JS-exact OPPONENT-arm was measured and reverted — it left the enemy
-        // passive in `--headless-loop`.)
-        if (st.current_move == nullptr || st.current_move != last_random_move_) {
+        // JS `wd.x3` (L20990) — the OPPONENT-arm. `x3` is the `EStartAnimationEvent`
+        // handler on MY model (`Te.x3` L23097 <- `Te.Skb` L23058), and it arms
+        // the OPPONENT's countdown: `a=this.jb; a.mwb(this.da.Ua); a.Mka(0)`
+        // (L20994-20997). So MY `tG` arms when the OPPONENT starts an animation.
+        // The old self-arm (`st.current_move` change) made the enemy re-decide
+        // the frame after each of its OWN move starts — the reported ~95% double
+        // attack. Detect the opponent's animation start by its move pointer /
+        // animation-name change (the same `jwb` move-start proxy the type-2 path
+        // uses; a looping clip does NOT re-dispatch `EStartAnimationEvent`, so a
+        // loop restart correctly does not re-arm).
+        if (st.enemy_move != last_random_opp_move_ ||
+            st.enemy_anim != last_random_opp_anim_) {
             tG_ = 0;
         }
-        last_random_move_ = st.current_move;
+        last_random_opp_move_ = st.enemy_move;
+        last_random_opp_anim_ = st.enemy_anim;
+
+        // JS `wd.fIa` (L21016) — the SELF-arm on `EStopIntervalEvent`: when MY
+        // stopped interval name is in the `<Random><Intervals>` set
+        // (`v.u4.ncb(a.name)`, tactic_settings.xml L366-369 =
+        // {Uninterrupt, SelfUninterrupt}) `this.tG` is set to 0 (`n6a` L49715
+        // returns 0). Detect the END of that interval by the falling edge on MY
+        // active-interval set.
+        const auto has_interrupt = [&]() {
+            for (const auto& iv : st.my_intervals) {
+                if (iv.first == "Uninterrupt" || iv.first == "SelfUninterrupt") {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const bool my_uninterrupt_now = has_interrupt();
+        if (my_uninterrupt_prev_ && !my_uninterrupt_now) {
+            tG_ = 0;
+        }
+        my_uninterrupt_prev_ = my_uninterrupt_now;
         return update_random(st);
     }
 
