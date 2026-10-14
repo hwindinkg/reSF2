@@ -13043,6 +13043,14 @@ void FightScreen::enable_pose_dump(const std::string& path, int frames) {
     }
 }
 
+// [trace, state harness] Arms the FightController's per-frame STATE dump (the
+// full fight-state JSONL the oracle's `{"t":"state"}` line is diffed against).
+void FightScreen::enable_state_dump(const std::string& path, int frames) {
+    if (fight_ != nullptr) {
+        fight_->set_state_dump(path, frames);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // On-screen gamepad (JS `Za` virtual controls) — the original's touch pad.
 // ---------------------------------------------------------------------------

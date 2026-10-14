@@ -8398,6 +8398,9 @@ void FightController::update(float dt) {
 
     // [trace] The per-frame pose dump (a no-op unless --dump-pose armed it).
     dump_pose_frame();
+
+    // [trace] The per-frame state dump (a no-op unless --dump-state armed it).
+    dump_state_frame();
 }
 
 // --- pose dump (trace infrastructure, Phase 0) -------------------------------
@@ -8407,11 +8410,20 @@ FightController::~FightController() {
         std::fclose(pose_dump_file_);
         pose_dump_file_ = nullptr;
     }
+    if (state_dump_file_ != nullptr) {
+        std::fclose(state_dump_file_);
+        state_dump_file_ = nullptr;
+    }
 }
 
 void FightController::set_pose_dump(const std::string& path, int frames) {
     pose_dump_path_ = path;
     pose_dump_frames_ = frames;
+}
+
+void FightController::set_state_dump(const std::string& path, int frames) {
+    state_dump_path_ = path;
+    state_dump_frames_ = frames;
 }
 
 // One JSONL line per frame (reference/traces/native_pose.jsonl contract):
@@ -8503,6 +8515,139 @@ void FightController::dump_pose_frame() {
         pose_dump_frames_ = 0;
         std::fprintf(stdout, "[dump] pose trace complete: %d frames -> %s\n",
                      pose_dump_written_, pose_dump_path_.c_str());
+        std::fflush(stdout);
+    }
+}
+
+// --- state dump (mechanical differential harness) ---------------------------
+//
+// One JSONL line per fight frame, field-for-field mirroring the web oracle's
+// `{"t":"state"}` line (reference/runner/trace.js `stateJson`). The oracle
+// reads the LIVE game objects (`ca` = FightController, `wd` = fighter, `Te` =
+// the animation controller, `Nd` = the physics/ragdoll, `Sf` = the HUD timer,
+// `du` = the rule manager); every field here names the JS source it mirrors:
+//
+//   hp/mhp       JS `f.parameters.gd` / `f.parameters.Zn`
+//   combo        JS `f.Vx.tf`          (combo_run)
+//   style        JS `f.dz`             (StyleMeter::level)
+//   unhit        JS `f.parameters.cE`  (round_unhit)
+//   shock        JS `f.vc`             (ShockState::shocked_vc)
+//   block        JS `f.da.yD(5)!=null` (has_block)
+//   invuln       JS `f.da.yD(6)!=null` (has_invuln)
+//   move         JS `f.da.Ua.name`     (current move name)
+//   af           JS `f.da.Xh`          (playhead_xh)
+//   iv           JS `f.da.xj`          (active intervals: [name,type])
+//   rag/ragf     JS `f.Nd.nk` / `f.Nd.frameCount` (ragdoll)
+//
+// Fight level:
+//   nf           JS `fight.ha.mb.NF`    (hud_timer())
+//   result       JS `ca.ey`             (rule_result_)
+//   rules        JS `fight.ud.Ae`       ([tag,active])
+//   callouts     JS `Gr.Gu`             ([side,type,value])
+//   counters.m$  JS `ca.m$`             (player_shocked_)
+//   counters.lW  JS `ca.lW`             (the JS init is `true`; cleared when
+//                the ENEMY wins a round. The port stores the COMPLEMENT
+//                (`achievement_lost_round_`, set true on an enemy round win —
+//                fight.cpp:3563 `this.lW=!1`), so the dump emits `!lost` to
+//                mirror the JS field. Verified against the oracle: JS lW = 1
+//                at fight start, the port's raw flag = 0.)
+//
+// Read-only over the simulation: nothing here mutates the fight state.
+void FightController::dump_state_frame() {
+    if (state_dump_frames_ <= 0) return;
+    // The oracle's tracer only emits frames while the fight controller is
+    // live (its `fightObj()` requires the fight screen's `Ig`). The native
+    // update() also runs during the pre-fight load (phase 0, frame 0) — skip
+    // those so the state trace starts at the first LIVE fight frame (phase 1),
+    // matching the oracle's first traced frame.
+    if (phase_ == fight_phase::idle) return;
+    if (state_dump_file_ == nullptr) {
+        if (fopen_s(&state_dump_file_, state_dump_path_.c_str(), "wb") != 0 ||
+            state_dump_file_ == nullptr) {
+            std::fprintf(stderr, "[dump] cannot open %s — state dump disabled\n",
+                         state_dump_path_.c_str());
+            state_dump_frames_ = 0;
+            return;
+        }
+    }
+
+    const int nf = hud_timer();
+    std::fprintf(state_dump_file_,
+                 "{\"t\":\"state\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"
+                 "\"nf\":%d,\"result\":%d,"
+                 "\"cam\":{\"cx\":%.6f,\"cy\":%.6f,\"zoom\":%.6f},"
+                 "\"counters\":{\"m$\":%d,\"lW\":%d},\"rules\":[",
+                 frame_, phase(), round_.number, round_.time_nf, nf,
+                 static_cast<int>(rule_result_),
+                 camera_.go_x_, camera_.go_y_, camera_.zoom_layer,
+                 player_shocked_ ? 1 : 0, achievement_lost_round_ ? 0 : 1);
+    {
+        // Parsed rules + how many are ACTIVE this frame (JS `fight.ud.Ae`
+        // length + the `Ga.active` count). The JS rule objects carry no
+        // stable XML-tag label (minified classes), so the diff compares the
+        // (total, active) counts, not per-kind identity.
+        int n_active = 0;
+        for (const FightRule& r : rules_) {
+            if (r.active) ++n_active;
+        }
+        std::fprintf(state_dump_file_, "%d,%d", static_cast<int>(rules_.size()),
+                     n_active);
+    }
+    std::fprintf(state_dump_file_, "],\"callouts\":[");
+    {
+        // Pending HUD callout signals this frame, counted per side (JS
+        // `Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` lengths). NOTE: the JS `Gr.Gu` list is
+        // a sliding DISPLAY queue (elements survive several frames), while the
+        // port's `callouts_` is drained every tick — so this field is emitted
+        // for visibility but is NOT part of the mechanical divergence count
+        // (see compare_state.py INFORMATIONAL).
+        int n_me = 0, n_en = 0;
+        for (const CalloutSignal& s : callouts_) {
+            if (s.side == 0) ++n_me; else ++n_en;
+        }
+        std::fprintf(state_dump_file_, "%d,%d", n_me, n_en);
+    }
+    std::fprintf(state_dump_file_, "],\"fighters\":[");
+    const FightFighter* fighters[2] = {&player_, &enemy_};
+    for (int i = 0; i < 2; ++i) {
+        const FightFighter& ff = *fighters[i];
+        const Fighter& f = ff.fighter;
+        // The current move name (JS `da.Ua.name`; `file_name` is only the
+        // archive key when the move carries no FileName — same rule as the
+        // pose dump).
+        std::string move_name;
+        if (const sf2::scene::MoveDef* m = f.current_move()) {
+            move_name = m->name;
+            if (move_name.empty()) move_name = m->file_name;
+        }
+        std::fprintf(state_dump_file_,
+                     "%s{\"id\":\"%s\",\"hp\":%.3f,\"mhp\":%.3f,\"combo\":%d,"
+                     "\"style\":%d,\"unhit\":%d,\"shock\":%d,\"block\":%d,"
+                     "\"invuln\":%d,\"move\":\"%s\",\"af\":%d,\"rag\":%d,"
+                     "\"ragf\":%d,\"iv\":[",
+                     i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
+                     static_cast<double>(ff.hp), static_cast<double>(ff.max_hp),
+                     ff.combo_run, ff.style.level, ff.round_unhit ? 1 : 0,
+                     ff.shock.shocked_vc ? 1 : 0, f.has_block() ? 1 : 0,
+                     f.has_invuln() ? 1 : 0, move_name.c_str(), f.playhead_xh(),
+                     f.ragdoll_active() ? 1 : 0, f.ragdoll_frame_count());
+        const std::set<std::string>& ivs = f.active_intervals();
+        std::size_t k = 0;
+        for (const std::string& n : ivs) {
+            std::fprintf(state_dump_file_, "%s[\"%s\",%d]", k == 0 ? "" : ",",
+                         n.c_str(), f.interval_type(n));
+            ++k;
+        }
+        std::fprintf(state_dump_file_, "]}");
+    }
+    std::fprintf(state_dump_file_, "]}\n");
+
+    if (++state_dump_written_ >= state_dump_frames_) {
+        std::fclose(state_dump_file_);
+        state_dump_file_ = nullptr;
+        state_dump_frames_ = 0;
+        std::fprintf(stdout, "[dump] state trace complete: %d frames -> %s\n",
+                     state_dump_written_, state_dump_path_.c_str());
         std::fflush(stdout);
     }
 }

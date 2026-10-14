@@ -1781,6 +1781,14 @@ public:
     // traces/native_pose.jsonl). Pure trace — the simulation is untouched.
     void set_pose_dump(const std::string& path, int frames);
 
+    // [trace, state harness] Arms the per-frame STATE dump: for the first
+    // `frames` fight frames, update() appends one JSONL line to `path`
+    // (reference/traces/native_state.jsonl). Mirrors the web oracle's
+    // `{"t":"state"}` line field-for-field (see reference/runner/trace.js
+    // `stateJson`) so reference/tools/compare_state.py can diff the two
+    // mechanically. Pure trace — the simulation is untouched.
+    void set_state_dump(const std::string& path, int frames);
+
     // [FIX Phase 4b — fighter color from the location] Sets the fill color
     // BOTH fighters' meshes are drawn with. The game's fighters are
     // silhouettes filled with the LOCATION's Root Color (dojo_params
@@ -1936,6 +1944,8 @@ public:
         out.swap(callouts_);
         return out;
     }
+    // Non-draining read of the pending HUD callout signals (state harness).
+    const std::vector<CalloutSignal>& pending_callouts() const { return callouts_; }
     // [probe, authorised] `--tactic <Name>`: force the ENEMY's tactic by
     // name (the tactic_settings.xml `<Tactic Name=..>`) on the live fight,
     // overriding the battle's shipped tactic. Returns false when the name
@@ -2470,6 +2480,13 @@ private:
     // Appends one JSONL line for the current frame to the dump file
     // (lazily opened on the first dumped frame; closed after the last).
     void dump_pose_frame();
+
+    // --- state dump (mechanical differential harness, no behavior change) ---
+    std::string state_dump_path_;
+    int state_dump_frames_ = 0;     // frames left to dump (0 = off)
+    int state_dump_written_ = 0;    // lines written so far
+    std::FILE* state_dump_file_ = nullptr;
+    void dump_state_frame();
 
     // --- fight helpers (JS ca methods) ------------------------------------
     // JS `xF` (L388): set the fight phase + sync the fighters' stance.

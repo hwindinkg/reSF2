@@ -200,6 +200,125 @@
     };
   }
 
+  /* ---------- full fight-state dump (mechanical differential harness) ------ */
+
+  /* Per-fighter LIVE combat state, read from the game objects:
+   *   hp/mhp   `parameters.gd` / `parameters.Zn`
+   *   combo    `Vx.tf`        (combo ladder)
+   *   style    `dz`           (style level)
+   *   unhit    `parameters.cE`(per-round "not hit yet" latch)
+   *   shock    `vc`           (shock/disarm latch)
+   *   block    `da.yD(5)`     (a Block interval active)
+   *   invuln   `da.yD(6)`     (an Invulnerable interval active)
+   *   move     `da.Ua.name`   (current move name)
+   *   af       `da.Xh`        (clip playhead)
+   *   iv       `da.xj`        (active intervals [name,type])
+   *   rag/ragf `Nd.nk` / `Nd.frameCount` (ragdoll solver)
+   * Every read is try/catch-guarded; the field NAMES/ORDER mirror the native
+   * `FightController::dump_state_frame` line exactly. */
+  function fighterState(f, id) {
+    var o = {
+      id: id, hp: null, mhp: null, combo: null, style: null, unhit: null,
+      shock: 0, block: 0, invuln: 0, move: null, af: null, rag: 0, ragf: 0,
+      iv: []
+    };
+    if (!f) return o;
+    try {
+      if (f.parameters) {
+        o.hp = r3(f.parameters.gd);
+        o.mhp = r3(f.parameters.Zn);
+        o.unhit = f.parameters.cE ? 1 : 0;
+      }
+    } catch (e) { /* ignore */ }
+    try { if (f.Vx) o.combo = f.Vx.tf | 0; } catch (e) { /* ignore */ }
+    try { o.style = f.dz | 0; } catch (e) { /* ignore */ }
+    try { o.shock = f.vc ? 1 : 0; } catch (e) { /* ignore */ }
+    try {
+      if (f.da) {
+        o.move = f.da.Ua && f.da.Ua.name != null ? String(f.da.Ua.name) : null;
+        o.af = typeof f.da.Xh === "number" ? f.da.Xh : null;
+        o.block = f.da.yD(5) != null ? 1 : 0;
+        o.invuln = f.da.yD(6) != null ? 1 : 0;
+        var xj = f.da.xj;
+        if (xj && xj.length) {
+          for (var i = 0; i < xj.length; i++) {
+            var it = xj[i];
+            o.iv.push([it && it.name != null ? String(it.name) : "",
+                       it && typeof it.type === "number" ? it.type : 0]);
+          }
+          o.iv.sort(function (a, b) {
+            if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+            return a[1] - b[1];
+          });
+        }
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      if (f.Nd) {
+        o.rag = f.Nd.nk ? 1 : 0;
+        o.ragf = typeof f.Nd.frameCount === "number" ? f.Nd.frameCount | 0 : 0;
+      }
+    } catch (e) { /* ignore */ }
+    return o;
+  }
+
+  /* Fight-level state:
+   *   nf       `ha.mb.NF`  (the HUD countdown seconds — Ar.mb is the Sf timer)
+   *   result   `ey`        (the round result code)
+   *   rules    [n, n_active] over `ud.Ae`
+   *   callouts [n_me, n_en]  (`Id.Jh.Gu` / `je.Jh.Gu` — INFORMATIONAL, the
+   *                           JS list slides across frames while the native
+   *                           queue is drained per tick; not diffed)
+   *   counters `m$` / `lW` */
+  function fightState(fight) {
+    var round = fight.round || null;
+    var nf = null;
+    try {
+      if (fight.ha && fight.ha.mb && typeof fight.ha.mb.NF === "number") {
+        nf = fight.ha.mb.NF | 0;
+      }
+    } catch (e) { /* ignore */ }
+    var result = null;
+    try { if (typeof fight.ey === "number") result = fight.ey | 0; } catch (e) { /* ignore */ }
+    var rules = [0, 0];
+    try {
+      var ud = fight.ud;
+      if (ud && ud.Ae) {
+        rules[0] = ud.Ae.length | 0;
+        var act = 0;
+        for (var i = 0; i < ud.Ae.length; i++) {
+          if (ud.Ae[i] && ud.Ae[i].active) ++act;
+        }
+        rules[1] = act;
+      }
+    } catch (e) { /* ignore */ }
+    var callouts = [0, 0];
+    try {
+      var mb = fight.ha && fight.ha.mb;
+      if (mb) {
+        if (mb.Id && mb.Id.Jh && mb.Id.Jh.Gu) callouts[0] = mb.Id.Jh.Gu.length | 0;
+        if (mb.je && mb.je.Jh && mb.je.Jh.Gu) callouts[1] = mb.je.Jh.Gu.length | 0;
+      }
+    } catch (e) { /* ignore */ }
+    var counters = { "m$": 0, "lW": 0 };
+    try { counters["m$"] = fight.m$ ? 1 : 0; } catch (e) { /* ignore */ }
+    try { counters["lW"] = fight.lW ? 1 : 0; } catch (e) { /* ignore */ }
+    return {
+      t: "state",
+      f: typeof fight.frame === "number" ? fight.frame : 0,
+      phase: typeof fight.eu === "number" ? fight.eu : 0,
+      round: round ? round.round : null,
+      timer: round ? round.time : null,
+      nf: nf,
+      result: result,
+      cam: tr.cam || camFallback(fight),
+      counters: counters,
+      rules: rules,
+      callouts: callouts,
+      fighters: [fighterState(fight.pb, "Me"), fighterState(fight.yb, "Enemy")]
+    };
+  }
+
   /* ---------- clip dump ---------- */
 
   /* Once per played clip (throttled: first occurrence of each label per run,
@@ -270,6 +389,7 @@
     if (!fight) return;
     ensureHooks(fight);
     console.log(JSON.stringify(frameJson(fight)));
+    console.log(JSON.stringify(fightState(fight)));
     tr.frameCount++;
     captureClips(fight);
     if (tr.frameCount >= MAX_FRAMES) finish();

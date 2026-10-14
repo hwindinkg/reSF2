@@ -87,6 +87,8 @@ void print_usage(const char* argv0) {
                  "                   dojo, player Fists (keyboard) vs enemy Fists (AI)\n"
                  "  --dump-pose N    (with --fight) dump the first N fight frames as JSONL to\n"
                  "                   reference/traces/native_pose.jsonl (trace, no sim change)\n"
+                 "  --dump-state N   (with --fight) dump the first N fight STATE frames as JSONL\n"
+                 "                   to reference/traces/native_state.jsonl (trace, no sim change)\n"
                  "  --dump-clip N    dump the anim archive clip <name> as 1/16 fixed-point\n"
                  "                   JSON to reference/traces/native_clip_<name>.json, exit 0\n",
                  argv0);
@@ -1883,6 +1885,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     std::string capture_dir;  // when set, capture screens to this dir
     std::string dump_clip;    // --dump-clip <name>: dump one anim clip as JSON, exit
     int dump_pose_frames = 0;  // --dump-pose N: dump the first N fight frames (0 = off)
+    int dump_state_frames = 0; // --dump-state N: dump the first N fight STATE frames
     // `--battle <name>` / `--zone <name>` (used with --fight): direct-boot a
     // named stages.xml battle resolved in a named zone — the verification
     // path for the stage-rule feeder (e.g. `Duel` in `ZONE_1`). Defaults to
@@ -2515,6 +2518,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             dump_pose_frames = std::atoi(argv[++i]);
             if (dump_pose_frames <= 0) {
                 std::fprintf(stderr, "game: --dump-pose needs a positive frame count N\n");
+                return 1;
+            }
+        } else if (arg == "--dump-state") {
+            if (i + 1 >= argc || argv[i + 1][0] == '-') {
+                std::fprintf(stderr, "game: --dump-state requires an explicit frame count N\n");
+                return 1;
+            }
+            dump_state_frames = std::atoi(argv[++i]);
+            if (dump_state_frames <= 0) {
+                std::fprintf(stderr, "game: --dump-state needs a positive frame count N\n");
                 return 1;
             }
         } else if (arg == "--fight") {
@@ -7860,6 +7873,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          "[dump] pose trace armed: first %d fight frames -> "
                          "reference/traces/native_pose.jsonl\n",
                          dump_pose_frames);
+            std::fflush(stdout);
+        }
+        if (dump_state_frames > 0) {
+            // [trace, state harness] Arm the FightController's per-frame STATE
+            // dump (reference/traces/native_state.jsonl). Pure trace.
+            std::filesystem::create_directories("reference/traces");
+            if (app.screens().top() != nullptr) {
+                static_cast<sf2::app::FightScreen*>(app.screens().top())
+                    ->enable_state_dump("reference/traces/native_state.jsonl",
+                                        dump_state_frames);
+            }
+            std::fprintf(stdout,
+                         "[dump] state trace armed: first %d fight frames -> "
+                         "reference/traces/native_state.jsonl\n",
+                         dump_state_frames);
             std::fflush(stdout);
         }
         if (headless > 0) {
