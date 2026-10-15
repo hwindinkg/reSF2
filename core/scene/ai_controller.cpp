@@ -587,8 +587,13 @@ bool AiController::fca(const AiFightState& st, int variant) const {
 
 // JS `V1` (L601-602): a candidate move must be in `me` (the fighter's move
 // list) and its tactics conditions (`FQ(2)` = the `Ts` list) must pass.
-bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
-    if (moves_ == nullptr || moves_->find(m.name) == moves_->end()) return false;
+bool AiController::v1(const MoveDef& m, const AiFightState& st,
+                      std::string* why) const {
+    if (why != nullptr) why->clear();
+    if (moves_ == nullptr || moves_->find(m.name) == moves_->end()) {
+        if (why != nullptr) *why = "not-in-table";
+        return false;
+    }
 
     // JS `de.V1` (L601-602): `let b=this.model.me; if(!b.includes(a))return!1;`
     // - the candidate must be one of MY OWN moves. The tactic's slot names
@@ -605,9 +610,11 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
                 break;
             }
         }
-        if (!own) return false;
+        if (!own) {
+            if (why != nullptr) *why = "not-my-move";
+            return false;
+        }
     }
-
     // Build a FightContext with the AI's state for the tactics conditions.
     FightContext ctx;
     ctx.roll01 = [this]() { return roll01(); };  // owned stream or override
@@ -681,7 +688,11 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
     // `ThrowForward`'s `<Distance Max="100">`) was never rejected and the AI
     // started/landed throws from across the arena. Keys conditions pass for
     // the AI (`ctx.keys_gm=false`, the same `gm=false` gate `NS` uses).
-    if (!eval_move_conditions(m.conditions, ctx)) return false;
+    std::string ctrace;
+    if (!eval_move_conditions(m.conditions, ctx, &ctrace)) {
+        if (why != nullptr) *why = "conditions:" + ctrace;
+        return false;
+    }
 
     // JS `de.V1` (L601-602), the `$Q` SIBLING filter (the ONE confirmed AI
     // divergence — verbatim, char offsets 306189-306760):
@@ -723,9 +734,17 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st) const {
         // `f.Yz(this.model,null,a.FQ(2))` — the SIBLING's `<Conditions>`
         // (`va.rb`), NOT its `<Tactics>` (`va.Ts`). `f.Yz` defaults its list to
         // `this.va.rb`.
-        if (eval_move_conditions(f.conditions, fctx)) return false;
+        if (eval_move_conditions(f.conditions, fctx)) {
+            if (why != nullptr) *why = "mirror-sibling:" + f.name;
+            return false;
+        }
     }
-    return eval_move_conditions(m.tactics, ctx);
+    std::string ttrace;
+    if (!eval_move_conditions(m.tactics, ctx, &ttrace)) {
+        if (why != nullptr) *why = "tactics:" + ttrace;
+        return false;
+    }
+    return true;
 }
 
 // Resolves a candidate animation/tag name to the move(s) whose name or
@@ -828,8 +847,14 @@ int AiController::pick(const std::vector<AiCandidate>& cands) const {
     };
     float sum = 0.0f;
     for (const AiCandidate& c : cands) sum += weight_of(c.animation);
-    if (sum <= 0.0f) return -1;
+    if (sum <= 0.0f) {
+        last_pick_sum_ = sum;
+        last_pick_roll_ = 0.0f;
+        return -1;
+    }
     float r = roll01() * sum;
+    last_pick_sum_ = sum;
+    last_pick_roll_ = r;
     for (std::size_t i = 0; i < cands.size(); ++i) {
         r -= weight_of(cands[i].animation);
         if (r < 0.0f) return static_cast<int>(i);
@@ -2352,6 +2377,47 @@ std::string AiController::update_random(const AiFightState& st) {
                      st.my_moves->size(), nkp, cands.size());
         for (const MoveDef* m : cands) std::fprintf(stdout, " %s", m->name.c_str());
         std::fprintf(stdout, "\n");
+        static const char* trace_move = std::getenv("SF2_TRACE_RANDOM_MOVE");
+        std::fprintf(stdout, "[random] ctx me_anim='%s' cur='%s' my_x=%.3f en_x=%.3f",
+                     st.my_anim.c_str(),
+                     st.current_move != nullptr ? st.current_move->name.c_str()
+                                                : "(null)",
+                     static_cast<double>(st.my_x), static_cast<double>(st.enemy_x));
+        if (st.current_move != nullptr) {
+            std::fprintf(stdout, " xl=[");
+            for (const std::string& a : st.current_move->anim_names) {
+                std::fprintf(stdout, "%s,", a.c_str());
+            }
+            std::fprintf(stdout, "]");
+        }
+        if (st.ref_pos) {
+            float px = 0.0f, py = 0.0f, nx = 0.0f, ny = 0.0f;
+            const bool okp = st.ref_pos("Pivot", "", 1, false, px, py);
+            const bool okn = st.ref_pos("Nodes", "NPivot", 2, false, nx, ny);
+            std::fprintf(stdout, " refPivot=%d:%.3f refEnemyNPivot=%d:%.3f",
+                         okp ? 1 : 0, static_cast<double>(px), okn ? 1 : 0,
+                         static_cast<double>(nx));
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+        std::fprintf(stdout, "[random] rejected:");
+        for (const MoveDef* m : *st.my_moves) {
+            if (m == nullptr || !m->has_event("KeyPressed")) continue;
+            std::string why;
+            if (!v1(*m, st, &why)) {
+                const std::size_t colon = why.find(':');
+                std::fprintf(stdout, " %s(%.*s)", m->name.c_str(),
+                             static_cast<int>(colon == std::string::npos
+                                                  ? why.size()
+                                                  : colon),
+                             why.c_str());
+                if (trace_move != nullptr && m->name == trace_move) {
+                    std::fprintf(stdout, "\n[random] %s why:\n%s", m->name.c_str(),
+                                 why.c_str());
+                }
+            }
+        }
+        std::fprintf(stdout, "\n");
         std::fflush(stdout);
     }
 
@@ -2386,6 +2452,16 @@ std::string AiController::update_random(const AiFightState& st) {
     rou.reserve(keep.size());
     for (const MoveDef* m : keep) rou.push_back({m->name, 0});
     const int ci = pick(rou);
+    if (trace_random) {
+        std::fprintf(stdout, "[random] keep=%zu sum=%.6f roll=%.6f ci=%d:",
+                     keep.size(), static_cast<double>(last_pick_sum_),
+                     static_cast<double>(last_pick_roll_), ci);
+        for (std::size_t i = 0; i < keep.size(); ++i) {
+            std::fprintf(stdout, " %s", keep[i]->name.c_str());
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
     if (ci < 0) {
         fk_ = -1;
         return "";

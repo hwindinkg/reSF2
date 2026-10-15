@@ -7689,8 +7689,20 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     return f.fighter.node_world_xy(part, prev, x, y);
                 }
                 if (obj == "Pivot") {
-                    x = f.fighter.world_x();
-                    y = f.fighter.world_y();
+                    // JS `ee.nt` case 2 (L33250) -> `ee.j8a` (L33329): the
+                    // move's `<Align><Pivot Part>` NODE (`CBa(a).Yd`, stamped
+                    // by `jc.vF`/`iB`; fallback `a.cJa = da.Fe()` = `Te.Mqb` =
+                    // the current move's align node), NOT the fighter ROOT.
+                    // The oracle measures the two apart: at the boss-lynx
+                    // decision (oracle f=333) the root is 1129.9 while the
+                    // pivot node is 1038.92, which is exactly the 0..300 vs
+                    // >300 gate flip on HighKick/Sweep/… — the Random-path
+                    // candidate-set divergence. Mirror `fill_ctx_geometry`
+                    // (L5402): `align.UE < 0` (no align pivot) leaves the JS
+                    // `new H(0,0,0,1)` (ShiftX/ShiftY 0 shipped) -> (0, 0).
+                    if (f.fighter.align_pivot_world_xy(prev, x, y)) return true;
+                    x = 0.0f;
+                    y = 0.0f;
                     return true;
                 }
                 return false;

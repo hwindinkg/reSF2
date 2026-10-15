@@ -130,6 +130,7 @@
     n0aRecent: [],
     cPqb: 0, cIa: 0, cN0a: 0, ciPa: 0, /* wrapper fire counters (trace_stats) */
     lastRandom: { Me: null, Enemy: null }, /* last Gc.jL (Random-path pick) */
+    lastPkbPre: { Me: null, Enemy: null }, /* Gc.Pkb INPUT list (pre-M7/Ts filter) */
     deProtoWrapped: false, /* de.prototype.Pqb/ia wrapped (covers every de) */
     gcProtoWrapped: false, /* Gc.prototype.jL wrapped (Random candidate pick) */
     hjaWrapped: false, /* fighter.prototype.hJa wrapped (Random timing) */
@@ -580,9 +581,15 @@
                 for (var i = 0; i < b.length; i++) names.push(animLabel(b[i]));
                 var side = deSide(or.fight, a && a.nf) || "?";
                 var chosen = animLabel(r);
+                var refs = {};
+                try { refs.mpivot = Math.round(a.da.Fe().ma.x * 100) / 100; } catch (e) { /* ignore */ }
+                try { refs.mroot = Math.round(a.oa.Fe().ma.x * 100) / 100; } catch (e) { /* ignore */ }
+                try { refs.enpivot = Math.round(a.jb.da.Fe().ma.x * 100) / 100; } catch (e) { /* ignore */ }
+                try { refs.enn = Math.round(a.jb.oa.Ic("NPivot").ma.x * 100) / 100; } catch (e) { /* ignore */ }
+                try { refs.mn = Math.round(a.oa.Ic("NPivot").ma.x * 100) / 100; } catch (e) { /* ignore */ }
                 var entry = {
                   m: "Gc.jL", side: side, f: frameNo(),
-                  cand: names, n: b.length, chosen: chosen
+                  cand: names, n: b.length, chosen: chosen, refs: refs
                 };
                 pushTrace(entry);
                 or.lastRandom[side] = entry;
@@ -596,6 +603,94 @@
           };
           proto.__orGcProto = true;
           or.gcProtoWrapped = true;
+        }
+        if (proto && typeof proto.Pkb === "function" && !proto.__orPkbProto) {
+          var origPkb = proto.Pkb;
+          proto.Pkb = function (a, b) {
+            try {
+              if (b && b.length) {
+                var pn = [];
+                for (var i = 0; i < b.length; i++) pn.push(animLabel(b[i]));
+                var pside = deSide(or.fight, a && a.nf) || "?";
+                or.lastPkbPre[pside] = { f: frameNo(), n: b.length, cand: pn };
+                if (!or.meList) or.meList = {};
+                if (!or.meList[pside]) {
+                  var me = [];
+                  try {
+                    if (a && a.me && a.me.length) {
+                      for (var j = 0; j < a.me.length; j++) me.push(animLabel(a.me[j]));
+                    }
+                  } catch (e) { /* ignore */ }
+                  var d2 = [];
+                  try {
+                    var dl = a && a.Su && typeof a.Su.dea === "function" ? a.Su.dea(2) : null;
+                    if (dl && dl.length) {
+                      for (var j2 = 0; j2 < dl.length; j2++) d2.push(animLabel(dl[j2]));
+                    }
+                  } catch (e) { /* ignore */ }
+                  or.meList[pside] = { me: me, dea2: d2 };
+                }
+                if (!or.distHooked) {
+                  try {
+                    var mv0 = b[0].animation;
+                    var cc0 = null;
+                    for (var bi = 0; bi < b.length && cc0 == null; bi++) {
+                      var mvq = b[bi].animation;
+                      var tsq = mvq && mvq.va ? mvq.va.Ts : null;
+                      if (!tsq) continue;
+                      for (var q = 0; q < tsq.length; q++) {
+                        if (tsq[q] && typeof tsq[q].FK !== "undefined") { cc0 = tsq[q]; break; }
+                      }
+                    }
+                    console.log(JSON.stringify({ t: "disthook", found: !!cc0,
+                      ts0: !!(mv0 && mv0.va && mv0.va.Ts && mv0.va.Ts.length) }));
+                    var cproto = cc0 ? Object.getPrototypeOf(cc0) : null;
+                    if (cproto && typeof cproto.he === "function" && !cproto.__orDist) {
+                      var ohe = cproto.he;
+                      cproto.he = function (ct) {
+                        var r = ohe.apply(this, arguments);
+                        try {
+                          var ff = frameNo();
+                          if (this.qdb === 0 && this.FK && this.GK && ct &&
+                              ff != null && ff >= 325 && ff <= 340) {
+                            var fx = this.FK.OQ(ct), tx = this.GK.OQ(ct);
+                            var bb = (tx - fx) * ct.Wl;
+                            var ydx = null;
+                            try {
+                              var yd = this.FK.CBa(ct).Yd;
+                              ydx = yd && yd.ma ? Math.round(yd.ma.x * 100) / 100 : null;
+                            } catch (e2) { /* ignore */ }
+                            console.log(JSON.stringify({ t: "distlog", f: ff,
+                              mv: or.curMove, mn: this.min, mx: this.max,
+                              fx: Math.round(fx * 100) / 100,
+                              tx: Math.round(tx * 100) / 100, wl: ct.Wl,
+                              ydx: ydx,
+                              b: Math.round(bb * 100) / 100, r: r }));
+                          }
+                        } catch (e) { /* ignore */ }
+                        return r;
+                      };
+                      cproto.__orDist = true;
+                    }
+                    var mproto = mv0 ? Object.getPrototypeOf(mv0) : null;
+                    if (mproto && typeof mproto.nw === "function" && !mproto.__orNw) {
+                      var onw = mproto.nw;
+                      mproto.nw = function () {
+                        or.curMove = this.name;
+                        var rr = onw.apply(this, arguments);
+                        or.curMove = null;
+                        return rr;
+                      };
+                      mproto.__orNw = true;
+                    }
+                    or.distHooked = true;
+                  } catch (e) { /* ignore */ }
+                }
+              }
+            } catch (e) { /* ignore */ }
+            return origPkb.apply(this, arguments);
+          };
+          proto.__orPkbProto = true;
         }
       } catch (e) { /* ignore */ }
     }
@@ -1027,6 +1122,8 @@
       chosen_move: or.lastMove[side],
       chosen_candidates: pqb && typeof pqb.cand === "number" ? pqb.cand : null,
       random: or.lastRandom[side] || null,
+      random_pre: or.lastPkbPre[side] || null,
+      me_list: or.meList ? (or.meList[side] || null) : null,
       chances: chancesOf(de),
       input_buffer_state: {
         me_empty: wMe.empty,

@@ -820,11 +820,19 @@ private:
     void vaa(const AiFightState& st, int variant);
     // The weighted roulette pick (JS `Md.jL` L640).
     int pick(const std::vector<AiCandidate>& cands) const;
+    // Diagnostic (`SF2_TRACE_RANDOM=1`): the last `pick` draw — the raw
+    // `Da.pg.s4(sum)` value and the weight sum, so the port's `Md.jL`
+    // roulette (candidate list + weights + roll + pick) can be compared with
+    // the JS `Gc.jL` trace. Written on every `pick`; read only by the trace.
+    mutable float last_pick_roll_ = 0.0f;
+    mutable float last_pick_sum_ = 0.0f;
     // Filter the candidate list by the V1 move test (JS `ABa` L600).
     void filter_by_v1(std::vector<AiCandidate>& cands,
                       const AiFightState& st) const;
-    // Tests one candidate move (JS `V1` L601-602).
-    bool v1(const MoveDef& m, const AiFightState& st) const;
+    // Tests one candidate move (JS `V1` L601-602). `why` (diagnostic,
+    // `SF2_TRACE_RANDOM=1`) receives the failing stage name.
+    bool v1(const MoveDef& m, const AiFightState& st,
+            std::string* why = nullptr) const;
     // The `fCa` body-part cautious check (JS `fCa` L599-600).
     bool fca(const AiFightState& st, int variant) const;
     // Rebuilds the QJa roll cache (JS `QJa` L594-595): five `Da.jf()`
