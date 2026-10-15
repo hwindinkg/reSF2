@@ -425,6 +425,7 @@ void FightController::init_locks(
     const sf2::scene::Model* enemy_model,
     const sf2::scene::TacticDef* player_tactic) {
     battle_ = battle;
+    prng_.set_tag("fight");  // SF2_TRACE_PRNG label for the shared stream
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_shocked_ = false;  // JS `ca.m$` ctor init (L379 `this.m$=!1`)
     // JS `ca.lW` ctor init (L15513 `this.lW = true`) + a fresh `fe` session

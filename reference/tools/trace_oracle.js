@@ -746,8 +746,16 @@
     if (!or.pgWrapped) {
       try {
         var pg = null;
+        /* Diagnostic export injected into the served bundle: `window.__orDa`
+         * is the `Da` class (static `pg` = the shared `Rk` stream, JS L2701
+         * `Da.pg=new Rk(L.seed)`). The bundle is a closure so `Da` is not a
+         * global; the export is a 1-line harness patch reverted after the
+         * trace. Falls back to the old instance scan if absent. */
         try {
-          if (or.fight.Da && or.fight.Da.constructor &&
+          if (window.__orDa && window.__orDa.pg) pg = window.__orDa.pg;
+        } catch (eDa) { /* ignore */ }
+        try {
+          if (!pg && or.fight.Da && or.fight.Da.constructor &&
               or.fight.Da.constructor.pg) {
             pg = or.fight.Da.constructor.pg;
           }
@@ -771,6 +779,31 @@
             } catch (e2) { /* ignore */ }
             return r;
           };
+          /* Per-draw counter (SF2_TRACE_PRNG analog): every `Rk.jf()` draw
+           * (s4/dT/cT all funnel through jf) is logged with its 1-based index
+           * and value plus the consuming JS caller frame, so the JS and port
+           * draw SEQUENCES can be diffed index-by-index. */
+          if (!or.pgJfWrapped) {
+            var origJf = pg.jf;
+            or.pgDraw = 0;
+            pg.jf = function () {
+              var v = origJf.apply(this, arguments);
+              try {
+                or.pgDraw++;
+                var c = "";
+                var c2 = "";
+                try {
+                  var st = new Error().stack || "";
+                  var ls = st.split("\n");
+                  c = (ls[2] || "").trim();
+                  c2 = (ls[3] || "").trim() + " | " + (ls[4] || "").trim();
+                } catch (e4) { /* ignore */ }
+                emit({ t: "draw", i: or.pgDraw, v: v, f: frameNo(), c: c, c2: c2 });
+              } catch (e3) { /* ignore */ }
+              return v;
+            };
+            or.pgJfWrapped = true;
+          }
           or.pgWrapped = true;
         }
       } catch (e) { /* ignore */ }

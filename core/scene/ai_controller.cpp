@@ -2088,6 +2088,28 @@ std::string AiController::update(const AiFightState& st) {
     // template has no `.dat` tables, so the old unconditional `de.ia` pass
     // found nothing and the enemy never moved.
     if (tactic_->type == 1) {
+        // JS `wd.mwb` (L527 `a.mwb(this.da.Ua)`) -> `de.jwb` (L596-597 /
+        // L25007): the ENEMY's move-start event runs `QJa` (6 `Da.jf()` draws,
+        // L24970-24975) REGARDLESS of the tactic type. `mwb` is dispatched by
+        // the model's EStartAnimationEvent (`Te.x3` L23097), NOT by `de.ia`,
+        // so the Random tactic (`wd.hJa`, `Md` type 1) consumes it too. The
+        // port ran the `jwb`/`QJa` block only in the type-2 path (the block
+        // below, after the `update_random` return), so the Random path's
+        // shared `Da.pg` stream was short by 6 draws per enemy move start —
+        // the boss-lynx roulette divergence. Mirror the type-2 `jwb` block
+        // here (before `update_random`), exactly as `mwb` precedes `Anb`.
+        if (st.enemy_move != last_enemy_move_ ||
+            st.enemy_anim != last_enemy_anim_) {
+            last_enemy_anim_ = st.enemy_anim;
+            last_enemy_move_ = st.enemy_move;
+            if (st.enemy_playing && st.enemy_move != nullptr) {
+                qja(st);
+                qja_done_ = true;
+                if (!mcb(*st.enemy_move)) {
+                    x_ = gfa_draw();
+                }
+            }
+        }
         // JS `wd.x3` (L20990) — the OPPONENT-arm. `x3` is the `EStartAnimationEvent`
         // handler on MY model (`Te.x3` L23097 <- `Te.Skb` L23058), and it arms
         // the OPPONENT's countdown: `a=this.jb; a.mwb(this.da.Ua); a.Mka(0)`

@@ -31,6 +31,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <map>
 #include <set>
@@ -62,6 +65,11 @@ class DaPrng {
 public:
     explicit DaPrng(std::uint32_t seed = 0) : mf_(seed) {}
     void seed(std::uint32_t s) { mf_ = s; }
+    // --- SF2_TRACE_PRNG per-draw diagnostic (index + value per `Rk.jf`) ---
+    // `set_tag` labels the instance; `SF2_TRACE_PRNG=<tag>` prints every
+    // `jf()` draw of the matching instance as `[prng] tag=.. n=.. v=..`.
+    void set_tag(const char* t) { tag_ = t; }
+    std::uint64_t draws() const { return draws_; }
     // Xx.Olb (L2366): advance the LCG, return mf mod 2^31.
     std::uint32_t b0() {
         mf_ = mf_ * 1103515245u + 12345u;  // u32 wrap = mod 2^32
@@ -71,7 +79,14 @@ public:
     double jf() {
         const double b1 = static_cast<double>(b0()) / 2147483648.0;
         const double b2 = static_cast<double>(b0()) / 2147483648.0;
-        return b1 + b2 / 2147483648.0;
+        const double v = b1 + b2 / 2147483648.0;
+        ++draws_;
+        const char* tt = trace_tag();
+        if (tt != nullptr && tag_ != nullptr && std::strcmp(tt, tag_) == 0) {
+            std::fprintf(stderr, "[prng] tag=%s n=%llu v=%.9f\n", tag_,
+                         static_cast<unsigned long long>(draws_), v);
+        }
+        return v;
     }
     // Rk.s4 / Rk.dT / Rk.cT (L2352).
     double s4(double a) { return jf() * a; }
@@ -80,6 +95,12 @@ public:
 
 private:
     std::uint32_t mf_;  // Xx.mf
+    std::uint64_t draws_ = 0;   // per-instance `jf()` draw counter (diagnostic)
+    const char* tag_ = nullptr; // instance label for SF2_TRACE_PRNG
+    static const char* trace_tag() {
+        static const char* t = std::getenv("SF2_TRACE_PRNG");
+        return t;
+    }
 };
 
 // ---------------------------------------------------------------------------
