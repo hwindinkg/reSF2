@@ -105,14 +105,11 @@ constexpr float kJsBannerRoundBreakSeconds = 1.666f;  // `Cr.tca` L2023 fu(1.666
 constexpr float kJsBannerArmDelaySeconds = 0.5f;      // `Cr.tca` L2023
                                                       // `wh.delay(...,500)`
 constexpr float kJsBannerHoldSeconds = 1.166f;        // `Cr.Zy`/`Cr.GZ` L2024
-// The phase-1 StartStance hold. JS `kg` (L387) leaves phase 1 only when the
-// intro stance clip's `OCa()` fires, and the clip itself starts on the SECOND
-// phase-1 frame (the `RoundStageStart` bus dispatch lags `xF(1)` by one
-// frame, see `intro_pick_armed_`). The oracle trace shows phase 1 = f 0..133
-// (134 frames: two clip-less lead frames, then the 132-frame stance clip
-// f2..f133). The port's 1-based `start_stance_frames_` counter therefore fires
-// on its frame 134 (f=133), matching the oracle's last phase-1 frame.
-constexpr int kStartStanceFrames = 134;
+// The phase-1 StartStance hold is NOT a frame count: JS `kg` (L15772) leaves
+// phase 1 only when the intro stance clip's `OCa()` end event fires, and the
+// clip itself starts on the SECOND phase-1 frame (the `RoundStageStart` bus
+// dispatch lags `xF(1)` by one frame, see `intro_pick_armed_`). See
+// `FightController::intro_stance_end_tick` for the per-fighter gate.
 
 // [fx] Latch a fighter's current strike-capsule endpoints (`HitCapsule.r1/r2`
 // = JS `sx.ma`/`Zs.ma`) into `prev_cap_ends` (= JS `sx.mf`/`Zs.mf`). Called
@@ -3315,6 +3312,14 @@ void FightController::enter_start_stance() {
     round_live_ = false;
     start_stance_done_ = false;
     start_stance_frames_ = 0;   // reset so every round re-plays the intro
+    // [FIX intro gate — JS `kg` L15772] Fresh round: forget the previous
+    // round's intro-stance end tracking so each fighter's stance end fires the
+    // gate once (`intro_stance_end_tick`).
+    for (FightFighter* f : {&player_, &enemy_}) {
+        f->intro_move = nullptr;
+        f->intro_end_count = -1;
+        f->intro_ended = false;
+    }
     intro_pick_armed_ = false;  // the bus dispatch lags `xF(1)` by one frame
     start_buffer_filled_ = false;  // fresh round, empty round-start buffer
     round_wait_ = false;   // the break plate expired -> the round is running
@@ -8044,6 +8049,16 @@ void FightController::banner_tick(float dt) {
     // [ROUND-plate lead-in] The intro's plate clock is held until the `ik` VS
     // overlay ends (`release_intro`); nothing ticks before then.
     if (intro_hold_) return;
+    // JS `Cr.aa` (L84366) is driven by the SCENE-GRAPH pass (`oja` L1036-1048:
+    // `this.aa(a)` then the children), which runs BEFORE the fight controller's
+    // own update — so the plate's `aa` never sees the same frame's `kg`/`Am()`
+    // raise. A plate therefore does NOT tick on its raise frame: `Sc` starts
+    // counting down on the NEXT frame. (The port's earlier comment claimed
+    // `ca.ia` L389 ends with the tick, but `this.Onb()` there is L16795 — the
+    // battle-end check, not the plate countdown.) Without this the FIGHT plate
+    // expired one frame early: the oracle's `ZONE_1` boss/tournament phase 2
+    // lands at `last-stance-frame + 70`, the port's at `+ 69`.
+
     if (banner_arm_delay_ > 0.0f) {
         banner_arm_delay_ -= dt;
         if (banner_arm_delay_ > 0.0f) return;
@@ -8075,6 +8090,77 @@ void FightController::release_intro() {
 // case 5:this.Rkb()}` (`Ar.lp` L2017 = `this.Se.type`). The port carries
 // the same dispatch in `banner_action_` because its `banner_kind` values are
 // NOT the JS type numbers.
+// JS `kg` (L15772) — the `EStopAnimationEvent` (`Te.lS` L23100 -> `wd.eIa`
+// L21004 -> `wd.kg.Z(this.Vb)`) handler the fight controller attached to each
+// model (`HT` L17155-17159: `a.kg.addListener(w(this,this.kg))`):
+//
+//   kg(a) {
+//     let b = a.model.jb;
+//     a = a.model.OCa() && b != null && b.OCa();
+//     if (this.eu == 1 && a) {
+//       this.fxa();
+//       this.Da.type != "FightNone" ? this.Am() : this.xF(2);
+//     }
+//     ...
+//   }
+//
+// `OCa()` (L21167) is `pR ? true : !QD`, with `pR = move.yda` (`EndsStage`,
+// L21007) — i.e. the intro stance's `<EndsStage="1">` clip-end is the gate.
+// The intro stance (`StanceLeft`/`StanceRight`, e.g. `FistsStartStance-Left`,
+// `FistsStartStance-Right`) is the move the fighter starts phase 1 with, so
+// its first clip end is the gate event.
+//
+// `Am()` (L16722) -> `ha.Zy()` (L84022) -> `Cr.Zy` (L84236):
+//   Zy() { if (!(this.active && this.type == 5)) { ...; this.fu(1.166); } }
+// `fu` (L84348) sets `Sc = 1.166` and `wU = true`. `Cr.active` is the SCREEN
+// node's `X(true)`/`X(false)` visibility latch (`fu` -> `X(true)`, `ONa` ->
+// `X(false)`), NOT a "plate is up" flag, so the guard misses while the plate
+// is up and EVERY `Am()` call re-runs `fu(1.166)`: the countdown RESTARTS, so
+// the plate expires 1.166 s after the LATER fighter's stance end. This is the
+// whole tournament/survival `nf 97 vs 98` / `Enemy.move` first-divergence
+// root: the old port used a hardcoded 134-frame hold (the PLAYER's stance
+// length) and fired 18 frames early when the ENEMY's stance clip is longer
+// (`FistsStartStance-Right`, 51 clip frames vs the player's 45).
+//
+// `FightNone` (the dojo dummy viewer) skips the plate entirely: `xF(2)` runs
+// directly on the first end (`Da.type == "FightNone"` branch, L15781-15783).
+void FightController::intro_stance_end_tick(FightFighter& f) {
+    if (f.intro_ended) return;
+    if (f.intro_move == nullptr) {
+        // The stance clip starts on the SECOND phase-1 frame (the
+        // `RoundStageStart` bus dispatch lags `xF(1)`), so latch it then.
+        const sf2::scene::MoveDef* m = f.fighter.current_move();
+        if (m == nullptr) return;
+        f.intro_move = m;
+        f.intro_end_count = f.fighter.move_end_count();
+        return;
+    }
+    if (f.fighter.move_end_count() == f.intro_end_count) return;
+    f.intro_ended = true;
+    if (battle_.type == "FightNone") {
+        // JS `kg` L15781-15783: `this.xF(2)` — phase 2 immediately, the plate
+        // is display-only for the dummy viewer (one end only; the dummy's
+        // `PhysicalDummy` carries no `FileName`, so it never ends at all).
+        if (!start_stance_done_) {
+            start_stance_done_ = true;
+            banner_show(banner_kind::fight, kJsBannerHoldSeconds,
+                        banner_action::none, false);
+            std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
+            std::fflush(stdout);
+            enter_fight();
+        }
+    } else {
+        // JS `Am()` (L16722) -> `ha.Zy()` -> `Cr.Zy` (L84236): raise the plate
+        // on the FIRST stance end; every later end restarts `Sc` (`fu(1.166)`),
+        // so the LAST end wins (the plate expires 1.166 s after it).
+        start_stance_done_ = true;
+        banner_show(banner_kind::fight, kJsBannerHoldSeconds,
+                    banner_action::begin_fight, false);
+        std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
+        std::fflush(stdout);
+    }
+}
+
 void FightController::banner_expire() {
     const banner_kind kind = cur_banner_;
     const banner_action action = banner_action_;
@@ -8242,6 +8328,20 @@ void FightController::update(float dt) {
     // callers: the round-break plate by `Z2`/init, the FIGHT! plate when
     // the stance ends.)
 
+    // The banner countdown (JS `Cr.aa` L84366). `Cr.aa` is driven by the
+    // SCENE-GRAPH pass (`oja` L1036-1048: `this.aa(a)` then the children),
+    // which runs BEFORE the fight controller's own update — so a plate raised
+    // later this frame by `kg`/`Am()` is NOT ticked on its raise frame and its
+    // `Sc` starts counting down on the next frame. It also means a plate
+    // expiry (`Cr.ONa` L84354 -> `yA.Z(type)` -> `ca.vhb` L410) switches the
+    // phase BEFORE the phase machine below runs, so the expiry frame is
+    // already the new phase: the round timer ticks on the frame the FIGHT
+    // plate expires (the oracle's `nf 98` at the phase-2 frame), exactly like
+    // the JS `ha.ia()` HUD tick that follows the switch in the same frame.
+    // (The port's earlier comment placed this tick at the end of `ca.ia` from
+    // `this.Onb()` L389 — that is L16795, the battle-end check, not the plate.)
+    banner_tick(dt);
+
     // The phase machine.
     switch (phase_) {
         case fight_phase::idle:
@@ -8263,34 +8363,17 @@ void FightController::update(float dt) {
             ++start_stance_frames_;
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
-            if (start_stance_frames_ >= kStartStanceFrames && !start_stance_done_) {
-                // JS `kg` (L387): `this.eu==1 && a` (the stance clip finished)
-                // -> `this.Da.type!="FightNone" ? this.Am() : this.xF(2)`.
-                // `FightNone` takes `xF(2)` straight to phase 2 (the plate below
-                // is display-only for it, matching the oracle dummy trace).
-                if (battle_.type == "FightNone") {
-                    banner_show(banner_kind::fight, kJsBannerHoldSeconds,
-                                banner_action::none, false);
-                    std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
-                    std::fflush(stdout);
-                    enter_fight();
-                } else {
-                    // JS `Am()` (L409) -> `Ar.Zy` (L2020) -> `Cr.Zy` (L2024):
-                    // the FIGHT plate (type 5, `fu(1.166)`, `wU=!0` so it is
-                    // armed immediately). It does NOT enter phase 2: the plate
-                    // expiry (`vhb` L410 case 5) calls `Rkb` -> `xF(2)`, so the
-                    // round-start delay holds BOTH fighters out of the fight
-                    // (no AI attack, no input) for the full 1.166 s the plate
-                    // is on screen. The old port called `enter_fight()` on the
-                    // same frame it raised the plate, so the enemy attacked
-                    // during/right after the FIGHT banner (bug #6).
-                    start_stance_done_ = true;  // raise the plate ONCE
-                    banner_show(banner_kind::fight, kJsBannerHoldSeconds,
-                                banner_action::begin_fight, false);
-                    std::fprintf(stdout, "[fight] banner: FIGHT! (F%d)\n", frame_);
-                    std::fflush(stdout);
-                }
-            }
+            // JS `kg` (L15772): the gate is the INTRO STANCE clip's end event,
+            // fired once per fighter — NOT a frame count. Each end calls
+            // `Am()` -> `Cr.Zy`, whose `fu(1.166)` RESTARTS the FIGHT plate's
+            // countdown (the `active && type==5` guard misses, see
+            // `intro_stance_end_tick`), so the plate expires 1.166 s after the
+            // LATER stance end. The old hardcoded 134-frame hold matched only
+            // the player's `FistsStartStance-Left` (45 clip frames) and fired
+            // 18 frames early whenever the enemy's stance clip is longer (the
+            // tournament `FistsStartStance-Right`, 51 clip frames).
+            intro_stance_end_tick(player_);
+            intro_stance_end_tick(enemy_);
             // The deferred `Bg.ia()` dispatch has now run (this frame's
             // fighters' update above), so the stage-start pick may fire from
             // the NEXT phase-1 frame (see `intro_pick_armed_`).
@@ -8586,12 +8669,6 @@ void FightController::update(float dt) {
     if (phase_ == fight_phase::fight || phase_ == fight_phase::start_stance) {
         dispatch_global_triggers("EveryFrame", "EveryFrame");
     }
-
-    // The banner countdown (JS `ca.ia` L389: `this.Onb(); a=this.ha;
-    // a!=null&&a.ia()` — the HUD tick that runs `Cr.aa`). It sits AFTER the
-    // phase machine, so a dispatch (`FNa`/`Rkb`/`Z2`) is applied from the
-    // next frame on — the JS ordering.
-    banner_tick(dt);
 
     // [probe, authorised] `SF2_ROUND_PROBE=1`: dump the round/fight timeline on
     // every state change (phase, banner, scene visibility, round_wait, round

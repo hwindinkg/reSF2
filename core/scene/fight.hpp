@@ -1214,6 +1214,15 @@ struct FightFighter {
     // the clip OCa() and never re-plays it). -1 = none; compared against
     // round_.number so each round plays the intro exactly once.
     int intro_played_round = -1;
+    // [FIX intro gate — JS `kg` L15772] The phase-1 -> 2 gate is the INTRO
+    // STANCE clip's end event (`a.model.OCa()`), fired once per fighter, NOT a
+    // frame count. `intro_move` latches the move the fighter started phase 1
+    // with; `intro_end_count` is `Fighter::move_end_count()` at that moment, so
+    // the first increment is the intro stance's clip end. `intro_ended` makes
+    // the end one-shot per round. See `FightController::intro_stance_end_tick`.
+    const sf2::scene::MoveDef* intro_move = nullptr;
+    int intro_end_count = -1;
+    bool intro_ended = false;
     // [FIX end-stance KO] The EndStance re-selection latch: `xF(3)` re-picks the
     // fighter's move once (the `Loss_fall`/`Win_Fists` EndStance family). Set
     // when the pick has been attempted, so a completed EndStance clip is not
@@ -2566,7 +2575,10 @@ private:
     // JS `Cr.fu` (L2026): raise a banner and start its `Sc` countdown.
     void banner_show(banner_kind kind, float seconds, banner_action action,
                      bool arm_after_delay);
-    void banner_tick(float dt);   // JS `Cr.aa` (L2027)
+    void banner_tick(float dt);   // JS `Cr.aa` (L84366)
+    // JS `kg` (L15772) <- `wd.eIa` (L21004) <- `Te.lS` (L23100): the phase-1
+    // -> 2 gate — one call per fighter per phase-1 frame.
+    void intro_stance_end_tick(FightFighter& f);
     void banner_expire();         // JS `Cr.ONa` (L2026) + the `ca.vhb` (L410)
                                   // dispatch carried by `banner_action_`
     // JS `FNa` (L409) / `Rkb` (L410) / `i4a` (L409): the phase transitions.
