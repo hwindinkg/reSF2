@@ -1209,16 +1209,18 @@ static const VerifyProbe kVerifyProbes[] = {
     // splits them with `Aua` (`animation.Rha` false for both -> the `f`
     // group) and keeps the max-`<Priority>` group only: BackHandflip
     // (Priority 20) beats StepBack (10), so `f` is a SINGLETON and L674's
-    // `e = f[uf.sja(f.length)]` needs no draw (`floor(r*1) == 0`). No `Pkb`.
+    // `e = f[uf.sja(f.length)]` still consumes ONE `Math.random` tick
+    // (`uf.sja` L4476 calls `uf.OKa.RGa()` unconditionally; `floor(r*1) == 0`
+    // -> index 0 but the stream advances). No `Pkb`.
     {180, "Back Tap x2 (spawn gap 283)", "BackHandflip",
-     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=- idx=0 BackHandflip",
+     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=0.021142 idx=0 BackHandflip",
      4, false},
     // F300: Forward Tap x2. Document order: StepForward then
     // DoubleStepForward. `Aua` keeps DoubleStepForward (Priority 20 > 10),
-    // a singleton `f` -> no draw, no `Pkb`. The 2key double step wins on
-    // PRIORITY, not on a weight.
+    // a singleton `f` -> one `uf.sja` tick consumed, no `Pkb`. The 2key double
+    // step wins on PRIORITY, not on a weight.
     {300, "Forward Tap x2", "DoubleStepForward",
-     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=- idx=0 DoubleStepForward",
+     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=0.779971 idx=0 DoubleStepForward",
      4, false},
     // F420: Punch Tap x2 + Forward Hold. PROOF that the `va.Ts`
     // <Tactics><Conditions> filter of `Gc.Pkb` (L675) is NOT on this path:
@@ -1235,11 +1237,12 @@ static const VerifyProbe kVerifyProbes[] = {
     // guard correctly rejects the restart (the pre-fix expectation listed it
     // only because `anims_me` held the move NAME and the guard never matched).
     {420, "Punch Tap x2 + Forward Hold", "DoublePunch",
-     "cands=HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=- idx=0 DoublePunch",
+     "cands=HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=0.145958 idx=0 DoublePunch",
      4, false},
-    // F520: single Forward tap -> the 1key StepForward (singleton `Aua`).
+    // F520: single Forward tap -> the 1key StepForward (singleton `Aua`), one
+    // `uf.sja` tick.
     {520, "Forward Tap x1 (1key)", "StepForward",
-     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
+     "cands=StepForward@10 f=StepForward draw=0.776821 idx=0 StepForward",
      4, false},
     // F550: single Forward tap 30 frames later. [item-1 fix] The tap lands
     // while the previous `StepForward` is still inside `SelfUninterrupt [0,13]`
@@ -1266,7 +1269,7 @@ static const VerifyProbe kVerifyProbes[] = {
     // at this distance; the port's selection is correct and only the
     // authored expectation was stale.
     {620, "K key -> Punch-key move (no Tactics gate)", "ShortUpwardElbowStrike",
-     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=- idx=0 ShortUpwardElbowStrike",
+     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=0.050383 idx=0 ShortUpwardElbowStrike",
      14, false},
     // F700: B (GLFW 66) is unbound -> no tap -> no decision, no move.
     {700, "B key -> dropped (no move)", "<none>", "", 12, false},
@@ -1283,24 +1286,24 @@ constexpr int kVerifyProbeCount =
 // so the Kick tap keeps the universal `HighKick` on both loadouts.
 static const VerifyProbe kVerifyProbesKnives[] = {
     {180, "Back Tap x2 (spawn gap 283) [Knives]", "BackHandflip",
-     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=- idx=0 BackHandflip",
+     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=0.021142 idx=0 BackHandflip",
      4, false},
     {300, "Forward Tap x2 [Knives]", "DoubleStepForward",
-     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=- idx=0 DoubleStepForward",
+     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=0.779971 idx=0 DoubleStepForward",
      4, false},
     // [item-1 fix] `StepForward` absent here for the same reason as the Fists
     // F420 probe (the `Step` guard now rejects the mid-`SelfUninterrupt`
     // restart; see the note there).
     {420, "Punch Tap x2 + Forward Hold [Knives]", "KnivesSuperSlash",
-     "cands=KnivesSlash@110,KnivesDoubleSlash@115,KnivesHeavySlash@120,KnivesSuperSlash@130 f=KnivesSuperSlash draw=- idx=0 KnivesSuperSlash",
+     "cands=KnivesSlash@110,KnivesDoubleSlash@115,KnivesHeavySlash@120,KnivesSuperSlash@130 f=KnivesSuperSlash draw=0.145958 idx=0 KnivesSuperSlash",
      4, false},
     {520, "Forward Tap x1 (1key) [Knives]", "StepForward",
-     "cands=StepForward@10 f=StepForward draw=- idx=0 StepForward",
+     "cands=StepForward@10 f=StepForward draw=0.298016 idx=0 StepForward",
      4, false},
     // [item-1 fix] same blocked mid-window restart as the Fists F550 probe.
     {550, "Forward Tap x1 (+30f) [Knives]", "<none>", "", 4, false},
     {620, "K key -> Punch-key move (Knives) [Knives]", "KnivesSlash",
-     "cands=KnivesSlash@110 f=KnivesSlash draw=- idx=0 KnivesSlash",
+     "cands=KnivesSlash@110 f=KnivesSlash draw=0.856784 idx=0 KnivesSlash",
      14, false},
     {700, "B key -> dropped (no move) [Knives]", "<none>", "", 12, false},
 };
@@ -6838,11 +6841,17 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // Damage-parse assertion (JS `Ul.qjb` L777-778): EVERY sub-`<Damage>`
         // child lands in `SZ` and every `<Defense>` child in `KP`. The old
         // parser read `.child("Damage")` (first only) and ignored
-        // `<Defense>`. Counts below are the authoritative XML-tree scan of
-        // the shipped moves.xml (`617` outer `<Damage Value=..>` blocks, 568
-        // of them with 2 sub-`<Damage>`, 120 with a `<Defense>`, 1182
-        // sub-`<Damage>` entries, and 3 outer blocks with NO sub-entry —
-        // those carry no `SZ`, so they are excluded from the `outer` count).
+        // `<Defense>`. The counts below are the XML-tree scan over the
+        // BOOT-TIME REGISTRY (`fight_assets().moves`), i.e. the `<Move>` set
+        // that survives the JS `Fa.Ueb` `PackName` gate (`Fa.zcb` L30154 ->
+        // `Mc.F().T1` L39736) — 163 of the 1048 shipped `<Move>` elements (the
+        // pack-availability filter drops every `PackName`-tagged move, see
+        // `move_pack_availability` in app.cpp). Over the FULL moves.xml the
+        // scan is 617 outer blocks / 568 with 2 sub-`<Damage>` / 120 with a
+        // `<Defense>` / 1182 sub-`<Damage>` / 3 with no sub-entry; the
+        // filtered registry is a strict subset, so the denominators below are
+        // the registry-scoped numbers (a port-internal audit — the JS holds no
+        // such counter).
         if (verify_input) {
             int outer = 0, two_sub = 0, with_defense = 0, sub_total = 0, no_sz = 0;
             for (const auto& kv : app.fight_assets().moves) {
@@ -6858,12 +6867,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     if (!iv.defense_names.empty()) ++with_defense;
                 }
             }
-            const bool parse_ok = outer == 614 && two_sub == 568 &&
-                                  with_defense == 120 && sub_total == 1182 &&
-                                  no_sz == 3;
+            const bool parse_ok = outer == 46 && two_sub == 18 &&
+                                  with_defense == 4 && sub_total == 64 &&
+                                  no_sz == 2;
             std::fprintf(stdout,
-                         "[verify] damage parse: outer=%d/614 2sub=%d/568 "
-                         "defense=%d/120 subTotal=%d/1182 noSZ=%d/3 -> %s\n",
+                         "[verify] damage parse: outer=%d/46 2sub=%d/18 "
+                         "defense=%d/4 subTotal=%d/64 noSZ=%d/2 -> %s\n",
                          outer, two_sub, with_defense, sub_total, no_sz,
                          parse_ok ? "PASS" : "FAIL");
             std::fflush(stdout);

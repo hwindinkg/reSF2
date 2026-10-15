@@ -1778,8 +1778,13 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     // stores into `P9`; `wd.Mnb` (L507) clears it on the next `ia`, so no
     // clip starts from the `Rha` group. Recorded for the probe only.
     if (!g.empty()) {
+        // `uf.sja` (L4476) calls `uf.OKa.RGa()` (L4463 -> `at.Nlb` L4466 =
+        // `Math.random()`) UNCONDITIONALLY, so `g.length > 0` consumes a tick
+        // even for a single-element group (`floor(r*1) == 0`). The old
+        // `g.size() > 1` guard skipped that tick and desynced the shared
+        // `Math.random` stream from the JS.
         std::size_t gi = 0;
-        if (g.size() > 1 && math_random_) {
+        if (math_random_) {
             float r = math_random_();
             if (r < 0.0f) r = 0.0f;
             if (r >= 1.0f) r = 0.9999999f;
@@ -1790,12 +1795,13 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
         decision_.ukb = gi_name;
         decision_.ukb_set = true;
     }
-    // `e = f[uf.sja(f.length)]` (L674). `|f| <= 1` needs no draw:
-    // `floor(r*1) == 0` for every `r`, so the pick is value-exact without
-    // consuming an `uf.OKa.RGa()` tick.
+    // `e = f[uf.sja(f.length)]` (L674) — `uf.sja` (L4476) calls
+    // `uf.OKa.RGa()` unconditionally, so a NON-EMPTY `f` consumes one
+    // `Math.random` tick even when `f.length == 1` (`floor(r*1) == 0` for
+    // every `r`, so the VALUE is index 0 but the STREAM still advances).
     if (f.empty()) return "";  // `e == null` -> nothing fires
     std::size_t idx = 0;
-    if (f.size() > 1 && math_random_) {
+    if (math_random_) {
         float r = math_random_();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;
@@ -1805,19 +1811,17 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
         decision_.draw = r;
     }
     decision_.index = static_cast<int>(idx);
-    // `e.animation.MS ? a.jJa(...) : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)`
-    // (L674). `jJa`/`Nsb` both end at `Te.Skb` (the `qs`/`Ml` queues are a
-    // port detail); `try_start_move` is the shared `NS`/`Skb` entry.
-    // Should the re-tested Conditions no longer hold, fall through the
-    // remaining candidates in order so the port never stalls on a stale pick.
-    for (std::size_t k = 0; k < f.size(); ++k) {
-        const MoveDef* m = f[(idx + k) % f.size()];
-        if (try_start_move(*m, ctx)) {
-            decision_.picked = m->name;
-            return m->name;
-        }
-    }
-    return "";
+    // `e.animation.MS ? a.jJa(e.animation, e.R1)
+    //                : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)` (L674):
+    // BOTH only QUEUE the pick (`jJa` -> `wd.qs`, `Nsb` -> `wd.fJa` -> `wd.Ml`)
+    // and the start happens on the NEXT `wd.ia` at the `Bnb` head
+    // (`process_reaction_queues`). The player/input path is the `eb == false`
+    // `DK` branch, exactly like the reaction path, so it must not start
+    // in-frame (that put the player's `Me.af` one frame early).
+    const MoveDef* pick = f[idx];
+    queue_reaction(pick, pick->physics);  // JS `e.animation.MS`
+    decision_.picked = pick->name;
+    return pick->name;
 }
 
 // Hit-reaction pick (JS `Gc.DK` L343452 + `Aua` L343447 + `uf.sja` L57426;
@@ -1919,11 +1923,13 @@ std::string Fighter::try_react(FightContext& ctx,
         }
     }
     // JS order: `f.length>0 && (e = f[uf.sja(f.length)])` FIRST, then
-    // `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)` (L674). `uf.sja` is
-    // the `Math.random` analog; the injected `rng` keeps it deterministic and
-    // off `Da.pg`. `|list| <= 1` needs no draw (`floor(r*1) == 0`).
+    // `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)` (L674). `uf.sja`
+    // (L4476) calls `uf.OKa.RGa()` unconditionally, so a NON-EMPTY list
+    // consumes one `Math.random` tick even at length 1 (`floor(r*1) == 0` —
+    // value-exact index 0, but the shared stream still advances). The injected
+    // `rng` keeps it deterministic and off `Da.pg`.
     std::size_t idx = 0;
-    if (f.size() > 1 && rng) {
+    if (f.size() > 0 && rng) {
         float r = rng();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;
@@ -1932,7 +1938,7 @@ std::string Fighter::try_react(FightContext& ctx,
     }
     if (!g.empty()) {
         std::size_t gi = 0;
-        if (g.size() > 1 && rng) {
+        if (g.size() > 0 && rng) {
             float r = rng();
             if (r < 0.0f) r = 0.0f;
             if (r >= 1.0f) r = 0.9999999f;
@@ -2001,10 +2007,12 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
         }
     }
     if (f.empty()) return "";
-    // `e = f[uf.sja(f.length)]` (L674): uniform `Math.random` draw. `|f|<=1`
-    // needs no draw (`floor(r*1)==0`), so the pick is value-exact.
+    // `e = f[uf.sja(f.length)]` (L674): uniform `Math.random` draw. `uf.sja`
+    // (L4476) calls `uf.OKa.RGa()` unconditionally, so a non-empty `f`
+    // consumes a tick even at length 1 (`floor(r*1) == 0` -> index 0, but the
+    // shared stream advances).
     std::size_t idx = 0;
-    if (f.size() > 1 && math_random_) {
+    if (f.size() > 0 && math_random_) {
         float r = math_random_();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;

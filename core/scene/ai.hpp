@@ -439,6 +439,14 @@ struct AiFightState {
     // below is the LOGICAL `ip()`/`M0()` domain — a DIFFERENT quantity.
     int move_kj = 0;    // MY `Te.kJ()`
     int enemy_kj = 0;   // the ENEMY's `Te.kJ()`
+    // The ENEMY's CLIP-START serial (`Te.Skb` L22984 -> `this.x3(this.Ua)`
+    // L23058 -> `gh("EStartAnimationEvent")`). `Te.Skb` runs on EVERY clip
+    // start, including a LOOP RESTART of the same move (the `wd.x3` handler
+    // L20990 then calls `a.mwb(...)`/`a.Mka(0)` on the OPPONENT, which is
+    // where `de.jwb`'s 6 `Da.jf()` + `gfa` draws and the `tG=0` arm live).
+    // `Fighter::move_start_count()` is the port's `Skb` counter
+    // (`start_move_impl`, fighter.cpp L1311).
+    int enemy_clip_starts = 0;
     // MY OWN move list (JS `this.model.me`, the fighter's `hb`): `de.V1`
     // (L601-602) rejects any candidate not in it. Without this the slots
     // resolve weapon-mismatched moves (Spear/Staff/Tonfa for a Knives boss)
@@ -956,6 +964,9 @@ private:
     bool wN_ = false;
     const MoveDef* last_random_opp_move_ = nullptr;
     std::string last_random_opp_anim_;
+    // The `Te.Skb` clip-start serial seen last frame (the `wd.x3`/`mwb` arm).
+    int last_random_opp_clip_ = 0;
+    int last_enemy_clip_ = 0;  // `jwb_event`'s `Skb` serial
     // `fIa`-arm edge state: was an `Uninterrupt`/`SelfUninterrupt` interval
     // active on the previous frame (so its STOP is detected this frame).
     bool my_uninterrupt_prev_ = false;

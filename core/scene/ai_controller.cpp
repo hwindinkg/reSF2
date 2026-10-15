@@ -1765,13 +1765,26 @@ bool AiController::in_randomizing_group(const MoveDef& m) const {
 // EStartAnimationEvent, NOT from `de.ia`/`wd.Anb`, so it fires in EVERY phase:
 // the QJa cache it rebuilds (6 `Da.jf()` at L24970-24975 + `Mu`/`lN`) and the
 // `$x` ResponseDelay draw are 9 shared `Da.pg` draws per enemy move start. The
-// port detects the event by the opponent's move pointer / animation-name
-// change (a looping clip does NOT re-dispatch `EStartAnimationEvent`, so a
-// loop restart correctly does not re-fire).
+// port detects the event by the opponent's `Te.Skb` clip-start serial
+// (`st.enemy_clip_starts`, `Fighter::move_start_count()`), because `Skb` runs
+// on EVERY clip start INCLUDING a loop restart of the same move; the move
+// pointer / animation-name compare alone misses the loop restart.
 void AiController::jwb_event(const AiFightState& st) {
-    if (st.enemy_move == last_enemy_move_ && st.enemy_anim == last_enemy_anim_) {
+    // JS `Te.Skb` (L22984) -> `Te.x3` (L23097) fires `EStartAnimationEvent` on
+    // EVERY clip start, INCLUDING a loop restart of the same move (`Te.lS`
+    // L23100 ends the clip, the move re-selects, `Skb` seats it again). The
+    // `wd.x3` handler (L20990) then calls `a.mwb(this.da.Ua)` on the OPPONENT,
+    // and `Y.mwb` (L21867) runs `Y.nf.jwb(X)` = `de.jwb` -> `QJa` (6 `Da.jf()`
+    // L24970-24975) + the `gfa` ResponseDelay draw. The old move-pointer /
+    // animation-name compare MISSED the loop restart, so the boss-lynx stream
+    // was 9 draws short before the second roulette (port draw 29 vs the JS
+    // draw 38, `roll=0.983574838` vs `0.660125684`).
+    const bool clip_started = st.enemy_clip_starts != last_enemy_clip_;
+    if (!clip_started && st.enemy_move == last_enemy_move_ &&
+        st.enemy_anim == last_enemy_anim_) {
         return;
     }
+    last_enemy_clip_ = st.enemy_clip_starts;
     last_enemy_anim_ = st.enemy_anim;
     last_enemy_move_ = st.enemy_move;
     if (st.enemy_playing && st.enemy_move != nullptr) {
@@ -2149,14 +2162,18 @@ std::string AiController::update(const AiFightState& st) {
         // (L20994-20997). So MY `tG` arms when the OPPONENT starts an animation.
         // The old self-arm (`st.current_move` change) made the enemy re-decide
         // the frame after each of its OWN move starts — the reported ~95% double
-        // attack. Detect the opponent's animation start by its move pointer /
-        // animation-name change (the same `jwb` move-start proxy the type-2 path
-        // uses; a looping clip does NOT re-dispatch `EStartAnimationEvent`, so a
-        // loop restart correctly does not re-arm).
-        if (st.enemy_move != last_random_opp_move_ ||
+        // attack. The arm condition is the OPPONENT's `Skb` serial
+        // (`st.enemy_clip_starts`) plus the move/anim proxy: `Te.Skb` L22984 ->
+        // `Te.x3` L23097 fires `EStartAnimationEvent` on EVERY clip start
+        // INCLUDING a loop restart of the same move, so the serial is required.
+        // (The oracle `hja` log re-arms `tG0=0` at the idle loop restarts: run 2
+        // at state f=374 AND 387, run 3 at f=373/386.)
+        if (st.enemy_clip_starts != last_random_opp_clip_ ||
+            st.enemy_move != last_random_opp_move_ ||
             st.enemy_anim != last_random_opp_anim_) {
             tG_ = 0;
         }
+        last_random_opp_clip_ = st.enemy_clip_starts;
         last_random_opp_move_ = st.enemy_move;
         last_random_opp_anim_ = st.enemy_anim;
 
@@ -2565,7 +2582,12 @@ std::string AiController::update_random(const AiFightState& st) {
         return "";
     }
     std::size_t idx = 0;
-    if (f.size() > 1) {
+    if (!f.empty()) {
+        // `uf.sja` (L4476) calls `uf.OKa.RGa()` unconditionally, so a
+        // non-empty `f` consumes one `Math.random` tick even at length 1
+        // (`floor(r*1) == 0` -> index 0, but the stream advances). The old
+        // `f.size() > 1` guard skipped it and left the port's stream one draw
+        // behind the JS after the first decision.
         float r = math_roll();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;

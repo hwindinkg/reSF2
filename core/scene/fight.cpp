@@ -3123,14 +3123,20 @@ void FightController::set_phase(fight_phase p) {
 }
 
 // JS `tx` (L407): round init — the timer is the round length, Vt=false.
-// The HUD timer (`Sf`) resets `xU = gma*60+1` (L2036); the first phase-2
-// tick decrements it to gma*60 (`NF = gma`).
+// The HUD timer (`Sf.reset` L84746) does `xU = round.gma*60 + 1` and then
+// IMMEDIATELY calls `iPa()` (L84737: `--xU; NF = xU/60|0`), so the state the
+// round actually starts in is `xU = gma*60`, `NF = gma`. The port seats that
+// POST-`iPa` state directly: the first phase-2 `iPa` tick then takes
+// `xU = gma*60 - 1` -> `NF = gma - 1`, exactly as the JS. (Seating the raw
+// `gma*60 + 1` left the port one tick behind: `nf` stayed at `gma` for one
+// extra frame and dropped 2 frames after the phase-2 transition instead of on
+// the JS's frame — the last boss-lynx `nf`/`timer` divergence.)
 void FightController::round_init() {
     round_.running = false;
     round_.length = battle_.rounds;     // Da.pT (Rounds)
     round_.gma = battle_.round_time;    // Da.R4 (RoundTime)
-    round_.time_xu = round_.gma * 60 + 1;
-    round_.time_nf = round_.gma;
+    round_.time_xu = round_.gma * 60;   // JS `Sf.reset`'s post-`iPa` `xU`
+    round_.time_nf = round_.gma;        // JS `Sf.reset`'s post-`iPa` `NF`
     round_live_ = false;
     start_stance_done_ = false;
     end_stance_frames_ = 0;
@@ -7626,6 +7632,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                        !foe.fighter.ragdoll_active())
                           ? foe.fighter.played_steps()
                           : 0;
+        // JS `Te.Skb` (L22984) -> `Te.x3` (L23097 `gh("EStartAnimationEvent")`):
+        // the OPPONENT's clip-start serial. `start_move_impl` (fighter.cpp
+        // L1311) bumps `move_start_count_` on EVERY clip seat, including the
+        // same-move loop restart a move-pointer compare cannot see.
+        st.enemy_clip_starts = foe.fighter.move_start_count();
         for (const std::string& n : me.fighter.active_intervals()) {
             st.my_intervals.push_back({n, me.fighter.interval_type(n)});
         }
