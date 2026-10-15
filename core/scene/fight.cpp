@@ -7668,6 +7668,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.magic_bullets = 0;
         st.fight_frame = frame_;
         st.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
+        // JS `uf.sja` (L115: `floor(uf.OKa.RGa()*a)`, `uf.OKa.RGa() = Math.random`,
+        // `uf.OKa = new at` L2471) is the UNSHARED `Math.random` stream — NOT
+        // `Da.pg`. `Gc.DK` (L28416-28420) uses it for the `Aua` picks
+        // (`e = f[uf.sja(f.length)]`). Wire the AI's `math_roll()` to the
+        // pinned `math_random01()` so the `Pkb` candidate list's duplicate
+        // draw comes from the same stream the JS uses.
+        st.math_random = []() { return FightController::math_random01(); };
         // JS `Da.pg` — the ONE shared stream; hand it to the AI so QJa/gfa/
         // aea/dqb/jL/slots all draw from it (the port previously kept QJa on
         // a private DaPrng, splitting the stream). With a test override

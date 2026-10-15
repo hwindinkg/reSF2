@@ -86,6 +86,66 @@ std::string extracted_xml(const std::string& name) {
     throw std::runtime_error("extracted xml missing: " + path);
 }
 
+// JS `Fa.zcb` (L30154-30159) -> `Mc.F().T1` (L39736-39748). A `<Move
+// PackName="X">` is kept in `ra.Lk` (`Fa.Ueb` L30040-30044) only when the
+// pack `X` is "available": `T1` looks the pack up in the packs.xml list
+// (`Mc.wq`, built by `Mc.IS` L39710 from `Aa.OJ()` -> `<Pack Name>` entries)
+// and in the config_cdn `<packs>` manifest's PlatformID="3" set (`hd.tm`,
+// `hd.IS` L47192; `tm.IQ` L47298 returns the FIRST PlatformID="3" `<item>`
+// for the name, whose `Url` L47213 is the stored url). If packs.xml has no
+// such pack -> unavailable (`c == null` -> false). If the CDN manifest has
+// no entry for it -> available (`b == null` -> true). Otherwise available
+// only when the two Urls are equal. The shipped packs.xml `<Pack>` carries
+// NO `Url` while config_cdn's does, so every pack listed in BOTH is
+// unavailable — this is what drops AxeKick (`PackName="ANIMATIONS"`),
+// DoubleSweep / TwoFootJumpKick (`PackName="ZONE_1"`) and the other
+// PackName-tagged moves from the registry.
+std::set<std::string> move_pack_availability() {
+    std::map<std::string, std::string> pack_url;  // packs.xml `Mc.wq` (Url may be "")
+    std::map<std::string, std::string> cdn_url;   // config_cdn PlatformID="3" `hd.tm`
+    auto parse_doc = [](const std::string& text, sf2::data::xml_doc& doc) {
+        doc.parse(reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
+    };
+    try {
+        sf2::data::xml_doc pd;
+        parse_doc(extracted_xml("packs.xml"), pd);
+        for (pugi::xml_node p : pd.root().child("Packs").children("Pack")) {
+            const char* n = p.attribute("Name") ? p.attribute("Name").value() : nullptr;
+            if (n == nullptr) continue;
+            const char* u = p.attribute("Url") ? p.attribute("Url").value() : nullptr;
+            pack_url.emplace(std::string(n), u ? std::string(u) : std::string());
+        }
+    } catch (...) {
+        // No packs.xml -> `Mc.wq` empty -> every pack unavailable.
+    }
+    try {
+        sf2::data::xml_doc cd;
+        parse_doc(extracted_xml("config_cdn.xml"), cd);
+        // Root element `<data>`; the pack manifest is its `<packs>` child
+        // (`Ja.ki(1313).A("packs")`).
+        for (pugi::xml_node it : cd.root().child("data").child("packs").children("item")) {
+            const char* pid = it.attribute("PlatformID") ? it.attribute("PlatformID").value() : "";
+            if (std::string(pid) != "3") continue;
+            const char* n = it.attribute("Name") ? it.attribute("Name").value() : nullptr;
+            if (n == nullptr) continue;
+            const char* u = it.attribute("Url") ? it.attribute("Url").value() : nullptr;
+            // `hd.IS` (L47206-47213): the FIRST PlatformID="3" node for a
+            // name wins (`X.uh` -> `b.set` only when absent).
+            cdn_url.emplace(std::string(n), u ? std::string(u) : std::string());
+        }
+    } catch (...) {
+        // No manifest -> `b == null` -> packs listed in packs.xml stay available.
+    }
+    std::set<std::string> available;
+    for (const auto& kv : pack_url) {
+        const auto cit = cdn_url.find(kv.first);
+        if (cit == cdn_url.end() || cit->second == kv.second) {
+            available.insert(kv.first);
+        }
+    }
+    return available;
+}
+
 // Decodes an atlas texture by trying all decodable formats (ktx ASTC, dds BCn, webp, png).
 bool decode_atlas_any(const std::string& base, sf2::data::Texture& out) {
     const std::string dir = std::filesystem::path(base).parent_path().string();
@@ -965,8 +1025,12 @@ bool App::init(const std::string& res_root, const std::string& save_path,
         load_magic_atlas_bundle(*this, res);
 
         const std::string moves_xml = extracted_xml("moves.xml");
+        // JS `Fa.zcb` (L30154) — the `PackName` availability set the registry
+        // load filters against (`Fa.Ueb` L30040-30044).
+        const std::set<std::string> available_move_packs = move_pack_availability();
         if (!sf2::scene::parse_moves(moves_xml, fight_assets_->moves,
-                                     &fight_assets_->global_triggers)) {
+                                     &fight_assets_->global_triggers,
+                                     &available_move_packs)) {
             throw std::runtime_error("parse_moves failed");
         }
         std::fprintf(stdout, "[moves] parsed %zu moves, %zu global <Triggers>\n",

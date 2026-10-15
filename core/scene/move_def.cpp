@@ -1028,7 +1028,8 @@ void merge_locks(const std::vector<pugi::xml_node>& templates, pugi::xml_node ow
 } // namespace
 
 bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out,
-                 std::vector<GlobalTrigger>* global_out) {
+                 std::vector<GlobalTrigger>* global_out,
+                 const std::set<std::string>* available_packs) {
     data::xml_doc doc;
     doc.parse(xml_text);
     pugi::xml_node root = doc.root().child("Movesxml");
@@ -1076,6 +1077,26 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
     int move_doc_index = 0;  // `<Move>` document order (`ra.Ul`, L712)
     for (pugi::xml_node move : root.child("Moves").children("Move")) {
         MoveDef def;
+        // JS `Fa.Ueb` (L30040-30044): `PackName` gate — `l = PackName;
+        // if (!Fa.zcb(l ?? null)) { d.add(n); continue; }` — a move whose
+        // pack is unavailable never reaches `c.push(l)` (`ra.Lk`), so it is
+        // absent from every fighter's `me` (and from the Random candidate
+        // set). `Fa.zcb` (L30154-30159) -> `Mc.F().T1` (L39736-39748):
+        // available iff packs.xml lists the pack (`Mc.wq`) AND the
+        // config_cdn `<packs>` manifest (PlatformID="3", `hd.tm.IQ`
+        // L39737/L47298) has no entry or the same Url. Placed BEFORE the
+        // `profile_order` assignment so the skipped moves do not consume a
+        // document index — `ra.Lk` is the push order of the KEPT moves.
+        if (available_packs != nullptr) {
+            if (pugi::xml_attribute pn = move.attribute("PackName")) {
+                const std::string pk = pn.value();
+                bool blank = true;
+                for (char ch : pk) {
+                    if (static_cast<unsigned char>(ch) > 32) { blank = false; break; }
+                }
+                if (!blank && available_packs->count(pk) == 0) continue;
+            }
+        }
         // JS `ra.Ul` document order (see `MoveDef::profile_order`): counts
         // every `<Move>` element, mirroring `Fa.Ueb`'s single pass (L709).
         def.profile_order = move_doc_index++;

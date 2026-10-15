@@ -2454,19 +2454,53 @@ std::string AiController::update_random(const AiFightState& st) {
         std::fflush(stdout);
     }
 
+    // JS `Gc.DK` (L28394-28426) — the list handed to `Pkb`: `d` collects the
+    // non-`Rha` candidates (`!(c || !h.eb || h.animation.Rha)`, `c=false`);
+    // `f` is the `Aua` (L28384) max-`priority` group of the non-`Rha`
+    // candidates; `e = f[uf.sja(f.length)]` (L28417, a `Math.random` draw via
+    // `uf.sja` L115, NOT `Da.pg`); then
+    //   `if (d.length > 0) { if (e != null) d.push(e); Pkb(a, d); }`
+    // `e` is ALREADY in `d`, so `Pkb` receives a DUPLICATE of the `Aua` winner
+    // (the JS `random_pre`/`jL` carry `DoubleJumpKick` twice). The port's
+    // roulette list must carry the same duplicate or its weight sum differs.
+    std::vector<const MoveDef*> dk_cands;
+    dk_cands.reserve(cands.size() + 1);
+    std::vector<const MoveDef*> aua_f;
+    for (const MoveDef* m : cands) {
+        if (m->no_animation) continue;  // `Rha` -> the `g` group (no clip)
+        dk_cands.push_back(m);
+        const int ap = m->priority;
+        const int bp = aua_f.empty() ? 0 : aua_f.front()->priority;
+        if (ap >= bp) {
+            if (ap > bp) aua_f.clear();
+            aua_f.push_back(m);
+        }
+    }
+    if (!aua_f.empty()) {
+        // `uf.sja` (L115) calls `uf.OKa.RGa()` unconditionally, so the draw is
+        // consumed even for a single-element group (`floor(r*1) == 0`).
+        float r = math_roll();
+        if (r < 0.0f) r = 0.0f;
+        if (r >= 1.0f) r = 0.9999999f;
+        std::size_t ei =
+            static_cast<std::size_t>(r * static_cast<float>(aua_f.size()));
+        if (ei >= aua_f.size()) ei = aua_f.size() - 1;
+        dk_cands.push_back(aua_f[ei]);
+    }
+
     // `Pkb` (L674-675): drop `f` when any OTHER candidate's name is in
     // `f.animation.M7.$Q` (`g.Wcb(l.animation)` false) - `f` has a
     // higher-priority mirror superior also present.
     std::vector<const MoveDef*> keep;
-    keep.reserve(cands.size());
-    for (std::size_t i = 0; i < cands.size(); ++i) {
-        const MoveDef* f = cands[i];
+    keep.reserve(dk_cands.size());
+    for (std::size_t i = 0; i < dk_cands.size(); ++i) {
+        const MoveDef* f = dk_cands[i];
         bool ok = true;
-        for (std::size_t k = 0; k < cands.size(); ++k) {
+        for (std::size_t k = 0; k < dk_cands.size(); ++k) {
             if (k == i) continue;
             if (std::find(f->mirror_exclusive.begin(),
                           f->mirror_exclusive.end(),
-                          cands[k]->name) != f->mirror_exclusive.end()) {
+                          dk_cands[k]->name) != f->mirror_exclusive.end()) {
                 ok = false;
                 break;
             }
@@ -2486,8 +2520,9 @@ std::string AiController::update_random(const AiFightState& st) {
     for (const MoveDef* m : keep) rou.push_back({m->name, 0});
     const int ci = pick(rou);
     if (trace_random) {
-        std::fprintf(stdout, "[random] keep=%zu sum=%.6f roll=%.6f ci=%d:",
-                     keep.size(), static_cast<double>(last_pick_sum_),
+        std::fprintf(stdout, "[random] f=%d keep=%zu sum=%.6f roll=%.6f ci=%d:",
+                     st.fight_frame, keep.size(),
+                     static_cast<double>(last_pick_sum_),
                      static_cast<double>(last_pick_roll_), ci);
         for (std::size_t i = 0; i < keep.size(); ++i) {
             std::fprintf(stdout, " %s", keep[i]->name.c_str());

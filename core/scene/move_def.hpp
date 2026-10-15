@@ -817,8 +817,13 @@ struct MoveDef {
 //     on malformed XML.
 // When `global_out` is non-null it also receives the root `<Triggers>` block
 // (JS `Fa.Exb` L708 -> `ra.Dm`).
+// When `available_packs` is non-null it is the set of pack names JS
+// `Fa.zcb`/`Mc.F().T1` reports available; a `<Move PackName="X">` whose X is
+// NOT in the set is dropped from the registry (`ra.Lk`), exactly as
+// `Fa.Ueb` (L30040-30044) does.
 bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out,
-                 std::vector<GlobalTrigger>* global_out = nullptr);
+                 std::vector<GlobalTrigger>* global_out = nullptr,
+                 const std::set<std::string>* available_packs = nullptr);
 
 // Debug helper: print one condition tree (for the probe).
 std::string cond_to_string(const Cond& c, int depth = 0);
