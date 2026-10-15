@@ -1,0 +1,22 @@
+# Real-fight STATE scenario: ZONE_1 TOURNAMENT (ladder fight 0, arena).
+# The seed override `?battle=Tournament` (reference/runner/index.html) rewrites
+# the installed save's `<Battles>` list to a single unlocked `ZONE_1|Tournament|`
+# record, so the Map focus falls back to that node and the same hub -> Map ->
+# "В БОЙ" taps as the BOSS_LYNX scenario reach it. NO player attack is injected:
+# the player idles while the enemy AI fights, exactly like the native
+#   game.exe --fight --battle Tournament --zone ZONE_1 --fight-ordinal 0
+#            --location arena --headless N --dump-state M
+# run (which never sets --auto-attack), so the two state traces are the same
+# input stream and align 1:1.
+#
+# Run (from E:\reSF2):
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Tournament" ^
+#     --input-script reference/tools/state_tournament.txt --timeout-ms 60000
+wait 8000
+tap 180 98
+wait 1500
+tap 140 250
+wait 2500
+tap 1130 580
+wait 40000

@@ -1774,15 +1774,34 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     decision_.f_group.clear();
     decision_.f_group.reserve(f.size());
     for (const MoveDef* m : f) decision_.f_group.push_back(m->name);
+    if (f.empty() && g.empty()) return "";  // `e == null` and no `g` -> nothing fires
+    // JS `Gc.DK` (L28416-28420) DRAW ORDER, verbatim:
+    //   if (f.length > 0) { e = f[uf.sja(f.length)]; }
+    //   if (g.length > 0) { a.Ukb(g[uf.sja(g.length)].animation); }
+    // The `f` draw runs FIRST and the `g` draw SECOND. `uf.sja` (L4476) calls
+    // `uf.OKa.RGa()` (L4463 -> `at.Nlb` L4466 = `Math.random()`) UNCONDITIONALLY,
+    // so a NON-EMPTY group consumes one tick even at length 1 (`floor(r*1) == 0`
+    // -> index 0, but the shared `Math.random` stream still advances). The old
+    // port ran the `g` draw BEFORE the `f` draw, which swapped the two ticks on
+    // any frame where both groups are non-empty (the `Rha` group is non-empty
+    // only for the PvP `*Hint*` switchers, so it was latent).
+    std::size_t idx = 0;
+    if (!f.empty()) {
+        if (math_random_) {
+            float r = math_random_();
+            if (r < 0.0f) r = 0.0f;
+            if (r >= 1.0f) r = 0.9999999f;
+            idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
+            if (idx >= f.size()) idx = f.size() - 1;
+            decision_.drew = true;
+            decision_.draw = r;
+        }
+        decision_.index = static_cast<int>(idx);
+    }
     // `g.length>0 && a.Ukb(g[sja].animation)` (L674) — `wd.Ukb` (L506) only
     // stores into `P9`; `wd.Mnb` (L507) clears it on the next `ia`, so no
     // clip starts from the `Rha` group. Recorded for the probe only.
     if (!g.empty()) {
-        // `uf.sja` (L4476) calls `uf.OKa.RGa()` (L4463 -> `at.Nlb` L4466 =
-        // `Math.random()`) UNCONDITIONALLY, so `g.length > 0` consumes a tick
-        // even for a single-element group (`floor(r*1) == 0`). The old
-        // `g.size() > 1` guard skipped that tick and desynced the shared
-        // `Math.random` stream from the JS.
         std::size_t gi = 0;
         if (math_random_) {
             float r = math_random_();
@@ -1791,26 +1810,10 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
             gi = static_cast<std::size_t>(r * static_cast<float>(g.size()));
             if (gi >= g.size()) gi = g.size() - 1;
         }
-        const char* gi_name = g[gi]->name.c_str();
-        decision_.ukb = gi_name;
+        decision_.ukb = g[gi]->name;
         decision_.ukb_set = true;
     }
-    // `e = f[uf.sja(f.length)]` (L674) — `uf.sja` (L4476) calls
-    // `uf.OKa.RGa()` unconditionally, so a NON-EMPTY `f` consumes one
-    // `Math.random` tick even when `f.length == 1` (`floor(r*1) == 0` for
-    // every `r`, so the VALUE is index 0 but the STREAM still advances).
-    if (f.empty()) return "";  // `e == null` -> nothing fires
-    std::size_t idx = 0;
-    if (math_random_) {
-        float r = math_random_();
-        if (r < 0.0f) r = 0.0f;
-        if (r >= 1.0f) r = 0.9999999f;
-        idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
-        if (idx >= f.size()) idx = f.size() - 1;
-        decision_.drew = true;
-        decision_.draw = r;
-    }
-    decision_.index = static_cast<int>(idx);
+    if (f.empty()) return "";  // `e == null` -> the `g` park is all that fired
     // `e.animation.MS ? a.jJa(e.animation, e.R1)
     //                : Gc.Nsb(a, Ek[e.index], e.animation, e.sign)` (L674):
     // BOTH only QUEUE the pick (`jJa` -> `wd.qs`, `Nsb` -> `wd.fJa` -> `wd.Ml`)
@@ -1982,6 +1985,7 @@ std::string Fighter::try_react(FightContext& ctx,
 // gets up").
 std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
                                           float wall_max) {
+    decision_.ukb_set = false;  // the `g` park is per-call, like `wd.P9`
     // `Gc.EZa` (L676-677): candidates = the fighter's moves carrying an
     // `<EveryFrame/>` event whose own `<Conditions>` pass. `Rwa` walks the
     // per-fighter move list in `ra.Lk` document order (`hb_`).
@@ -1993,32 +1997,54 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
         passing.push_back(m);
     }
     if (passing.empty()) return "";
-    // `Aua` (L673): keep only the max-`priority` group of the non-`Rha` list
-    // (`ap>=bp && (ap>bp && b.length=0, b.push(a))`). The `Rha` group (`g`)
-    // only parks a name in `wd.P9` (`wd.Ukb` L506) — no clip starts.
+    // `Aua` (L673): keep only the max-`priority` group of each list
+    // (`ap>=bp && (ap>bp && b.length=0, b.push(a))`), the `Rha` (`<NoAnimation>`)
+    // group SEPARATELY as `g`. `Gc.DK` (L28416-28420) draws `f` FIRST and `g`
+    // SECOND, and `uf.sja` (L4476) consumes a `Math.random` tick for EVERY
+    // non-empty group — so the `g` draw must run too (the old port skipped it
+    // entirely, desyncing the shared stream on any frame whose max-priority
+    // EveryFrame candidate is a `<NoAnimation>` move).
     std::vector<const MoveDef*> f;
-    for (const MoveDef* m : passing) {
-        if (m->no_animation) continue;  // `g` (parked, no clip)
+    std::vector<const MoveDef*> g;
+    auto aua = [](std::vector<const MoveDef*>& b, const MoveDef* m) {
         const int ap = m->priority;
-        const int bp = f.empty() ? 0 : f.front()->priority;
+        const int bp = b.empty() ? 0 : b.front()->priority;
         if (ap >= bp) {
-            if (ap > bp) f.clear();
-            f.push_back(m);
+            if (ap > bp) b.clear();
+            b.push_back(m);
+        }
+    };
+    for (const MoveDef* m : passing) {
+        if (m->no_animation) {
+            aua(g, m);  // `g` (parked in `wd.P9`, no clip)
+        } else {
+            aua(f, m);
         }
     }
-    if (f.empty()) return "";
-    // `e = f[uf.sja(f.length)]` (L674): uniform `Math.random` draw. `uf.sja`
-    // (L4476) calls `uf.OKa.RGa()` unconditionally, so a non-empty `f`
-    // consumes a tick even at length 1 (`floor(r*1) == 0` -> index 0, but the
-    // shared stream advances).
+    if (f.empty() && g.empty()) return "";
+    // `e = f[uf.sja(f.length)]` (L674): uniform `Math.random` draw, FIRST.
     std::size_t idx = 0;
-    if (f.size() > 0 && math_random_) {
+    if (!f.empty() && math_random_) {
         float r = math_random_();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;
         idx = static_cast<std::size_t>(r * static_cast<float>(f.size()));
         if (idx >= f.size()) idx = f.size() - 1;
     }
+    // `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)` (L674), SECOND.
+    if (!g.empty()) {
+        std::size_t gi = 0;
+        if (math_random_) {
+            float r = math_random_();
+            if (r < 0.0f) r = 0.0f;
+            if (r >= 1.0f) r = 0.9999999f;
+            gi = static_cast<std::size_t>(r * static_cast<float>(g.size()));
+            if (gi >= g.size()) gi = g.size() - 1;
+        }
+        decision_.ukb = g[gi]->name;
+        decision_.ukb_set = true;
+    }
+    if (f.empty()) return "";  // `e == null` -> the `g` park is all that fired
     // `e.animation.MS ? a.jJa(...) : Gc.Nsb(...)` (L674). Both end at
     // `Te.Skb`; the physics branch additionally starts the `Al` ragdoll
     // (`wd.Lwb` L511 -> `Nd.start`). Fall through the remaining candidates if

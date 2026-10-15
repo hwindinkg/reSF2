@@ -443,6 +443,14 @@ struct HeadlessLoopDriver {
 // next opponent, each iteration naturally faces the next `<Fight>`.
 struct TourWalkDriver {
     int iterations = 3;
+    // `SF2_TOUR_BATTLE` selects the map battle node the driver walks to
+    // (default `Tournament`, the crash-hunt target). Used only to PRINT each
+    // battle's real Map node centre for authoring the state-harness navigation
+    // scripts (the walk itself is battle-agnostic: `node_center` +
+    // `fight_button_center` are the same rects the JS `qe.X0a`/`tj` paint).
+    std::string battle =
+        std::getenv("SF2_TOUR_BATTLE") != nullptr ? std::getenv("SF2_TOUR_BATTLE")
+                                                  : "Tournament";
     int done = 0;
     int phase = 0;        // 0 select node, 1 FIGHT, 2 wait Results, 3 Results
     int phase_frame = 0;
@@ -465,17 +473,18 @@ struct TourWalkDriver {
                 if (cur == sf2::app::kScreenMap && top != nullptr) {
                     float nx = 0.0f, ny = 0.0f;
                     if (!static_cast<sf2::app::MapScreen*>(top)->node_center(
-                            "Tournament", nx, ny)) {
+                            battle, nx, ny)) {
                         std::fprintf(stderr,
-                                     "[walk] no 'Tournament' node in the selected zone\n");
+                                     "[walk] no '%s' node in the selected zone\n",
+                                     battle.c_str());
                         std::fflush(stderr);
                         failed = true;
                         finished = true;
                         return;
                     }
                     std::fprintf(stdout,
-                                 "[walk] iter %d select Tournament node @(%.0f,%.0f)\n",
-                                 done + 1, nx, ny);
+                                 "[walk] iter %d select %s node @(%.0f,%.0f)\n",
+                                 done + 1, battle.c_str(), nx, ny);
                     std::fflush(stdout);
                     app.inject_click(nx, ny);
                     phase = 1;

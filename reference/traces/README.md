@@ -188,7 +188,15 @@ scenario scripts inject NO attack.
 | --- | --- | --- |
 | `dojo-demo` (Training / `FightNone` dummy viewer) | `OracleShell.exe --query postTutorial=0 --input-script reference/tools/state_dojo_demo.txt --timeout-ms 40000` | `game.exe --fight --headless 640 --dump-state 400 --watchdog 900 reference/www/res reference/saves/save.xml` |
 | `boss-lynx` (ZONE_1 BOSS_LYNX, real fight) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000" --input-script reference/tools/state_boss_lynx.txt --timeout-ms 60000` | `game.exe --fight --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location moon --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
-| tournament ladder / survival / challenge | needs a per-battle navigation script (hub -> Map -> the battle node -> "В БОЙ"); the harness is the same: seed the battle into the save (`reference/runner/index.html`) or tap its Map node, then `skipFightNone=1&maxFrames=N` | `game.exe --fight --battle <name> --zone <zone> --fight-ordinal N --location <loc> --headless N --dump-state M ...` |
+| `tournament` (ZONE_1 TOURNAMENT ladder fight 0, arena) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Tournament" --input-script reference/tools/state_tournament.txt --timeout-ms 60000` | `game.exe --fight --battle Tournament --zone ZONE_1 --fight-ordinal 0 --location arena --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
+| `survival` (ZONE_1 SURVIVAL, bamboo_grove) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Survival" --input-script reference/tools/state_survival.txt --timeout-ms 60000` | `game.exe --fight --battle Survival --zone ZONE_1 --fight-ordinal 0 --location bamboo_grove --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
+| `challenge` (ZONE_1 CHALLENGE, autumn) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Challenge" --input-script reference/tools/state_challenge.txt --timeout-ms 60000` | `game.exe --fight --battle Challenge --zone ZONE_1 --fight-ordinal 0 --location autumn --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
+
+The tournament/survival/challenge seed: `reference/runner/index.html` accepts a
+`?battle=<Name>` query key that rewrites the installed save's `<Battles>` record
+list to a single unlocked `ZONE_1|<Name>|` record, so the Map's focus falls back
+to that node and the SAME hub -> Map -> "В БОЙ" taps as the BOSS_LYNX script
+reach it (no per-battle node coordinate is needed).
 
 Then, for EVERY scenario:
 
