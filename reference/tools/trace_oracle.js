@@ -720,8 +720,15 @@
             var r = origHja.apply(this, arguments);
             try {
               var side = deSide(or.fight, this.nf) || "?";
-              pushTrace({ m: "hJa", side: side, f: frameNo(),
+              var fr = frameNo();
+              pushTrace({ m: "hJa", side: side, f: fr,
                 tG0: tG0, wN0: wN0, tG1: num(this.tG), wN1: !!this.wN });
+              /* Per-frame `hJa` countdown record (the Random-tactic arm/fire
+               * timeline): the same values as the `__trace` ring entry, also
+               * emitted to the console so the native port's `tG`/`wN` can be
+               * diffed frame-by-frame against the JS. */
+              emit({ t: "hja", f: fr, side: side, tG0: tG0, wN0: wN0,
+                tG1: num(this.tG), wN1: !!this.wN });
               var e2 = or.lastRandom[side];
               if (e2) e2.hja = { f: frameNo(), tG0: tG0, tG1: num(this.tG) };
             } catch (e) { /* ignore */ }
@@ -729,6 +736,42 @@
           };
           fp.__orHja = true;
           or.hjaWrapped = true;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    /* The `Md.jL` weighted-roulette roll: `Da.pg.s4(sum)` (L26988) — the raw
+     * `Da.pg` draw the Random-tactic pick consumes. Logging it lets the port's
+     * `[random] roll=` be diffed against the JS draw directly (the frame alone
+     * cannot distinguish "same roll, different list" from "different roll"). */
+    if (!or.pgWrapped) {
+      try {
+        var pg = null;
+        try {
+          if (or.fight.Da && or.fight.Da.constructor &&
+              or.fight.Da.constructor.pg) {
+            pg = or.fight.Da.constructor.pg;
+          }
+        } catch (e0) { /* ignore */ }
+        if (!pg) {
+          var ks = Object.keys(or.fight);
+          for (var ki = 0; ki < ks.length && !pg; ki++) {
+            var vv = null;
+            try { vv = or.fight[ks[ki]]; } catch (e1) { continue; }
+            if (vv && vv.constructor && vv.constructor.pg) {
+              pg = vv.constructor.pg;
+            }
+          }
+        }
+        if (pg && typeof pg.s4 === "function") {
+          var origS4 = pg.s4;
+          pg.s4 = function (a) {
+            var r = origS4.apply(this, arguments);
+            try {
+              if (a > 50) emit({ t: "roll", f: frameNo(), d: a, r: r });
+            } catch (e2) { /* ignore */ }
+            return r;
+          };
+          or.pgWrapped = true;
         }
       } catch (e) { /* ignore */ }
     }
