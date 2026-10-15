@@ -2338,6 +2338,23 @@ std::string AiController::update_random(const AiFightState& st) {
         return "";
     }
 
+    // Diagnostic (`SF2_TRACE_RANDOM=1`): the candidate build for the Random
+    // path. `keypressed` = the `<Events><KeyPressed/>` count (`Su.dea(2)`
+    // membership), `passing` = those also passing `de.V1` (gm=false -> the
+    // Keys gate is bypassed). No effect when the env var is unset.
+    static const bool trace_random = std::getenv("SF2_TRACE_RANDOM") != nullptr;
+    if (trace_random) {
+        std::size_t nkp = 0;
+        for (const MoveDef* m : *st.my_moves) {
+            if (m != nullptr && m->has_event("KeyPressed")) ++nkp;
+        }
+        std::fprintf(stdout, "[random] my_moves=%zu keypressed=%zu passing=%zu:",
+                     st.my_moves->size(), nkp, cands.size());
+        for (const MoveDef* m : cands) std::fprintf(stdout, " %s", m->name.c_str());
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
+
     // `Pkb` (L674-675): drop `f` when any OTHER candidate's name is in
     // `f.animation.M7.$Q` (`g.Wcb(l.animation)` false) - `f` has a
     // higher-priority mirror superior also present.

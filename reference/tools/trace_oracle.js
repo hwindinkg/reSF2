@@ -119,22 +119,20 @@
     rFightFrames: 0,
     hookedFight: null,
     hookedPaths: { iPa: [], N0a: [], O0a: [] },
-    wrappedDe: [null, null], /* legacy: superseded by deList scan */
-    deScanFight: null,
-    deList: null, /* [{obj, label}] every de in the fight graph */
+    deList: null, /* [{obj, label}] the fighters' own de (for the header) */
     deCount: 0,
-    lastDecider: null, /* label of the de with the latest Pqb/ia event */
+    lastDecider: null, /* label of the de/Gc with the latest decision event */
     methodHosts: null, /* {N0a:{host},O0a:{host}} for exact replay */
     orecSeq: 0, /* INPUT-REC sequence number */
     cO0a: 0, /* O0a (release) wrapper fire counter */
-    deScanFight: null,
-    deList: null, /* [{obj, label}] every de in the fight graph */
-    deCount: 0,
-    lastDecider: null, /* label of the de with the latest Pqb/ia event */
     lastMove: { Me: null, Enemy: null },
     lastPqb: { Me: null, Enemy: null },
     n0aRecent: [],
     cPqb: 0, cIa: 0, cN0a: 0, ciPa: 0, /* wrapper fire counters (trace_stats) */
+    lastRandom: { Me: null, Enemy: null }, /* last Gc.jL (Random-path pick) */
+    deProtoWrapped: false, /* de.prototype.Pqb/ia wrapped (covers every de) */
+    gcProtoWrapped: false, /* Gc.prototype.jL wrapped (Random candidate pick) */
+    hjaWrapped: false, /* fighter.prototype.hJa wrapped (Random timing) */
     errLogged: false
   };
 
@@ -317,12 +315,57 @@
 
   /* ================= 4. Method wrappers (log in/out, delegate) ================= */
 
-  function wrapPqb(de, side) {
-    var orig = de.Pqb;
-    de.Pqb = function (a) {
-      var r = orig.apply(this, arguments);
+  /* Side of a `de`/fighter-AI instance: compare it to the fighters' own AI
+   * (JS `this.nf = new de(...)`, L20548/L20783). Resolved at CALL time, so a
+   * single PROTOTYPE wrapper covers both sides (the old per-instance scan
+   * captured the side once and missed the real fight's de entirely). */
+  function deSide(fight, de) {
+    try {
+      if (!de || !fight) return null;
+      if (fight.pb && de === fight.pb.nf) return "Me";
+      if (fight.yb && de === fight.yb.nf) return "Enemy";
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /* Duck-typed animation/move name for a `kd` candidate (`Ti`, `.animation`)
+   * or a bare animation object. */
+  function animLabel(x) {
+    if (x == null) return null;
+    try {
+      if (typeof x === "string") return x;
+      var a = x.animation != null ? x.animation : x;
+      var cands = ["name", "Eza", "jb", "ID", "FileName"];
+      for (var i = 0; i < cands.length; i++) {
+        var v = a[cands[i]];
+        if (typeof v === "string" && v) return v;
+      }
+    } catch (e) { /* ignore */ }
+    return "?";
+  }
+
+  function deProtoOf(de) {
+    try {
+      var p = Object.getPrototypeOf(de);
+      if (p && typeof p.Pqb === "function") return p;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /* Wrap `de.prototype.Pqb` / `de.prototype.ia` (the class methods). The AI
+   * main decision (`Pqb`) and the per-frame pass (`ia`) live on the PROTOTYPE,
+   * so one wrap covers every de instance (current and future). The wrapper
+   * records the branch (`fk`/`aqa`), the return (chosen move) and the
+   * candidate count (`ld.length`). */
+  function wrapDeProto(proto) {
+    if (!proto || proto.__orPqbProto) return false;
+    if (typeof proto.Pqb !== "function") return false;
+    var origPqb = proto.Pqb;
+    proto.Pqb = function (a) {
+      var r = origPqb.apply(this, arguments);
       try {
         or.cPqb++;
+        var side = deSide(or.fight, this) || "X";
         or.lastDecider = side;
         var entry = {
           m: "Pqb", side: side, f: frameNo(),
@@ -336,27 +379,27 @@
       } catch (e) { /* ignore */ }
       return r;
     };
-  }
-
-  function wrapDeIa(de, side) {
-    if (typeof de.ia !== "function") return false;
-    var orig = de.ia;
-    de.ia = function (a) {
-      var fk0 = num(this.fk);
-      var r = orig.apply(this, arguments);
-      try {
-        or.cIa++;
-        or.lastDecider = side;
-        pushTrace({
-          m: "de.ia", side: side, f: frameNo(),
-          fk0: fk0, fk1: num(this.fk), aqa: num(this.aqa),
-          ret: moveLabel(r)
-        });
-        var lbl = moveLabel(r);
-        if (lbl != null) or.lastMove[side] = lbl;
-      } catch (e) { /* ignore */ }
-      return r;
-    };
+    if (typeof proto.ia === "function") {
+      var origIa = proto.ia;
+      proto.ia = function (a, b) {
+        var fk0 = num(this.fk);
+        var r = origIa.apply(this, arguments);
+        try {
+          or.cIa++;
+          var side = deSide(or.fight, this) || "X";
+          or.lastDecider = side;
+          pushTrace({
+            m: "de.ia", side: side, f: frameNo(),
+            fk0: fk0, fk1: num(this.fk), aqa: num(this.aqa),
+            ret: moveLabel(r)
+          });
+          var lbl = moveLabel(r);
+          if (lbl != null) or.lastMove[side] = lbl;
+        } catch (e) { /* ignore */ }
+        return r;
+      };
+    }
+    proto.__orPqbProto = true;
     return true;
   }
 
@@ -454,86 +497,131 @@
     } catch (e) { /* ignore */ }
   }
 
-  function deLabel(fight, de) {
-    try {
-      if (fight.pb && de === fight.pb.nf) return "Me";
-      if (fight.yb && de === fight.yb.nf) return "Enemy";
-    } catch (e) { /* ignore */ }
-    return null;
-  }
-
   function ensureDeHooks(fight) {
-    /* Wrap EVERY de instance in the fight graph (fighters, sub-fighters),
-     * not just fight.pb/yb .nf — the tutorial may drive bodies whose de
-     * lives elsewhere. Cached per fight identity; re-scanned on change. */
-    if (or.deScanFight === fight && or.deList) {
-      var stillThere = true;
-      try {
-        for (var s = 0; s < or.deList.length; s++) {
-          if (!isDe(or.deList[s].obj)) { stillThere = false; break; }
-        }
-      } catch (e) { stillThere = false; }
-      if (stillThere) return;
+    /* Once the de PROTOTYPE is wrapped, every de instance is covered, so no
+     * scan is needed. (The old per-instance BFS scan missed the real fight's
+     * de entirely — the fight graph is built a few ticks after the fight
+     * object appears, and the scan cached the empty result: `deCount:0`,
+     * `Pqb:0` in every boss-lynx record.) */
+    if (or.deProtoWrapped) return;
+    /* Direct: the fighter's own AI (JS `this.nf = new de(...)`). */
+    var inst = null;
+    try { if (fight.pb && isDe(fight.pb.nf)) inst = fight.pb.nf; } catch (e) { /* ignore */ }
+    if (!inst) {
+      try { if (fight.yb && isDe(fight.yb.nf)) inst = fight.yb.nf; } catch (e) { /* ignore */ }
     }
-    or.deScanFight = fight;
-    or.deList = [];
-    var found = [];
-    try {
-      var queue = [{ o: fight, d: 0 }];
-      var seen = [fight];
-      var visited = 0;
-      while (queue.length && visited < 600) {
-        var cur = queue.shift();
-        if (cur.d > 0 && isDe(cur.o)) {
-          var dup = false;
-          for (var k = 0; k < found.length; k++) {
-            if (found[k] === cur.o) { dup = true; break; }
-          }
-          if (!dup) found.push(cur.o);
-        }
-        if (cur.d >= 5) continue;
-        var keys = null;
-        try {
-          if (cur.o && (typeof cur.o === "object" || typeof cur.o === "function")) {
-            keys = Object.keys(cur.o);
-          }
-        } catch (e) { continue; }
-        if (!keys) continue;
-        for (var i = 0; i < keys.length; i++) {
-          var v = null;
-          try { v = cur.o[keys[i]]; } catch (e2) { continue; }
-          if (v && (typeof v === "object" || typeof v === "function")) {
-            var known = false;
-            for (var m = 0; m < seen.length; m++) {
-              if (seen[m] === v) { known = true; break; }
-            }
-            if (!known) {
-              seen.push(v);
-              visited++;
-              queue.push({ o: v, d: cur.d + 1 });
-            }
-          }
-        }
-      }
-    } catch (e) { /* ignore */ }
-    var xCount = 0;
-    for (var n = 0; n < found.length; n++) {
+    var proto = inst ? deProtoOf(inst) : null;
+    /* Fallback: BFS over the fight graph (covers a sub-fighter's de). */
+    if (!proto) {
       try {
-        var de = found[n];
-        var label = deLabel(fight, de);
-        if (!label) { xCount++; label = "X" + xCount; }
-        if (!de.__orPqb) {
-          de.__orPqb = true;
-          wrapPqb(de, label);
+        var queue = [{ o: fight, d: 0 }];
+        var seen = [fight];
+        var visited = 0;
+        while (queue.length && visited < 600 && !proto) {
+          var cur = queue.shift();
+          if (cur.d > 0 && isDe(cur.o)) { proto = deProtoOf(cur.o); break; }
+          if (cur.d >= 5) continue;
+          var keys = null;
+          try {
+            if (cur.o && (typeof cur.o === "object" || typeof cur.o === "function")) {
+              keys = Object.keys(cur.o);
+            }
+          } catch (e) { continue; }
+          if (!keys) continue;
+          for (var i = 0; i < keys.length; i++) {
+            var v = null;
+            try { v = cur.o[keys[i]]; } catch (e2) { continue; }
+            if (v && (typeof v === "object" || typeof v === "function")) {
+              var known = false;
+              for (var m = 0; m < seen.length; m++) {
+                if (seen[m] === v) { known = true; break; }
+              }
+              if (!known) {
+                seen.push(v);
+                visited++;
+                queue.push({ o: v, d: cur.d + 1 });
+              }
+            }
+          }
         }
-        if (!de.__orIa && typeof de.ia === "function") {
-          de.__orIa = true;
-          if (!wrapDeIa(de, label)) de.__orIa = false;
-        }
-        or.deList.push({ obj: de, label: label });
       } catch (e) { /* ignore */ }
     }
-    or.deCount = found.length;
+    if (!proto) return;
+    if (wrapDeProto(proto)) or.deProtoWrapped = true;
+    /* Header labels: the fighters' own de instances. */
+    or.deList = [];
+    try { if (fight.pb && isDe(fight.pb.nf)) or.deList.push({ obj: fight.pb.nf, label: "Me" }); }
+    catch (e) { /* ignore */ }
+    try { if (fight.yb && isDe(fight.yb.nf)) or.deList.push({ obj: fight.yb.nf, label: "Enemy" }); }
+    catch (e) { /* ignore */ }
+    or.deCount = or.deList.length;
+  }
+
+  /* Random-tactic path (JS `wd.Anb` L499 -> `hJa` L500 -> `ca.Vgb` L508 ->
+   * `Gc.Vkb` L671 -> `Ih(2,Vb,!0)` -> the next `Gc.ia`/`Gnb` pass builds the
+   * per-fighter candidate lists (`Rwa`/`EZa`) and dispatches `Gc.DK` ->
+   * `Gc.Pkb` -> `Gc.jL` = the `Md.jL` weighted roulette). A `Type=="Random"`
+   * tactic NEVER calls `de.Pqb`/`de.ia` (`Anb` routes type 1 to `hJa`), so the
+   * de wrappers above record nothing for it; these record the candidate set +
+   * the roulette pick. The `Gc` instance is `ca.Bg` (`this.Bg = new Gc`,
+   * L15469) — reachable from the fight controller (`or.fight` = the `ca`). */
+  function ensureRandomHooks(fight) {
+    if (!or.gcProtoWrapped) {
+      try {
+        var gc = fight.Bg;
+        var proto = gc ? Object.getPrototypeOf(gc) : null;
+        if (proto && typeof proto.jL === "function") {
+          var origJL = proto.jL;
+          proto.jL = function (a, b) {
+            var r = origJL.apply(this, arguments);
+            try {
+              if (b && b.length) {
+                var names = [];
+                for (var i = 0; i < b.length; i++) names.push(animLabel(b[i]));
+                var side = deSide(or.fight, a && a.nf) || "?";
+                var chosen = animLabel(r);
+                var entry = {
+                  m: "Gc.jL", side: side, f: frameNo(),
+                  cand: names, n: b.length, chosen: chosen
+                };
+                pushTrace(entry);
+                or.lastRandom[side] = entry;
+                if (chosen != null) {
+                  or.lastMove[side] = chosen;
+                  or.lastDecider = side;
+                }
+              }
+            } catch (e) { /* ignore */ }
+            return r;
+          };
+          proto.__orGcProto = true;
+          or.gcProtoWrapped = true;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    if (!or.hjaWrapped) {
+      try {
+        var f = fight.pb || fight.yb;
+        var fp = f ? Object.getPrototypeOf(f) : null;
+        if (fp && typeof fp.hJa === "function") {
+          var origHja = fp.hJa;
+          fp.hJa = function (a) {
+            var tG0 = num(this.tG), wN0 = !!this.wN;
+            var r = origHja.apply(this, arguments);
+            try {
+              var side = deSide(or.fight, this.nf) || "?";
+              pushTrace({ m: "hJa", side: side, f: frameNo(),
+                tG0: tG0, wN0: wN0, tG1: num(this.tG), wN1: !!this.wN });
+              var e2 = or.lastRandom[side];
+              if (e2) e2.hja = { f: frameNo(), tG0: tG0, tG1: num(this.tG) };
+            } catch (e) { /* ignore */ }
+            return r;
+          };
+          fp.__orHja = true;
+          or.hjaWrapped = true;
+        }
+      } catch (e) { /* ignore */ }
+    }
   }
 
   function deOfLabel(fight, label) {
@@ -938,6 +1026,7 @@
       ai_zone: de ? num(de.aqa) : null,
       chosen_move: or.lastMove[side],
       chosen_candidates: pqb && typeof pqb.cand === "number" ? pqb.cand : null,
+      random: or.lastRandom[side] || null,
       chances: chancesOf(de),
       input_buffer_state: {
         me_empty: wMe.empty,
@@ -1193,6 +1282,7 @@
     or.fight = fight;
     ensureFightHooks(fight);
     ensureDeHooks(fight);
+    ensureRandomHooks(fight);
     if (!or.headerDone) {
       or.headerDone = true;
       emitHeader(fight);

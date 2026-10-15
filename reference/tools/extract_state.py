@@ -9,6 +9,12 @@ reference/traces/console.log. reference/runner/trace.js emits one
 those lines (ignoring the shell's own `[shell]`/`[TRACE]` lines and any other
 console noise) into reference/traces/oracle_state.jsonl.
 
+The capture ACCUMULATES every run (a fresh page per run appends to the same
+file), so mixing scenarios makes `compare_state.py --align auto` pick a wrong
+offset. trace.js therefore emits a `{"t":"run_start",...}` marker once per page
+load; this tool resets on it and keeps ONLY the last run's state lines. Logs
+without a marker keep the legacy behaviour (every state line is kept).
+
 Usage:
   python extract_state.py [SRC] [DST]
   # defaults: SRC=reference/traces/console.log
@@ -31,10 +37,15 @@ def main(argv):
         print("extract_state: no such file: %s" % src, file=sys.stderr)
         return 2
 
-    states = frames = hooked = done = 0
-    with io.open(src, encoding="utf-8", errors="replace") as fh, \
-            open(dst, "w", encoding="utf-8") as out:
+    runs = 0
+    states = []  # state objects of the CURRENT (last) run
+    frames = hooked = done = 0
+    with io.open(src, encoding="utf-8", errors="replace") as fh:
         for line in fh:
+            if '"t":"run_start"' in line:
+                runs += 1
+                states = []  # a new run starts -> drop the previous run
+                continue
             i = line.find('{"t":"state"')
             if i >= 0:
                 s = line[i:].strip()
@@ -42,8 +53,7 @@ def main(argv):
                     obj = json.loads(s)
                 except json.JSONDecodeError:
                     continue
-                out.write(json.dumps(obj, separators=(",", ":")) + "\n")
-                states += 1
+                states.append(obj)
                 continue
             if '"t":"frame"' in line:
                 frames += 1
@@ -52,7 +62,12 @@ def main(argv):
             elif "[TRACE] done" in line:
                 done += 1
 
-    print("extract_state: %d state lines -> %s" % (states, dst))
+    with open(dst, "w", encoding="utf-8") as out:
+        for obj in states:
+            out.write(json.dumps(obj, separators=(",", ":")) + "\n")
+
+    print("extract_state: %d state lines (last of %d run(s)) -> %s"
+          % (len(states), runs, dst))
     print("extract_state: (saw %d pose frame lines, hooked=%d, done=%d)"
           % (frames, hooked, done))
     return 0

@@ -54,6 +54,13 @@
   } catch (e) { /* no query string */ }
   var MAX_CLIPS = 5; /* at most this many clip dumps per run */
 
+  /* Run marker: OracleShell's console.log ACCUMULATES every run (a fresh page
+   * per run appends to the same file), so a state extractor must be able to
+   * keep ONLY the last run — otherwise the mixed frames make
+   * `compare_state.py --align auto` pick a wrong offset. Emitted once per page
+   * load, before any `{"t":"state"}` line. */
+  console.log('{"t":"run_start","maxFrames":' + MAX_FRAMES + '}');
+
   var tr = {
     enabled: true,
     hooked: false,
