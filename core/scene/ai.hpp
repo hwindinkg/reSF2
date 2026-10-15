@@ -504,6 +504,13 @@ struct AiFightState {
     int magic_bullets = 0;
     // Frame counter (`ca.frame` — the fight's frame).
     int fight_frame = 0;
+    // JS `wd.Anb` (L499) gates the AI DECISION dispatch on `Je==2` (phase 2,
+    // Fight). The model-EVENT handlers are NOT gated: `wd.x3` (L20990) ->
+    // `wd.mwb` (L21867) -> `de.jwb`/`de.iwb` fire in every phase (the round
+    // intro included) and consume the shared `Da.pg` stream. The fight sets
+    // this false during phase 1 so only the event blocks run there; probes
+    // that model no phase keep the default (always deciding).
+    bool phase_fight = true;
     // Random source for the chance draws (injected; the native demo
     // supplies a std::mt19937). `roll01()` returns a value in [0,1).
     std::function<float()> roll01;
@@ -888,6 +895,17 @@ private:
     // change (JS `jwb` L596-597, routed by `mwb`; the port detects the
     // change by enemy anim name — documented proxy).
     void qja(const AiFightState& st);
+    // JS `wd.mwb` (L21867) -> `de.jwb` (L25007): the OPPONENT's animation-start
+    // MODEL EVENT. Rebuilds the QJa cache (6 `Da.jf()` + `Mu`/`lN`) and, unless
+    // the move is in `<IgnoredEnemyAnimations>`, the `$x` ResponseDelay draw.
+    // NOT phase-gated (`wd.Anb` L499 gates only the decision dispatch), so it
+    // runs in every phase — including the round intro.
+    void jwb_event(const AiFightState& st);
+    // JS `wd.mwb` (L21867) -> `de.iwb` (L24994): the sibling MODEL EVENT on MY
+    // side — MY move start (`this.da.Ua` passed by `wd.x3` L20996) sets `cs`
+    // and resets the decision wait `eh=1` when the move is in
+    // `<UnexpectedMoves>`. Draw-free; also not phase-gated.
+    void iwb_event(const AiFightState& st);
     // JS `de.gfa` (L597: `Gc.gfa(a)+1`, `G` = `Md.I0(z$)` L640-643).
     int gfa_draw() const;
     // JS `de.Aea` (L597: `Gc.Aea(a)`, `Md.I0(v8)` L640-643, truncated).

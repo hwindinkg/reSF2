@@ -3287,6 +3287,17 @@ void FightController::enter_start_stance() {
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     set_phase(fight_phase::start_stance);
+    // JS `swb` (L16634) = `IKa(); FNa(); Eaa(!0); v.FU()`: `IKa` (L17061) runs
+    // `F1()` (L17558 -> `ud.rob(round)` L38088 -> `qob` L38074) for round >= 2,
+    // and for round 1 the SAME `F1()` ran at the fight INIT (L15544). `qob`
+    // reseeds the shared `Da.pg` (`Da.rL()` = the frozen clock) and runs the
+    // `DKa(1)`/`DKa(2)` `ERuleRandom` picks. `rob` therefore precedes EVERY
+    // phase-1 frame — the round-intro enemy move starts (the model-event
+    // `de.jwb`/QJa draws, `wd.x3` L20990) consume the reseeded stream. The port
+    // ran it at the phase-2 hand-off (`enter_fight`), which discarded the whole
+    // round-intro draw sequence and left the boss-lynx roulette on the wrong
+    // `Da.pg` position.
+    rules_begin_round(round_.number);
     // JS `swb` (L16634-16638): `IKa(); FNa(); Eaa(!0); v.FU()` — the round
     // boundary runs each fighter's `ctb(!0)` (L20376) which does
     // `if (this.sN = a) { this.Kl.reset(); this.Mka(0); }`, arming the
@@ -3322,13 +3333,13 @@ void FightController::enter_fight() {
     round_live_ = true;
     round_.running = true;   // the timer counts down (JS Sf.play L2037)
     start_stance_done_ = true;
-    // JS `f_a` (L896-897): with the round live, the FIRST active
-    // `ERuleRingout` rule feeds the two `sXa` arrows
-    // (`this.Oe.H1a(a.ZG, a.BH, a.tta)`). The rules come from the stage's
-    // `<Rules>` parsed into battle_.rules (apply_stage_ringout_rule); the
-    // per-round `kI`/`Ti` gates run in `rob` (L900) before `f_a`. Presentation
-    // only - set_ringout_rule never touches the simulation / RNG.
-    rules_begin_round(round_.number);
+    // JS `Rkb` (L16728): `xF(2)` + `Hba=!0` + `llb()` — the FIGHT plate's hold
+    // has elapsed and the round goes live. `rob` (the `Da.pg` reseed + the
+    // `ERuleRandom` picks) is NOT part of `Rkb`: it ran at the round start
+    // (`enter_start_stance`, JS `IKa`/init -> `F1` -> `rob`), before the
+    // round-intro model events. The FIRST active `ERuleRingout` rule feeds the
+    // two `sXa` arrows (`this.Oe.H1a(...)`, JS `f_a` L896-897) — presentation
+    // only, `set_ringout_rule` never touches the simulation / RNG.
     // [FIX idle-slide — JS `xF(2)` keeps `da.Ua`] The old code called
     // `clear_move()` on both fighters to cut the root-moving intro stance clip
     // before the idle phase. `xF(2)` (L15810) does NOT clear `da.Ua` — it only
@@ -7531,13 +7542,18 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         me.fighter.advance(0.0f);
     }
 
-    // The AI decision (JS `de.ia` via `wd.Anb`/`Ykb`, L499-500:
-    // `(parameters.Fj||P.fP)&&Je==2` — the AI ONLY decides in phase 2
-    // (Fight). Gating the whole block (not just the move start) also
-    // stops the phase-1 QJa roll consumption, keeping the Da stream
-    // aligned with the game.
-    if (me.ai != nullptr && phase_ == fight_phase::fight) {
-        sf2::scene::AiFightState st;        st.current_move = me.fighter.current_move();
+    // The AI update (JS `de.ia` via `wd.Anb`/`Ykb`, L499-500:
+    // `(parameters.Fj||P.fP)&&Je==2` — the DECISION is phase 2 (Fight) only).
+    // The model-EVENT handlers `de.jwb`/`de.iwb` (`wd.x3` L20990 -> `wd.mwb`
+    // L21867) are NOT phase-gated and consume the shared `Da.pg` stream
+    // (QJa = 6 `Da.jf()` + `Mu`/`lN`/`$x` = 9 draws per opponent move start),
+    // so `update()` must run in every phase and gate the decision internally
+    // via `st.phase_fight`. Gating the whole call left the round-intro move
+    // starts draw-free — the boss-lynx roulette read the stream 9 draws early.
+    if (me.ai != nullptr) {
+        sf2::scene::AiFightState st;
+        st.phase_fight = (phase_ == fight_phase::fight);
+        st.current_move = me.fighter.current_move();
         // JS `ra.Hza` (L28904-28913): `this.model.me` = every move of `ra.Lk`
         // whose `<Locks>` pass AND whose `xl` (name + `<Template>` chain) does
         // NOT intersect `parameters.eK` (`f.jZ` L29535). `hb_` already models

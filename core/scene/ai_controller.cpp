@@ -1760,6 +1760,47 @@ bool AiController::in_randomizing_group(const MoveDef& m) const {
     return false;
 }
 
+// JS `wd.mwb` (L21867) -> `de.jwb` (L25007): the OPPONENT's animation-start
+// MODEL EVENT. `wd.x3` (L20990) dispatches it from the model's
+// EStartAnimationEvent, NOT from `de.ia`/`wd.Anb`, so it fires in EVERY phase:
+// the QJa cache it rebuilds (6 `Da.jf()` at L24970-24975 + `Mu`/`lN`) and the
+// `$x` ResponseDelay draw are 9 shared `Da.pg` draws per enemy move start. The
+// port detects the event by the opponent's move pointer / animation-name
+// change (a looping clip does NOT re-dispatch `EStartAnimationEvent`, so a
+// loop restart correctly does not re-fire).
+void AiController::jwb_event(const AiFightState& st) {
+    if (st.enemy_move == last_enemy_move_ && st.enemy_anim == last_enemy_anim_) {
+        return;
+    }
+    last_enemy_anim_ = st.enemy_anim;
+    last_enemy_move_ = st.enemy_move;
+    if (st.enemy_playing && st.enemy_move != nullptr) {
+        qja(st);
+        qja_done_ = true;
+        if (!mcb(*st.enemy_move)) {
+            x_ = gfa_draw();
+        }
+    }
+}
+
+// JS `wd.mwb` (L21867) -> `de.iwb` (L24994), dispatched by MY model's
+// EStartAnimationEvent (`wd.x3` L20990 -> `a.mwb(this.da.Ua)`): MY move start
+// makes MY AI's `cs` my own current move and, when it carries an
+// `<UnexpectedMoves>` tag (Physical/Hit/ThrowFall), resets the decision wait
+// `eh=1` so the AI re-decides on the very next frame. The move change draws
+// nothing, so the `Da.pg` stream position is unaffected. Not phase-gated.
+void AiController::iwb_event(const AiFightState& st) {
+    if (st.current_move == last_my_move_) return;
+    last_my_move_ = st.current_move;
+    if (!st.playing || st.current_move == nullptr) return;
+    for (const std::string& n : unexpected_moves_) {
+        if (move_has_name(*st.current_move, n)) {
+            eh_ = 1;
+            break;
+        }
+    }
+}
+
 // JS `Pqb` (L604-608): the core decision. Returns the candidate count.
 int AiController::pqb(const AiFightState& st) {
     wb_.clear();
@@ -2081,35 +2122,27 @@ std::string AiController::update(const AiFightState& st) {
     // mt19937); otherwise ALL draws come from `prng_` in JS call order.
     roll01_fn_ = st.roll01;
     math_random_fn_ = st.math_random;
+    // No decision on a phase-1 (event-only) pass, so clear the previous
+    // decision's debug snapshot — the fight's `[ai]` log gates on `d.gate`.
+    dbg_ = AiDebug{};
 
     // JS `wd.Anb` (L499): `a.type==1 ? this.hJa() : a.type==2 && this.Ykb()`
-    // - a `Type=="Random"` tactic (`Md.getType` L642 `"Random"->1`) drives
-    // the `hJa` path (Vkb/`Pkb`), NOT `de.ia`. The `NoTables` Beginner
-    // template has no `.dat` tables, so the old unconditional `de.ia` pass
-    // found nothing and the enemy never moved.
+    // — a `Type=="Random"` tactic (`Md.getType` L642 `"Random"->1`) drives the
+    // `hJa` path (Vkb/`Pkb`), NOT `de.ia`. `Anb` itself is gated
+    // `(parameters.Fj||P.fP)&&Je==2` (phase 2, Fight), but the model-EVENT
+    // handlers below are not: `wd.x3` (L20990, the model's
+    // EStartAnimationEvent) -> `wd.mwb` (L21867) -> `de.jwb` (L25007, QJa) /
+    // `de.iwb` (L24994) fire in EVERY phase, and their shared-`Da.pg` draws
+    // land during the round intro too. Running the whole `update()` behind the
+    // phase gate left the round-intro enemy move starts draw-free, so the
+    // boss-lynx roulette read the stream 9 draws early (port draw 10 vs the JS
+    // draw 19). `mq` (JS `mQ` L620) is draw-free and feeds both the events'
+    // curve evaluation and the decision below.
+    mq(st);
+    jwb_event(st);
+    iwb_event(st);
+
     if (tactic_->type == 1) {
-        // JS `wd.mwb` (L527 `a.mwb(this.da.Ua)`) -> `de.jwb` (L596-597 /
-        // L25007): the ENEMY's move-start event runs `QJa` (6 `Da.jf()` draws,
-        // L24970-24975) REGARDLESS of the tactic type. `mwb` is dispatched by
-        // the model's EStartAnimationEvent (`Te.x3` L23097), NOT by `de.ia`,
-        // so the Random tactic (`wd.hJa`, `Md` type 1) consumes it too. The
-        // port ran the `jwb`/`QJa` block only in the type-2 path (the block
-        // below, after the `update_random` return), so the Random path's
-        // shared `Da.pg` stream was short by 6 draws per enemy move start —
-        // the boss-lynx roulette divergence. Mirror the type-2 `jwb` block
-        // here (before `update_random`), exactly as `mwb` precedes `Anb`.
-        if (st.enemy_move != last_enemy_move_ ||
-            st.enemy_anim != last_enemy_anim_) {
-            last_enemy_anim_ = st.enemy_anim;
-            last_enemy_move_ = st.enemy_move;
-            if (st.enemy_playing && st.enemy_move != nullptr) {
-                qja(st);
-                qja_done_ = true;
-                if (!mcb(*st.enemy_move)) {
-                    x_ = gfa_draw();
-                }
-            }
-        }
         // JS `wd.x3` (L20990) — the OPPONENT-arm. `x3` is the `EStartAnimationEvent`
         // handler on MY model (`Te.x3` L23097 <- `Te.Skb` L23058), and it arms
         // the OPPONENT's countdown: `a=this.jb; a.mwb(this.da.Ua); a.Mka(0)`
@@ -2146,80 +2179,29 @@ std::string AiController::update(const AiFightState& st) {
             tG_ = 0;
         }
         my_uninterrupt_prev_ = my_uninterrupt_now;
+        // JS `wd.Anb` (L499): the Random-tactic DECISION (`hJa`) is phase-2
+        // gated (`Je==2`); the event blocks above already ran.
+        if (!st.phase_fight) return "";
         return update_random(st);
     }
 
-    // Snapshot the features (JS mQ L620).
-    mq(st);
+    // The Table-tactic DECISION (`Ykb` -> `de.ia`) is phase-2 gated too.
+    if (!st.phase_fight) return "";
+
     // JS `de.ia` (L592): `b=a.da` (a = the ENEMY) -> `Fl = b.Pe ?
     // b.kJ()+b.Q_+this.j0(this.Uu) : -1` (the ENEMY's PER-SUB-STEP frame
     // `kJ()` + the per-frame `<FrameError>` draw); `q7 = this.Ji.kJ()+...` =
     // MY frame. `b.Q_` == 0 in the shipped JS. The `j0(Uu)` draw is the
     // frame-start `Da.pg` consumption (two `B0()` words) that precedes the
-    // `jwb`/`QJa` caches below; no draw when the enemy is not playing.
+    // `jwb`/`QJa` caches; no draw when the enemy is not playing.
     Fl_ = st.enemy_playing ? st.enemy_kj + j0_draw() : -1;
     q7_ = st.playing ? st.move_kj : -1;
 
-    // JS `de.ia` (L592-593): `QJa` refreshes the five cached chance rolls
-    // (`tua/dua/Bpa/rqa/oqa`) that gate the safe attack, table attack and
-    // cautious movements. JS-EXACT cadence: QJa runs (a) when the ENEMY
-    // STARTS a move — the `jwb` path below — and (b) each frame while the
-    // enemy's move is a `<RandomizingEnemyAnimation>` child (the `ia` L593
-    // check further down). It is NOT re-rolled on every `ia` pass: during a
-    // non-randomizing enemy move (e.g. the player's StepBack) the JS keeps
-    // the rolls frozen until the next move start. (The port previously
-    // re-rolled every frame AND again for randomizing moves, consuming the
-    // 6-roll cache twice per frame — a `Da.pg` stream divergence.)
-    // JS `de.jwb` (L596-597), invoked from `wd.mwb` (L527) when the ENEMY
-    // STARTS a move: `QJa(a)` then `$x = gfa(Ol)` (unless `mcb(c)` gates it).
-    // QJa is NOT re-rolled every frame: the JS calls it (a) here, on the
-    // enemy's move start, and (b) each frame while the enemy's move is a
-    // `<RandomizingEnemyAnimation>` child (the `ia` L593 check below). The
-    // old unconditional per-frame `qja` PLUS the randomizing `qja` drew the
-    // 6-roll cache TWICE per frame for randomizing moves (e.g. the player's
-    // StanceIdle) and once per frame for non-randomizing moves — a `Da.pg`
-    // stream divergence. `$x` is now drawn only here, from `gfa` (JS
-    // `jwb`), not inside `QJa` (JS `QJa` never touches `$x`).
-    const bool move_changed = st.enemy_move != last_enemy_move_;
-    if (move_changed || st.enemy_anim != last_enemy_anim_) {
-        last_enemy_anim_ = st.enemy_anim;
-        last_enemy_move_ = st.enemy_move;
-        if (st.enemy_playing && st.enemy_move != nullptr) {
-            qja(st);
-            qja_done_ = true;
-            if (!mcb(*st.enemy_move)) {
-                x_ = gfa_draw();
-            }
-        }
-    }
-
-    // JS `de.iwb` (L596), invoked from `wd.mwb` (L527) — i.e. from `wd.x3`
-    // (L508 `a=this.jb; ... a.mwb(this.da.Ua)`) when MY fighter STARTS a move
-    // — so the de OWNER's `cs` becomes MY OWN current move (the sibling
-    // `jwb` fills `ds` = the opponent's):
-    //   `iwb(a){if(this.R0()){if(this.Ji.Pe&&a!=null){let b=a.PX;
-    //     this.cs=b!=null?b:a}else this.cs=null;
-    //     this.icb(this.cs)&&(this.eh=1)}}`
-    //   `icb(a){if(this.Ji.Pe&&a!=null){c=P.T$a();for(...)if(a.$k(c[b++]))
-    //     return!0}return!1}` (L598).
-    // `P.T$a()` = `P.mua` = the shipped `<UnexpectedMoves>` {Physical, Hit,
-    // ThrowFall}: starting one of those (while MY clip plays) resets the
-    // decision wait to 1, so the AI re-decides on the very next frame. The
-    // port tracks MY move pointer as the animation-start event proxy (the
-    // mirror of `last_enemy_move_` used for `jwb`); the move change draws
-    // nothing, so the `Da.pg` stream position is unaffected.
-    {
-        const bool my_changed = st.current_move != last_my_move_;
-        last_my_move_ = st.current_move;
-        if (my_changed && st.playing && st.current_move != nullptr) {
-            for (const std::string& n : unexpected_moves_) {
-                if (move_has_name(*st.current_move, n)) {
-                    eh_ = 1;
-                    break;
-                }
-            }
-        }
-    }
+    // JS `de.jwb`/`de.iwb` (L25007/L24994), invoked from `wd.mwb` (L21867) by
+    // the fighters' EStartAnimationEvent: both are MODEL EVENTS and already
+    // ran at the top of `update()` (they fire in every phase). The remaining
+    // `QJa` cadence is (b) below — the per-frame rebuild while the enemy's
+    // move is a `<RandomizingEnemyAnimation>` child (`ia` L593).
 
     // JS `de.ia` (L592) — the `mW` watch-recompute, the load-bearing piece
     // the port lacked: after `dsb` (the watch), the JS recomputes the wait
@@ -2392,9 +2374,8 @@ std::string AiController::update_random(const AiFightState& st) {
     if (!wN_) return "";
     wN_ = false;
 
-    // `de.jL` (L598) refreshes `iN` via `mQ` before the `Md.jL` roulette;
-    // the candidate condition pass reads the same feature set.
-    mq(st);
+    // `de.jL` (L598) refreshes `iN` via `mQ` before the `Md.jL` roulette; the
+    // feature snapshot already ran at the top of `update()` (draw-free).
 
     // `Gc.EZa` (L676): the event is `Ih(2,...)` = the type-2
     // `<KeyPressed/>` slot. Candidates are MY OWN moves whose Events carry
