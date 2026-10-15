@@ -362,27 +362,39 @@ float wall_ref_x(const FightContext& ctx, int player, const std::string& part) {
     return ((facing > 0.0f) == back) ? ctx.wall_min : ctx.wall_max;
 }
 
-// `ee.nt(a).x` for one end of a Distance ref (`to_end` selects To vs From).
-float ref_x(const Cond& c, bool to_end, const FightContext& ctx) {
+// `ee.nt(a)` (L786) — ONE end of a Distance ref. `Object="Pivot"` (case 2)
+// reads `ee.j8a` (L33329): `this.CBa(ctx).Yd` = the CANDIDATE move's
+// `<Align><Pivot Part>` node (`jc.vF`/`ee.iB` L29378/L33309), falling back to
+// `ctx.cJa` = the CURRENT move's `da.Fe()` (`Te.Mqb` L23543) when the
+// candidate has no align node. `Wall` (case 3) keeps its own `ee.q9a` path.
+// Returns false when nothing resolved (the caller's root fallback applies).
+bool ref_xy(const Cond& c, bool to_end, const FightContext& ctx, float& x,
+            float& y) {
     const std::string& obj = to_end ? c.to_obj : c.from_obj;
     const std::string& part = to_end ? c.to_part : c.from_part;
-    const int player = to_end ? c.to_player : c.from_player;
-    // EMPTY object = a NULL `ee` (no From/To child): JS `ee.nt` default
-    // returns (0,0,0,1) -> x == 0 (the 7 shipped `<Direction Player="Enemy">`).
-    if (obj.empty()) return 0.0f;
-    if (obj == "Wall") return wall_ref_x(ctx, player, part);
-    // `Object="Nodes"|"Pivot"|"COM"|"Floor"` -> the SAME `ee.nt` resolution
-    // the two-ended path uses (`ctx.ref_pos`), so a `Pivot` end paired with a
-    // `Wall` end still reads the `<Align><Pivot Part>` node, not the NPivot
-    // anchor (`ee.j8a` L33329 -> `Te.Mqb` L23543).
-    if (ctx.ref_pos) {
-        float x = 0.0f, y = 0.0f;
-        if (ctx.ref_pos(obj, part, player, to_end ? c.to_prev : c.from_prev, x,
-                        y)) {
-            return x;
-        }
+    const int player = to_end ? (c.to_player_set ? c.to_player : 1)
+                              : (c.from_player_set ? c.from_player : 1);
+    const bool prev = to_end ? c.to_prev : c.from_prev;
+    if (obj.empty()) { x = 0.0f; y = 0.0f; return true; }
+    if (obj == "Wall") {
+        x = wall_ref_x(ctx, player, part);
+        y = 0.0f;
+        return true;
     }
+    if (obj == "Pivot" && ctx.candidate_pivot_pos &&
+        ctx.candidate_pivot_pos(player, prev, x, y)) {
+        return true;
+    }
+    if (ctx.ref_pos) return ctx.ref_pos(obj, part, player, prev, x, y);
+    return false;
+}
+
+// `ee.nt(a).x` for one end of a Distance ref (`to_end` selects To vs From).
+float ref_x(const Cond& c, bool to_end, const FightContext& ctx) {
+    float x = 0.0f, y = 0.0f;
+    if (ref_xy(c, to_end, ctx, x, y)) return x;
     // Unknown/MapCenter -> the owning fighter's root X.
+    const int player = to_end ? c.to_player : c.from_player;
     return player == 2 ? ctx.enemy_x : ctx.me_x;
 }
 
@@ -420,11 +432,9 @@ bool eval_distance(const Cond& c, const FightContext& ctx) {
     };
     const bool ref_objects = is_pos_obj(c.from_obj) && is_pos_obj(c.to_obj);
     if (ctx.ref_pos && ref_objects) {
-        const int fp = c.from_player_set ? c.from_player : 1;
-        const int tp = c.to_player_set ? c.to_player : 1;
         have_refs =
-            ctx.ref_pos(c.from_obj, c.from_part, fp, c.from_prev, fx, fy) &&
-            ctx.ref_pos(c.to_obj, c.to_part, tp, c.to_prev, tx, ty);
+            ref_xy(c, /*to_end=*/false, ctx, fx, fy) &&
+            ref_xy(c, /*to_end=*/true, ctx, tx, ty);
     }
     if (have_refs) {
         switch (c.axis) {

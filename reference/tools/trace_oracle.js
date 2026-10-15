@@ -610,9 +610,24 @@
             try {
               if (b && b.length) {
                 var pn = [];
-                for (var i = 0; i < b.length; i++) pn.push(animLabel(b[i]));
+                var pq = [];
+                for (var i = 0; i < b.length; i++) {
+                  pn.push(animLabel(b[i]));
+                  /* `M7.$Q` (the `Pu` mirror-exclusive list, `ra.b1a` L684) +
+                   * `priority`: the exact per-candidate data the `M7.Wcb`
+                   * filter (L676) and the `Aua` max-priority pick consume. */
+                  var q = [];
+                  try {
+                    var qq = b[i] && b[i].animation && b[i].animation.M7
+                        ? b[i].animation.M7.$Q : null;
+                    if (qq) { for (var qi = 0; qi < qq.length; qi++) q.push(animLabel(qq[qi])); }
+                  } catch (e) { /* ignore */ }
+                  var pr = 0;
+                  try { pr = b[i].animation.priority | 0; } catch (e) { /* ignore */ }
+                  pq.push({ n: pn[pn.length - 1], p: pr, q: q });
+                }
                 var pside = deSide(or.fight, a && a.nf) || "?";
-                or.lastPkbPre[pside] = { f: frameNo(), n: b.length, cand: pn };
+                or.lastPkbPre[pside] = { f: frameNo(), n: b.length, cand: pn, det: pq };
                 if (!or.meList) or.meList = {};
                 if (!or.meList[pside]) {
                   var me = [];

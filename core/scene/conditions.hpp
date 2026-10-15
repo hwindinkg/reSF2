@@ -174,6 +174,15 @@ struct FightContext {
     std::function<bool(const std::string& obj, const std::string& part,
                        int player, bool frame_prev, float& x, float& y)>
         ref_pos;
+    // JS `ee.j8a` (L33329) / `ee.nt` case 2 (L33250): `Object="Pivot"` reads
+    // `this.CBa(ctx).Yd` — the node `jc.vF`/`ee.iB` (L29378/L33309) stamps
+    // from the move whose `vF` last ran (`e = a.Va.IF[this.va.align.UE]`, i.e.
+    // the CANDIDATE's `<Align><Pivot Part>`). When the candidate has no align
+    // node (`align.UE < 0`, or an absolute `Object="Animation"`) `j8a` falls
+    // back to `ctx.cJa` = `da.Fe()` (`Te.Mqb` L23543) = the CURRENT move's
+    // node, which `ref_pos` resolves. `de.V1` binds this per candidate.
+    std::function<bool(int player, bool frame_prev, float& x, float& y)>
+        candidate_pivot_pos;
     // The two fighter roots, kept separately so `Object="Wall"` Distance refs
     // can resolve their non-wall end (`ee.nt` L786). `dist_x == enemy_x - me_x`.
     float me_x = 0.0f;     // this fighter's world X (`Me/...` refs)

@@ -7530,7 +7530,34 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // aligned with the game.
     if (me.ai != nullptr && phase_ == fight_phase::fight) {
         sf2::scene::AiFightState st;        st.current_move = me.fighter.current_move();
-        st.my_moves = &me.fighter.hb();    // JS `this.model.me` (`de.V1` L601)
+        // JS `ra.Hza` (L28904-28913): `this.model.me` = every move of `ra.Lk`
+        // whose `<Locks>` pass AND whose `xl` (name + `<Template>` chain) does
+        // NOT intersect `parameters.eK` (`f.jZ` L29535). `hb_` already models
+        // the `<Locks>` half in `ra.Lk` document order; `eK` is the
+        // `bb.zva` (L37999-38008) list of the ACTIVE `ERuleNoAnimation`
+        // rules' `<Name>` (`ln.VTa` L36790). Without the `eK` half the
+        // BOSS_LYNX bot's move list carried the battle-banned AxeKick /
+        // DoubleSweep / TwoFootJumpKick into the Random candidate set
+        // (oracle `random_pre` n=29 vs the port's 31).
+        std::vector<std::string> ek;
+        for (const sf2::scene::FightRule& r : rules_) {
+            if (!r.active || r.no_animation_name.empty()) continue;
+            ek.push_back(r.no_animation_name);
+        }
+        std::vector<const sf2::scene::MoveDef*> ai_me;
+        ai_me.reserve(me.fighter.hb().size());
+        for (const sf2::scene::MoveDef* m : me.fighter.hb()) {
+            if (m == nullptr) continue;
+            bool banned = false;
+            for (const std::string& n : m->anim_names) {
+                if (std::find(ek.begin(), ek.end(), n) != ek.end()) {
+                    banned = true;
+                    break;
+                }
+            }
+            if (!banned) ai_me.push_back(m);
+        }
+        st.my_moves = &ai_me;              // JS `this.model.me` (`de.V1` L601)
         st.move_frame = me.fighter.move_frame();
         st.move_len = st.current_move ? st.current_move->end_frame : 0;
         st.my_hp = me.hp;
@@ -7708,6 +7735,57 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 return false;
             };
         }
+        // JS `ee.j8a` (L33329) via `ee.iB` (L33309): `Object="Pivot"` inside
+        // a CANDIDATE's condition tree resolves to the candidate's own
+        // `<Align><Pivot Part>` node (`model.Va.IF[align.UE]`), not the
+        // current move's. `align.UE < 0` (no `<Align>`, or an absolute
+        // `<Pivot Object="Animation">`) leaves `CBa(ctx).Yd == null`, so
+        // `j8a` returns `ctx.cJa` = the current move's `da.Fe()` and the
+        // generic `ref_pos` above resolves it. `de.V1` binds the candidate.
+        st.candidate_pivot_pos = [&me, &foe](const MoveDef& cand,
+                                            int player, bool prev,
+                                            float& x, float& y) {
+            if (!cand.align.has_align) return false;
+            if (cand.align.pivot_object == "Animation" ||
+                cand.align.pos_object == "Animation") {
+                return false;
+            }
+            const std::string& part = cand.align.pivot_part;
+            if (part.empty()) return false;
+            const FightFighter& f = (player == 2) ? foe : me;
+            if (!f.fighter.node_world_xy(part, prev, x, y)) return false;
+            // JS `jc.Tab` (L29746-29758): `align.WE` = 1 when the `<Align>
+            // <Pivot Part>` name ends `_1`, 2 when it ends `_2`. `ee.j8a`
+            // (L33329-33340) then swaps to the node's `NE` MIRROR PARTNER
+            // (`Du.v5a` L24307-24328 links the `_1`/`_2` pairs) when
+            // `YH==1 && !(b.ma.x*Wl > d.ma.x*Wl)` or `YH==2 && (...)`. That
+            // swap is the whole boss-lynx Ts divergence: `NHeel_1` and
+            // `NHeel_2` sit 1038.92 / 1164.55 apart, i.e. the 245.38-vs-
+            // 371.01 split that gates the Random candidate set.
+            int we = 0;
+            if (part.size() > 2 && part[part.size() - 2] == '_') {
+                if (part.back() == '1') we = 1;
+                else if (part.back() == '2') we = 2;
+            }
+            if (we != 0) {
+                std::string partner = part;
+                partner[partner.size() - 1] = we == 1 ? '2' : '1';
+                float px = 0.0f, py = 0.0f;
+                if (f.fighter.node_world_xy(partner, prev, px, py)) {
+                    // `j8a`'s `a.Wl` = `f.xD(ctx, hd())` — the candidate's
+                    // `<SetDirection>` sign, which for the shipped
+                    // `Me/NPivot -> Enemy/NPivot` SetDirection is
+                    // `sign(enemy_x - me_x)`.
+                    const float wl = (foe.fighter.world_x() -
+                                      me.fighter.world_x()) >= 0.0f
+                                         ? 1.0f
+                                         : -1.0f;
+                    const bool c = (x * wl) > (px * wl);
+                    if ((we == 1 && !c) || (we == 2 && c)) { x = px; y = py; }
+                }
+            }
+            return true;
+        };
         // JS `de.oxb` (L618 `b.da.yu`/`b.da.zu`, b = this.model = ME): MY
         // arena walls (`Te.zLa` via `qMa`). The candidate-filter `bma`.
         st.my_wall_min = me.fighter.arena_wall_min();

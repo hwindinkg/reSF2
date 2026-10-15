@@ -588,7 +588,7 @@ bool AiController::fca(const AiFightState& st, int variant) const {
 // JS `V1` (L601-602): a candidate move must be in `me` (the fighter's move
 // list) and its tactics conditions (`FQ(2)` = the `Ts` list) must pass.
 bool AiController::v1(const MoveDef& m, const AiFightState& st,
-                      std::string* why) const {
+                      std::string* why, bool mirror_filter) const {
     if (why != nullptr) why->clear();
     if (moves_ == nullptr || moves_->find(m.name) == moves_->end()) {
         if (why != nullptr) *why = "not-in-table";
@@ -654,6 +654,22 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
     // `b = this.GK.OQ(a) - this.FK.OQ(a)`. Wiring the resolver makes the
     // Random path's candidate set use the same distance as the JS.
     ctx.ref_pos = st.ref_pos;
+    // JS `ee.j8a` (L33329): `Object="Pivot"` in the CANDIDATE's own condition
+    // tree resolves to the CANDIDATE's `<Align><Pivot Part>` node — `jc.vF`
+    // (L29378) stamps `CBa(ctx).Yd` with `a.Va.IF[this.va.align.UE]` for the
+    // move whose `vF` last ran, and `de.V1`/`Gc.EZa` evaluate each candidate
+    // right after its own `vF`. Bind the candidate so `conditions.cpp`'s
+    // `ref_xy` reads the candidate's node; a candidate with no align node
+    // (`align.UE < 0`) returns false and the current move's `da.Fe()`
+    // (`ref_pos`) stands in, exactly as `j8a`'s `else` branch does.
+    if (st.candidate_pivot_pos) {
+        const MoveDef* cand = &m;
+        const auto& fn = st.candidate_pivot_pos;
+        ctx.candidate_pivot_pos = [cand, &fn](int player, bool prev, float& x,
+                                             float& y) {
+            return fn(*cand, player, prev, x, y);
+        };
+    }
     ctx.wall_min = st.my_wall_min;
     ctx.wall_max = st.my_wall_max;
     ctx.health_ratio = st.my_max_hp > 0.0f ? st.my_hp / st.my_max_hp : 1.0f;
@@ -711,6 +727,17 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
     // `mirror_exclusive` only in the Random path (`update_random`/`Pkb`), so
     // the tabular AI could pick the lower-priority sibling (e.g. a plain
     // strike over the key-combo variant sharing its `<Keys>` signature).
+    //
+    // `mirror_filter=false` (the RANDOM path) SKIPS this gate, JS-exact: the
+    // Random candidate list is built by `Gc.EZa` (L28531), which never calls
+    // `de.V1` — it tests only the slot (`Gc.iEa` -> `Qm.compare`, a type
+    // match) and the move's own `<Conditions>` (`f.Yz(b,null,g)`). The `$Q`
+    // gate for that path lives in `Gc.Pkb`'s `M7.Wcb` (L28448, `update_random`
+    // below), which tests membership in the CANDIDATE list and never
+    // re-evaluates the sibling's conditions. Applying `V1`'s stricter
+    // (condition-dependent) version here wrongly dropped candidates the JS
+    // keeps, so the roulette set differed.
+    if (mirror_filter) {
     for (const std::string& sib : m.mirror_exclusive) {
         auto it = moves_->find(sib);
         if (it == moves_->end()) continue;
@@ -738,6 +765,7 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
             if (why != nullptr) *why = "mirror-sibling:" + f.name;
             return false;
         }
+    }
     }
     std::string ttrace;
     if (!eval_move_conditions(m.tactics, ctx, &ttrace)) {
@@ -2354,7 +2382,12 @@ std::string AiController::update_random(const AiFightState& st) {
     if (st.my_moves != nullptr) {
         for (const MoveDef* m : *st.my_moves) {
             if (m == nullptr || !m->has_event("KeyPressed")) continue;
-            if (!v1(*m, st)) continue;
+            // `Gc.EZa` (L28531) gates: the type-2 slot match (`Gc.iEa` ->
+            // `Qm.compare`, `g.type == ctx.type`) + the move's own
+            // `<Conditions>` (`f.Yz(b,null,g)`). `de.V1`'s `$Q` sibling gate
+            // is NOT part of this path (`mirror_filter=false`); `Pkb`'s
+            // `M7.Wcb` (the `keep` pass below) is.
+            if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
             cands.push_back(m);
         }
     }
@@ -2404,7 +2437,7 @@ std::string AiController::update_random(const AiFightState& st) {
         for (const MoveDef* m : *st.my_moves) {
             if (m == nullptr || !m->has_event("KeyPressed")) continue;
             std::string why;
-            if (!v1(*m, st, &why)) {
+            if (!v1(*m, st, &why, /*mirror_filter=*/false)) {
                 const std::size_t colon = why.find(':');
                 std::fprintf(stdout, " %s(%.*s)", m->name.c_str(),
                              static_cast<int>(colon == std::string::npos

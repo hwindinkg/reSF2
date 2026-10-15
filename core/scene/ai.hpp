@@ -489,6 +489,14 @@ struct AiFightState {
     std::function<bool(const std::string&, const std::string&, int, bool, float&,
                        float&)>
         ref_pos;
+    // JS `ee.j8a` (L33329): the CANDIDATE move's `<Align><Pivot Part>` node
+    // position (`model.Va.IF[align.UE]`, stamped by `jc.vF`/`ee.iB`), on the
+    // fighter `player` selects (1=Me / 2=Enemy). Returns false when the
+    // candidate has no align node (`align.UE < 0` / `Object="Animation"`), so
+    // `Object="Pivot"` falls back to the current move's `da.Fe()` (`ref_pos`).
+    std::function<bool(const MoveDef& cand, int player, bool frame_prev,
+                       float& x, float& y)>
+        candidate_pivot_pos;
     // JS `Te.yu`/`Te.zu` (set by `Te.zLa` L279707 via `qMa`): MY arena walls.
     // Read by `de.oxb` (L618 `b.da.zu` / `b.da.yu` with b = this.model = me).
     // Set by the fight from the fighter's arena bounds; 0/0 in pose-less
@@ -830,9 +838,12 @@ private:
     void filter_by_v1(std::vector<AiCandidate>& cands,
                       const AiFightState& st) const;
     // Tests one candidate move (JS `V1` L601-602). `why` (diagnostic,
-    // `SF2_TRACE_RANDOM=1`) receives the failing stage name.
+    // `SF2_TRACE_RANDOM=1`) receives the failing stage name. `mirror_filter`
+    // selects the `$Q` sibling gate (L25314-25324): the Tabular path
+    // (`ABa` -> `V1`) applies it, the Random path (`Gc.EZa` + `Gc.Pkb`'s
+    // `M7.Wcb`) does NOT (see `update_random`).
     bool v1(const MoveDef& m, const AiFightState& st,
-            std::string* why = nullptr) const;
+            std::string* why = nullptr, bool mirror_filter = true) const;
     // The `fCa` body-part cautious check (JS `fCa` L599-600).
     bool fca(const AiFightState& st, int variant) const;
     // Rebuilds the QJa roll cache (JS `QJa` L594-595): five `Da.jf()`

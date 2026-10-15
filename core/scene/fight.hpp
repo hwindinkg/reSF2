@@ -302,6 +302,12 @@ struct FightRule {
     float player_rating = 0.0f;      // `eVa` (PlayerRating; `u.H(...,0)`)
     float enemy_rating = 0.0f;       // `yUa` (EnemyRating; `u.H(...,0)`)
     float rating_correction = 0.0f;  // `jVa` (RatingCorrection; `u.H(...,0)`)
+    // `ln` (`ERuleNoAnimation`, L36786-36791): `VTa` = the `<Name>` attr, the
+    // move/animation name the rule BANS. `bb.zva` (L37999-38008) collects the
+    // `VTa` of every ACTIVE `VW` entry into `parameters.eK`, and `ra.Hza`
+    // (L28904-28913) then drops every move whose `xl` intersects `eK`
+    // (`f.jZ` L29535) from `this.model.me`.
+    std::string no_animation_name;   // `ln.VTa`
     // `Ce.EM` (L848): the rule's `<Animation Name="..."/>` child names
     // (JS `bn.parse` also folds a top-level `Animation` attr — DamageFactor
     // only, and its effect is OPEN). The animation-scoped rules match the
@@ -459,6 +465,13 @@ inline FightRule parse_fight_rule(const StageRule& sr) {
     FightRule r;
     r.kind = fight_rule_kind(sr.tag);
     r.tag = sr.tag;
+    // `ln` (L36786-36791): `VTa` = the `<Name>` attr — the banned move name.
+    // Read BEFORE the `kind == none` early return (the tag is not in
+    // `fight_rule_kind`), so `rules_` carries it for `bb.zva`.
+    if (sr.tag == "NoAnimation" || sr.tag == "ERuleNoAnimation") {
+        const auto nit = sr.attrs.find("Name");
+        if (nit != sr.attrs.end()) r.no_animation_name = nit->second;
+    }
     if (r.kind == FightRuleKind::none) return r;
     // `Ce.c4a`/`Mwa` (L848/L866): the rule's animation list + the
     // `Physical` group test (gates LoseFall's `Zf(7)` registration).
