@@ -655,7 +655,7 @@ bool eval_random(const Cond& c, const FightContext& ctx) {
     if (ctx.roll01) {
         return ctx.roll01() * 100.0f < percent;
     }
-    static DaPrng rng(0x5F2);
+    static DaPrng rng(kBootSeed);  // the boot `Da.pg = new Rk(L.seed)` (L2701)
     return static_cast<float>(rng.s4(1.0)) * 100.0f < percent;
 }
 

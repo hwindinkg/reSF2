@@ -112,15 +112,18 @@ bool hit_audit_global();
 // via `Da.pg.jf()` (`rules_begin_round`, the `Da.pg` analog `roll01_`).
 // Shipped pattern is `RandomRule > ComplexRule` (407 wrappers across
 // Duel / Duel_INTERMISSION / FINAL_BATTLE / C3_Challenge / C3_Duel).
-// JS-EXACT STREAM: `cl.pmb` (L1413) ALWAYS draws `2147483647*Da.pg.jf()|0`
-// and reseeds the shared stream (`Da.IT`, L2353) once per fight, then each
-// `pn.M4` (L879) draws `eligible.length*Da.pg.jf()|0`. The port does the
-// same on the OWNED `DaPrng` (`Da.pg` analog): one draw + reseed at the
-// first `rules_begin_round`, then one draw per group - matching the JS draw
-// ORDER/VALUES (previously the private mt19937 stream, and the reseed draw
-// was skipped when a battle carried no `<RandomRule>`). Still OPEN: `qmb`
-// (the second `$Ja` reseed, L1413) is not modeled, and `NoDoubles` across
-// battles is not modeled (one pick per group per fight).
+// JS-EXACT STREAM: `du.qob` (L38074, called by `du.rob` L38088 at every round
+// start) reseeds the shared stream from the WALL CLOCK — `Da.rL()` (L97723) =
+// `Da.pg.sL(ed.getDate().getTime())`, NOT a draw — then `du.DKa(1)` picks the
+// `Zsa==1` (`Refresh!=EachRound`) groups at round 1 and `du.DKa(2)` the
+// `Zsa==2` (`Refresh="EachRound"`) groups every round; each `pn.M4` (L37907)
+// draws `eligible.length*Da.pg.jf()|0`. The port does the same on the OWNED
+// `DaPrng` (`Da.pg` analog): the frozen-clock reseed (`kRoundClockSeed`) then
+// one draw per eligible group, matching the JS draw ORDER/VALUES. The
+// `cl.pmb`/`cl.qmb` draw-based reseeds (`cl.$Ja`, L58953) apply ONLY to a
+// replay record (`ob != null`) and are therefore not modeled for the shipped
+// single fights. Still OPEN: `NoDoubles` across battles (one pick per group
+// per fight).
 // ---------------------------------------------------------------------------
 enum class FightRuleKind : int {
     none = 0,
@@ -1723,10 +1726,11 @@ public:
                     // (keeps the ai_demo AI-player path unchanged).
                     const sf2::scene::TacticDef* player_tactic = nullptr);
 
-    // Seeds the OWNED fight stream (JS `Da.pg=new Rk(L.seed)`, L67). Every
-    // fight draw - rules (`cl.pmb`/`pn.M4`), combat (`Lcb`/`R8a`), the AI
-    // (`de.ia`) and conditions (`Random`) - uses this ONE stream unless a
-    // `roll01` override was injected (the demo/probe path).
+    // Seeds the OWNED fight stream (JS `Da.pg=new Rk(L.seed)`, L2701; the
+    // frozen clock seed, see `kBootSeed`). Every fight draw - rules
+    // (`du.qob`/`pn.M4`), combat (`Lcb`/`R8a`), the AI (`de.ia`) and
+    // conditions (`Random`) - uses this ONE stream unless a `roll01` override
+    // was injected (the demo/probe path).
     void set_seed(std::uint32_t seed) { prng_.seed(seed); }
     // The shared fight draw exposed to the app's mode resolver: the JS mode
     // battle generation (`p.F().efa` group Random picks) draws on the SAME
@@ -2272,15 +2276,15 @@ private:
     // External stream override (the demo/probe path). Empty -> the OWNED
     // `prng_` (JS `Da.pg`) is used for every fight draw.
     std::function<float()> roll01_;
-    // JS `Da.IT` (L1210444/L2353) reseed hook for an EXTERNAL override
-    // stream. `rules_begin_round` calls it once, immediately before the
-    // `pn.M4` RandomRule draw pass, mirroring `cl.pmb` (L1413).
+    // JS `Da.IT(a)` (L97728: `Da.pg.sL(a)`): reseed the shared stream in
+    // place. `rules_begin_round` calls it with the frozen clock value
+    // (`du.qob`'s `Da.rL()`, L97723).
     std::function<void(int)> reseed01_;
-    // The OWNED fight stream (JS `Da.pg`, L67: `Da.pg=new Rk(L.seed)`;
-    // `Xx`+`Rk` L2352/2366). Shared by EVERY fight draw - rules, combat,
-    // AI and conditions - like the game's single global `Da.pg`. Default
-    // seed 0x5F2 (the native replay-seed analog).
-    DaPrng prng_{0x5F2};
+    // The OWNED fight stream (JS `Da.pg`, L2701: `Da.pg=new Rk(L.seed)`;
+    // `Xx`+`Rk` L98397/L97733). Shared by EVERY fight draw - rules, combat,
+    // AI and conditions - like the game's single global `Da.pg`. Seeded with
+    // the boot `L.seed` (L102533) = the frozen clock (see `kBootSeed`).
+    DaPrng prng_{kBootSeed};
     // The shared fight draw (JS `Da.pg.jf()`, L2352): the external override
     // when installed, else the owned `prng_` (`Rk.s4(1)` == `Rk.jf`).
     float draw01();
@@ -2479,14 +2483,10 @@ private:
     // entry here, split into two only in `rules_` for the runtime effects).
     std::vector<FightRule> rule_report_;
     // JS `pn.CB` (L879): the chosen RandomRule child per group. The pick is
-    // drawn once per fight (`EachFight`) or every round (`EachRound`); it is
-    // cached here so `EachFight` groups keep the same choice across rounds.
+    // drawn once (`Zsa == 1`, `Refresh != EachRound`) or every round
+    // (`Zsa == 2`, `Refresh="EachRound"`, `du.DKa` L38401); it is cached here
+    // so the once-only groups keep the same choice across rounds.
     std::map<int, int> random_pick_;
-    bool random_pick_done_ = false;
-    // JS `cl.qmb` (L724359): the SECOND `$Ja` reseed. `$Ja` (L723864) runs
-    // `pmb()` THEN `qmb()`, each reseeding the shared `Da.pg` from ONE draw;
-    // the port modeled only the `pmb` reseed.
-    bool qmb_done_ = false;
     // JS `bu` (L220406) — the full-screen overlay the `SetDarkness` perk
     // (type 25) installs via `ca.Nqb` (L199177 -> `this.mV = new bu(...)`).
     // `bu.Qh` (L220546) ramps its alpha once per frame.

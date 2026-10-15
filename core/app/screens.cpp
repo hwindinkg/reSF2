@@ -7586,7 +7586,7 @@ void DojoScreen::build_dojo_fight(App& app) {
         battle.enemy_spawn_y, battle.max_hp, battle.max_hp, {}, player_owned,
         equipped_perks(app, assets, bw), nullptr, player_model, &assets.merged_bag,
         player_tactic);
-    dojo_fight_->set_seed(0x5F2u);  // JS `Da.pg=new Rk(L.seed)` (L67)
+    dojo_fight_->set_seed(sf2::scene::kBootSeed);  // JS `Da.pg=new Rk(L.seed)` (L2701/L102533)
     dojo_fight_->set_bounds(wall, arena_w - wall, loc.arena_floor());
     dojo_fight_->set_fighter_color(loc.root_color());
     {
@@ -11849,13 +11849,14 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     const auto it = assets.tactic_defs.find("Standard");
     if (it != assets.tactic_defs.end()) tactic = &it->second;
 
-    // JS `Da.pg` (L67: `Da.pg=new Rk(L.seed)`; `Xx`+`Rk` L2352/2366): the
+    // JS `Da.pg` (L2701: `Da.pg=new Rk(L.seed)`; `Xx`+`Rk` L98397/L97733): the
     // ONE global fight stream. The scene layer OWNS it (`FightController`
     // DaPrng), so the app only seeds it and installs NO override — the former
     // private mt19937 stream (the documented RNG divergence) is gone.
     // `rules_begin_round` reseeds it in place before the RandomRule draws
-    // (JS `cl.pmb`, L1413). 0x5F2 = the native replay-seed analog.
-    const std::uint32_t fight_seed = 0x5F2u;
+    // (JS `du.qob`'s `Da.rL()`, L38074/L97723). `L.seed` (L102533) =
+    // `ed.getDate().getTime() % 2147483647` = the harness' frozen clock.
+    const std::uint32_t fight_seed = sf2::scene::kBootSeed;
 
     fight_ = std::make_unique<sf2::scene::FightController>();
     // JS `Br.dbb` (L2011): a fresh fight's `Br.init` sets the HP-bar layers to

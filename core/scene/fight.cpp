@@ -454,10 +454,9 @@ void FightController::init_locks(
     std::fflush(stdout);
     roll01_ = std::move(roll01);
     reseed01_ = std::move(reseed01);
-    // JS `cl.pmb`: each battle re-picks the `ERuleRandom` children (`pn.M4`).
+    // JS `du.qob` (L38074) re-picks the `ERuleRandom` children (`pn.M4`) each
+    // round via `DKa`; the once-only groups' picks are cached across rounds.
     random_pick_.clear();
-    random_pick_done_ = false;
-    qmb_done_ = false;
 
     // NOTE (W2 blocker): the move-LIST weapon subtype stays "Fists". The JS
     // derives it from the equipped weapon (`xc.cM` L809-810 -> `ra.Hza`
@@ -608,8 +607,9 @@ float FightController::draw01() {
     return static_cast<float>(prng_.s4(1.0));
 }
 
-// JS `Da.IT(a)` (L2353: `Da.pg.sL(a)`): reseed the shared fight stream in
-// place - the `cl.pmb` reseed (L1413). An injected override's reseed hook
+// JS `Da.IT(a)` (L97728: `Da.pg.sL(a)`) — reseed the shared fight stream in
+// place. `rules_begin_round` calls it with the frozen clock value, which is
+// `du.qob`'s `Da.rL()` (L97723) reseed. An injected override's reseed hook
 // reseeds the external stream; otherwise the owned `DaPrng`.
 void FightController::reseed_stream(int seed) {
     if (reseed01_) {
@@ -1725,8 +1725,9 @@ std::string i6a_attr(const std::vector<std::pair<std::string, float>>& sz) {
 // stream of its OWN, NOT `Da.pg` (routing the two shock rolls through the
 // shared stream desynced crit/AI). The oracle harness pins `Math.random` to
 // `mulberry32(0xC0FFEE)` (reference/traces/README.md `harness.mathRandom`), so
-// the native mirrors that pin — same spirit as the `Da.pg` replay seed
-// (0x5F2). Process-global state: the sequence is fixed per run.
+// the native mirrors that pin — same spirit as the `Da.pg` seed (the frozen
+// clock `T0`, `kBootSeed`/`kRoundClockSeed`). Process-global state: the
+// sequence is fixed per run.
 float FightController::math_random01() {
     static std::uint32_t a = 0xC0FFEEu;
     a += 0x6D2B79F5u;
@@ -2506,9 +2507,10 @@ void FightController::rules_begin_round(int round) {
     // that child's rules stay active (`pn.setActive`/`A$`). `M4`'s filter is
     // `Ti()` (power range) only; the Round `kI` gate is the `osb` pass above
     // (`fight_rule_gate`). `Refresh="EachRound"` (`pn.Zsa==2`) re-draws every
-    // round; otherwise the choice is cached for the fight. `draw01()` is the
-    // shared fight stream (JS `Da.pg.jf()`, L2352) - the OWNED `DaPrng`
-    // unless a caller injected an override (the demo/probe path).
+    // round; otherwise (`Zsa==1`) the choice is drawn ONCE at round 1
+    // (`du.DKa(1)`, L38401). `draw01()` is the shared fight stream (JS
+    // `Da.pg.jf()`, L97744) - the OWNED `DaPrng` unless a caller injected an
+    // override (the demo/probe path).
     {
         std::map<int, std::vector<int>> groups;  // group -> distinct choices
         for (const FightRule& r : rules_) {
@@ -2520,29 +2522,16 @@ void FightController::rules_begin_round(int round) {
             }
             if (!seen) ch.push_back(r.random_choice);
         }
-        // JS `cl.pmb` (L1413): `Da.IT(this.ob!=null?this.ob.Qm:
-        // 2147483647*Da.pg.jf()|0)` - `$Ja` runs this for EVERY fight, so the
-        // port draws once and reseeds ONCE per fight (before any `pn.M4`
-        // pick), even when the battle carries no ERuleRandom group. The
-        // shipped single fights have no persisted replay record
-        // (`this.ob == null`), so the seed is the random path: ONE shared
-        // draw (`Da.pg.jf()`) scaled to 31 bits, then `Da.pg.sL(seed)`.
-        if (!random_pick_done_) {
-            const int seed = static_cast<int>(
-                2147483647.0 * static_cast<double>(draw01()));
-            reseed_stream(seed);
-        }
-        for (const auto& kv : groups) {
-            const int gid = kv.first;
-            const std::vector<int>& choices = kv.second;
-            bool each_round = false;
+        auto each_round_of = [this](int gid) {
             for (const FightRule& r : rules_) {
-                if (r.random_group == gid && r.random_each_round) each_round = true;
+                if (r.random_group == gid && r.random_each_round) return true;
             }
-            if (!each_round && random_pick_done_ &&
-                random_pick_.find(gid) != random_pick_.end())
-                continue;  // `EachFight`: keep this fight's pick
-            // `pn.M4` eligible = choices whose `Ti()` (power range) holds.
+            return false;
+        };
+        // JS `pn.M4` (L37907): ONE `Da.pg.jf()` draw per group, truncated to
+        // the eligible index. An empty eligible list keeps the JS
+        // `a$.length>0` reset-retry (no re-roll).
+        auto pick_group = [&](int gid, const std::vector<int>& choices) {
             std::vector<int> eligible;
             for (int c : choices) {
                 for (const FightRule& r : rules_) {
@@ -2566,19 +2555,37 @@ void FightController::rules_begin_round(int round) {
                 pick = choices[0];  // JS `a$.length>0` reset-retry (no re-roll)
             }
             random_pick_[gid] = pick;
+        };
+        // JS `du.qob` (L38074), called by `du.rob` (L38088) at EVERY round
+        // start:
+        //   if (cz == 1) { Tqa ? Da.IT(Qm) : Da.rL();  DKa(1); }
+        //   Da.rL();  DKa(2);  Blb();
+        // `Da.rL()` (L97723) = `Da.pg.sL(ed.getDate().getTime())` — the seed
+        // is the WALL CLOCK, not a draw. The differential harness freezes it
+        // (trace_oracle.js L48 `T0 = 1720000000000`), so the port seeds the
+        // SAME frozen value (`kRoundClockSeed`). The previous model reseeded
+        // from `2147483647*Da.pg.jf()|0`; that is `cl.pmb`/`cl.qmb`
+        // (L58969/L59001), which `cl.$Ja` (L58953) runs ONLY when a replay
+        // record exists (`ob != null`: `$fb` L59030 / `dla` L59126). The
+        // shipped single fights have `ob == null`, so NO such draw exists and
+        // the stream is the frozen-clock seed drawn continuously.
+        reseed_stream(static_cast<int>(kRoundClockSeed));
+        // `du.DKa(1)` (L38401): the `Zsa == 1` (Refresh != EachRound) groups,
+        // ROUND 1 ONLY. Their `M4` draws are discarded by the unconditional
+        // `Da.rL()` below (only the `CB` pick is kept).
+        if (round <= 1) {
+            for (const auto& kv : groups) {
+                if (each_round_of(kv.first)) continue;
+                pick_group(kv.first, kv.second);
+            }
+            // JS `qob`'s unconditional `Da.rL()` — the SAME frozen value.
+            reseed_stream(static_cast<int>(kRoundClockSeed));
         }
-        random_pick_done_ = true;
-        // JS `cl.qmb` (L724359): `$Ja` (L723864) runs `pmb()` THEN `qmb()`,
-        // each reseeding the shared `Da.pg` from ONE draw
-        // (`Da.IT(ob?ob.Qm|ob.fv : 2147483647*Da.pg.jf()|0)`). The port
-        // modeled only the `pmb` reseed; `qmb` adds the SECOND reseed (the
-        // single-battle port has no `<Warriors>` roster `qpa`, so only the
-        // reseed applies). Shipped single fights: `ob==null` -> random path.
-        if (!qmb_done_) {
-            const int seed2 = static_cast<int>(
-                2147483647.0 * static_cast<double>(draw01()));
-            reseed_stream(seed2);
-            qmb_done_ = true;
+        // `du.DKa(2)` (L38401): the `Zsa == 2` (Refresh="EachRound") groups,
+        // every round.
+        for (const auto& kv : groups) {
+            if (!each_round_of(kv.first)) continue;
+            pick_group(kv.first, kv.second);
         }
         for (FightRule& r : rules_) {
             if (r.random_group < 0) continue;

@@ -46,6 +46,22 @@
 
 namespace sf2::scene {
 
+// The differential harness' FROZEN wall clock: `reference/tools/trace_oracle.js`
+// L48 `var T0 = 1720000000000;` replaces `window.Date` (L51-63), so the game's
+// `ed.getDate()` (L2532 `return new Date`) is a CONSTANT. Every JS seed derived
+// from the clock therefore resolves to this value:
+//   - `L.seed` (L102533 `ed.getDate().getTime() % 2147483647`) -> kBootSeed,
+//     the boot `Da.pg = new Rk(L.seed)` (L2701);
+//   - `Da.rL()` (L97723 `Da.pg.sL(ed.getDate().getTime())`) -> kRoundClockSeed,
+//     the `du.qob` round-begin reseed (L38074-38086).
+// `Xx.sL` (L98405) stores the raw number and `Xx.Olb` (L98408) masks it to 32
+// bits, so the port's `std::uint32_t` state holds `T0 & 0xFFFFFFFF`.
+constexpr std::uint64_t kFrozenClockMs = 1720000000000ull;
+constexpr std::uint32_t kBootSeed = static_cast<std::uint32_t>(
+    kFrozenClockMs % 2147483647ull);                             // L.seed
+constexpr std::uint32_t kRoundClockSeed =
+    static_cast<std::uint32_t>(kFrozenClockMs & 0xFFFFFFFFull);  // Da.rL()
+
 // ---------------------------------------------------------------------------
 // Exact port of the JS PRNG: `Da` + `Rk` (sf2.502f0946.js L2352) on top of
 // the `Xx` LCG (L2366).
