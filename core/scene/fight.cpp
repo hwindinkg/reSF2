@@ -7935,7 +7935,33 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 ctx.anims_enemy = anim_names_of(foe.fighter);
                 fill_ctx_geometry(ctx, me, foe);
                 ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
-                if (me.fighter.ai_start_move(*chosen, ctx)) {
+                // [FIX decision-application latency] The Random-tactic
+                // decision is QUEUED, not started here. JS chain:
+                //   `wd.Anb` (L20631 `a.type==1 -> this.hJa()`) ->
+                //   `wd.hJa` (L20679 `this.Vb.data=null; ca.Ka().Vgb(this.Vb)`)
+                //   -> `ca.Vgb` (L15807 `this.Bg.Vkb(a)`) ->
+                //   `Gc.Vkb` (L28282 `Ih(2,a,!0)`, pushing a type-2 event into
+                //   `Gc.Tu`) -> the SAME frame's `Gc.ia`/`Gnb` (L28299/L28336)
+                //   builds the candidates (`Rwa`/`EZa`), runs `dxa`->`DK`->
+                //   `Pkb`->`Gc.jL` (the `Md.jL` roulette) and its tail
+                //   `DK(a,d,!0)` -> `Gc.Nsb` (L28711) -> `wd.fJa` (L20892)
+                //   which only does `this.Ml.animation = a; this.Ml.sign = b;`
+                //   The move therefore starts on the NEXT frame, at the HEAD of
+                //   `wd.ia` (L20591): `Qnb()` false -> `Bnb()` (L20947)
+                //   `KCa()` (`Ml.animation != null`) -> `Nd.nk && Nd.stop()` ->
+                //   `NS` (L20869) -> `da.Skb` -> `Ml.clear()`.
+                // Starting it in the decision frame (as the port did) put the
+                // boss's `KnivesDoubleSlash` at nat f=204 / af=0 while the
+                // oracle starts it at ora f=335 / af=1 (the roulette is at
+                // ora f=333), and every downstream field followed.
+                // The `Ml` slot is the port's `ml_move_`
+                // (`Fighter::queue_reaction`, drained by
+                // `Fighter::process_reaction_queues` at the top of
+                // `update_fighter` — the `wd.ia` head).
+                if (me.ai->tactic_type() == 1) {
+                    me.fighter.queue_reaction(chosen, /*physics=*/false);
+                    ++me.moves_started;
+                } else if (me.fighter.ai_start_move(*chosen, ctx)) {
                     ++me.moves_started;
                 }
             }
