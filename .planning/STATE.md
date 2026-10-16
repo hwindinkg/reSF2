@@ -147,6 +147,28 @@ that char-offset grep missed:
   first seat `Pi.job` re-seats) — the "back→forward + jump" is gone
   (`--profile-avatar-probe`: `restart_step 0.155` vs `steady 0.142`) + the hit
   impulse now REPLACES per strike (JS `Bb` is one overwritten descriptor).
+## MILESTONE — ALL FIVE DIFFERENTIAL SCENARIOS ARE 0 (2026-10-16)
+`reference/tools/compare_state.py` reports **0 divergences / 36 counted fields** for
+**dojo-demo, boss-lynx, tournament, survival, challenge** (368 matched frames each,
+100% coverage). The path to 0 (each JS-exact, oracle-verified):
+- the tabular `Z0()` lookup is always EMPTY (JS `P.hKa` clears per-move) → `fk` 5/9;
+- the AI candidate/decision pipeline: `de.Pqb`/`de.ia`, the Random `hJa` arm, the
+  `Gc.DK` candidate build + `Aua` duplicate + the `Math.random`/`Da.pg` draw
+  counts, the `Da.pg` seed (`Da.rL()` frozen clock), the tabular index resolution;
+- the `<Move PackName>` pack filter (registry 1048 → 163 = JS `ra.Lk`; `me` 114);
+- the enemy equipped slots (`a.parameters.jt()`/`ur` `<Items>` equip-by-type);
+- `Te.vN` post-clip-end `Xh += 3`; the `Te.xj` interval OBJECT list (name+type);
+- the phase-1 gate = the intro stance CLIP END (not 134 frames) + the plate tick
+  before the phase machine; the post-intro selection via the `AnimationEnd` event
+  pass (not a `Template` template pick); the `de.V1` opponent-model pivot
+  (`e = a.nf` → `Object="Pivot"` resolves on the OPPONENT's skeleton).
+- Commits: `d3ff40c8`, `569bf6ef`, `e2c36907`, `5dadb025`, `ee30d4d5`, `862e99ab`,
+  plus the earlier `f0a3cf9f`/`c3f6fb12`/`c6599920`/`18264ec6` etc.
+
+**BUILD NOTE:** `cmake --build` is BROKEN since the user's VS update deregistered
+both instances from the VS Installer. Build with:
+`& "D:\MicrosoftVisualStudio\2022\BuildTools\MSBuild\Current\Bin\amd64\MSBuild.exe" build\sf2_native.sln /p:Configuration=Release /m /nologo`.
+
 ## METHOD (root cause + fix) — 2026-10-14
 **Why "new divergences keep appearing":** the port is a hand-transcription (read
 JS → understand → write C++); verification was manual sampling; the only
