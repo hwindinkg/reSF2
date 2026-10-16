@@ -475,6 +475,12 @@ struct AiFightState {
     std::vector<std::string> enemy_perks;
     std::set<std::string> my_mods;                    // `Sia`
     std::set<std::string> enemy_mods;                 // `S3`
+    // The OPPONENT's own move list (JS `a.me` = `fighter.jb.hb()`, the same
+    // `ra.Hza` set `my_moves` holds for me). JS `de.V1` (L601-602) runs on
+    // the OPPONENT's controller (`e = a.nf`, L25504: `this.model = a` = the
+    // opponent), so its `this.model.me` membership test reads the OPPONENT's
+    // list. Filled by the fight for the `Pqb` `IB` loop.
+    const std::vector<const MoveDef*>* enemy_moves = nullptr;
     // Enemy's highest body-part animation frame (`Tba` L595: max over
     // `vd` parts of `da.M2`).
     int enemy_max_part_frames = 0;
@@ -555,6 +561,21 @@ struct AiFightState {
     // probes (where `oxb` short-circuits on the missing bone resolver).
     float my_wall_min = 0.0f;
     float my_wall_max = 0.0f;
+    // The OPPONENT's arena walls (JS `a.da.yu/zu` of `a.nf.model`). JS
+    // `de.V1` runs with `this.model` = the opponent, so its `de.oxb`
+    // (`b.da.zu`/`b.da.yu`) reads the OPPONENT's walls.
+    float enemy_wall_min = 0.0f;
+    float enemy_wall_max = 0.0f;
+    // The OPPONENT's own-view `Object="Pivot"`/`Object="Nodes"` resolvers
+    // (`ee.nt` L786 / `ee.j8a` L33329): the SAME fight resolvers with
+    // `me`/`foe` swapped, so `Player="Me"` (1) selects the OPPONENT's skeleton
+    // and its direction sign — exactly what `de.V1`'s own `this.model` sees.
+    std::function<bool(const std::string&, const std::string&, int, bool, float&,
+                       float&)>
+        foe_ref_pos;
+    std::function<bool(const MoveDef& cand, int player, bool frame_prev,
+                       float& x, float& y)>
+        foe_candidate_pivot_pos;
     // Cautious-movements condition: whether the enemy is playing a
     // cautious animation (JS `fCa` - body-part anim in `P.nG`).
     bool enemy_cautious = false;

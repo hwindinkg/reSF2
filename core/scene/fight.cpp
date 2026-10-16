@@ -7629,6 +7629,24 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             if (!banned) ai_me.push_back(m);
         }
         st.my_moves = &ai_me;              // JS `this.model.me` (`de.V1` L601)
+        // The OPPONENT's own filtered move list (JS `a.me` = `foe.hb()` minus
+        // the battle's `eK` banned anims). JS `de.V1` (L601-602) runs on the
+        // OPPONENT's controller (L25504 `e = a.nf`, `this.model = a`), so its
+        // `this.model.me.includes(h)` membership test reads THIS list.
+        std::vector<const sf2::scene::MoveDef*> ai_foe;
+        ai_foe.reserve(foe.fighter.hb().size());
+        for (const sf2::scene::MoveDef* m : foe.fighter.hb()) {
+            if (m == nullptr) continue;
+            bool banned = false;
+            for (const std::string& n : m->anim_names) {
+                if (std::find(ek.begin(), ek.end(), n) != ek.end()) {
+                    banned = true;
+                    break;
+                }
+            }
+            if (!banned) ai_foe.push_back(m);
+        }
+        st.enemy_moves = &ai_foe;
         st.move_frame = me.fighter.move_frame();
         st.move_len = st.current_move ? st.current_move->end_frame : 0;
         st.my_hp = me.hp;
@@ -7825,9 +7843,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // `<Pivot Object="Animation">`) leaves `CBa(ctx).Yd == null`, so
         // `j8a` returns `ctx.cJa` = the current move's `da.Fe()` and the
         // generic `ref_pos` above resolves it. `de.V1` binds the candidate.
-        st.candidate_pivot_pos = [&me, &foe](const MoveDef& cand,
-                                            int player, bool prev,
-                                            float& x, float& y) {
+        const auto make_cand_pivot =
+            [](const FightFighter& me_f, const FightFighter& foe_f) {
+                return [&me_f, &foe_f](const MoveDef& cand, int player,
+                                       bool prev, float& x, float& y) -> bool {
             if (!cand.align.has_align) return false;
             if (cand.align.pivot_object == "Animation" ||
                 cand.align.pos_object == "Animation") {
@@ -7835,7 +7854,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             }
             const std::string& part = cand.align.pivot_part;
             if (part.empty()) return false;
-            const FightFighter& f = (player == 2) ? foe : me;
+            const FightFighter& f = (player == 2) ? foe_f : me_f;
             if (!f.fighter.node_world_xy(part, prev, x, y)) return false;
             // JS `jc.Tab` (L29746-29758): `align.WE` = 1 when the `<Align>
             // <Pivot Part>` name ends `_1`, 2 when it ends `_2`. `ee.j8a`
@@ -7859,8 +7878,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     // `<SetDirection>` sign, which for the shipped
                     // `Me/NPivot -> Enemy/NPivot` SetDirection is
                     // `sign(enemy_x - me_x)`.
-                    const float wl = (foe.fighter.world_x() -
-                                      me.fighter.world_x()) >= 0.0f
+                    const float wl = (foe_f.fighter.world_x() -
+                                      me_f.fighter.world_x()) >= 0.0f
                                          ? 1.0f
                                          : -1.0f;
                     const bool c = (x * wl) > (px * wl);
@@ -7868,11 +7887,25 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 }
             }
             return true;
-        };
+                };
+            };
+        st.candidate_pivot_pos = make_cand_pivot(me, foe);
+        st.foe_candidate_pivot_pos = make_cand_pivot(foe, me);
         // JS `de.oxb` (L618 `b.da.yu`/`b.da.zu`, b = this.model = ME): MY
         // arena walls (`Te.zLa` via `qMa`). The candidate-filter `bma`.
         st.my_wall_min = me.fighter.arena_wall_min();
         st.my_wall_max = me.fighter.arena_wall_max();
+        st.enemy_wall_min = foe.fighter.arena_wall_min();
+        st.enemy_wall_max = foe.fighter.arena_wall_max();
+        // `de.V1`'s `this.model` = the OPPONENT: the same `ee.nt` ref resolver
+        // with the `Player` index flipped (1<->2), so `Player="Me"` selects the
+        // OPPONENT's skeleton (JS `CBa` picks the holder by the ctx owner's
+        // `qb`, and the ctx owner is `this.model`).
+        st.foe_ref_pos = [&st](const std::string& obj, const std::string& part,
+                               int player, bool prev, float& x, float& y) {
+            const int p = (player == 1) ? 2 : (player == 2 ? 1 : player);
+            return st.ref_pos(obj, part, p, prev, x, y);
+        };
 
         const std::string decision = me.ai->update(st);
         me.last_decision = decision;

@@ -666,20 +666,28 @@
                         var r = ohe.apply(this, arguments);
                         try {
                           var ff = frameNo();
-                          if (this.qdb === 0 && this.FK && this.GK && ct &&
-                              ff != null && ff >= 325 && ff <= 340) {
+                          var inW = (ff != null) &&
+                            ((ff >= 325 && ff <= 340) || (ff >= 478 && ff <= 492));
+                          if (this.qdb === 0 && this.FK && this.GK && ct && inW) {
                             var fx = this.FK.OQ(ct), tx = this.GK.OQ(ct);
                             var bb = (tx - fx) * ct.Wl;
-                            var ydx = null;
+                            var ydx = null, yn = null, txn = null;
                             try {
                               var yd = this.FK.CBa(ct).Yd;
                               ydx = yd && yd.ma ? Math.round(yd.ma.x * 100) / 100 : null;
+                              yn = yd && yd.name != null ? String(yd.name) : null;
+                            } catch (e2) { /* ignore */ }
+                            try {
+                              var tn = this.GK.CBa(ct).node;
+                              txn = tn && tn.name != null ? String(tn.name) : null;
                             } catch (e2) { /* ignore */ }
                             console.log(JSON.stringify({ t: "distlog", f: ff,
                               mv: or.curMove, mn: this.min, mx: this.max,
                               fx: Math.round(fx * 100) / 100,
                               tx: Math.round(tx * 100) / 100, wl: ct.Wl,
-                              ydx: ydx,
+                              ydx: ydx, yn: yn, txn: txn,
+                              fpe: this.FK.pe, fobj: this.FK.object, fpart: this.FK.part,
+                              tope: this.GK.pe, tobj: this.GK.object, tpart: this.GK.part,
                               b: Math.round(bb * 100) / 100, r: r }));
                           }
                         } catch (e) { /* ignore */ }
@@ -1471,6 +1479,7 @@
     ensureFightHooks(fight);
     ensureDeHooks(fight);
     ensureRandomHooks(fight);
+    ensureIbHooks(fight);
     if (!or.headerDone) {
       or.headerDone = true;
       emitHeader(fight);
@@ -1547,6 +1556,276 @@
       }
       return true;
     } catch (e) { return false; }
+  }
+
+  /* ================= IB / pivot-root evidence hook =================
+   * The challenge differential: the JS `de.Pqb` (`readable.js:25500-25513`)
+   * sets `IB` when an Evade (`nD`) slot candidate `h` passes
+   * `a.nf.V1(h)` (L25301), i.e. the candidate's `<Distance><From
+   * Object="Pivot">` resolves inside `V1`'s scratch ctx. The port's V1
+   * proxy sees the candidate 14.13 short of the required window, so the
+   * whole point is to record WHAT `ee.j8a`/`CBa(a).Yd` actually resolves
+   * to for the deciding candidates: the node NAME + `ma.x`, the `CBa`
+   * branch (per-fighter `H5a`/`XE`/`IC` vs shared `Ob`/`XY`), and the
+   * `Vi.SBa` (direction-condition) inputs. Frame-gated to the decision
+   * window so the log stays readable. */
+  function ibWin() {
+    var f = frameNo();
+    return f != null && f >= 470 && f <= 500;
+  }
+  function nodeRec(n) {
+    if (n == null) return null;
+    try {
+      var o = n;
+      if (o.G != null) o = o.G; /* `Ia` wrapper -> node */
+      var out = { name: null, x: null };
+      try { if (o.name != null) out.name = String(o.name); } catch (e) { /* */ }
+      try {
+        if (o.ma && typeof o.ma.x === "number") {
+          out.x = Math.round(o.ma.x * 100) / 100;
+        }
+      } catch (e) { /* */ }
+      return out;
+    } catch (e) { return null; }
+  }
+  function cbaBranch(self, a) {
+    try {
+      if (a && a.hE && self.pe !== 2) return "H5a";
+      switch (self.pe) {
+        case 0:
+        case 1: return (a && a.qb) ? "Ob" : "XY";
+        case 2: return (a && a.qb) ? "XY" : "Ob";
+        case 3: return "null";
+        case 6: return "Lza";
+        default: return "null";
+      }
+    } catch (e) { return "?"; }
+  }
+  function ensureIbHooks(fight) {
+    if (or.ibHooked) return;
+    try {
+      var pb = (fight && (fight.pb || fight.yb)) || null;
+      if (!pb || !pb.nf) return;
+      var deP = deProtoOf(pb.nf);
+      var mv = null;
+      try {
+        var lists = [pb.me, pb.Mo];
+        for (var li = 0; li < lists.length && !mv; li++) {
+          var L = lists[li];
+          if (!L) continue;
+          for (var i = 0; i < L.length; i++) {
+            if (L[i] && L[i].va && L[i].va.vj && L[i].va.vj.from) {
+              mv = L[i]; break;
+            }
+          }
+        }
+      } catch (e) { /* ignore */ }
+      if (!mv) return;
+      var eeP = Object.getPrototypeOf(mv.va.vj.from);
+      var viP = Object.getPrototypeOf(mv.va.vj);
+
+      if (eeP && typeof eeP.OQ === "function" && !eeP.__orOq) {
+        var oOq = eeP.OQ;
+        eeP.OQ = function (a) {
+          var r = oOq.apply(this, arguments);
+          try {
+            if (ibWin() && this.object !== 0) {
+              emit({ t: "oq", f: frameNo(), pe: this.pe, obj: this.object,
+                part: this.part, cand: or.curCand, x: num(r), br: cbaBranch(this, a) });
+            }
+          } catch (e) { /* */ }
+          return r;
+        };
+        eeP.__orOq = true;
+      }
+      if (eeP && typeof eeP.MQ === "function" && !eeP.__orMq) {
+        var oMq = eeP.MQ;
+        eeP.MQ = function (a) {
+          var r = oMq.apply(this, arguments);
+          try {
+            if (ibWin()) {
+              emit({ t: "mq", f: frameNo(), pe: this.pe, part: this.part,
+                cand: or.curCand, node: nodeRec(r) });
+            }
+          } catch (e) { /* */ }
+          return r;
+        };
+        eeP.__orMq = true;
+      }
+
+      /* Distance-condition (`qm`) hook: attach from a `Ts` entry (the
+       * `Pkb`-path disthook never attaches on the `Pqb` path this fight
+       * takes). Logs the From/To node NAMES + x for the Axis=X window so
+       * the `IB` candidate's `<Distance Max="100"><From Pivot/><To
+       * NPivot/></Distance>` resolves on both sides. */
+      try {
+        var qm = null;
+        var tss = (mv.va && mv.va.Ts) ? mv.va.Ts : null;
+        if (tss) {
+          for (var ti = 0; ti < tss.length; ti++) {
+            var cand = tss[ti];
+            if (cand && typeof cand.he === "function" && cand.FK) { qm = cand; break; }
+            if (cand && cand.rb) {
+              for (var ri = 0; ri < cand.rb.length; ri++) {
+                if (cand.rb[ri] && typeof cand.rb[ri].he === "function" && cand.rb[ri].FK) {
+                  qm = cand.rb[ri]; break;
+                }
+              }
+            }
+            if (qm) break;
+          }
+        }
+        var qmP = qm ? Object.getPrototypeOf(qm) : null;
+        if (qmP && typeof qmP.he === "function" && !qmP.__orIbDist) {
+          var ohe2 = qmP.he;
+          qmP.he = function (ct) {
+            var rr = ohe2.apply(this, arguments);
+            try {
+              var ff = frameNo();
+              if (ff != null && ff >= 478 && ff <= 492) {
+                var fx = this.FK.OQ(ct), tx = this.GK.OQ(ct);
+                var yn = null, txn = null, ydx = null, txn2 = null;
+                try {
+                  var yd = this.FK.CBa(ct).Yd;
+                  yn = yd && yd.name != null ? String(yd.name) : null;
+                  ydx = yd && yd.ma ? Math.round(yd.ma.x * 100) / 100 : null;
+                } catch (e2) { /* */ }
+                try {
+                  var tn = this.GK.CBa(ct).node;
+                  txn = tn && tn.name != null ? String(tn.name) : null;
+                  if (tn && tn.ma) txn2 = Math.round(tn.ma.x * 100) / 100;
+                } catch (e2) { /* */ }
+                emit({ t: "dist", f: ff, mv: or.curMove, cand: or.curCand,
+                  mn: this.min, mx: this.max, qdb: this.qdb,
+                  fpe: this.FK.pe, fobj: this.FK.object, fpart: this.FK.part,
+                  tope: this.GK.pe, tobj: this.GK.object, tpart: this.GK.part,
+                  fx: Math.round(fx * 100) / 100, tx: Math.round(tx * 100) / 100,
+                  yn: yn, ydx: ydx, txn: txn, tx2: txn2,
+                  wl: num(ct && ct.Wl), b: Math.round(((tx - fx) * ct.Wl) * 100) / 100,
+                  r: rr });
+              }
+            } catch (e) { /* */ }
+            return rr;
+          };
+          qmP.__orIbDist = true;
+        }
+      } catch (e) { /* ignore */ }
+
+      if (eeP && typeof eeP.j8a === "function" && !eeP.__orJ8a) {
+        var oj8a = eeP.j8a;
+        eeP.j8a = function (a) {
+          var r = oj8a.apply(this, arguments);
+          try {
+            if (ibWin() && this.object === 2) {
+              var yd = null;
+              try { yd = this.CBa(a).Yd; } catch (e2) { /* */ }
+              emit({ t: "j8a", f: frameNo(), side: deSide(or.fight, or.ibDe) || "?",
+                pe: this.pe, part: this.part, br: cbaBranch(this, a),
+                hE: !!(a && a.hE), qb: !!(a && a.qb),
+                mdlIsPb: !!(or.fight && or.ibDe && or.ibDe.model === or.fight.pb),
+                mdlIsYb: !!(or.fight && or.ibDe && or.ibDe.model === or.fight.yb),
+                wl: num(a && a.Wl), yh: num(a && a.YH),
+                cand: or.curCand, yd: nodeRec(yd), r: nodeRec(r),
+                cja: a ? nodeRec(a.cJa) : null });
+            }
+          } catch (e) { /* ignore */ }
+          return r;
+        };
+        eeP.__orJ8a = true;
+      }
+      if (eeP && typeof eeP.H5a === "function" && !eeP.__orH5a) {
+        var oH5a = eeP.H5a;
+        eeP.H5a = function (a) {
+          var r = oH5a.apply(this, arguments);
+          try {
+            if (ibWin()) {
+              var key = null;
+              try { key = a && a.Ob ? a.Ob.Pg : null; } catch (e2) { /* */ }
+              emit({ t: "h5a", f: frameNo(), pe: this.pe, qb: !!(a && a.qb),
+                keyIsEnemy: (or.fight && or.fight.yb && key === or.fight.yb.oa),
+                keyIsMe: (or.fight && or.fight.pb && key === or.fight.pb.oa),
+                yd: nodeRec(r ? r.Yd : null) });
+            }
+          } catch (e) { /* ignore */ }
+          return r;
+        };
+        eeP.__orH5a = true;
+      }
+      if (viP && typeof viP.SBa === "function" && !viP.__orSba) {
+        var oSba = viP.SBa;
+        viP.SBa = function (a) {
+          var r = oSba.apply(this, arguments);
+          try {
+            if (ibWin()) {
+              var tv = null, fv = null;
+              try { tv = this.to.OQ(a); } catch (e2) { /* */ }
+              try { fv = this.from.OQ(a); } catch (e2) { /* */ }
+              emit({ t: "sba", f: frameNo(), fg: num(this.fg), kw: num(a && a.kw),
+                to: num(tv), from: num(fv), r: r });
+            }
+          } catch (e) { /* ignore */ }
+          return r;
+        };
+        viP.__orSba = true;
+      }
+      if (deP && typeof deP.V1 === "function" && !deP.__orV1) {
+        var oV1 = deP.V1;
+        deP.V1 = function (x) {
+          var prev = or.curCand;
+          or.curCand = animLabel(x);
+          or.ibDe = this;
+          var r = oV1.apply(this, arguments);
+          try {
+            if (ibWin()) {
+              emit({ t: "v1", f: frameNo(), side: deSide(or.fight, this) || "?",
+                cand: or.curCand, r: !!r });
+            }
+          } catch (e) { /* ignore */ }
+          or.curCand = prev;
+          return r;
+        };
+        deP.__orV1 = true;
+      }
+      if (deP && typeof deP.Pqb === "function" && !deP.__orIbPqb) {
+        var oPqb2 = deP.Pqb;
+        deP.Pqb = function (a) {
+          var r = oPqb2.apply(this, arguments);
+          try {
+            if (ibWin()) {
+              var names = [];
+              try {
+                if (this.wb) {
+                  for (var wi = 0; wi < this.wb.length; wi++) names.push(animLabel(this.wb[wi]));
+                }
+              } catch (e2) { /* */ }
+              var grp = [];
+              try {
+                var nD = this.Gc ? this.Gc.nD : null;
+                if (nD) {
+                  for (var gi = 0; gi < nD.length; gi++) {
+                    var it = nD[gi];
+                    grp.push({ na: !!(it && it.N_), first: (it && it.first != null) ? String(it.first) : null });
+                  }
+                }
+              } catch (e2) { /* */ }
+              emit({ t: "ib", f: frameNo(), side: deSide(or.fight, this) || "?",
+                argMove: (a && a.da && a.da.Ua) ? String(a.da.Ua.name) : null,
+                mdlMove: (this.model && this.model.da && this.model.da.Ua)
+                  ? String(this.model.da.Ua.name) : null,
+                argIsPb: !!(or.fight && a === or.fight.pb),
+                argIsYb: !!(or.fight && a === or.fight.yb),
+                myIsPb: !!(or.fight && this.model === or.fight.pb),
+                myIsYb: !!(or.fight && this.model === or.fight.yb),
+                ib: !!this.IB, fk: num(this.fk), n: names.length, wb: names, grp: grp });
+            }
+          } catch (e) { /* ignore */ }
+          return r;
+        };
+        deP.__orIbPqb = true;
+      }
+      or.ibHooked = true;
+      try { console.log("[ORACLE] ib hooks attached"); } catch (e) { /* */ }
+    } catch (e) { /* ignore */ }
   }
 
   try {

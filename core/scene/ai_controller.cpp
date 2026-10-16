@@ -1611,12 +1611,35 @@ int AiController::quick_slots(const AiFightState& st) {
 }
 
 // JS `Pqb` L606: `IB` is set when a FIRING Evade (`nD`) slot resolves to a
-// move the OPPONENT's `de` would accept (`a.nf.V1(h)`). The port has no
-// opponent controller, so its own `V1` is the documented proxy (both
-// fighters share the move table).
+// move the OPPONENT's `de` would accept (`a.nf.V1(h)`). JS `Ykb` (L20647)
+// calls `this.nf.ia(this.jb)` — the AI is fed the OPPONENT fighter as `a`, so
+// `a.nf` (L25504 `e = a.nf`) is the OPPONENT's controller and `de.V1`'s
+// `this.model` (L25301-25312, `this.model.me` / `this.model.Fc`) is the
+// OPPONENT. The port has no opponent controller, but the opponent's STATE is
+// right here: mirror the two halves of `st` and hand `V1` the OPPONENT view
+// (`my_moves` <- `enemy_moves`, `my_x` <- `enemy_x`, the swapped `Pivot`
+// resolvers, …) so the candidate's align node and direction are measured on
+// the OPPONENT's skeleton, exactly as the JS does. (With the own-view the
+// `ThrowForward` `<Distance Max="100">` was ~14 units outside the window and
+// `IB` stayed false; the oracle measures `IB=true` -> `fk=9` -> BackHandflip.)
 void AiController::evade_ib(const AiFightState& st) {
     IB_ = false;
     if (tactic_ == nullptr || moves_ == nullptr) return;
+    AiFightState foe = st;  // the OPPONENT's own view = `a` in `Pqb(a)`
+    std::swap(foe.my_moves, foe.enemy_moves);
+    std::swap(foe.current_move, foe.enemy_move);
+    std::swap(foe.my_anim, foe.enemy_anim);
+    std::swap(foe.my_x, foe.enemy_x);
+    std::swap(foe.my_hp, foe.enemy_hp);
+    std::swap(foe.my_max_hp, foe.enemy_max_hp);
+    std::swap(foe.my_intervals, foe.enemy_intervals);
+    std::swap(foe.my_items, foe.enemy_items);
+    std::swap(foe.my_perks, foe.enemy_perks);
+    std::swap(foe.my_mods, foe.enemy_mods);
+    std::swap(foe.my_wall_min, foe.enemy_wall_min);
+    std::swap(foe.my_wall_max, foe.enemy_wall_max);
+    std::swap(foe.ref_pos, foe.foe_ref_pos);
+    std::swap(foe.candidate_pivot_pos, foe.foe_candidate_pivot_pos);
     for (std::size_t d = 0;
          d < tactic_->evades.size() && d < evade_rolls_.size(); ++d) {
         if (!evade_rolls_[d].na) continue;
@@ -1624,7 +1647,7 @@ void AiController::evade_ib(const AiFightState& st) {
         for (const std::string& n : tactic_->evades[d].names) {
             const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
             for (const MoveDef* m : group) {
-                if (v1(*m, st)) {
+                if (v1(*m, foe)) {
                     hit = true;
                     break;
                 }
