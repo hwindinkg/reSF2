@@ -720,6 +720,10 @@ inline bool resolve_survival_warrior(
     out.tactic = slot->tactic;
     out.attrs = slot->attrs;
     out.perks = slot->perks;
+    // The ordered equip list the JS `parameters.jt()` exposes (see the `ur`
+    // note in the group walk below); filled for both the group and the
+    // no-group path, then handed to the app layer's equip-by-type bucketing.
+    std::vector<std::string> merged_items;
     if (slot->groups.empty()) {
         out.template_name = slot->template_name;
     } else {
@@ -735,6 +739,22 @@ inline bool resolve_survival_warrior(
         // effect, so it is not modelled. When NO group resolves, `efa` falls
         // back to a clone of the row (`c.length==0 && c.push(a.clone())`).
         bool have_base = false;
+        // JS `ur` (L7838-7868) `<Items>` hop: `efa` (L7394-7400) merges EVERY
+        // group member's resolved node ON TOP of the accumulator
+        // (`l==null ? l=g : (l=this.ur(g.node,l))`), and `ur`'s `<Items>` block
+        // EQUIPS each item by TYPE (`b.hk(f.type,f)`, L7861) — a later member
+        // therefore OVERRIDES an earlier member in the same slot. `g.node` is
+        // the member's FULL node (its `<Template>` chain merged with the member
+        // via `F0a`/`pGa`, L8218-8222), so the member's resolved template-chain
+        // items ride along. Reproduce the ordered equip list here; the app-side
+        // `resolve_enemy_loadout` buckets last-wins by type (the SAME `<Items>`
+        // equip semantics). Before this the resolver kept only the FIRST
+        // member's template chain, so a survival enemy (Survival_1
+        // `Template="Default"` + a RANDOM Generic_1 Ninja) never got the Ninja's
+        // weapon: the ported enemy kept `Fists` while the JS one carried e.g.
+        // `WEAPON_NINJA_SWORD` (SubType `NinjaSword`), which changes the
+        // `FistsStartStanceIdle-Right` `<Locks>` outcome (readable.js:28897
+        // `d.items = a.parameters.jt()` = the EQUIPPED slots).
         for (const StageWarrior::GroupRef& g : slot->groups) {
             const auto it = groups.find(g.name);
             if (it == groups.end() || it->second.members.empty()) continue;
@@ -771,7 +791,15 @@ inline bool resolve_survival_warrior(
             }
             if (!m.tactic.empty()) out.tactic = m.tactic;
             for (const auto& kv : m.attrs) out.attrs[kv.first] = kv.second;
-            if (!m.items.empty()) out.items = m.items;
+            // `ur`'s `<Items>` hop (see above): the member's resolved
+            // template-chain items then the member's own `<Items>`, in order.
+            if (!m.template_name.empty()) {
+                for (const std::string& it2 :
+                     template_items(m.template_name, templates)) {
+                    merged_items.push_back(it2);
+                }
+            }
+            for (const std::string& it2 : m.items) merged_items.push_back(it2);
             // `ur`'s `<Perks>` hop appends, deduped by Name (L97347).
             for (const StagePerkRef& pr : m.perks) {
                 bool have = false;
@@ -786,10 +814,15 @@ inline bool resolve_survival_warrior(
         }
         if (!have_base) out.template_name = slot->template_name;
     }
+    // The Fight `<Warrior>`'s own `<Items>` merge LAST (`ur(a.node, l)` at
+    // L7406 when the row carries no `Template`), i.e. they override the groups'
+    // gear in the same slot.
+    for (const std::string& it2 : slot->items) merged_items.push_back(it2);
+    out.items = std::move(merged_items);
     if (!out.template_name.empty()) {
-        out.items = template_items(out.template_name, templates);
-        // Fight-warrior <Items> override the template list when present.
-        if (!slot->items.empty()) out.items = slot->items;
+        // No resolvable group member (and no row items) -> fall back to the
+        // row template's chain (the `c.length==0 && c.push(a.clone())` case).
+        if (out.items.empty()) out.items = template_items(out.template_name, templates);
         out.first_name = template_first_name(out.template_name, templates);
         // JS `xc.AK` merge (`ur`): the `<Template>` chain's `<Perks>` are the
         // base, the row/group perks append on top (dedup by Name, later `<Set>`
@@ -800,7 +833,7 @@ inline bool resolve_survival_warrior(
             template_perks(out.template_name, templates);
         append_perks_unique(merged_perks, out.perks);
         out.perks = std::move(merged_perks);
-    } else {
+    } else if (out.items.empty()) {
         out.items = slot->items;
     }
     used_templates.push_back(out.template_name);
@@ -853,7 +886,11 @@ inline bool resolve_tournament_fight(const StageBattle& battle, int fight_index,
             out.enemy.items = template_items(w.template_name, templates);
             out.enemy.first_name = template_first_name(w.template_name, templates);
         }
-        if (!w.items.empty()) out.enemy.items = w.items;
+        // JS `ur` (L7838-7868): the row's own `<Items>` merge ON TOP of the
+        // template chain (equip by TYPE), so APPEND (not replace) — the app
+        // layer's `resolve_enemy_loadout` buckets last-wins by type. The old
+        // replace dropped the chain's `Skeleton` (see screens.cpp note).
+        for (const std::string& it2 : w.items) out.enemy.items.push_back(it2);
     }
     return true;
 }

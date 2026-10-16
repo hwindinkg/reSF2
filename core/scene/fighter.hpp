@@ -1227,6 +1227,16 @@ private:
     // while `Ua`/`Xh`/`xj` stay set. Cleared by `clear_move` and every move
     // start (`Te.Skb`). See `playing()`/`move_ended()`.
     bool move_ended_ = false;
+    // JS `Te.vN` (L22757), set by `Te.Sca` (L22861 `this.Pe=!1; this.vN=!0`)
+    // on the NON-buffer clip-end branch (`Te.ia` L22827-22830:
+    // `KNa(); lS(Ua); Sca()`). The NEXT `da.ia()` tick then runs the `else`
+    // branch (L22844-22850) `if (this.vN && this.Ua != null) { this.Xh += 3;
+    // this.vp(); this.vN = false; }` — the `+3` jump past the last play-buffer
+    // range (the oracle's `af` 50 -> 53 for a 52-frame `stance_2.bin`) and
+    // `vp()` -> `rrb()` -> `c7a` (L29173) REBUILDS `xj` at the new frame, so
+    // every interval drops out of its window and the oracle reports `iv: []` /
+    // `block: 0`. Cleared by `clear_move` and every move start (`Te.Skb`).
+    bool vn_pending_ = false;
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf
     // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED

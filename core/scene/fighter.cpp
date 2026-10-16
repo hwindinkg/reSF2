@@ -1280,6 +1280,9 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // here: this new move is now the live `Ua`.
     const bool prev_move_active = current_move_ != nullptr && !move_ended_;
     move_ended_ = false;
+    // JS `Te.Skb` L22838 `this.vN = false` (a new clip cancels the pending
+    // post-end `Xh += 3` step).
+    vn_pending_ = false;
     current_move_ = &move;
     // JS `Te.Skb` (L280074): `this.Pe && this.gh("EAnimationInterruptedEvent",
     // a)` — a new clip interrupting a still-active one. `Pe` is the animator's
@@ -2236,6 +2239,36 @@ void Fighter::advance_step() {
     // (Node12) flailed — the reported "pinned at the CENTRE instead of the
     // rope" bag. `not_animation_` forces the bind/solver path below.
     if (not_animation_ || current_move_ == nullptr || current_clip_ == nullptr) {
+        // JS `Te.ia` L22844-22850 (the `else` of the `Pe` branch):
+        //   `if (this.vN && this.Ua != null) { this.Xh += 3; this.vp(); this.vN = false; }`
+        // This is the tick AFTER the non-buffer clip end (`Te.Sca` set `vN`):
+        // `Xh += 3` walks past the last play-buffer range and `vp()` -> `rrb()`
+        // -> `c7a` (L29173 `b.length = 0` then re-add every interval active at
+        // the new frame) leaves `xj` EMPTY because no interval window covers
+        // the jumped-to frame. That is exactly the oracle's post-end state
+        // (`af` 50 -> 53 for the 52-frame `stance_2.bin`, `iv: []`, `block:
+        // 0`). The port kept `playhead_`/`active_intervals_` frozen, so the
+        // just-ended clip reported a stale interval set forever.
+        if (vn_pending_ && move_ended_ && current_move_ != nullptr) {
+            playhead_ += 3;  // JS `this.Xh += 3`
+            const int ff0 = std::max(0, current_move_->first_frame);
+            // `vp()` -> `ip()`/`M0()` with the NEW `Xh` (`subframe_ == 0`
+            // here, so the JS `Xh` == `playhead_`).
+            move_frame_ = ff0 + std::max(0, playhead_ - 2);
+            active_intervals_.clear();
+            active_interval_list_.clear();
+            for (const Interval& iv : current_move_->intervals) {
+                const int s = std::max(iv.start, ff0);
+                if (s <= move_frame_ && move_frame_ <= interval_last(iv)) {
+                    const std::string key = iv.name.empty()
+                                                ? "type" + std::to_string(iv.type)
+                                                : iv.name;
+                    active_intervals_.insert(key);
+                    active_interval_list_.emplace_back(key, iv.type);
+                }
+            }
+            vn_pending_ = false;
+        }
         // JS `ia` (L499): `this.parameters.QD && (this.da.ia(), ...)` gates
         // ONLY the clip advance (`da.ia`); `this.Nd.ia()` (the ragdoll
         // solver, L582 `sk(); jE(); nk&&frameCount++`) runs UNCONDITIONALLY
@@ -2361,6 +2394,10 @@ void Fighter::advance_step() {
         // exactly as before (the JS `stop()` resets `jc`, `Pe` gates `da.ia`).
         current_clip_ = nullptr;
         move_ended_ = true;
+        // JS `Te.Sca` (L22861) on the non-buffer clip-end branch: `vN = true`.
+        // The next `da.ia()` tick adds 3 to `Xh` and re-runs `vp()` -> `rrb()`
+        // -> `c7a` (see `vn_pending_` in the header).
+        vn_pending_ = true;
         last_action_frame_ = -1;
         subframe_ = 0;
         prepend_.clear();
@@ -2587,6 +2624,7 @@ void Fighter::clear_move() {
     current_move_ = nullptr;
     current_clip_ = nullptr;
     move_ended_ = false;
+    vn_pending_ = false;  // JS `Te.reset` L22886 `this.vN = false`
     move_end_frame_ = 0;
     active_intervals_.clear();
     active_interval_list_.clear();

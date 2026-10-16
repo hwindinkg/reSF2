@@ -12394,9 +12394,21 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
     // out of `hb_`: the tournament monkey/brick never started its stance or
     // any move (`started=0`). Re-apply the chain, base-first, exactly like
     // `battle_warrior`.
+    // [FIX survival/challenge item set] `mf.enemy.items` is now the FULL
+    // merged equip list the JS `parameters.jt()` exposes — every group member's
+    // resolved template-chain `<Items>` in order, then the row's own `<Items>`
+    // (JS `ur` L7838-7868 equip-by-type, `efa` L7394-7400 merge). Prepending
+    // `template_items(template_name)` again would duplicate the chain AND (for
+    // survival) leave the RANDOM Generic_1 Ninja member's gear out of the list,
+    // so the enemy kept `Fists` instead of e.g. `WEAPON_NINJA_SWORD`
+    // (`SubType="NinjaSword"`) — which flipped the `FistsStartStanceIdle-Right`
+    // `<Locks>` outcome. Fall back to the chain only when the resolver produced
+    // nothing (the `efa` `c.push(a.clone())` case).
     BattleWarriorInfo mw;
-    mw.items = sf2::scene::template_items(mf.enemy.template_name, mode_templates_);
-    for (const std::string& it : mf.enemy.items) mw.items.push_back(it);
+    mw.items = mf.enemy.items;
+    if (mw.items.empty()) {
+        mw.items = sf2::scene::template_items(mf.enemy.template_name, mode_templates_);
+    }
     sf2::scene::BattleParams mrow;
     resolve_enemy_loadout(app(), mw, mrow);
     out = sf2::scene::mode_setup_from_fight(mf, mrow.enemy_owned);
