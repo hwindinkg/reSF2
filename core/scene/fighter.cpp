@@ -1810,7 +1810,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     // only for the PvP `*Hint*` switchers, so it was latent).
     std::size_t idx = 0;
     if (!f.empty()) {
-        if (math_random_) {
+        if (math_random_ && !ctx.no_draw) {
             float r = math_random_();
             if (r < 0.0f) r = 0.0f;
             if (r >= 1.0f) r = 0.9999999f;
@@ -1826,7 +1826,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     // clip starts from the `Rha` group. Recorded for the probe only.
     if (!g.empty()) {
         std::size_t gi = 0;
-        if (math_random_) {
+        if (math_random_ && !ctx.no_draw) {
             float r = math_random_();
             if (r < 0.0f) r = 0.0f;
             if (r >= 1.0f) r = 0.9999999f;
@@ -2057,7 +2057,7 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
     // `g.length>0 && a.Ukb(g[uf.sja(g.length)].animation)` (L674), SECOND.
     if (!g.empty()) {
         std::size_t gi = 0;
-        if (math_random_) {
+        if (math_random_ && !ctx.no_draw) {
             float r = math_random_();
             if (r < 0.0f) r = 0.0f;
             if (r >= 1.0f) r = 0.9999999f;

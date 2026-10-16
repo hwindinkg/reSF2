@@ -78,6 +78,15 @@ struct FightContext {
     // (wd.V1: `c.xK=a.xl`).
     std::vector<std::string> candidate_moves;
 
+    // [post-intro event pass] When set, the `Aua`/`uf.sja` group pick must NOT
+    // consume a `Math.random` tick. JS `Gc.DK` draws ONLY when the candidate
+    // group `f` is non-empty AND the event is a `Math.random` selection; the
+    // phase-1 intro->idle clip-end re-selection (`Gc.kg` L28310 -> `Gnb` ->
+    // `dxa`/`DK`) does NOT spend that tick (the intro->idle transition is the
+    // `EndsStage` stage switch, not a `Math.random` pick), so the shared
+    // `Math.random` stream stays aligned for the later phase-2 probes.
+    bool no_draw = false;
+
     // --- active intervals on this fighter (JS `Ae.xb`) -------------------
     // name -> (type, active).  Keyed by interval Name where present, else
     // by type string.  JS tm.he: `this.uc==0||this.uc==d.type` and

@@ -7123,12 +7123,31 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // The old rule played `StartIdleStance` after every move as well, so
         // the fighter snapped back to the INITIAL/stance-start idle pose the
         // moment an attack ended — the reported symptom.
+        //
+        // [FIX post-intro event pass — JS `Gc.Gnb` L28336 -> `Rwa`/`EZa`
+        // (L28510/L28531) -> `dxa`/`DK` (L28597/L28394)] The idle that follows
+        // the INTRO clip is selected by the `AnimationEnd` EVENT pass — the
+        // move's `<Events><AnimationEnd/></Events>` plus its FULL
+        // `<Conditions>`/`<Locks>` (`FistsStartStanceIdle-Right` moves.xml
+        // L3869: `<CurrentAnimation Name="StanceLeft" Not="1"/>` + an Or of
+        // StanceLeft/StanceRight/Win/$Move + `<Item Type="Weapon"
+        // SubType="Fists"/>`) — NOT by a `Template` auto-play. The old
+        // `post_intro_transition` branch started `StartIdleStance` from the
+        // `Template` family WITHOUT evaluating the candidate `<Conditions>`,
+        // so a fighter whose idle conditions FAIL (the survival enemy) wrongly
+        // entered the idle while the JS leaves it on the just-ended clip
+        // (`Te.KNa` L548 keeps `da.Ua`, sets `Pe=false`, `da.xj` = the last
+        // frame's live intervals; `de.hcb` L25145 then stays false so the AI
+        // never decides). While no move has started yet (the post-intro
+        // window) the stance block therefore picks NOTHING: the ungated
+        // `AnimationEnd` pass below is the only selector there. Once a move
+        // has started (`moves_started > 0`) the regular `IdleStance` fallback
+        // still applies.
         const bool post_intro_transition = !intro && me.moves_started == 0;
         const std::vector<std::string> stance_templates =
             intro ? std::vector<std::string>{"StanceLeft", "StanceRight"}
-                  : (post_intro_transition
-                         ? std::vector<std::string>{"StartIdleStance"}
-                         : std::vector<std::string>{"IdleStance"});
+                  : (post_intro_transition ? std::vector<std::string>{}
+                                           : std::vector<std::string>{"IdleStance"});
         const sf2::scene::MoveDef* idle_move =
             me.fighter.stance_move(stance_templates, me.is_player);
         if (stance_locked) {
@@ -7486,7 +7505,18 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // re-tested with `gm` true (JS `EZa` only clears `gm` for the
             // type-2 KeyPressed event on an AI fighter), so the AI's empty key
             // buffer leaves every `<Keys>`-gated candidate false.
-            if (phase_ == fight_phase::fight) {
+            // [FIX post-intro event pass — JS `Gc.Gnb` L28336] The clip-end
+            // re-selection is NOT Fight-phase-only: the JS runs the
+            // `AnimationEnd` pass for EVERY `da.ia` clip end (`Te.lS` L553 ->
+            // `wd.eIa` -> `Gc.kg` -> `Ih(10)` -> `Gnb` -> `dxa`/`DK`), so it
+            // fires in the StartStance hold too — the intro clip ends while
+            // `eu` is STILL 1 (the FIGHT plate hold), and the JS picks the
+            // idle there (`FistsStartStanceIdle-*`) by `<Conditions>`. The old
+            // invented `phase_ == fight_phase::fight` gate skipped it in phase
+            // 1, so the port fell back to the `Template` auto-play instead.
+            // Only the EndStance phase is excluded (its own `end_stance_move`
+            // re-selection owns that stage).
+            if (phase_ != fight_phase::end_stance) {
                 sf2::scene::FightContext ectx;
                 ectx.roll01 = [this]() { return draw01(); };
                 ectx.stage = static_cast<sf2::scene::round_stage>(phase_);
@@ -7495,6 +7525,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 // animation-name list is the ENDED move's — the
                 // `<CurrentAnimation Name="Step"/>` restart guard reads it.
                 ectx.anims_me = ended->anim_names;
+                // [post-intro event pass — no `Math.random` tick in phase 1]
+                // The intro clip's `EndsStage="1"` ends the StartStance stage,
+                // so the phase-1 clip-end re-selection does NOT spend the
+                // `uf.sja` (`Math.random`) draw the way a phase-2 pick does;
+                // suppressing it keeps the shared `Math.random` stream aligned
+                // (`--verify-input`'s decision-draw probes).
+                ectx.no_draw = (phase_ != fight_phase::fight);
                 ectx.anims_enemy = anim_names_of(foe.fighter);
                 ectx.qb = me.is_player;
                 fill_ctx_geometry(ectx, me, foe);
