@@ -1835,6 +1835,13 @@ public:
     // mechanically. Pure trace — the simulation is untouched.
     void set_state_dump(const std::string& path, int frames);
 
+    // [trace, audio harness] Arms the per-frame AUDIO dump: for the first
+    // `frames` fight frames, update() appends one JSONL line to `path`
+    // (reference/traces/native_audio.jsonl) listing the SFX the AudioEngine
+    // started that frame, mirroring the web oracle's `{"t":"audio"}` line
+    // (trace.js `emitAudio`) so compare_audio.py can diff mechanically.
+    void set_audio_dump(const std::string& path, int frames);
+
     // [FIX Phase 4b — fighter color from the location] Sets the fill color
     // BOTH fighters' meshes are drawn with. The game's fighters are
     // silhouettes filled with the LOCATION's Root Color (dojo_params
@@ -2558,6 +2565,13 @@ private:
     std::FILE* state_dump_file_ = nullptr;
     int callout_display_[2] = {0, 0};  // live `Gr.Gu` lengths (per side)
     void dump_state_frame();
+
+    // --- audio dump (mechanical differential harness, no behavior change) --
+    std::string audio_dump_path_;
+    int audio_dump_frames_ = 0;     // frames left to dump (0 = off)
+    int audio_dump_written_ = 0;
+    std::FILE* audio_dump_file_ = nullptr;
+    void dump_audio_frame();
 
     // --- fight helpers (JS ca methods) ------------------------------------
     // JS `xF` (L388): set the fight phase + sync the fighters' stance.

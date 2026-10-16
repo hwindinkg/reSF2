@@ -1902,6 +1902,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     std::string dump_clip;    // --dump-clip <name>: dump one anim clip as JSON, exit
     int dump_pose_frames = 0;  // --dump-pose N: dump the first N fight frames (0 = off)
     int dump_state_frames = 0; // --dump-state N: dump the first N fight STATE frames
+    int dump_audio_frames = 0; // --dump-audio N: dump the first N fight AUDIO frames
+    bool dump_ui = false;      // --dump-ui: UI screen-stack trace (all screens)
     // `--battle <name>` / `--zone <name>` (used with --fight): direct-boot a
     // named stages.xml battle resolved in a named zone — the verification
     // path for the stage-rule feeder (e.g. `Duel` in `ZONE_1`). Defaults to
@@ -2557,6 +2559,18 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 std::fprintf(stderr, "game: --dump-state needs a positive frame count N\n");
                 return 1;
             }
+        } else if (arg == "--dump-audio") {
+            if (i + 1 >= argc || argv[i + 1][0] == '-') {
+                std::fprintf(stderr, "game: --dump-audio requires an explicit frame count N\n");
+                return 1;
+            }
+            dump_audio_frames = std::atoi(argv[++i]);
+            if (dump_audio_frames <= 0) {
+                std::fprintf(stderr, "game: --dump-audio needs a positive frame count N\n");
+                return 1;
+            }
+        } else if (arg == "--dump-ui") {
+            dump_ui = true;
         } else if (arg == "--fight") {
             fight_mode = true;
         } else if (arg == "--battle" && i + 1 < argc) {
@@ -3363,6 +3377,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     if (!app.init(res_root, save_path, std::string(), /*hidden=*/driver_mode)) {
         std::fprintf(stderr, "game: app init failed\n");
         return 1;
+    }
+    if (dump_ui) {
+        // [trace, UI harness] Arm the screen manager's stack trace (one
+        // `{"t":"ui"}` line per stack change) -> reference/traces/native_ui.jsonl.
+        std::filesystem::create_directories("reference/traces");
+        app.screens().enable_ui_dump("reference/traces/native_ui.jsonl");
+        std::fprintf(stdout, "[dump] ui trace armed -> reference/traces/native_ui.jsonl\n");
+        std::fflush(stdout);
     }
     std::fprintf(stdout, "[game] booted: window %dx%d, save '%s'\n", app.view_w(), app.view_h(),
                  save_path.c_str());
@@ -7962,6 +7984,20 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          dump_state_frames);
             std::fflush(stdout);
         }
+        if (dump_audio_frames > 0) {
+            // [trace, audio harness] Arm the per-frame AUDIO dump.
+            std::filesystem::create_directories("reference/traces");
+            if (app.screens().top() != nullptr) {
+                static_cast<sf2::app::FightScreen*>(app.screens().top())
+                    ->enable_audio_dump("reference/traces/native_audio.jsonl",
+                                        dump_audio_frames);
+            }
+            std::fprintf(stdout,
+                         "[dump] audio trace armed: first %d fight frames -> "
+                         "reference/traces/native_audio.jsonl\n",
+                         dump_audio_frames);
+            std::fflush(stdout);
+        }
         if (headless > 0) {
             // Deterministic headless verification: force one fixed step per
             // frame (like the other drivers) so the fight advances frame-
@@ -7972,6 +8008,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // proves the keyboard control; capture at fight frame 400 (the
             // task's mid-fight snapshot).
             app.set_headless_frames(1);
+            // Optional real-time pacing: the SFX engine throttles a re-triggered
+            // cue within 0.05 s of WALL-CLOCK time (JS `Ss.pxb`), so an
+            // uncapped headless loop (sub-ms frames) over-suppresses swish/hit
+            // cues the real-time JS run does not. `SF2_HEADLESS_REALTIME=1`
+            // sleeps to the 1/60 s frame budget so the audio layer's throttle
+            // sees the SAME deltas as the oracle. Off by default (every other
+            // gate stays as fast as before).
+            const char* rt_env = std::getenv("SF2_HEADLESS_REALTIME");
+            const bool realtime_pace =
+                rt_env != nullptr && rt_env[0] != '\0' && rt_env[0] != '0';
             int guard = 0;
             bool fight_seen = false;
             int fight_frames = 0;
@@ -7988,6 +8034,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 }
                 app.run_one_frame();
                 ++guard;
+                if (realtime_pace) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(16667));
+                }
                 if (!fight_seen && app.screens().current_id() == kScreenFight) {
                     fight_seen = true;
                     fight_frames = 0;

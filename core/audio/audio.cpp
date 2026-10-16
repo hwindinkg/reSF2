@@ -448,6 +448,11 @@ void AudioEngine::play(const std::string& event, bool loop) {
         impl_->last_play[static_cast<std::size_t>(e)] = now;  // `b.oFa=c`
     }
 
+    // [audio trace] Record the STARTED voice (mirrors the JS hook's
+    // `Ss.play` return != -1 filter): the name + loop flag land in the
+    // per-frame buffer the fight state harness drains (drain_frame_plays).
+    frame_plays_.emplace_back(event, loop ? 1 : 0);
+
     // Round-robin over the event's voices: voice v always holds the sample
     // files[v % n], so consecutive plays walk the event's file pool.
     const int v = impl_->next_voice[static_cast<std::size_t>(e)];
@@ -499,6 +504,19 @@ std::uint64_t AudioEngine::played(const std::string& event) const {
     return impl_->played[static_cast<std::size_t>(e)];
 }
 
+// [audio trace] Drain + clear the per-frame play/stop buffers.
+std::vector<std::pair<std::string, int>> AudioEngine::drain_frame_plays() {
+    std::vector<std::pair<std::string, int>> out;
+    out.swap(frame_plays_);
+    return out;
+}
+
+std::vector<std::string> AudioEngine::drain_frame_stops() {
+    std::vector<std::string> out;
+    out.swap(frame_stops_);
+    return out;
+}
+
 // JS `ta.Jwb(a)` (L1264): `a=ta.WBa(a); a!=null && L.K.$f.stop(a)`. `WBa`
 // resolves the event name to the ONE playing source; a miss stops nothing.
 // Native: stop + rewind every voice of the event (the port has no
@@ -507,6 +525,7 @@ std::uint64_t AudioEngine::played(const std::string& event) const {
 void AudioEngine::stop(const std::string& event) {
     const int e = find_event_index(event);
     if (e < 0 || impl_ == nullptr) return;
+    frame_stops_.push_back(event);  // [audio trace] JS `Ss.stop` hook mirror
     std::fprintf(stdout, "[audio] stop '%s'\n", event.c_str());
     std::fflush(stdout);
     if (!enabled_ || !impl_->engine_ok) return;  // headless: logged only

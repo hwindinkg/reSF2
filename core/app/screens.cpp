@@ -13064,6 +13064,13 @@ void FightScreen::enable_state_dump(const std::string& path, int frames) {
     }
 }
 
+// [trace, audio harness] Arms the FightController's per-frame AUDIO dump.
+void FightScreen::enable_audio_dump(const std::string& path, int frames) {
+    if (fight_ != nullptr) {
+        fight_->set_audio_dump(path, frames);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // On-screen gamepad (JS `Za` virtual controls) — the original's touch pad.
 // ---------------------------------------------------------------------------

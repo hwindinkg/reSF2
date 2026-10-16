@@ -120,6 +120,7 @@
     mc: null, /* screen manager (mc.K), captured from the app's lbb() */
     done: false,
     frameCount: 0,
+    tick: 0,
     clips: 0,
     cam: null, /* {cx,cy,zoom} set by the Ut.Al hook */
     seenClips: {}, /* clip label -> true (dump once per clip per run) */
@@ -133,6 +134,159 @@
     lastScreen: -1,
     state: function () { return snapshot(); }
   };
+
+  /* ---------- AUDIO hook (Js platform mixer `Ss`, app.$f) ----------------
+   * Every cue the JS plays goes through ONE point: `Ss.play(id, loop)`
+   * (`Ss` = `new Ss()` at L1950, reached as `L.K.$f.play(a,b)` from `ta.ak`
+   * L52930 for SFX and `ta.Ut` L52954 for music). Hooking its prototype
+   * captures the exact (asset id, loop) stream, the per-cue replays, and the
+   * two bus writes (`Ss.uF`/`Ss.cMa`, the `ta.VT`/`ta.WT` sources L52982/
+   * L52986) without touching game code. The asset NAME is resolved from the
+   * player's OWN dict (`Ss.kWa` L100054 `this.names.v[e.id]=e.name`), so the
+   * trace carries the same `snd_*`/music key the native sfx table uses. */
+  var AU = {
+    hooked: false, plays: [], stops: [], sfx: 1, music: 1,
+    seen: {}, diag: []
+  };
+  function auName(player, id) {
+    try {
+      if (player && player.names && player.names.v &&
+          player.names.v[id] != null) {
+        return String(player.names.v[id]);
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function hookAudio(app) {
+    try {
+      var snd = app && app.$f;
+      if (!snd) return;
+      var P = Object.getPrototypeOf(snd);
+      if (!P || P.__sf2Au) return;
+      P.__sf2Au = true;
+      var oPlay = P.play, oStop = P.stop, oUF = P.uF, oCMa = P.cMa;
+      if (typeof oPlay === "function") {
+        P.play = function (id, loop) {
+          var r;
+          try { r = oPlay.apply(this, arguments); } catch (e) { r = -1; }
+          try {
+            if (AU.hooked && r !== -1) {
+              var nm = auName(this, id);
+              var key = nm == null ? ("#" + id) : nm;
+              if (auIsMusic(key)) {
+                AU.musicTrack = auMusicTrack(key);
+              } else {
+                AU.plays.push([key, loop ? 1 : 0]);
+              }
+              if (!AU.seen[key]) {
+                AU.seen[key] = 1;
+                if (AU.diag.length < 80) AU.diag.push([id, nm, loop ? 1 : 0]);
+              }
+            }
+          } catch (e) { /* ignore */ }
+          return r;
+        };
+      }
+      if (typeof oStop === "function") {
+        P.stop = function (id) {
+          var r;
+          try { r = oStop.apply(this, arguments); } catch (e) { /* ignore */ }
+          try {
+            if (AU.hooked) {
+              var nm = auName(this, id);
+              AU.stops.push(nm == null ? ("#" + id) : nm);
+            }
+          } catch (e) { /* ignore */ }
+          return r;
+        };
+      }
+      if (typeof oUF === "function") {
+        P.uF = function (g) {
+          try { if (AU.hooked) AU.music = g; } catch (e) { /* ignore */ }
+          return oUF.apply(this, arguments);
+        };
+      }
+      if (typeof oCMa === "function") {
+        P.cMa = function (g) {
+          try { if (AU.hooked) AU.sfx = g; } catch (e) { /* ignore */ }
+          return oCMa.apply(this, arguments);
+        };
+      }
+      AU.hooked = true;
+      console.log("[TRACE] audio hooked (Ss.prototype.play/stop/uF/cMa)");
+    } catch (e) {
+      console.log("[TRACE] audio hook ERR " + (e && e.message ? e.message : e));
+    }
+  }
+  function auIsMusic(name) {
+    return name.indexOf("res/audio/") === 0 || /\.(m4a|ogg|mp3)$/i.test(name);
+  }
+  function auMusicTrack(name) {
+    var b = name;
+    var i = b.lastIndexOf("/");
+    if (i >= 0) b = b.substring(i + 1);
+    b = b.replace(/\.(m4a|ogg|mp3)$/i, "");
+    b = b.replace(/_music$/i, "");
+    return b;
+  }
+  function auClear() { AU.plays.length = 0; AU.stops.length = 0; }
+  function emitAudio(fight) {
+    if (!AU.hooked) return;
+    if (AU.diag.length > (AU.diagSent || 0)) {
+      AU.diagSent = AU.diag.length;
+      console.log(JSON.stringify({ t: "audiodiag", d: AU.diag, hooked: AU.hooked }));
+    }
+    var plays = AU.plays; AU.plays = [];
+    var stops = AU.stops; AU.stops = [];
+    console.log(JSON.stringify({
+      t: "audio",
+      f: typeof fight.frame === "number" ? fight.frame : 0,
+      phase: typeof fight.eu === "number" ? fight.eu : 0,
+      plays: plays, stops: stops, sfx: AU.sfx, music: AU.music,
+      music_track: AU.musicTrack
+    }));
+  }
+
+  /* ---------- UI SCREEN-STATE (the `mc` screen manager stack) ------------
+   * `mc.K` (L4831) is the singleton screen manager; `tr.mc` is captured from
+   * the app's `lbb`. Every screen entry `d` (`$d` base) carries `state` (the
+   * `Te(n)` machine), `active`, `time`, and its id (`DQ`/`dJ`). One line per
+   * STACK CHANGE, so the trace is the screen-transition timeline the port's
+   * ScreenManager stack reproduces. */
+  var UI = { last: null, lines: 0 };
+  function uiStack() {
+    var out = [];
+    try {
+      var mgr = tr.mc;
+      if (mgr && mgr.stack) {
+        for (var i = 0; i < mgr.stack.length; i++) {
+          var d = mgr.stack[i];
+          if (!d) continue;
+          var sid = -1;
+          if (typeof d.DQ === "function") sid = d.DQ();
+          else if (typeof d.dJ === "function") sid = d.dJ();
+          out.push({
+            id: sid,
+            name: screenName(sid),
+            state: typeof d.state === "number" ? d.state : -1,
+            active: d.active ? 1 : 0,
+            t: r3(typeof d.time === "number" ? d.time : 0)
+          });
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+  function emitUi() {
+    var st = uiStack();
+    var sig = JSON.stringify(st.map(function (e) {
+      return [e.id, e.state, e.active];
+    }));
+    if (sig === UI.last) return;
+    UI.last = sig;
+    UI.lines++;
+    console.log(JSON.stringify({ t: "ui", tick: tr.tick, stack: st }));
+  }
 
   /* ---------- helpers ---------- */
 
@@ -485,8 +639,10 @@
 
   function afterFrame() {
     if (tr.done || !tr.enabled) return;
+    tr.tick++;
+    emitUi();
     var fight = fightObj();
-    if (!fight) return;
+    if (!fight) { auClear(); return; }
     if (SKIP_FIGHT_NONE) {
       try {
         if (fight.Da && fight.Da.type === "FightNone") return;
@@ -500,13 +656,14 @@
     // without this the trace would carry dozens of duplicate `f=0,phase=0`
     // lines and the two-pointer alignment would stall.
     try {
-      if (fight.eu === 0) return;
+      if (fight.eu === 0) { auClear(); return; }
       if (typeof fight.frame === "number" && fight.frame === tr.lastFightFrame)
         return;
       tr.lastFightFrame = fight.frame;
     } catch (e) { /* ignore */ }
     console.log(JSON.stringify(frameJson(fight)));
     console.log(JSON.stringify(fightState(fight)));
+    emitAudio(fight);
     tr.frameCount++;
     captureClips(fight);
     if (tr.frameCount >= MAX_FRAMES) finish();
@@ -514,6 +671,7 @@
 
   function finish() {
     tr.done = true;
+    console.log(JSON.stringify({ t: "audiodiag", d: AU.diag, hooked: AU.hooked }));
     console.log("[TRACE] done " + tr.frameCount + " frames, " + tr.clips + " clips");
     /* Best effort: request the browser to close the tab/runtime. WebView2
      * ignores window.close() for host-embedded pages, so the shell process is
@@ -579,6 +737,7 @@
     app.__sf2Hooked = true;
 
     app.aa = wrapFrameMethod(app.aa);
+    hookAudio(app);
 
     if (typeof app.lbb === "function") {
       var origLbb = app.lbb;

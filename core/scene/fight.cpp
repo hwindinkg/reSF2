@@ -8991,7 +8991,7 @@ void FightController::dump_pose_frame() {
 //                at fight start, the port's raw flag = 0.)
 //
 // Read-only over the simulation: nothing here mutates the fight state.
-void FightController::emit_state_dump() { dump_state_frame(); }
+void FightController::emit_state_dump() { dump_state_frame(); dump_audio_frame(); }
 
 void FightController::dump_state_frame() {
     if (state_dump_frames_ <= 0) return;
@@ -9086,6 +9086,65 @@ void FightController::dump_state_frame() {
         state_dump_frames_ = 0;
         std::fprintf(stdout, "[dump] state trace complete: %d frames -> %s\n",
                      state_dump_written_, state_dump_path_.c_str());
+        std::fflush(stdout);
+    }
+}
+
+void FightController::set_audio_dump(const std::string& path, int frames) {
+    audio_dump_path_ = path;
+    audio_dump_frames_ = frames;
+    audio_dump_written_ = 0;
+    // Discard any cue buffered BEFORE the fight (navigation/UI) so the trace
+    // starts empty, exactly like the JS hook (which clears until the live
+    // fight frame — trace.js `auClear`).
+    sf2::audio::AudioEngine::instance().drain_frame_plays();
+    sf2::audio::AudioEngine::instance().drain_frame_stops();
+}
+
+void FightController::dump_audio_frame() {
+    if (audio_dump_frames_ <= 0) return;
+    sf2::audio::AudioEngine& au = sf2::audio::AudioEngine::instance();
+    // Pre-live frames: drop buffered cues (matches the JS `eu==0` `auClear`).
+    if (phase_ == fight_phase::idle) {
+        au.drain_frame_plays();
+        au.drain_frame_stops();
+        return;
+    }
+    if (audio_dump_file_ == nullptr) {
+        if (fopen_s(&audio_dump_file_, audio_dump_path_.c_str(), "wb") != 0 ||
+            audio_dump_file_ == nullptr) {
+            std::fprintf(stderr, "[dump] cannot open %s — audio dump disabled\n",
+                         audio_dump_path_.c_str());
+            audio_dump_frames_ = 0;
+            return;
+        }
+    }
+    std::vector<std::pair<std::string, int>> plays = au.drain_frame_plays();
+    std::vector<std::string> stops = au.drain_frame_stops();
+    std::fprintf(audio_dump_file_,
+                 "{\"t\":\"audio\",\"f\":%d,\"phase\":%d,\"plays\":[", frame_,
+                 phase());
+    for (std::size_t i = 0; i < plays.size(); ++i) {
+        std::fprintf(audio_dump_file_, "%s[\"%s\",%d]", i == 0 ? "" : ",",
+                     plays[i].first.c_str(), plays[i].second);
+    }
+    std::fprintf(audio_dump_file_, "],\"stops\":[");
+    for (std::size_t i = 0; i < stops.size(); ++i) {
+        std::fprintf(audio_dump_file_, "%s\"%s\"", i == 0 ? "" : ",",
+                     stops[i].c_str());
+    }
+    std::fprintf(audio_dump_file_,
+                 "],\"sfx\":%d,\"music\":%d,\"music_track\":\"%s\"}\n",
+                 au.sfx_bus_gain() > 0.0f ? 1 : 0,
+                 au.music_bus_gain() > 0.0f ? 1 : 0,
+                 au.music_track().c_str());
+
+    if (++audio_dump_written_ >= audio_dump_frames_) {
+        std::fclose(audio_dump_file_);
+        audio_dump_file_ = nullptr;
+        audio_dump_frames_ = 0;
+        std::fprintf(stdout, "[dump] audio trace complete: %d frames -> %s\n",
+                     audio_dump_written_, audio_dump_path_.c_str());
         std::fflush(stdout);
     }
 }

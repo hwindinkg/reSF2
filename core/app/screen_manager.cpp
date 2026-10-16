@@ -268,6 +268,63 @@ void ScreenManager::update(float dt) {
             stack_[i]->update(dt);
         }
     }
+    dump_ui_state();
+}
+
+// `--dump-ui`: one `{"t":"ui"}` line per stack-signature change (the JS
+// `emitUi` in trace.js). Ids/state/active mirror the JS `mc.stack` entries
+// (`$d.DQ`/`dJ`, `$d.state`, `$d.active`); `t` is the screen's own time.
+static const char* ui_screen_name(int id) {
+    switch (id) {
+        case 0: return "Preloader";
+        case 2: return "Loader";
+        case 3: return "Dojo";
+        case 4: return "Shop";
+        case 5: return "Map";
+        case 6: return "Fight";
+        case 7: return "Profile";
+        case 8: return "GeneralMenu";
+        case 9: return "Pvp";
+        case 10: return "Results";
+        case 11: return "Settings";
+        default: return "";
+    }
+}
+
+void ScreenManager::dump_ui_state() {
+    if (ui_dump_path_.empty()) return;
+    std::string sig;
+    for (const std::unique_ptr<Screen>& s : stack_) {
+        if (s == nullptr) continue;
+        sig += std::to_string(static_cast<int>(s->id()));
+        sig += ':';
+        sig += std::to_string(s->state());
+        sig += ':';
+        sig += (s->active() ? '1' : '0');
+        sig += ';';
+    }
+    if (sig == ui_last_sig_) return;
+    ui_last_sig_ = sig;
+    if (ui_dump_file_ == nullptr) {
+        if (fopen_s(&ui_dump_file_, ui_dump_path_.c_str(), "wb") != 0 ||
+            ui_dump_file_ == nullptr) {
+            return;
+        }
+    }
+    std::fprintf(ui_dump_file_, "{\"t\":\"ui\",\"stack\":[");
+    bool first = true;
+    for (const std::unique_ptr<Screen>& s : stack_) {
+        if (s == nullptr) continue;
+        std::fprintf(ui_dump_file_,
+                     "%s{\"id\":%d,\"name\":\"%s\",\"state\":%d,\"active\":%d,"
+                     "\"t\":%.3f}",
+                     first ? "" : ",", static_cast<int>(s->id()),
+                     ui_screen_name(static_cast<int>(s->id())), s->state(),
+                     s->active() ? 1 : 0, static_cast<double>(s->time()));
+        first = false;
+    }
+    std::fprintf(ui_dump_file_, "]}\n");
+    std::fflush(ui_dump_file_);
 }
 
 void ScreenManager::render(App& app) {

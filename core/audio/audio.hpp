@@ -36,6 +36,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace sf2::audio {
 
@@ -144,6 +146,15 @@ public:
     // event uses the `qxb = 0.05` default window.
     std::uint64_t suppressed_total() const { return suppressed_total_; }
 
+    // --- mechanical AUDIO trace (no behavior change) ----------------------
+    // Every `play`/`stop` appends its resolved event name (+ loop flag) to a
+    // per-frame buffer; the fight state harness drains it once per dumped
+    // frame, mirroring the JS `Ss.play`/`Ss.stop` wrappers in trace.js. The
+    // names are the SAME `ta.WBa` keys the JS player resolves via `Ss.kWa`
+    // (`snd_*`), so the two sides diff by name. drain returns and CLEARS.
+    std::vector<std::pair<std::string, int>> drain_frame_plays();
+    std::vector<std::string> drain_frame_stops();
+
 private:
     struct Impl;
     Impl* impl_ = nullptr;  // owns the miniaudio state (hpp stays header-light)
@@ -154,6 +165,9 @@ private:
     bool music_ducked_ = false;  // JS `L.K.$f.uF(0)` — the pause `Dr` dialog (L2065).
     std::uint64_t played_total_ = 0;
     std::uint64_t suppressed_total_ = 0;  // JS `Ss.pxb` suppressed plays
+    // Audio-trace per-frame buffers (see drain_frame_plays).
+    std::vector<std::pair<std::string, int>> frame_plays_;
+    std::vector<std::string> frame_stops_;
 };
 
 }  // namespace sf2::audio

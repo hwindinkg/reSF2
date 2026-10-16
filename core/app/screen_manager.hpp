@@ -21,6 +21,7 @@
 // 2 = entering (active), 3 = active, 5 = leaving, 7 = destroyed.
 
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <set>
 #include <string>
@@ -162,6 +163,13 @@ public:
 
     App& app() const { return app_; }
 
+    // `--dump-ui`: mechanical UI screen-state trace (the JS `mc` stack
+    // reproduced). Writes one `{"t":"ui"}` JSONL line to `path` on every
+    // stack-signature change, mirroring `trace.js` `emitUi` so
+    // reference/tools/compare_ui.py can diff the two stacks.
+    void enable_ui_dump(const std::string& path) { ui_dump_path_ = path; }
+    void dump_ui_state();
+
 private:
     // Shared push body (both overloads): activates the screen, pushes it and
     // fires the navigation edge (`quest_nav`) with the given source scene.
@@ -179,6 +187,11 @@ private:
     // never call `G.Qr` on their `Yv()` ids, so they load only on the first
     // mount. Fight(6)/Results(10) are excluded in `push_impl`.
     std::set<int> scene_data_cached_;
+
+    // UI screen-state trace (see enable_ui_dump).
+    std::string ui_dump_path_;
+    std::FILE* ui_dump_file_ = nullptr;
+    std::string ui_last_sig_;
 };
 
 } // namespace sf2::app

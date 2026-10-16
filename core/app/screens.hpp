@@ -816,6 +816,10 @@ public:
     // (reference/traces/native_state.jsonl). Defined in screens.cpp.
     void enable_state_dump(const std::string& path, int frames);
 
+    // [trace, audio harness] Arms the FightController's per-frame AUDIO dump
+    // (reference/traces/native_audio.jsonl). Defined in screens.cpp.
+    void enable_audio_dump(const std::string& path, int frames);
+
 private:
     // JS `Dr` (the pause dialog, L2065-2067): its ctor `L.K.$f.uF(0)` ducks the
     // MUSIC bus and `B()`/`resume()` `uF(1)` restore it. `Ar.Aia`/`Ar.tZ`
