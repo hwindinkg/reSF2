@@ -190,13 +190,18 @@ scenario scripts inject NO attack.
 | `boss-lynx` (ZONE_1 BOSS_LYNX, real fight) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000" --input-script reference/tools/state_boss_lynx.txt --timeout-ms 60000` | `game.exe --fight --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location moon --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
 | `tournament` (ZONE_1 TOURNAMENT ladder fight 0, arena) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Tournament" --input-script reference/tools/state_tournament.txt --timeout-ms 60000` | `game.exe --fight --battle Tournament --zone ZONE_1 --fight-ordinal 0 --location arena --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
 | `survival` (ZONE_1 SURVIVAL, bamboo_grove) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Survival" --input-script reference/tools/state_survival.txt --timeout-ms 60000` | `game.exe --fight --battle Survival --zone ZONE_1 --fight-ordinal 0 --location bamboo_grove --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
-| `challenge` (ZONE_1 CHALLENGE, autumn) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Challenge" --input-script reference/tools/state_challenge.txt --timeout-ms 60000` | `game.exe --fight --battle Challenge --zone ZONE_1 --fight-ordinal 0 --location autumn --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
+| `challenge` (ZONE_2 CHALLENGE, autumn) | `OracleShell.exe --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Challenge&battleZone=ZONE_2" --input-script reference/tools/state_challenge.txt --timeout-ms 60000` | `game.exe --fight --battle Challenge --zone ZONE_2 --fight-ordinal 0 --location autumn --headless 700 --dump-state 600 --watchdog 900 reference/www/res reference/saves/save.xml` |
 
 The tournament/survival/challenge seed: `reference/runner/index.html` accepts a
-`?battle=<Name>` query key that rewrites the installed save's `<Battles>` record
-list to a single unlocked `ZONE_1|<Name>|` record, so the Map's focus falls back
-to that node and the SAME hub -> Map -> "В БОЙ" taps as the BOSS_LYNX script
-reach it (no per-battle node coordinate is needed).
+`?battle=<Name>` query key (plus an optional `?battleZone=<ZONE>`, default
+`ZONE_1`) that rewrites the installed save's `<Battles>` record list to a single
+unlocked `<Zone>|<Name>|` record, sets `CurrentZone`/`MapFocus` to that zone
+(so the Map OPENS there), and the SAME hub -> Map -> "В БОЙ" taps as the
+BOSS_LYNX script reach it (no per-battle node coordinate is needed). ZONE_1
+carries no `Challenge` node, so `challenge` passes `battleZone=ZONE_2`
+(stages.xml `<Battle Name="Challenge" ... Location="autumn">`), whose fight
+`Description="NO_WEAPON"` opens the SENSEI confirmation dialog — the challenge
+script taps that dialog's `В БОЙ` plate as the second step.
 
 Then, for EVERY scenario:
 
