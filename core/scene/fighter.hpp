@@ -733,6 +733,18 @@ public:
     int buffered_tap_count() const;
     int buffered_hold_count() const;
     const std::set<std::string>& active_intervals() const { return active_intervals_; }
+    // JS `Te.xj` is a list of interval OBJECTS (`{name,type}`), not bare names.
+    // On the move-START frame the port keeps the PREVIOUS move's active list
+    // (`Te.Skb` L23018 never touches `xj`), so the `G0` type CANNOT be
+    // re-resolved from the NEW `current_move_` — it must be remembered beside
+    // the name (the tournament `ThrowThroughTheBackV af=0` frame: JS
+    // `('',5)`/Block vs the port's `('',0)`).
+    int active_interval_type(const std::string& name) const {
+        for (const std::pair<std::string, int>& p : active_interval_list_) {
+            if (p.first == name) return p.second;
+        }
+        return interval_type(name);
+    }
     // The ended move's still-active intervals, snapshotted at clip end.
     // JS `KNa()` (L548) does NOT clear `Ua`/`Te.xj`, so the `AnimationEnd`
     // pass sees `Ae.xb = b.P0()` = the last played frame's intervals.
@@ -1495,6 +1507,8 @@ private:
     // `this.bQa` = `xd.bAa` (per-location `FrictionForce`, char 241113).
     float ragdoll_friction_ = kFrictionForce;
     std::set<std::string> active_intervals_;
+    // The (name, `G0` type) pairs behind `active_intervals_` — JS `Te.xj`.
+    std::vector<std::pair<std::string, int>> active_interval_list_;
     // Clip-end snapshot of the above (JS `Ae.xb` at the `AnimationEnd` pass).
     std::vector<std::pair<std::string, int>> ended_intervals_; // active interval names (JS `Te.xj`)
     // --- move-frame action dispatch (JS `Te.Lwa` / `Te.CZa`) --------------

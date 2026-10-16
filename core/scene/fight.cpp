@@ -9003,7 +9003,7 @@ void FightController::dump_state_frame() {
         std::size_t k = 0;
         for (const std::string& n : ivs) {
             std::fprintf(state_dump_file_, "%s[\"%s\",%d]", k == 0 ? "" : ",",
-                         n.c_str(), f.interval_type(n));
+                         n.c_str(), f.active_interval_type(n));
             ++k;
         }
         std::fprintf(state_dump_file_, "]}");

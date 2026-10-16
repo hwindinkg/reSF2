@@ -654,23 +654,20 @@ int Fighter::interval_type(const std::string& name) const {
 }
 
 // JS `wd.qYa`/`Nbb` (L514): a Block interval (`yD(5)`) active now.
+// `Te.yD(5)` (L553) scans the LIVE `xj` list, so on the move-START frame it
+// still sees the PREVIOUS move's Block (the tournament `af=0` frame) — read
+// the remembered (name,type) list, not the new `current_move_`.
 bool Fighter::has_block() const {
-    if (current_move_ == nullptr) return false;
-    for (const Interval& iv : current_move_->intervals) {
-        if (iv.type != 5) continue;  // `fe.G0`: Block = 5 (L774)
-        const int s = std::max(iv.start, current_move_->first_frame);
-        if (s <= move_frame_ && move_frame_ <= interval_last(iv)) return true;
+    for (const std::pair<std::string, int>& p : active_interval_list_) {
+        if (p.second == 5) return true;  // `fe.G0`: Block = 5 (L774)
     }
     return false;
 }
 
 // JS `Te.yD(6)` presence (L553): Invulnerable active now (HZa gate).
 bool Fighter::has_invuln() const {
-    if (current_move_ == nullptr) return false;
-    for (const Interval& iv : current_move_->intervals) {
-        if (iv.type != 6) continue;  // `fe.G0`: Invulnerable = 6 (L774)
-        const int s = std::max(iv.start, current_move_->first_frame);
-        if (s <= move_frame_ && move_frame_ <= interval_last(iv)) return true;
+    for (const std::pair<std::string, int>& p : active_interval_list_) {
+        if (p.second == 6) return true;  // `fe.G0`: Invulnerable = 6 (L774)
     }
     return false;
 }
@@ -1147,6 +1144,7 @@ void Fighter::strike_midpoint_smooth() {
 
 void Fighter::clear_intervals(int type, const std::string& name) {    if (current_move_ == nullptr) {
         active_intervals_.clear();
+        active_interval_list_.clear();
         return;
     }
     for (const Interval& iv : current_move_->intervals) {
@@ -1154,7 +1152,17 @@ void Fighter::clear_intervals(int type, const std::string& name) {    if (curren
         if (!name.empty() && iv.name != name) continue;
         const int s = std::max(iv.start, current_move_->first_frame);
         if (s <= move_frame_ && move_frame_ <= interval_last(iv)) {
-            active_intervals_.erase(iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name);
+            const std::string key =
+                iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name;
+            active_intervals_.erase(key);
+            for (std::size_t i = 0; i < active_interval_list_.size();) {
+                if (active_interval_list_[i].first == key) {
+                    active_interval_list_.erase(active_interval_list_.begin() +
+                                                static_cast<std::ptrdiff_t>(i));
+                } else {
+                    ++i;
+                }
+            }
         }
     }
 }
@@ -2284,8 +2292,15 @@ void Fighter::advance_step() {
 
     // Interval update: active when max(start,qx) <= frame <= min(finish,Lj).
     active_intervals_.clear();
-    for (const std::string& n : intervals_at(move_frame_)) {
-        active_intervals_.insert(n);
+    active_interval_list_.clear();
+    for (const Interval& iv : current_move_->intervals) {
+        const int s = std::max(iv.start, current_move_->first_frame);
+        if (s <= move_frame_ && move_frame_ <= interval_last(iv)) {
+            const std::string key =
+                iv.name.empty() ? "type" + std::to_string(iv.type) : iv.name;
+            active_intervals_.insert(key);
+            active_interval_list_.emplace_back(key, iv.type);
+        }
     }
 
     // Root motion (JS `Te.eda` L556 + `Te.j8`/`DM`/`aV` L546/564).
@@ -2574,6 +2589,7 @@ void Fighter::clear_move() {
     move_ended_ = false;
     move_end_frame_ = 0;
     active_intervals_.clear();
+    active_interval_list_.clear();
     subframe_ = 0;
     playhead_ = 0;
     prepend_.clear();
