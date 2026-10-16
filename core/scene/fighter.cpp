@@ -1316,7 +1316,22 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     if (first_start_tick_ < 0) first_start_tick_ = ia_ticks_;
     move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
-    active_intervals_.clear();
+    // [FIX JS-exact `xj` on the move-start frame] JS `Te.Skb` (readable.js
+    // L22984-23059) NEVER touches `this.xj` — the active-interval list is
+    // recomputed ONLY inside `Te.rrb` (L23063-23083), reached only from
+    // `Te.vp` (L23532, `if (ip() != cX) rrb()`), which is called only from
+    // `Te.ia` (L22842/22847/22855) and `Te.Nnb` (L22855). `Skb` instead just
+    // arms the sentinel `this.cX = 2147483647` (L23034) so the NEXT tick's
+    // `vp()` sees a frame change. So on the frame a move STARTS via `Skb` the
+    // JS still reports the PREVIOUS move's `xj` (`Ua.c7a` L29173 does
+    // `b.length = 0` then refills, i.e. a full replace — but it has not run
+    // yet). The port's `active_intervals_.clear()` here made that frame read
+    // `iv = []`/`block = 0` instead — the single-frame tournament divergence at
+    // native f=316 / oracle f=446 (throw victim `ThrowThroughTheBackV` af=0:
+    // native `[] , block 0` vs JS `[('',5),('Throwable',0)], block 1`). Every
+    // other frame is unaffected: the per-frame `advance_step` interval pass
+    // (below) clears+refills from `intervals_at(move_frame_)` exactly like
+    // `rrb`, so when `Skb` runs before the tick the list is recomputed anyway.
     // JS `Skb` L551: `this.cX = 2147483647` — the sentinel that makes the
     // first `vp()` (L563) see a frame change and run the action pass, so the
     // move's FIRST-frame actions fire (`Te.Lwa` L563-564).
