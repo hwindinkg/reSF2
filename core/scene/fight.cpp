@@ -3311,7 +3311,6 @@ void FightController::enter_start_stance() {
     if (enemy_.ai != nullptr) enemy_.ai->begin_round();
     round_live_ = false;
     start_stance_done_ = false;
-    start_stance_frames_ = 0;   // reset so every round re-plays the intro
     // [FIX intro gate — JS `kg` L15772] Fresh round: forget the previous
     // round's intro-stance end tracking so each fighter's stance end fires the
     // gate once (`intro_stance_end_tick`).
@@ -8365,7 +8364,6 @@ void FightController::update(float dt) {
             // hardcoded 134 frames WITHOUT animating the fighters (the
             // intro was frozen) — the "too fast" + frozen intro symptom.
             // Now the fighters play the stance clip during phase 1.
-            ++start_stance_frames_;
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
             // JS `kg` (L15772): the gate is the INTRO STANCE clip's end event,

@@ -2417,7 +2417,6 @@ private:
     std::map<std::string, int> cl_intr_;
     bool hit_audit_ = false;  // `[hitaudit]` per-frame hit row probe
     bool start_stance_done_ = false;  // phase 1 -> 2 gate
-    int start_stance_frames_ = 0;  // phase 1 hold counter
     // JS `xF(1)` (L15810) only QUEUES the `RoundStageStart` event
     // (`this.Bg.Ih(1, d.Vb)` L15827); the bus dispatches it on the NEXT
     // frame's `this.Bg.ia()` (L15886), so the stage-start move (the intro
