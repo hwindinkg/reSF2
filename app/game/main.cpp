@@ -91,7 +91,11 @@ void print_usage(const char* argv0) {
                  "                   to reference/traces/native_state.jsonl (trace, no sim change)\n"
                  "  --dump-clip N    dump the anim archive clip <name> as 1/16 fixed-point\n"
                  "                   JSON to reference/traces/native_clip_<name>.json, exit 0\n",
-                 argv0);
+                  "  --dump-save <in.xml>  NON-fight layer harness: load <in.xml>, re-serialize,\n"
+                  "                   emit the JS `SF2User` envelope (Aa.save form) as a\n"
+                  "                   {\"t\":\"savegame\",...} line -> reference/traces/native_savegame.jsonl\n"
+                  "                   (diffed by reference/tools/compare_profile.py)\n",
+                  argv0);
 }
 
 // One step of the headless-loop driver. Each step is two-phase:
@@ -1918,6 +1922,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // deterministic regardless of the ambient save — required by the probe
     // harness, whose expectations are authored per loadout.
     std::string loadout;
+    // `--dump-save <in.xml>`: NON-fight layer harness (save/profile/economy,
+    // persisted quest + shop rows). Loads <in.xml> with SaveSystem, writes it
+    // back, and emits the JS `SF2User` storage envelope (`Aa.save` form) as a
+    // `{"t":"savegame","b64":".."}` line — the SAME artifact
+    // reference/runner/trace.js `?probe=save` emits, diffed by
+    // reference/tools/compare_profile.py. Empty = off.
+    std::string dump_save_path;
     // RULE 0: the hard watchdog bound (seconds). See install_watchdog().
     int watchdog_secs = kDefaultWatchdogSeconds;
 
@@ -2049,6 +2060,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // JS-exact save field + envelope round-trip (dispatched after the
             // RULE 0 watchdog install; no OS input, no sim).
             save_fields_probe_mode = true;
+        } else if (arg == "--dump-save" && i + 1 < argc) {
+            // NON-fight layer harness: load a save, re-serialize it, emit the
+            // `SF2User` envelope (see the declaration of dump_save_path).
+            dump_save_path = argv[++i];
         } else if (arg == "--energy-regen-probe") {
             // The energy-regeneration model (JS `Zma` L134483 / `aPa` L138972)
             // walked over a simulated clock (dispatched after the watchdog).
@@ -2801,6 +2816,45 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      row_aspect.c_str(), def_aspect.c_str(),
                      resolve_ok ? "4000" : "-", resolve_ok ? "PASS" : "FAIL",
                      ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return ok ? 0 : 1;
+    }
+
+    // `--dump-save <in.xml>`: NON-fight layer harness. Loads <in.xml> with the
+    // port's SaveSystem, writes it back, and emits BOTH:
+    //   - the JS `SF2User` storage envelope (`Aa.save` form) as
+    //     `{"t":"savegame","b64":".."}` -> reference/traces/native_savegame.jsonl
+    //   - the round-tripped raw XML -> reference/traces/native_save_roundtrip.xml
+    // Same artifact as reference/runner/trace.js `?probe=save`; diffed by
+    // reference/tools/compare_profile.py. RULE 0: after the watchdog install.
+    if (!dump_save_path.empty()) {
+        bool ok = false;
+        std::string detail;
+        try {
+            const std::string out_xml = "reference/traces/native_save_roundtrip.xml";
+            // SaveSystem(save_path, default_path): point save_path at the
+            // OUTPUT (so save() writes there) and default_path at the SEED, so
+            // a fresh output load()s the seed verbatim (the template path).
+            std::remove(out_xml.c_str());
+            sf2::app::SaveSystem ss(out_xml, dump_save_path);
+            sf2::app::WarriorSave w = ss.load();
+            ss.save(w);
+            std::ifstream in(out_xml, std::ios::binary);
+            const std::string xml((std::istreambuf_iterator<char>(in)),
+                                  std::istreambuf_iterator<char>());
+            const std::string env = sf2::app::SaveSystem::envelope_encode_users(xml);
+            {
+                std::ofstream o("reference/traces/native_savegame.jsonl",
+                                std::ios::binary | std::ios::trunc);
+                o << "{\"t\":\"savegame\",\"b64\":\"" << env << "\"}\n";
+            }
+            ok = !xml.empty() && !env.empty();
+            std::fprintf(stdout, "[dump-save] in=%s xml=%zu bytes env=%zu bytes -> %s\n",
+                         dump_save_path.c_str(), xml.size(), env.size(), ok ? "PASS" : "FAIL");
+        } catch (const std::exception& e) {
+            detail = e.what();
+        }
+        std::fprintf(stdout, "[dump-save] RESULT %s %s\n", ok ? "PASS" : "FAIL", detail.c_str());
         std::fflush(stdout);
         return ok ? 0 : 1;
     }

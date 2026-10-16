@@ -669,15 +669,25 @@ void SaveSystem::save(const WarriorSave& w) {
     warrior.attribute("CurrentZone").set_value(w.current_zone.c_str());
     warrior.attribute("ShowUpgrades").set_value(w.show_upgrades ? "1" : "0");
     // `On` (`EDenomination`): `nF("DenominationDigits", kq)` + `Cr("CoinIcon")`.
-    // The seed carries neither attr, and `attribute().set_value()` on a null
-    // attribute is a no-op -> append when absent.
+    // Both are written only when the corresponding action runs; the seed
+    // carries neither attr, and the JS's own save therefore has neither.
+    // Materializing them unconditionally was an invention (see `mtb` L10274 /
+    // `xtb` L10257).
     {
         pugi::xml_attribute dd = warrior.attribute("DenominationDigits");
-        if (!dd) dd = warrior.append_attribute("DenominationDigits");
-        dd.set_value(w.denomination_digits);
+        if (dd || w.denomination_digits != 0) {
+            if (!dd) dd = warrior.append_attribute("DenominationDigits");
+            dd.set_value(w.denomination_digits);
+        }
+        // `mtb(a)` (L10274): `this.Cr("CoinIcon", this.Vf)` — written ONLY
+        // when the coin icon is set. The seed carries no attr and `mtb` never
+        // runs at boot, so the JS's own save has NO `CoinIcon`; materializing
+        // an empty one is an invention.
         pugi::xml_attribute ci = warrior.attribute("CoinIcon");
-        if (!ci) ci = warrior.append_attribute("CoinIcon");
-        ci.set_value(w.coin_icon.c_str());
+        if (ci || !w.coin_icon.empty()) {
+            if (!ci) ci = warrior.append_attribute("CoinIcon");
+            ci.set_value(w.coin_icon.c_str());
+        }
     }
 
     // Bus mutes (JS `sc.Gpb` L114249): `<Sounds>/<Sound|Music>@Mute` from `ta.$D`
@@ -725,32 +735,57 @@ void SaveSystem::save(const WarriorSave& w) {
     if (!items) {
         items = warrior.append_child("Items");
     }
-    std::vector<pugi::xml_node> old_items;
-    for (pugi::xml_node existing : items.children("Item")) {
-        old_items.push_back(existing);
-    }
-    for (const pugi::xml_node& existing : old_items) {
-        items.remove_child(existing);
-    }
+    // Patch the existing rows IN PLACE (match by `Name`) so every attribute
+    // the JS never touches on an existing row survives `Aa.save` (the JS keeps
+    // the LIVE document node and only writes the attributes it tracks:
+    // `lk`/`zF`/`UT`/`Np`/`gla`, L52489-52527). A genuinely new item gets the
+    // full JS-shaped row the oracle's own `Aa.save` output carries for the
+    // post-tutorial seed: `[Name Count UpgradeLevel Equipped DeliveryTime
+    // DeliveryUpgradeLevel AcquireType]`.
+    std::vector<std::string> placed_items;
     for (const WarriorSave::OwnedItem& oi : w.items) {
-        pugi::xml_node item = items.append_child("Item");
-        item.append_attribute("Name").set_value(oi.name.c_str());
-        item.append_attribute("Equipped").set_value(oi.equipped ? "1" : "0");
-        item.append_attribute("Count").set_value(oi.count);
-        // `Ce` round-trip: only materialize a non-zero level so an unupgraded
-        // item row keeps the shipped shape (no spurious UpgradeLevel="0").
-        if (oi.upgrade_level > 0) {
+        pugi::xml_node item;
+        for (pugi::xml_node e : items.children("Item")) {
+            if (oi.name == e.attribute("Name").value()) {
+                item = e;
+                break;
+            }
+        }
+        if (!item) {
+            item = items.append_child("Item");
+            item.append_attribute("Name").set_value(oi.name.c_str());
+            item.append_attribute("Count").set_value(oi.count);
             item.append_attribute("UpgradeLevel").set_value(oi.upgrade_level);
+            item.append_attribute("Equipped").set_value(oi.equipped ? "1" : "0");
+            item.append_attribute("DeliveryTime").set_value("0");
+            item.append_attribute("DeliveryUpgradeLevel")
+                .set_value(oi.delivery_upgrade_level);
+            item.append_attribute("AcquireType")
+                .set_value(oi.acquire_type.c_str());
+        } else {
+            item.attribute("Count").set_value(oi.count);
+            {
+                pugi::xml_attribute a = item.attribute("UpgradeLevel");
+                if (!a) a = item.append_attribute("UpgradeLevel");
+                a.set_value(oi.upgrade_level);
+            }
+            item.attribute("Equipped").set_value(oi.equipped ? "1" : "0");
+            // `gla` (`AcquireType`) — the JS writes the field whenever it is
+            // set; "Item" is the parse default, so only a real change is
+            // written onto a row that already carries the attribute.
+            if (!item.attribute("AcquireType") || oi.acquire_type != "Item") {
+                pugi::xml_attribute a = item.attribute("AcquireType");
+                if (!a) a = item.append_attribute("AcquireType");
+                a.set_value(oi.acquire_type.c_str());
+            }
+            // `UT` (`DeliveryUpgradeLevel`) — parse default -1 = unset.
+            if (oi.delivery_upgrade_level >= 0) {
+                pugi::xml_attribute a = item.attribute("DeliveryUpgradeLevel");
+                if (!a) a = item.append_attribute("DeliveryUpgradeLevel");
+                a.set_value(oi.delivery_upgrade_level);
+            }
         }
-        // `j7` round-trip: only materialize a non-default AcquireType so a
-        // plain owned row keeps the shipped shape (no spurious "Item").
-        if (oi.acquire_type != "Item") {
-            item.append_attribute("AcquireType").set_value(oi.acquire_type.c_str());
-        }
-        // `by` round-trip: only materialize a set (>= 0) level.
-        if (oi.delivery_upgrade_level >= 0) {
-            item.append_attribute("DeliveryUpgradeLevel").set_value(oi.delivery_upgrade_level);
-        }
+        placed_items.push_back(oi.name);
         // `<Enchantments>` (JS `xe` L692882; writer L646621 emits
         // `<Enchantments><Perk Name=".."><Set k="v"/>...</Perk>`). Materialize
         // the node only when the item carries enchantments (mirrors the lazy
@@ -771,6 +806,23 @@ void SaveSystem::save(const WarriorSave& w) {
             }
         }
     }
+    // A row the model no longer carries is removed with it (the JS `$g` list
+    // IS the document's `<Items>` list).
+    {
+        std::vector<pugi::xml_node> gone;
+        for (pugi::xml_node e : items.children("Item")) {
+            bool keep = false;
+            const std::string nm = e.attribute("Name").value();
+            for (const std::string& n : placed_items) {
+                if (n == nm) {
+                    keep = true;
+                    break;
+                }
+            }
+            if (!keep) gone.push_back(e);
+        }
+        for (const pugi::xml_node& g : gone) items.remove_child(g);
+    }
 
     // Shop locks (`p.o.R$` -> `<Shop><Lock Name>`; `vq` L267 appends, `tnb`
     // L267 removes). Replace the `<Lock>` children; the `<Shop>` node is
@@ -790,26 +842,56 @@ void SaveSystem::save(const WarriorSave& w) {
         }
     }
 
-    // MapFocus (`ys`): get-or-append (absent in the seed).
+    // MapFocus (`ys`): `m5` (L10283) writes `this.Cr("MapFocus", ..)` ONLY when
+    // the focus actually changes. The seed carries no attr and `m5` never runs
+    // at boot, so the JS's own save has NO `MapFocus`; materializing an empty
+    // one is an invention.
     {
         pugi::xml_attribute mf = warrior.attribute("MapFocus");
-        if (!mf) mf = warrior.append_attribute("MapFocus");
-        mf.set_value(w.map_focus.c_str());
+        if (mf || !w.map_focus.empty()) {
+            if (!mf) mf = warrior.append_attribute("MapFocus");
+            mf.set_value(w.map_focus.c_str());
+        }
     }
 
     // NOTE: the JS does NOT persist the game clock — there is no `GameClock`
     // save attribute; `p.Dc` is re-derived from `Date.now()` on every boot.
     // Nothing is written here.
 
-    // Battles (`iF`): replace the <Battle Name> children.
+    // Battles (`iF`): the JS keeps the LIVE `<Battle>` node, so any attribute
+    // the record does not change (e.g. `Locked="0"`) survives `Aa.save`.
+    // Patch the existing rows IN PLACE (match by `Name`); append only a
+    // genuinely new battle. Recreating the list dropped `Locked` (divergence).
     {
         pugi::xml_node battles = warrior.child("Battles");
         if (!battles) battles = warrior.append_child("Battles");
-        std::vector<pugi::xml_node> old;
-        for (pugi::xml_node b : battles.children("Battle")) old.push_back(b);
-        for (const pugi::xml_node& b : old) battles.remove_child(b);
         for (const std::string& name : w.battles) {
-            battles.append_child("Battle").append_attribute("Name").set_value(name.c_str());
+            bool found = false;
+            for (pugi::xml_node b : battles.children("Battle")) {
+                if (name == b.attribute("Name").value()) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                battles.append_child("Battle").append_attribute("Name").set_value(
+                    name.c_str());
+            }
+        }
+        {
+            std::vector<pugi::xml_node> gone;
+            for (pugi::xml_node b : battles.children("Battle")) {
+                const std::string nm = b.attribute("Name").value();
+                bool keep = false;
+                for (const std::string& n : w.battles) {
+                    if (n == nm) {
+                        keep = true;
+                        break;
+                    }
+                }
+                if (!keep) gone.push_back(b);
+            }
+            for (const pugi::xml_node& g : gone) battles.remove_child(g);
         }
         // `hl` Locked/Hidden flags (L277-278): patch the matching row (the
         // Name list above already carries the zone-qualified "ZONE|BATTLE|").
@@ -827,55 +909,45 @@ void SaveSystem::save(const WarriorSave& w) {
                 node = battles.append_child("Battle");
                 node.append_attribute("Name").set_value(raw.c_str());
             }
-            // `hl` flags (`CMa` L278, `gx` L278, `yla` L279): set the flag
-            // when on; clear the attribute when off so a `HideBattle`
-            // (`battle_remove`) / show transition is reflected exactly.
-            pugi::xml_attribute la = node.attribute("Locked");
-            if (r.locked) {
-                if (!la) la = node.append_attribute("Locked");
-                la.set_value("1");
-            } else if (la) {
-                node.remove_attribute("Locked");
-            }
-            pugi::xml_attribute ha = node.attribute("Hidden");
-            if (r.hidden) {
-                if (!ha) ha = node.append_attribute("Hidden");
-                ha.set_value("1");
-            } else if (ha) {
-                node.remove_attribute("Hidden");
-            }
-            pugi::xml_attribute ra = node.attribute("ReplayCount");
+            // Battle-record flags (`CMa` L11235 `set("Locked", zo?"1":"0")`,
+            // `gx` L11245 `set("Hidden", d9?"1":"0")`). The JS keeps the LIVE
+            // document node, so an attribute the record does NOT change is
+            // never REMOVED (`Aa.save` re-serializes the document as-is) — the
+            // oracle's own output keeps `Locked="0"` on an unlocked battle.
+            // Write the flag when set; otherwise leave the attribute untouched
+            // (the previous remove-when-off was a divergence).
+            auto patch_flag = [&node](const char* key, bool on) {
+                if (!on) return;
+                pugi::xml_attribute a = node.attribute(key);
+                if (!a) a = node.append_attribute(key);
+                a.set_value("1");
+            };
+            patch_flag("Locked", r.locked);
+            patch_flag("Hidden", r.hidden);
             if (r.replay_count > 0) {
-                if (!ra) ra = node.append_attribute("ReplayCount");
-                ra.set_value(r.replay_count);
-            } else if (ra) {
-                node.remove_attribute("ReplayCount");
+                pugi::xml_attribute a = node.attribute("ReplayCount");
+                if (!a) a = node.append_attribute("ReplayCount");
+                a.set_value(r.replay_count);
             }
             // `hl` optional attrs (L140070): presence-tracked seeds + EndTime,
-            // and the boolean `Fight` marker (`hl.Sqa`).
+            // and the boolean `Fight` marker (`hl.Sqa`). Same rule: patch when
+            // set, never remove.
             const auto patch_opt_int =
                 [&node](const char* key, bool present, int value) {
+                    if (!present) return;
                     pugi::xml_attribute a = node.attribute(key);
-                    if (present) {
-                        if (!a) a = node.append_attribute(key);
-                        a.set_value(value);
-                    } else if (a) {
-                        node.remove_attribute(key);
-                    }
+                    if (!a) a = node.append_attribute(key);
+                    a.set_value(value);
                 };
             patch_opt_int("RandomGroupSeed", r.has_random_group_seed,
                           r.random_group_seed);
             patch_opt_int("RandomRuleSeed", r.has_random_rule_seed,
                           r.random_rule_seed);
             patch_opt_int("EndTime", r.has_end_time, r.end_time);
-            {
+            if (r.fight) {
                 pugi::xml_attribute fa = node.attribute("Fight");
-                if (r.fight) {
-                    if (!fa) fa = node.append_attribute("Fight");
-                    fa.set_value("1");
-                } else if (fa) {
-                    node.remove_attribute("Fight");
-                }
+                if (!fa) fa = node.append_attribute("Fight");
+                fa.set_value("1");
             }
         }
     }
@@ -941,6 +1013,24 @@ void SaveSystem::save(const WarriorSave& w) {
                 pugi::xml_node qp = q.append_child("QuestParameters");
                 qp.append_attribute("ScreenIndex").set_value(qs.screen_index);
                 qp.append_attribute("ChekPointIndex").set_value(qs.checkpoint_index);
+                // The `fl` ctor (L9303-9329) force-materializes these children
+                // the first time the node is touched, so the JS's own save
+                // always carries them (the oracle artifact does). Omitting them
+                // was a divergence.
+                qp.append_child("FightResult")
+                    .append_attribute("Name")
+                    .set_value("");
+                qp.append_child("RaidResult")
+                    .append_attribute("Name")
+                    .set_value("");
+                qp.append_child("Fight").append_attribute("Name").set_value("");
+                qp.append_child("LevelUp").append_attribute("Value").set_value("0");
+                qp.append_child("PowerAmount")
+                    .append_attribute("Value")
+                    .set_value("0");
+                qp.append_child("FightAvgFPS")
+                    .append_attribute("Value")
+                    .set_value("0");
             }
         }
         pugi::xml_node vars = quests.child("Variables");

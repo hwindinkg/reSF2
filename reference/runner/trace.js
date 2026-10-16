@@ -54,6 +54,58 @@
   } catch (e) { /* no query string */ }
   var MAX_CLIPS = 5; /* at most this many clip dumps per run */
 
+  /* STATE-HARNESS profile probe (`?probe=save`): the NON-fight layers
+   * (save/profile/economy + the persisted quest + shop rows) live in the
+   * game's own savegame blob, which the browser build keeps in
+   * `localStorage["shadow-fight-2:savegame"]` under `data.SF2User` — the
+   * `Aa.save` (L34782-area) `SF2User` storage form: a u32-LE UTF-8 byte
+   * length + the save XML, base64-encoded (the same bytes the port's
+   * `SaveSystem::envelope_decode` consumes). Emitting that blob gives the
+   * non-fight differential a REAL artifact from the JS side without
+   * inventing any field. Emitted as `{"t":"savegame","b64":".."}`; the
+   * extractor keeps the LAST one (the page may re-save during the run). */
+  var PROBE_SAVE = false;
+  try {
+    PROBE_SAVE =
+      new URLSearchParams(window.location.search).get("probe") === "save";
+  } catch (e) { /* no query string */ }
+
+  function readSavegameB64() {
+    try {
+      var keys = ["shadow-fight-2:savegame", "SF2User", "savegame"];
+      for (var i = 0; i < keys.length; i++) {
+        var raw = window.localStorage.getItem(keys[i]);
+        if (!raw) continue;
+        var obj = null;
+        try { obj = JSON.parse(raw); } catch (e) { obj = null; }
+        if (obj && obj.data && typeof obj.data.SF2User === "string") {
+          return obj.data.SF2User;
+        }
+        if (obj && typeof obj.SF2User === "string") return obj.SF2User;
+      }
+      /* Fallback: any localStorage value that carries the envelope. */
+      for (var k = 0; k < window.localStorage.length; k++) {
+        var key = window.localStorage.key(k);
+        var v = window.localStorage.getItem(key);
+        if (!v || v.indexOf("SF2User") < 0) continue;
+        try {
+          var o = JSON.parse(v);
+          if (o && o.data && typeof o.data.SF2User === "string") {
+            return o.data.SF2User;
+          }
+        } catch (e) { /* not this key */ }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function emitSavegame() {
+    if (!PROBE_SAVE) return;
+    var b64 = readSavegameB64();
+    if (!b64) return;
+    console.log('{"t":"savegame","b64":"' + b64 + '"}');
+  }
+
   /* Run marker: OracleShell's console.log ACCUMULATES every run (a fresh page
    * per run appends to the same file), so a state extractor must be able to
    * keep ONLY the last run — otherwise the mixed frames make
@@ -583,6 +635,18 @@
       } catch (e) { /* ignore */ }
       return bound;
     };
+  }
+
+  /* STATE-HARNESS: arm the profile probe (bounded periodic re-emit so a
+   * save the game writes later in the run is captured; the extractor keeps
+   * the last line). */
+  if (PROBE_SAVE) {
+    emitSavegame();
+    var probeTicks = 0;
+    var probeTimer = setInterval(function () {
+      emitSavegame();
+      if (++probeTicks >= 40) clearInterval(probeTimer);
+    }, 1000);
   }
 
   if (!tryDirect()) {
