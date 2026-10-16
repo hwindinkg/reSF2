@@ -7975,7 +7975,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 // `Fighter::process_reaction_queues` at the top of
                 // `update_fighter` — the `wd.ia` head).
                 if (me.ai->tactic_type() == 1) {
-                    me.fighter.queue_reaction(chosen, /*physics=*/false);
+                    // `bind_pivot`: the Random decision was resolved with the
+                    // candidate's own `<Align><Pivot Part>` bound (`Gc.Pkb`),
+                    // so the queued start re-tests the `<Tactics>` in the SAME
+                    // context (see `Fighter::queue_reaction`).
+                    me.fighter.queue_reaction(chosen, /*physics=*/false,
+                                              /*bind_pivot=*/true);
                     ++me.moves_started;
                 } else if (me.fighter.ai_start_move(*chosen, ctx)) {
                     ++me.moves_started;

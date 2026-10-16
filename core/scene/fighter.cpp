@@ -2061,12 +2061,13 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
 }
 
 // JS `wd.jJa` (L257798) / `wd.fJa` (L257400): stash the picked reaction.
-void Fighter::queue_reaction(const MoveDef* m, bool physics) {
+void Fighter::queue_reaction(const MoveDef* m, bool physics, bool bind_pivot) {
     if (m == nullptr) return;
     if (physics) {
         qs_move_ = m;  // `this.qs.animation = a`
     } else {
         ml_move_ = m;  // `this.Ml.animation = a`
+        ml_bind_pivot_ = bind_pivot;
     }
 }
 
@@ -2097,9 +2098,27 @@ std::string Fighter::process_reaction_queues(sf2::scene::FightContext& ctx,
     // `Mnb()` (L257955): clear the parked `P9` name — no port equivalent.
     if (ml_move_ != nullptr) {
         const MoveDef* m = ml_move_;
+        const bool bind_pivot = ml_bind_pivot_;
         ml_move_ = nullptr;
+        ml_bind_pivot_ = false;
         // `Bnb` (L257860): `Nd.nk && Nd.stop()` BEFORE the ordinary clip.
         if (ragdoll_active()) ragdoll_stop();
+        // JS `Gc.DK` (L28394) -> `Gc.Nsb` (L28711): the Random-tactic decision
+        // is a MOVE OBJECT already resolved by `Gc.Pkb` (L28437); its
+        // `<Tactics>` were tested there with the candidate's own
+        // `<Align><Pivot Part>` bound (`ee.j8a` L33329 reads `CBa(ctx).Yd`).
+        // Reproduce that binding so the start-time re-test (`start_move_impl
+        // (ai=true)`) does not measure a `<Distance Object="Pivot">` from the
+        // CURRENT move's pivot and wrongly reject a JS-valid move
+        // (`BackFlipKick`'s `<Tactics><Distance Max="350">`). Only the AI
+        // Random decision sets this; hit-reaction picks keep the default.
+        if (bind_pivot) {
+            const MoveDef* cand = m;
+            ctx.candidate_pivot_pos = [this, cand](int player, bool prev,
+                                                   float& x, float& y) {
+                return candidate_align_pivot_world_xy(*cand, player, prev, x, y);
+            };
+        }
         if (ai_start_move(*m, ctx)) return m->name;
     }
     return "";

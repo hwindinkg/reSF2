@@ -380,7 +380,7 @@ public:
     // `try_react`/`try_every_frame_move` is stashed here and STARTED on the
     // next frame — the JS order (`ia`'s Qnb/Bnb run before `Ax`'s every-frame
     // event). `qs` (physics) wins and clears `Ml`.
-    void queue_reaction(const MoveDef* m, bool physics);
+    void queue_reaction(const MoveDef* m, bool physics, bool bind_pivot = false);
     std::string process_reaction_queues(sf2::scene::FightContext& ctx,
                                         float wall_min, float wall_max);
     bool reaction_pending() const {
@@ -844,6 +844,55 @@ public:
         y = p[static_cast<std::size_t>(i) * 2 + 1];
         return true;
     }
+    // JS `ee.j8a` (L33329) + `ee.nt` case 2 (L33250): resolve `Object="Pivot"`
+    // inside a CANDIDATE move's condition tree to that candidate's OWN
+    // `<Align><Pivot Part>` node (`CBa(ctx).Yd`, stamped by `jc.vF`/`ee.iB`
+    // when the candidate's `vF` last ran), with the `YH`/`_1`/`_2` mirror
+    // swap. This is the SAME resolution `FightController` installs as
+    // `AiFightState::candidate_pivot_pos` for `de.V1`/`Gc.EZa`; the AI's
+    // move-start re-test (`start_move_impl(ai=true)`, the port's stand-in for
+    // the JS `NS`/`Skb` which never re-evaluates) must bind it too, or the
+    // candidate's `<Tactics>` `<Distance>` is measured from the CURRENT move's
+    // pivot instead of the candidate's (rejecting JS-valid moves such as
+    // `BackFlipKick`).
+    bool candidate_align_pivot_world_xy(const MoveDef& cand, int player,
+                                        bool prev, float& x, float& y) const {
+        if (!cand.align.has_align) return false;
+        if (cand.align.pivot_object == "Animation" ||
+            cand.align.pos_object == "Animation") {
+            return false;
+        }
+        const std::string& part = cand.align.pivot_part;
+        if (part.empty()) return false;
+        const Fighter& f = (player == 2 && opponent_ != nullptr) ? *opponent_ : *this;
+        if (!f.node_world_xy(part, prev, x, y)) return false;
+        // JS `jc.Tab` (L29746-29758): `align.WE` = 1 when the `<Align><Pivot
+        // Part>` name ends `_1`, 2 when it ends `_2`; `ee.j8a` swaps to the
+        // node's `_1`/`_2` mirror partner when `YH==1 && !(x*Wl > px*Wl)` or
+        // `YH==2 && (x*Wl > px*Wl)`.
+        int we = 0;
+        if (part.size() > 2 && part[part.size() - 2] == '_') {
+            if (part.back() == '1') we = 1;
+            else if (part.back() == '2') we = 2;
+        }
+        if (we != 0) {
+            std::string partner = part;
+            partner[partner.size() - 1] = we == 1 ? '2' : '1';
+            float px = 0.0f, py = 0.0f;
+            if (f.node_world_xy(partner, prev, px, py)) {
+                const float wl = (opponent_ != nullptr &&
+                                  opponent_->world_x() - world_x() >= 0.0f)
+                                     ? 1.0f
+                                     : -1.0f;
+                const bool c = (x * wl) > (px * wl);
+                if ((we == 1 && !c) || (we == 2 && c)) {
+                    x = px;
+                    y = py;
+                }
+            }
+        }
+        return true;
+    }
     // Clamps the fighter's world x to [min_x, max_x] (the arena walls).
     // Called each frame by the fight controller after the root-motion walk.
     void clamp_x(float min_x, float max_x) {
@@ -1274,6 +1323,11 @@ private:
     // L253545 `Qnb`/`Bnb`).
     const MoveDef* qs_move_ = nullptr;
     const MoveDef* ml_move_ = nullptr;
+    // `true` when the queued `ml_move_` is the AI's Random-tactic decision:
+    // `process_reaction_queues` then binds the candidate's own `<Align><Pivot
+    // Part>` for the start-time `<Tactics>` re-test (`ee.j8a`), reproducing
+    // `de.V1`/`Gc.Pkb`. Hit-reaction picks leave it false.
+    bool ml_bind_pivot_ = false;
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
     // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
     // a shift of the whole clip buffer. Native equivalent: added to every

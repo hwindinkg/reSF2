@@ -159,6 +159,15 @@ struct StageBattle {
 struct TemplateDef {
     std::string name, base, first_name;
     std::vector<std::string> items;
+    // The template's own `<Perks>` (JS `xc.AK`): `battle_warrior` resolves the
+    // `<Template>` chain's perks (base-first) and appends the `<Warrior>`'s
+    // own on top; the mode path (`resolve_tournament_fight`/
+    // `resolve_survival_warrior`) must do the same — the shipped `Default`
+    // template carries 5 perks (incl. `PERK_BACK_FLIP_KICK`) that a tournament
+    // `<Warrior>` (own `<Perks>` = {PERK_BEGINNER}) inherits. Dropping them
+    // removed every template-perk-gated move from the mode enemy's `me`
+    // (`BackFlipKick` fell out; the AI could never pick it).
+    std::vector<StagePerkRef> perks;
 };
 
 struct GroupDef {
@@ -562,6 +571,24 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                         if (i.attribute("Name")) def.items.push_back(i.attribute("Name").value());
                     }
                 }
+                // The template's own `<Perks>` (JS `xc.AK` parse), mirroring
+                // `battle_warrior` (screens.cpp) — the base of the mode enemy's
+                // resolved perk set.
+                const pugi::xml_node perks = t.child("Perks");
+                if (perks) {
+                    for (const pugi::xml_node p : perks.children("Perk")) {
+                        if (!p.attribute("Name")) continue;
+                        StagePerkRef ref;
+                        ref.name = p.attribute("Name").value();
+                        const pugi::xml_node set = p.child("Set");
+                        if (set) {
+                            for (const pugi::xml_attribute a : set.attributes()) {
+                                ref.set[a.name()] = a.value();
+                            }
+                        }
+                        def.perks.push_back(std::move(ref));
+                    }
+                }
                 if (!def.name.empty()) templates[def.name] = std::move(def);
             }
         }
@@ -605,6 +632,47 @@ inline std::vector<std::string> template_items(
             }
             if (!dup) out.push_back(item);
         }
+    }
+    return out;
+}
+
+// Append `src` perks onto `dst`, deduped by Name with the LATER row's `<Set>`
+// winning — the JS `xc.AK` merge `battle_warrior` performs (template chain
+// base-first, then the Warrior's own). Used by the mode resolvers so a
+// tournament/survival enemy inherits its `<Template>` chain's perks exactly as
+// the stage path does.
+inline void append_perks_unique(std::vector<StagePerkRef>& dst,
+                                const std::vector<StagePerkRef>& src) {
+    for (const StagePerkRef& ref : src) {
+        if (ref.name.empty()) continue;
+        bool merged = false;
+        for (StagePerkRef& e : dst) {
+            if (e.name == ref.name) {
+                e.set = ref.set;
+                merged = true;
+                break;
+            }
+        }
+        if (!merged) dst.push_back(ref);
+    }
+}
+
+// Template chain perks (base-first, deduped by Name) — the `<Template>`
+// `<Perks>` half of `xc.AK`. Mirrors `template_items` (the `<Items>` half).
+inline std::vector<StagePerkRef> template_perks(
+    const std::string& name, const std::map<std::string, TemplateDef>& templates) {
+    std::vector<StagePerkRef> out;
+    std::string cur = name;
+    std::vector<std::string> chain;
+    while (!cur.empty()) {
+        const auto it = templates.find(cur);
+        if (it == templates.end()) break;
+        chain.push_back(cur);
+        cur = it->second.base;
+        if (chain.size() > 8) break;
+    }
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+        append_perks_unique(out, templates.at(*it).perks);
     }
     return out;
 }
@@ -723,6 +791,15 @@ inline bool resolve_survival_warrior(
         // Fight-warrior <Items> override the template list when present.
         if (!slot->items.empty()) out.items = slot->items;
         out.first_name = template_first_name(out.template_name, templates);
+        // JS `xc.AK` merge (`ur`): the `<Template>` chain's `<Perks>` are the
+        // base, the row/group perks append on top (dedup by Name, later `<Set>`
+        // wins). Without this a survival warrior lost every template-perk-gated
+        // move (the shipped `Default` chain carries 5, incl.
+        // `PERK_BACK_FLIP_KICK`).
+        std::vector<StagePerkRef> merged_perks =
+            template_perks(out.template_name, templates);
+        append_perks_unique(merged_perks, out.perks);
+        out.perks = std::move(merged_perks);
     } else {
         out.items = slot->items;
     }
@@ -762,7 +839,16 @@ inline bool resolve_tournament_fight(const StageBattle& battle, int fight_index,
         out.enemy.template_name = w.template_name;
         out.enemy.tactic = w.tactic;
         out.enemy.attrs = w.attrs;
-        out.enemy.perks = w.perks;
+        // JS `xc.AK` merge (`ur`): the `<Template>` chain's `<Perks>` are the
+        // base, the `<Warrior>`'s own `<Perks>` append on top (dedup by Name,
+        // the Warrior's `<Set>` wins). The shipped tournament `<Warrior
+        // Template="Man_Fist">` owns only `PERK_BEGINNER` but inherits the
+        // `Default` chain's 5 perks (incl. `PERK_BACK_FLIP_KICK`); dropping
+        // them excluded `BackFlipKick` (and the other template-perk moves) from
+        // the mode enemy's `me`, so its first Random pick resolved to a move
+        // the JS keeps.
+        out.enemy.perks = template_perks(w.template_name, templates);
+        append_perks_unique(out.enemy.perks, w.perks);
         if (!w.template_name.empty()) {
             out.enemy.items = template_items(w.template_name, templates);
             out.enemy.first_name = template_first_name(w.template_name, templates);
