@@ -7981,7 +7981,19 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     me.fighter.queue_reaction(chosen, /*physics=*/false,
                                               /*bind_pivot=*/true);
                     ++me.moves_started;
-                } else if (me.fighter.ai_start_move(*chosen, ctx)) {
+                } else {
+                    // [FIX Tabular decision latency] The Tabular decision is
+                    // QUEUED too: `wd.Ykb` (L20643) resolves the candidate and
+                    // then only `this.da.rva = b; a.S1 = true; this.Okb(a)` —
+                    // `Okb` (L20887) writes the candidate's `<Keys>` signature
+                    // into the fighter's key buffer (`Kl.Ptb`/`rwa`) and fires
+                    // the buffer event; the clip itself is seated at the head
+                    // of the NEXT `wd.ia` (L20591) via `Bnb`->`NS`->`Skb`.
+                    // Starting it in the decision frame put the challenge
+                    // enemy's `StepForward` at nat f=223 while the oracle
+                    // starts it at nat f=224 (ora f=355, af=1).
+                    me.fighter.queue_reaction(chosen, /*physics=*/false,
+                                              /*bind_pivot=*/false);
                     ++me.moves_started;
                 }
             }

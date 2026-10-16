@@ -1042,48 +1042,34 @@ const std::vector<std::string>& gea_safe_dodges() {
 const TacticRecord* AiController::find_record(const std::string& key_anim,
                                               int table_index) const {
     if (table_index < 0 || table_index > 2) return nullptr;
-    // JS `de.XAa`/`de.Q6a`/`de.Gea` (L611/L609/L613) select the record with
-    //   `for(f of this.ds.Z0()[table]) if(this.OO==f.second){ for(g of
-    //    f.first) if(this.OO==g.Tfa){c=g;break} break }`
-    // — i.e. the group whose WEAPON (`f.second`) matches the AI's own weapon
-    // id `OO` and, within it, the WEAPON record (`g.Tfa`, the pool-B string)
-    // matching the same `OO`. Both keys are the RESPONDER weapon; the shipped
-    // per-anim Z0 entries group a move's `Il` branches by their `Tfa`, so the
-    // two checks collapse to `Il.Tfa == OO` — exactly `r.weapon == oo_`.
+    // [FIX table-path deadness] `de.XAa`/`de.Q6a`/`de.Gea` (L25715/L25652/
+    // L25803) look their record up in `this.ds.Z0()[table]` — a PER-MOVE list
+    // returned by `jc.Z0()` (L29154: `return this.vC`). `P.hKa` (L26594-26614)
+    // runs on load and CLEARS every move's `Z0()` lists
+    // (`k.first=null; k.second="delete"` then `f.length = 0`), and NOTHING in
+    // the shipped build ever refills them: `sb.load` (L27280) only fills the
+    // `sb.FM` records, `Si.cxb`/`Si.dxb` (L27510/L27552) push those into the
+    // GLOBAL `P.wO[table]` via `P.$ua` (L26508), and no code writes
+    // `Z0()/vC`. So `ds.Z0()[table]` is ALWAYS empty, the `for(f of …)` scan
+    // never runs, `c` stays `null` and every table path returns 0.
     //
-    // The ANIMATION is the IMPLICIT scope of `this.ds.Z0()`: `ds` is set by
-    // `de.jwb` L596-597 (`var b=a.da,c=b.Ua; ... c=this.ds=d==null?c:d`) which
-    // `wd.mwb` L527 calls as `this.nf.jwb(this.jb)` — `this.jb` is THIS
-    // fighter's OPPONENT (`wd.wI` `this.jb=a.jb`; `wd.Zka` `this.jb=HB[0]`).
-    // So the JS queries the OPPONENT's current clip, and the .dat tables are
-    // authored that way: `<keyWeapon>_<responderWeapon>.dat` carries records
-    // KEYED BY THE KEY-WEAPON's animations whose `Il.Tfa` is the RESPONDER
-    // weapon (verified on the shipped data: `fists_knives` keys on the Fists
-    // anims `DoublePunch`/`FistsStartStanceIdle-Right`/… with `Tfa=Knives`,
-    // and `knives_fists` is the mirror). The port therefore keys on
-    // `st.enemy_anim` (the OPPONENT's clip) — NOT `st.my_anim`.
-    //
-    // `de.OO = P.dBa(b)` (L300046) where `b = this.parameters.Hd.Yb` = the
-    // equipped item's XML `SubType`; `P.dBa` maps a SubType to its
-    // `<ItemEquivalents>` canonical SubType. The shipped `tactic_settings.xml`
-    // `<ItemEquivalents>` block is COMMENTED OUT (L379-383), so `dBa` is the
-    // IDENTITY: `OO` is exactly the weapon SubType. The port's `oo_ = weapon`
-    // (= the SubType passed to `init`) is JS-exact with no `dBa` step.
-    //
-    // The WEAPON match is EXACT; an empty-`weapon` record (the `default.dat`
-    // pair `$ua(e,'','')`) must NOT shadow the weapon-specific one. Prefer the
-    // exact weapon, fall back to the empty-weapon default only when none
-    // exists.
-    const TacticRecord* fallback = nullptr;
-    for (const TacticsFile& tf : tactics_) {
-        if (tf.version != table_index) continue;  // JS `P.wO[table_index]`
-        for (const TacticRecord& r : tf.set.tables[table_index]) {
-            if (r.anim != key_anim) continue;
-            if (r.weapon == oo_ || weapon_.empty()) return &r;
-            if (r.weapon.empty() && fallback == nullptr) fallback = &r;
-        }
-    }
-    return fallback;
+    // Verified against the oracle: over the full accumulated trace (4818
+    // `{"t":"oracle"}` frames spanning boss/tournament/challenge runs)
+    // `chances.fk` is only ever -1 (never decided), -2 (the `dsb` watch),
+    // 5 (cautious movements) and 9 (evade-throw dodges) — NEVER 0/1/2 (the
+    // three table paths) nor 6 (quick attacks). At the challenge decision
+    // (ora f=353) `fk=5` and the JS starts `StepForward` from `P.nCa()`,
+    // while the port's table path returned 10 candidates and picked
+    // `HeavyPunch`. The port therefore models the empty `Z0()` by returning
+    // no record.
+    // The per-move `Z0()` record list is therefore always empty, so the
+    // lookup can never produce a record: `XAa`/`Q6a`/`Gea` all fall through
+    // with `c == null` and return 0, exactly as the oracle shows. (The
+    // `.dat` blobs are still parsed by `tactics_parse_file` for the record
+    // layout, but the JS never consults them.)
+    (void)key_anim;
+    (void)table_index;
+    return nullptr;
 }
 
 int AiController::yaa(const AiFightState& st) {
