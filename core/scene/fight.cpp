@@ -6066,11 +6066,28 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         const float head_term =
             gfp.shock_head_base * atk.params.attr(gfp.shock_head_attr);
         // The two `r8a` draws come from `uf.RJa()` = `Math.random`, NOT the
-        // shared `Da.pg` crit/AI stream (`draw01()`).
+        // shared `Da.pg` crit/AI stream (`draw01()`). JS `wd.R8a` (L22083)
+        // draws them LAZILY and in this order, and ONLY after the `wd.ecb`
+        // (L22084) / `this.vc` (L22087) early returns:
+        //   `if (this.Bb.se) e = a*b > uf.RJa();`                    (L22103)
+        //   `if (this.Bb.Uq && !this.Bb.block) f = d*b > uf.RJa();`  (L22106)
+        // `se` = the crit gate (`rec.critical`), `Uq` = head-zone
+        // (`rec.head_hit`), `block` = `blocked`. A body hit draws ONE, a head
+        // hit TWO, a `vc`/blocked-gate hit NONE — an eager pair of arguments
+        // (the old shape) drew TWO for every hit and ran the pinned
+        // `Math.random` stream ahead of the JS (the RandomSound `uf.sja` pick
+        // is the only observable that reads it).
+        const bool ecb = false;  // JS `wd.ecb` (L22084) -> false
+        const bool target_vc = def.shock.shocked_vc;  // JS `this.vc` (L22087)
+        float crit_roll = 0.0f;
+        float head_roll = 0.0f;
+        if (!ecb && !target_vc) {
+            if (critical) crit_roll = math_random01();
+            if (rec.head_hit && !blocked) head_roll = math_random01();
+        }
         const bool ub = sf2::scene::r8a_decide(
-            false, def.shock.shocked_vc, b, pain_c, crit_term, critical,
-            math_random01(), head_term, rec.head_hit, blocked,
-            math_random01()).raw;
+            ecb, target_vc, b, pain_c, crit_term, critical, crit_roll,
+            head_term, rec.head_hit, blocked, head_roll).raw;
         rec.shock = ub;
         // JS `Cgb` shock apply (L394): `Ub&&(vc?Ub=false:vc=true)`.
         if (ub) {
