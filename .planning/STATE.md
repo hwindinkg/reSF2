@@ -147,6 +147,26 @@ that char-offset grep missed:
   first seat `Pi.job` re-seats) — the "back→forward + jump" is gone
   (`--profile-avatar-probe`: `restart_step 0.155` vs `steady 0.142`) + the hit
   impulse now REPLACES per strike (JS `Bb` is one overwritten descriptor).
+## MILESTONE 2 — ALL MECHANICAL DIFFERENTIALS ARE 0 (2026-10-17)
+Beyond the five fight scenarios, the harness now also diffs (and is **0**):
+- **save/profile/quest/shop** — `--dump-save` + `reference/tools/compare_profile.py`
+  (canonical XML multiset diff): 68/68 lines, 0 divergences. Found+fixed 4 real
+  save-writer bugs: invented `CoinIcon=""`/`MapFocus=""`/`DenominationDigits="0"`,
+  the port DELETED `<Battle Locked/Hidden/ReplayCount/Fight>` and
+  `<Item AcquireType/UpgradeLevel/…>` (JS patches in place), and the missing
+  6 `<QuestParameters>` children. (`b3f41983`)
+- **UI screen-stack** — `--dump-ui` + `compare_ui.py` (the `mc.K.stack` model).
+- **audio** — `--dump-audio` + `compare_audio.py` (per-frame `plays/stops/sfx/
+  music/music_track`). `921d6b0c`: `wd.R8a`'s two `uf.RJa()` rolls were eager
+  (2 draws/hit) instead of lazy (0/1/2 by `se`/`Uq&&!block`) → the shared
+  `Math.random` stream drifted; the index `<RandomSound>` was the only observer.
+  Now `plays` **0/368**. NOTE: the audio diff needs `SF2_HEADLESS_REALTIME=1`.
+- **invention sweep**: 0 `TODO/FIXME/workaround/placeholder/stub/dead` markers;
+  2 real fixes (`CHALLENGE→FightChallenge`, the tactic-constants parse); the rest
+  justified with JS lines.
+- NOT mechanically diffable (documented, covered by deterministic probes): the UI
+  node-level geometry/list/selected/scroll, the quest RUNTIME object.
+
 ## MILESTONE — ALL FIVE DIFFERENTIAL SCENARIOS ARE 0 (2026-10-16)
 `reference/tools/compare_state.py` reports **0 divergences / 36 counted fields** for
 **dojo-demo, boss-lynx, tournament, survival, challenge** (368 matched frames each,
