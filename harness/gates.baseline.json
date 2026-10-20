@@ -1,0 +1,140 @@
+{
+  "_meta": {
+    "updated": "2026-10-20T08:48:42",
+    "mode": "full"
+  },
+  "gates": {
+    "verify-input": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "flow-verify": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "save-fields-probe": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "settings-profile-shop-probe": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "input-tape": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "ui-tour": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "fidelity-tour": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "headless-loop": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "boss-hit-probe": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "kick-ko": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "quest-verify": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:40"
+    },
+    "quest-verify-buy": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "dialog-verify": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "tutorial-real-verify": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "doublesweep-verify": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "enemy-move-audit": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "diff:dojo-demo": {
+      "metric": 2,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "diff:boss-lynx": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "diff:tournament": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "diff:survival": {
+      "metric": 2649,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "diff:challenge": {
+      "metric": 0,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:41"
+    },
+    "diff:dojo-move": {
+      "metric": 1527,
+      "commit": "db4c58c2",
+      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
+      "date": "2026-10-20T08:48:42"
+    }
+  }
+}

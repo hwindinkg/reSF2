@@ -65,7 +65,15 @@ FLOAT_TOL = 0.001
 #               (the JS `$t.time` is write-once 0 — NOT the countdown)
 #   rules.*  -> oracle `fight.Da.jh()` (`p.o.Yh ? CV : Ae`)    == native `rules_`
 #   callouts -> oracle `Sf.Id.Jh.Gu` / `Sf.je.Jh.Gu` (live)    == native `callout_display_`
-INFORMATIONAL = {}
+#
+# `fighters.*.x`: the oracle's x is the POSED body x (it includes the
+# location scene Shift), the native's is the logical world x. Measured on
+# 2026-10-20 from the gate artifacts: the difference is a constant per
+# location and the same for both fighters (dojo 0.000, moon 0.598,
+# arena/autumn 22.211), i.e. a global scene shift, not a fighter position.
+# The comparable quantity is `fighters.sep_x` (the x distance between the two
+# fighters), which IS counted; the absolute x stays visible as a diagnostic.
+INFORMATIONAL = {"fighters.Me.x", "fighters.Enemy.x"}
 
 # clip/move name normalization (same rule as compare_pose.py)
 CLIP_ALIASES = {
@@ -354,8 +362,14 @@ def collect_fields(nf, of, swap):
         if not isinstance(a, dict) or not isinstance(b, dict):
             continue
         p = "fighters.%s." % label
-        for k in ("x", "y", "w",
-                  "hp", "mhp", "combo", "style", "unhit", "shock", "block",
+        # Absolute/derived POSITION is only one quantity for a STANDING body:
+        # for a ragdoll the oracle reports the posed ragdoll body while the
+        # native reports the fighter root (measured on the dojo dummy: dy up to
+        # ~4 units, d|x| ~2 mm, on every frame). The ragdoll's bones are
+        # compared by compare_pose.py; the state harness skips the position
+        # fields on ragdoll frames instead of reporting a false divergence.
+        standing = a.get("rag") == 0 and b.get("rag") == 0
+        for k in ("w", "hp", "mhp", "combo", "style", "unhit", "shock", "block",
                   "invuln", "move", "af", "rag", "ragf"):
             va = a.get(k)
             vb = b.get(k)
@@ -363,7 +377,37 @@ def collect_fields(nf, of, swap):
                 va = normalize_move(va)
                 vb = normalize_move(vb)
             out[p + k] = (va, vb)
+        if standing:
+            out[p + "x"] = (a.get("x"), b.get("x"))
+            out[p + "y"] = (a.get("y"), b.get("y"))
         out[p + "iv"] = (normalize_ivs(a.get("iv")), normalize_ivs(b.get("iv")))
+
+    # Positions: the absolute x is NOT one quantity across locations. The
+    # oracle reports the POSED body x (`f.oa.Fe().ma.x`), which carries the
+    # location's scene Shift; the native reports the logical world x
+    # (`Fighter::world_x`). Measured: the offset is constant per location and
+    # IDENTICAL for both fighters (dojo 0.000, moon 0.598, arena/autumn
+    # 22.211), so a global shift is invisible in the relative geometry. The
+    # counted position field is therefore the x distance between the two
+    # fighters (shift-invariant, abs() makes the oracle role mapping
+    # irrelevant). `fighters.*.x` stays emitted as a diagnostic (INFORMATIONAL).
+    def x_of(fr, fid):
+        f = get_fighter(fr, fid)
+        return f.get("x") if isinstance(f, dict) else None
+
+    n_me, n_en = x_of(nf, "Me"), x_of(nf, "Enemy")
+    o_me, o_en = x_of(of, "Me"), x_of(of, "Enemy")
+    if None not in (n_me, n_en, o_me, o_en):
+        # Only a fully standing pair has one position quantity (see above).
+        standing = True
+        for fr, fid in ((nf, "Me"), (nf, "Enemy"), (of, "Me"), (of, "Enemy")):
+            f = get_fighter(fr, fid)
+            if not isinstance(f, dict) or f.get("rag") != 0:
+                standing = False
+                break
+        if standing:
+            out["fighters.sep_x"] = (
+                round(abs(n_en - n_me), 4), round(abs(o_en - o_me), 4))
     return out
 
 
@@ -508,7 +552,8 @@ def run(args):
             if field in ("fighters.Me.hp", "fighters.Enemy.hp",
                          "fighters.Me.mhp", "fighters.Enemy.mhp",
                          "fighters.Me.x", "fighters.Enemy.x",
-                         "fighters.Me.y", "fighters.Enemy.y"):
+                         "fighters.Me.y", "fighters.Enemy.y",
+                         "fighters.sep_x"):
                 # Positions are floats on both sides (native `%.4f`, oracle
                 # rounded to 4 decimals): compare with the same tolerance the
                 # hp fields use, so 1e-4 rounding never reads as a divergence.

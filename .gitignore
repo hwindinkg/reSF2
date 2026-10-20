@@ -204,3 +204,5 @@ reference/saves/
 # Legacy asset dump (superseded by code-only snapshot; binaries live in 'old' history)
 /assets/
 build_head/
+# Gate runner runtime state (artifacts, samples, save backup, lock)
+.harness/
