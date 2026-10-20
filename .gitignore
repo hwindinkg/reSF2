@@ -18,7 +18,10 @@ user.xml
 .codegraph/
 .env
 .flowdeck/
-.opencode/
+.opencode/*
+!.opencode/plugins/
+!.opencode/commands/
+!.opencode/package.json
 .planning/
 .qoder/
 HANDOFF.md

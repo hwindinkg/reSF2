@@ -242,6 +242,12 @@ class RunLock:
             self._fh.close()
         except Exception:
             pass
+        # Remove the file too: the plugin's "is a run active?" check reads the
+        # PID from it, and a leftover file with a dead PID must not look busy.
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------
