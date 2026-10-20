@@ -737,10 +737,14 @@ def run_diff_gate(gate: Gate) -> GateResult:
     # 3. State diff (the metric of this gate).
     report = REPORTS / f"state_{scenario}.txt"
     cmp_res = run_proc(
-        [PY, "reference/tools/compare_state.py", "--label", scenario,
+        [PY, "reference/tools/compare_state.py", "--gate", "--label", scenario,
          "--out", str(report.relative_to(ROOT))],
         f"{scenario}-compare", 300,
     )
+    if cmp_res.rc not in (0, 1):
+        return GateResult(gate.id, "diff", None, verdict="ERROR",
+                          error=f"compare_state exited {cmp_res.rc}",
+                          seconds=time.time() - started)
     try:
         metric, detail = p_total_divergences(cmp_res.out)
     except AnchorMissing as exc:
@@ -754,7 +758,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
     if native_ui.exists() and oracle_ui.exists():
         ui_report = REPORTS / f"ui_{scenario}.txt"
         ui_res = run_proc(
-            [PY, "reference/tools/compare_ui.py", "--label", scenario,
+            [PY, "reference/tools/compare_ui.py", "--gate", "--label", scenario,
              "--native", str(native_ui.relative_to(ROOT).as_posix()),
              "--oracle", str(oracle_ui.relative_to(ROOT).as_posix()),
              "--out", str(ui_report.relative_to(ROOT))],

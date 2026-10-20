@@ -31,6 +31,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 
 DEFAULT_NATIVE = os.path.join("reference", "traces", "native_ui.jsonl")
@@ -183,6 +184,22 @@ def run(args):
             fh.write(text + "\n")
     except OSError as exc:
         print("compare_ui: cannot write %s: %s" % (args.out, exc), file=sys.stderr)
+    if getattr(args, "gate", False):
+        # Gate mode: the NUMBERS decide. Counted: depth mismatch, per-entry
+        # mismatch and oracle-only transitions (a native-only transition is by
+        # design - the native adds Results=10 / Settings=11). A missing summary
+        # line or a missing oracle trace is a FAIL.
+        if ora_missing:
+            return 1
+        dep = re.search(r"matched transitions with depth mismatch:\s*(\d+)", text)
+        st = re.search(
+            r"matched transitions with per-entry \(id,state,active\) mismatch:\s*(\d+)",
+            text)
+        oo = re.search(r"oracle-only:\s*(\d+)", text)
+        if not (dep and st and oo):
+            return 1
+        return 0 if (int(dep.group(1)) + int(st.group(1)) +
+                     int(oo.group(1))) == 0 else 1
     return 0
 
 
@@ -192,6 +209,10 @@ def main(argv=None):
     ap.add_argument("--oracle", default=DEFAULT_ORACLE)
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--label", default="")
+    ap.add_argument("--gate", action="store_true",
+                    help="gate mode: exit 1 when the UI stack diverges (depth/"
+                         "per-entry mismatch or oracle-only transitions), when the "
+                         "summary is absent, or when the oracle trace is missing")
     args = ap.parse_args(argv)
     return run(args)
 

@@ -58,6 +58,13 @@ def main():
     ap.add_argument("--threshold", type=int, default=12)
     ap.add_argument("--pairs", default="")
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--gate", action="store_true",
+                    help="gate mode: exit 1 when any pair is MISSING/ERROR or its "
+                         "pct_over_threshold exceeds --max-pct")
+    ap.add_argument("--max-pct", type=float, default=100.0,
+                    help="gate mode: fail when pct_over_threshold > this "
+                         "(default 100 = only MISSING/ERROR fail; the per-screen "
+                         "thresholds live in MASTER_TODO)")
     args = ap.parse_args()
     names = STATES if args.all else [p.split(":")[0] for p in args.pairs.split(",") if p]
     pmap = {}
@@ -68,13 +75,23 @@ def main():
     if not names:
         raise SystemExit("no states (use --all or --pairs oracle:port,...)")
     print("screen,pct_over_threshold")
+    gate_bad = 0
     for n in names:
         try:
-            print("%s,%.2f" % (n, diff_pair(args.dir, n, args.threshold, pmap.get(n))))
+            pct = diff_pair(args.dir, n, args.threshold, pmap.get(n))
+            print("%s,%.2f" % (n, pct))
+            if args.gate and pct > args.max_pct:
+                gate_bad += 1
         except FileNotFoundError as e:
             print("%s,MISSING %s" % (n, e))
+            if args.gate:
+                gate_bad += 1
         except SystemExit as e:
             print("%s,ERROR %s" % (n, e))
+            if args.gate:
+                gate_bad += 1
+    if args.gate and gate_bad:
+        return 1
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 import glob
@@ -986,6 +987,17 @@ def run_frame_mode(args):
                          native_bad, oracle_bad, oracle_missing, matches,
                          unaligned_native, unaligned_oracle, stats, swap=swap)
     emit(args, lines)
+    if getattr(args, "gate", False):
+        # Gate mode: count "frames with any bone over tolerance" (both
+        # fighters). A missing summary line or a missing oracle trace is a FAIL.
+        if oracle_missing:
+            return 1
+        text = "\n".join(lines)
+        over = [int(n) for n in re.findall(
+            r"frames with any bone over tolerance:\s*(\d+)/", text)]
+        if not over:
+            return 1
+        return 0 if sum(over) == 0 else 1
     return 0
 
 
@@ -1008,12 +1020,19 @@ def main(argv=None):
     ap.add_argument("--coord-transform", dest="coord_transform", default="none",
                     choices=["none", "center"],
                     help="coordinate handling: none (raw) or center (subtract per-frame mean x before bone/world comparison) (default: none)")
+    ap.add_argument("--gate", action="store_true",
+                    help="gate mode: exit 1 when any matched frame has a bone over "
+                         "tolerance, when the summary is absent, or when the oracle "
+                         "trace is missing (not supported with --clip)")
     args = ap.parse_args(argv)
 
     if args.tolerance <= 0:
         print("compare_pose: --tolerance must be positive", file=sys.stderr)
         return 2
 
+    if args.gate and args.clip is not None:
+        print("compare_pose: --gate is not supported with --clip", file=sys.stderr)
+        return 2
     if args.clip is not None:
         return run_clip_mode(args)
     return run_frame_mode(args)

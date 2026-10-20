@@ -582,6 +582,15 @@ def run(args):
             fh.write(text + "\n")
     except OSError as exc:
         print("compare_state: cannot write report %s: %s" % (args.out, exc), file=sys.stderr)
+    if getattr(args, "gate", False):
+        # Gate mode: the NUMBER decides, never the exit code of the producer.
+        # A missing total line is a FAIL too (absence is not success).
+        m = re.search(r"total divergences:\s*(\d+)", text)
+        if oracle_missing:
+            return 1
+        if m is None:
+            return 1
+        return 0 if int(m.group(1)) == 0 else 1
     return 0
 
 
@@ -603,6 +612,10 @@ def main(argv=None):
                     help="scenario label shown in the report header "
                          "(e.g. 'dojo-demo', 'tournament-ladder', "
                          "'boss-lynx', 'survival', 'shop', 'quests')")
+    ap.add_argument("--gate", action="store_true",
+                    help="gate mode: exit 1 when 'total divergences' != 0, when the "
+                         "number is absent, or when the oracle trace is missing "
+                         "(default: always exit 0 for manual scenarios)")
     args = ap.parse_args(argv)
     return run(args)
 
