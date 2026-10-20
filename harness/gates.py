@@ -273,12 +273,20 @@ class ProcResult:
         return self.err_path.read_text(encoding="utf-8", errors="replace")
 
 
-def run_proc(argv: list[str], sample_id: str, timeout_s: int) -> ProcResult:
-    """Run one argv (NO SHELL), hidden, with a hard timeout; kill our tree."""
+def run_proc(argv: list[str], sample_id: str, timeout_s: int,
+             extra_env: dict[str, str] | None = None) -> ProcResult:
+    """Run one argv (NO SHELL), hidden, with a hard timeout; kill our tree.
+
+    `extra_env` layers probe-only switches on top of the inherited environment
+    (e.g. `SF2_FORCE_DISARM=1` for the disarm gate)."""
     SAMPLES.mkdir(parents=True, exist_ok=True)
     out_path = SAMPLES / f"{sample_id}.out"
     err_path = SAMPLES / f"{sample_id}.err"
     started = time.time()
+    env = None
+    if extra_env:
+        env = dict(os.environ)
+        env.update(extra_env)
     with open(out_path, "w", encoding="utf-8", errors="replace") as fo, open(
         err_path, "w", encoding="utf-8", errors="replace"
     ) as fe:
@@ -288,6 +296,7 @@ def run_proc(argv: list[str], sample_id: str, timeout_s: int) -> ProcResult:
             stdout=fo,
             stderr=fe,
             stdin=subprocess.DEVNULL,
+            env=env,
             creationflags=CREATE_NO_WINDOW,
         )
         timed_out = False
@@ -396,6 +405,22 @@ def p_boss_hit(text: str) -> tuple[int, str]:
     return (0 if "HIT" in hits else 1), ("HIT" if "HIT" in hits else "MISS")
 
 
+def p_disarm_ai(text: str) -> tuple[int, str]:
+    """`SF2_FORCE_DISARM=1` + `SF2_TRACE_MOVELIST=1`: the AI must never start a
+    move that is not in the fighter's own (weapon-filtered) list after the drop.
+
+    JS `de.V1` (L601-602) `!this.model.me.includes(a)` -> the candidate is
+    rejected; a start of a foreign-weapon move is the reported "the dropped
+    weapon's animations still play". The run must PROVE it disarmed (an
+    `after drop` line) or the gate is vacuous.
+    """
+    drops = re.findall(r"^\[movelist\].*after drop.*$", text, re.M)
+    if not drops:
+        raise AnchorMissing("[movelist] ... after drop")
+    leaks = re.findall(r"^\[movelist\] AI start .* NOT in hb_ .*$", text, re.M)
+    return len(leaks), f"{len(drops)} drop(s), {len(leaks)} foreign-move start(s)"
+
+
 def p_kick_ko(text: str) -> tuple[int, str]:
     """`--kick-ko` ends with `[result] WIN` (no RESULT line)."""
     m = _need(r"^\[result\]\s+(WIN|LOSE|DRAW)\s*$", text)
@@ -467,6 +492,7 @@ PARSERS = {
     "tape": p_tape,
     "boss_hit": p_boss_hit,
     "kick_ko": p_kick_ko,
+    "disarm_ai": p_disarm_ai,
     "dialog": p_dialog,
     "total_div": p_total_divergences,
     "ui_total": p_ui_total,
@@ -489,6 +515,7 @@ class Gate:
     parser: str = ""  # key into PARSERS
     scenario: str = ""  # kind="diff"
     note: str = ""
+    env: dict[str, str] = field(default_factory=dict)  # probe-only switches
 
     def outer_timeout(self) -> int:
         return self.timeout_s or (self.watch + 120)
@@ -505,6 +532,11 @@ FLAG_GATES: list[Gate] = [
     Gate("headless-loop", "gate", ("full",), "--headless-loop", 700, parser="loop:13"),
     Gate("boss-hit-probe", "gate", ("full",), "--boss-hit-probe", 300, parser="boss_hit"),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
+    # JS `de.V1` (L601-602) `!model.me.includes(a)`: after a DISARM the AI must
+    # never resolve/start a foreign weapon's move. `SF2_FORCE_DISARM=1` makes
+    # the drop deterministic (fight.cpp `[probe, authorised]`).
+    Gate("disarm-ai", "gate", ("full",), "--kick-ko", 300, parser="disarm_ai",
+         env={"SF2_FORCE_DISARM": "1", "SF2_TRACE_MOVELIST": "1"}),
     Gate("quest-verify", "gate", ("full",), "--quest-verify", 300, parser="kv:qverify"),
     Gate("quest-verify-buy", "gate", ("full",), "--quest-verify-buy", 300, parser="kv:qverify"),
     Gate("dialog-verify", "gate", ("full",), "--dialog-verify", 300, parser="dialog"),
@@ -661,7 +693,7 @@ def build_gate(force: bool) -> GateResult:
 
 def run_flag_gate(gate: Gate) -> GateResult:
     argv = [str(GAME), gate.flag, "--watchdog", str(gate.watch), RES, SAVE_REL]
-    res = run_proc(argv, gate.id, gate.outer_timeout())
+    res = run_proc(argv, gate.id, gate.outer_timeout(), gate.env or None)
     started = res.seconds
     if res.timed_out:
         return GateResult(gate.id, "gate", None, verdict="TIMEOUT",

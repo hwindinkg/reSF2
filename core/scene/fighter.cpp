@@ -1252,6 +1252,26 @@ bool Fighter::ai_start_move(const MoveDef& move, FightContext& ctx) {
 
 bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     if (ai) {
+        // [probe, authorised] `SF2_TRACE_MOVELIST=1`: an AI start of a move
+        // that is NOT in this fighter's own list (`hb_`) is the JS
+        // `de.V1` `!b.includes(a)` case the port must never reach.
+        if (std::getenv("SF2_TRACE_MOVELIST") != nullptr) {
+            bool own = false;
+            for (const sf2::scene::MoveDef* om : hb_) {
+                if (om != nullptr && om->name == move.name) {
+                    own = true;
+                    break;
+                }
+            }
+            if (!own) {
+                std::fprintf(stdout,
+                             "[movelist] AI start '%s' (tactic=%s) NOT in hb_ "
+                             "(n=%zu)\n",
+                             move.name.c_str(), move.tactic_weapon.c_str(),
+                             hb_.size());
+                std::fflush(stdout);
+            }
+        }
         // JS `de.V1` (L601-602): the AI's candidate test evaluates ONLY the
         // move's TACTICS conditions (`a.Yz(this.model,null,a.FQ(2))` = the
         // `Ts` list). The main Conditions tree (Keys/CurrentAnimation/etc)

@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-20T19:47:54",
+    "updated": "2026-10-20T22:47:33",
     "mode": "only"
   },
   "gates": {
@@ -135,6 +135,12 @@
       "commit": "db4fc9aa",
       "reason": "bug 1/2 fix: the queued player pick no longer runs the AI Tactics re-test (StartStance/StepBack start now); 236 = the remaining 1-frame press-queue latency on JumpUp (541) + the dojo dummy spawn y",
       "date": "2026-10-20T19:47:54"
+    },
+    "disarm-ai": {
+      "metric": 0,
+      "commit": "874b413c",
+      "reason": "NEW gate (not a relaxation): JS de.V1 L601-602 false-negative guard; metric 0 = no AI start of a move outside the fighter's own weapon-filtered list after a forced disarm (proven to fail at 1 with the filter disabled)",
+      "date": "2026-10-20T22:47:33"
     }
   }
 }

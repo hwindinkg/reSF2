@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -7348,6 +7349,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             me.fighter.build_move_list_locks(*moves_, me.owned_items,
                                              /*include_universal=*/true,
                                              gfp.shock_weapon);
+            // [probe, authorised] `SF2_TRACE_MOVELIST=1`: show what the rebuilt
+            // list still admits for OTHER weapons (JS `ra.Hza` must key the
+            // list on the new weapon only).
+            if (std::getenv("SF2_TRACE_MOVELIST") != nullptr) {
+                int armed = 0;
+                std::string sample;
+                for (const sf2::scene::MoveDef* m : me.fighter.hb()) {
+                    if (m == nullptr || m->tactic_weapon.empty()) continue;
+                    ++armed;
+                    if (sample.size() < 180) {
+                        sample += m->name + "[" + m->tactic_weapon + "] ";
+                    }
+                }
+                std::fprintf(stdout,
+                             "[movelist] F%d %s after drop: total=%zu "
+                             "weapon-gated=%d sample=%s\n",
+                             frame_, me.name.c_str(), me.fighter.hb().size(),
+                             armed, sample.c_str());
+                std::fflush(stdout);
+            }
             // JS `this.oa.vc=!0; this.parameters.P2a(); <impulse loop>`.
             // `P2a` (`xc.P2a` L417709) deactivates the wielded item; the
             // weapon MESH is NOT hidden — the weapon's `Shock="1"` nodes are
@@ -8014,10 +8035,24 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             // condition tree passes. A tag can match several moves, so take
             // the first whose `<Conditions>` hold — `Throw` must resolve to
             // the distance-gated `ThrowForward`, never a far throw.
+            // `de.V1` ALSO requires `this.model.me.includes(a)` — the move must
+            // be in the fighter's OWN (weapon-filtered) list. Without this the
+            // tag scan picked another weapon's variant: after a disarm
+            // (`weapon='Fists'`) the bot still resolved `KatarsUpperCut`
+            // (`TacticWeapon="Katars|MonkKatars"`, Priority 120) and played a
+            // weapon animation with fists, and the AI's own `not-my-move`
+            // gate never saw it because the resolution happened HERE.
+            std::set<std::string> own_moves;
+            for (const sf2::scene::MoveDef* om : me.fighter.hb()) {
+                if (om != nullptr) own_moves.insert(om->name);
+            }
             for (const auto& kv : *moves_) {
                 if (kv.second.name != decision &&
                     kv.second.template_tags.count(decision) == 0) {
                     continue;
+                }
+                if (!own_moves.empty() && own_moves.count(kv.second.name) == 0) {
+                    continue;  // `!b.includes(a)` (L601) -> not my move
                 }
                 sf2::scene::FightContext c = pick_ctx();
                 if (!sf2::scene::eval_move_conditions(kv.second.conditions, c)) continue;
@@ -8027,6 +8062,9 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             if (chosen == nullptr && decision == "ShortAttack") {
                 for (const auto& kv : *moves_) {
                     if (kv.second.template_tags.count("Punch") == 0) continue;
+                    if (!own_moves.empty() && own_moves.count(kv.second.name) == 0) {
+                        continue;  // same `de.V1` membership gate
+                    }
                     sf2::scene::FightContext ctx;
         ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
                     ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
