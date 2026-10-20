@@ -567,8 +567,28 @@ struct SubFrameTable {
     }
 };
 
+// JS `Tu` (`Fa.Cxb` L30298-30316; class at L30537): ONE
+// `<Transitions><Transition>` entry. `.$c` = its own `<Conditions>` list
+// (`Fa.HS("Conditions", d)`, NEVER the templates' - `Fa.xbb` L30213 reads
+// `a.A("Transitions")` on the move's OWN node only), `.VD` = "the frame is a
+// SHIFT relative to the current playhead" (`FrameShift` attr), `.pD` = the
+// frame value (`FirstFrame` -> absolute, `FrameShift` -> relative; the
+// `FrameShift` test runs SECOND, so an element carrying both wins with the
+// shift, JS L30305-30312).
+struct MoveTransition {
+    std::vector<Cond> conditions;  // `.$c`
+    bool relative = false;         // `.VD`
+    int frame = 0;                 // `.pD`
+};
+
 struct MoveDef {
     std::string name;
+    // JS `jc.p6` (`Fa.xbb` L30213) - the move's own `<Transitions>` list,
+    // read by `Gc.Nsb` (L28711-28728) when the move is seated through
+    // `Gc.DK`: the FIRST transition whose conditions pass decides the clip's
+    // start frame (`Te.Skb` L23003-23008: `FrameShift` -> `ip()+1+pD`,
+    // `FirstFrame` -> `pD`, none -> `a.qx`).
+    std::vector<MoveTransition> transitions;
     // JS `jc.aU` (a `Jl`): the sub-frame offset table for this move, filled
     // from the tactics .dat v=7 block (`Si.cxb` L654 `f.aU.DFa(f,b)`). Read
     // by the AI `Q6a`/`bma` distance windows (`b.aU.xea(f,r)` @310868).
@@ -818,9 +838,10 @@ struct MoveDef {
 // When `global_out` is non-null it also receives the root `<Triggers>` block
 // (JS `Fa.Exb` L708 -> `ra.Dm`).
 // When `available_packs` is non-null it is the set of pack names JS
-// `Fa.zcb`/`Mc.F().T1` reports available; a `<Move PackName="X">` whose X is
-// NOT in the set is dropped from the registry (`ra.Lk`), exactly as
-// `Fa.Ueb` (L30040-30044) does.
+// `Fa.zcb`/`Mc.F().T1` reports available (see `move_pack_availability()` in
+// app.cpp for the JS chain); a `<Move PackName="X">` whose X is NOT in the
+// set is dropped from the registry (`ra.Lk`), exactly as `Fa.Ueb`
+// (L30040-30044) does.
 bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& out,
                  std::vector<GlobalTrigger>* global_out = nullptr,
                  const std::set<std::string>* available_packs = nullptr);

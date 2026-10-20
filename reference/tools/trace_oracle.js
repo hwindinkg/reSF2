@@ -1254,9 +1254,16 @@
     try {
       if (!or.stimulus && window.__oracleStimulus &&
           window.__oracleStimulus.length) {
-        or.stimulus = window.__oracleStimulus;
+        /* SHARED-SCRIPT key edges ({t:'key', c, d}) are driven by the v2 tracer
+         * (reference/runner/trace.js `beforeFrame`), which honours the `d`
+         * edge flag. This legacy driver keeps only the OLD item shapes (bare
+         * `key` = down + auto-up, tap, drag, press/release) so one script does
+         * not fire two different key streams. */
+        or.stimulus = window.__oracleStimulus.filter(function (it) {
+          return !(it && it.t === "key" && it.d !== undefined);
+        });
         console.log("[ORACLE] stimulus armed: " +
-          window.__oracleStimulus.length + " items");
+          or.stimulus.length + " items");
       }
     } catch (e) { /* ignore */ }
   }

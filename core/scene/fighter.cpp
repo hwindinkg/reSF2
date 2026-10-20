@@ -1261,7 +1261,20 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // ran) and skips the input-gated main conditions.
         ctx.candidate_moves = {move.name};
         ctx.keys_gm = false;  // gm=false: every Keys condition passes
-        if (!eval_move_conditions(move.tactics, ctx)) {
+        static const bool trace_tactics = std::getenv("SF2_TRACE_COND") != nullptr;
+        std::string tactics_trace;
+        if (!eval_move_conditions(move.tactics, ctx,
+                                  trace_tactics ? &tactics_trace : nullptr)) {
+            if (trace_tactics &&
+                (move.name.rfind("Step", 0) == 0 ||
+                 move.name == "DoubleStepForward")) {
+                std::fprintf(stdout,
+                             "[cond] %s TACTICS FAIL dist_x=%.1f me=%.1f "
+                             "en=%.1f\n%s",
+                             move.name.c_str(), ctx.dist_x, ctx.me_x, ctx.enemy_x,
+                             tactics_trace.c_str());
+                std::fflush(stdout);
+            }
             return false;
         }
     } else {
@@ -1325,7 +1338,47 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // counter is read AFTER this tick's `M2++`, exactly as the JS reads it
     // (`ia` incremented `M2` before `Xqb` overwrote it).
     if (first_start_tick_ < 0) first_start_tick_ = ia_ticks_;
-    move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
+    // JS `Te.Skb` L23003-23017 - the CLIP START FRAME:
+    //   `let f = a.qx;`
+    //   `if (d) { f = this.ip() + 1 + e; } else if (e > -1) { f = e; }`
+    //   `... this.Mq = f; this.Lj = this.Ua.Lj;`
+    //   `if (this.Mq > this.Lj - 1) { this.Mq = this.Lj - 1; }`
+    // `d`/`e` = the queued `Ml.VD`/`Ml.pD` (`Gc.Nsb` L28711-28728, reached
+    // from every `Gc.DK` seat: the AI decision and the player/input pick):
+    // when the move being started has a `<Transitions>` entry whose
+    // `<Conditions>` pass, the clip starts at `ip()+1+FrameShift` (relative
+    // to the frame the OLD clip was on) or at the transition's `FirstFrame`
+    // instead of at the move's own `qx`.
+    // `ip()` (L22865 `Ua.MS ? fG : M0()`) is the OLD clip's frame - the port's
+    // `move_frame_`, still holding the previous move's `M0` here (it is read
+    // BEFORE the switch, L23005, and overwritten below).
+    // `Lj` (L23013) = `jc.Lj` (`Vlb`/`Cdb`): the XML `EndFrame`, or the LOADED
+    // clip's last frame index (`frames.len - 1`) when `EndFrame` is absent.
+    const int ip_prev = move_frame_;
+    int start_f = std::max(0, move.first_frame);  // `let f = a.qx;`
+    if (ml_shift_rel_) {                          // `if (d)`
+        start_f = ip_prev + 1 + ml_shift_;        // `this.ip() + 1 + e`
+    } else if (ml_shift_ > -1) {                  // `else if (e > -1)`
+        start_f = ml_shift_;                      // `f = e`
+    }
+    // `Skb` hands the UNCLAMPED `f` to `Pka` (L23024) but stores the CLAMPED
+    // value in `Mq` (L23015-23017): the play buffer / `J$a()` base
+    // (`move_base_`) and the `M0()` base (`move_start_`) can therefore differ
+    // by the clamp - keep both. The `Lj - 1` clamp needs a loaded clip (a
+    // clip-less move keeps `f`; the JS would clamp against `Lj = 0`).
+    const int lj = move.end_frame != 0
+                       ? move.end_frame
+                       : (current_clip_ != nullptr
+                              ? static_cast<int>(current_clip_->frames.size()) - 1
+                              : 0);
+    move_base_ = start_f > -1 ? start_f
+                              : std::max(0, move.first_frame);  // `f>-1?f:qx`
+    if (lj > 0 && start_f > lj - 1) start_f = lj - 1;  // `Mq > Lj-1`
+    move_start_ = start_f;  // JS `Te.Mq`
+    // `wd.Bnb` -> `Ml.clear()`: the directive is consumed by this seat.
+    ml_shift_rel_ = false;
+    ml_shift_ = -1;
+    move_frame_ = move_start_;  // JS `M0()` at `Xh = 0` == `Mq`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     // [FIX JS-exact `xj` on the move-start frame] JS `Te.Skb` (readable.js
     // L22984-23059) NEVER touches `this.xj` — the active-interval list is
@@ -1463,8 +1516,10 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         partner.back() = (partner.back() == '1') ? '2' : '1';
         const int ni_b = model_.bone_by_name(partner);
         if (ni_a >= 0 && ni_b >= 0) {
+            // `this.jc.Kh(2)` = buffer slot 2 = clip frame `Mq` (the `Pka`
+            // base), not the move's `qx`.
             const std::size_t ref = static_cast<std::size_t>(std::max(
-                0, std::min(move.first_frame,
+                0, std::min(move_base_,
                             static_cast<int>(current_clip_->frames.size()) - 1)));
             const auto& rb = current_clip_->frames[ref].bones;
             const std::size_t zclip = std::min(rb.size(), model_.bones.size());
@@ -1749,7 +1804,8 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
         if (!pass) {
             if (trace_cond &&
                 (m->name.rfind("Throw", 0) == 0 || m->name == "HighPunch" ||
-                 m->name == "StepForward" || m->name == "ShortUpwardElbowStrike" ||
+                 m->name == "StepForward" || m->name == "StepBack" ||
+                 m->name == "ShortUpwardElbowStrike" ||
                  m->name == "DoublePunch" || m->name == "HeavyPunch")) {
                 std::fprintf(stdout, "[cond] %s FAIL cur=%s@%d enemy_intervals=[",
                              m->name.c_str(),
@@ -1848,7 +1904,7 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     // `DK` branch, exactly like the reaction path, so it must not start
     // in-frame (that put the player's `Me.af` one frame early).
     const MoveDef* pick = f[idx];
-    queue_reaction(pick, pick->physics);  // JS `e.animation.MS`
+    queue_reaction(pick, pick->physics, /*bind_pivot=*/false, &ctx);  // JS `e.animation.MS`
     decision_.picked = pick->name;
     return pick->name;
 }
@@ -1984,7 +2040,7 @@ std::string Fighter::try_react(FightContext& ctx,
     // (ordinary clip). The start happens on the next `wd.ia`
     // (`process_reaction_queues`), NOT here.
     const MoveDef* m = f[idx];
-    queue_reaction(m, m->physics);
+    queue_reaction(m, m->physics, /*bind_pivot=*/false, &ctx);
     react_physics_ = m->physics;  // JS `e.animation.MS` (L674)
     return m->name;
 }
@@ -2081,19 +2137,47 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
     (void)wall_min;
     (void)wall_max;
     const MoveDef* m = f[idx];
-    queue_reaction(m, m->physics);
+    queue_reaction(m, m->physics, /*bind_pivot=*/false, &ctx);
     react_physics_ = m->physics;  // JS `e.animation.MS`
     return m->name;
 }
 
 // JS `wd.jJa` (L257798) / `wd.fJa` (L257400): stash the picked reaction.
-void Fighter::queue_reaction(const MoveDef* m, bool physics, bool bind_pivot) {
+// `fJa(a, b, c, d)` also stores the TRANSITION DIRECTIVE (`Ml.VD`/`Ml.pD`)
+// computed one step earlier by `Gc.Nsb` (`Gc.DK` L28431): the picked move's
+// own `<Transitions>` are scanned in document order and the first whose
+// `<Conditions>` all pass supplies `(VD, pD)`; no match leaves
+// `(false, -1)` -> `Skb`'s default `f = a.qx`. `Skb` then seats the clip at
+// `ip()+1+pD` (`FrameShift`) or at `pD` (`FirstFrame`) - see `move_start_`.
+void Fighter::queue_reaction(const MoveDef* m, bool physics, bool bind_pivot,
+                             const sf2::scene::FightContext* ctx) {
     if (m == nullptr) return;
     if (physics) {
         qs_move_ = m;  // `this.qs.animation = a`
     } else {
         ml_move_ = m;  // `this.Ml.animation = a`
         ml_bind_pivot_ = bind_pivot;
+        // JS `Gc.Nsb` (L28711-28728):
+        //   `let e = false; let f = -1; let h = c.va.p6;`
+        //   `while (g < h.length) { let k = h[g]; ++g;`
+        //     `if (k.Sbb(b)) { if (k.VD) { e = true; } f = k.pD; break; } }`
+        //   `a.fJa(c, d, e, f);`
+        // `b` = the FIGHTER (`this.Ek[e.index]`, `Gc.ia` L28295) - the port
+        // evaluates with the same context it uses for the candidate's own
+        // `<Conditions>` (`pick_ctx()`), which carries the live animation /
+        // interval / geometry state those conditions read.
+        ml_shift_rel_ = false;
+        ml_shift_ = -1;
+        if (ctx != nullptr) {
+            for (const MoveTransition& tr : m->transitions) {
+                if (!sf2::scene::eval_move_conditions(tr.conditions, *ctx)) {
+                    continue;
+                }
+                ml_shift_rel_ = tr.relative;
+                ml_shift_ = tr.frame;
+                break;
+            }
+        }
     }
 }
 
@@ -2112,6 +2196,8 @@ std::string Fighter::process_reaction_queues(sf2::scene::FightContext& ctx,
         const MoveDef* m = qs_move_;
         qs_move_ = nullptr;
         ml_move_ = nullptr;  // `this.Ml.clear()`
+        ml_shift_rel_ = false;  // `Ml.clear()` drops `Ml.VD`/`Ml.pD` too
+        ml_shift_ = -1;
         if (ai_start_move(*m, ctx)) {
             // `Qnb` -> `Mwb` -> `Lwb` -> `Nd.start(a)` (`Al.start`, L582):
             // the physics/getup reaction starts the ragdoll. `Al.P6a` pins
@@ -2146,6 +2232,11 @@ std::string Fighter::process_reaction_queues(sf2::scene::FightContext& ctx,
             };
         }
         if (ai_start_move(*m, ctx)) return m->name;
+        // The seat was refused by the start-time re-test: drop the
+        // transition directive so a later, unrelated start cannot consume it
+        // (`Skb` consumed it in the JS - the JS never reaches `Skb` here).
+        ml_shift_rel_ = false;
+        ml_shift_ = -1;
     }
     return "";
 }
@@ -2251,10 +2342,12 @@ void Fighter::advance_step() {
         // just-ended clip reported a stale interval set forever.
         if (vn_pending_ && move_ended_ && current_move_ != nullptr) {
             playhead_ += 3;  // JS `this.Xh += 3`
-            const int ff0 = std::max(0, current_move_->first_frame);
+            const int ff0 = std::max(0, current_move_->first_frame);  // `qx`
             // `vp()` -> `ip()`/`M0()` with the NEW `Xh` (`subframe_ == 0`
-            // here, so the JS `Xh` == `playhead_`).
-            move_frame_ = ff0 + std::max(0, playhead_ - 2);
+            // here, so the JS `Xh` == `playhead_`). `M0()`'s base is the
+            // ANIMATOR's `Mq` (`move_start_`), NOT the move's `qx` - the
+            // interval lower bound below keeps `qx` (`c7a`'s `max(start,qx)`).
+            move_frame_ = move_start_ + std::max(0, playhead_ - 2);
             active_intervals_.clear();
             active_interval_list_.clear();
             for (const Interval& iv : current_move_->intervals) {
@@ -2319,9 +2412,11 @@ void Fighter::advance_step() {
     // flickered inside a span, which the JS never does (`rrb` runs once per
     // span). Capture `Xh` HERE (before the wrap below bumps `playhead_`) so
     // both sites see the same per-frame constant.
-    const int ff = std::max(0, current_move_->first_frame);
+    const int ff = std::max(0, move_base_);  // the `Pka`/`J$a()` buffer base
     const int xh = playhead_ + 1;      // JS `Te.Xh` for THIS frame
-    move_frame_ = ff + std::max(0, xh - 2);  // JS `Te.M0()`
+    // `M0()`'s base is the ANIMATOR's `Mq` (`move_start_`, clamped), while
+    // `ff` above is the unclamped `Skb` start frame the buffer was built from.
+    move_frame_ = move_start_ + std::max(0, xh - 2);  // JS `Te.M0()`
 
     // Interval update: active when max(start,qx) <= frame <= min(finish,Lj).
     active_intervals_.clear();
@@ -2366,7 +2461,8 @@ void Fighter::advance_step() {
 
     // Clip end (JS `Te.ia` L547-548: `Xh+2 >= vu.J$a()` -> KNa + lS + Sca).
     // `vu.J$a()` = the play buffer size = 2 prepended slots + the playable
-    // range [FirstFrame..len-1], i.e. `clip_len - ff + 2`. The buffer is
+    // range [Mq..len-1], i.e. `clip_len - ff + 2` (`ff` = the `Pka` base).
+    // The buffer is
     // sampled at `Xh = 0 .. (clip_len - ff - 1)` (the first two `Xh` ranges
     // read the prepend slots — JS `vu.Pka` L340543 / `Te.qrb` L282683), each
     // at `sub` subframes.
@@ -2433,9 +2529,9 @@ void Fighter::advance_step() {
     }
     // The JS `vp()` -> `rrb()`/`Lwa()` read `ip()` = `M0` with the SAME
     // per-span `Xh` (the `else` branch bumps it, then calls `vp()`); the port
-    // therefore keeps the frame's constant `ff + max(0, xh - 2)` — recomputing
+    // therefore keeps the frame's constant `Mq + max(0, xh - 2)` — recomputing
     // from the just-bumped `playhead_` would add 1 on the wrap frame.
-    move_frame_ = ff + std::max(0, xh - 2);  // JS `M0` (see above)
+    move_frame_ = move_start_ + std::max(0, xh - 2);  // JS `M0` (see above)
     // JS `Te.ia` L547-548 order: `eda()` (the pose apply) THEN `vp()`
     // (L563) which detects the frame change (`a != this.cX`) and runs
     // `rrb()` + the action pass `Lwa()` (L563-564:
@@ -2528,9 +2624,11 @@ void Fighter::sample_current() {
     if (current_clip_ != nullptr) {
         // [F10] The `sample()` mirror argument is the CLIP MIRROR (`Te.FX` /
         // `hd()`), not the `b6a` facing lock.
+        // The buffer base (`sample`'s `first_frame`) is the `Pka` start frame
+        // (`Te.Skb` L23024 `Ua.Pka(this.jc, f, ...)` -> `vu.Pka(f > -1 ? f :
+        // this.qx, ...)`), NOT the move's `qx`.
         sample(*current_clip_, move_frame_, world_x_, world_y_, clip_mirror_,
-               /*interp=*/true, current_move_ != nullptr ? current_move_->first_frame : 0,
-               playhead_, sub_frac_);
+               /*interp=*/true, move_base_, playhead_, sub_frac_);
     }
 }
 
@@ -2621,6 +2719,9 @@ void Fighter::clear_move() {
     // (RECOVER |d| ~ 3.5e4). Clearing here matches `Z2`'s full reset.
     qs_move_ = nullptr;
     ml_move_ = nullptr;
+    // `Ml.clear()` drops the transition directive (`Ml.VD`/`Ml.pD`) with it.
+    ml_shift_rel_ = false;
+    ml_shift_ = -1;
     current_move_ = nullptr;
     current_clip_ = nullptr;
     move_ended_ = false;
@@ -2683,7 +2784,10 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     clear_move();  // `Te.reset`/`Bnb`: drop any previous move + ragdoll
     current_move_ = &move;
     current_clip_ = &clip;
-    move_frame_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
+    // `Skb` start frame: this seat has no `Gc.DK`/`Gc.Nsb` directive (a
+    // display model), so `f` stays `a.qx` -> `Mq` = `qx` (see `move_start_`).
+    move_start_ = move_base_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
+    move_frame_ = move_start_;                    // JS `M0()` at `Xh = 0`
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     sub_ = std::max(1, (move.mid_frames + 1) * 1);  // JS `Gka`: (XJ+1)*HD
     subframe_ = 0;
@@ -2824,10 +2928,11 @@ void Fighter::compute_align(const MoveDef& move) {
     const int ve = map_object(al.pivot_object);
     const int jk = map_object(al.pos_object);
 
-    // Reference frame = FirstFrame (JS `Pka(jc, Mq)` loads it before `Gub`;
-    // `this.jc.Kh(2)` is that buffer, `Kh(2).data[node]` = the raw clip pos).
+    // Reference frame = the `Pka` base (JS `Pka(jc, Mq)` loads it before
+    // `Gub`; `this.jc.Kh(2)` is that buffer, `Kh(2).data[node]` = the raw
+    // clip pos).
     const std::size_t f0 = static_cast<std::size_t>(
-        std::max(0, std::min(move.first_frame,
+        std::max(0, std::min(move_base_,
                              static_cast<int>(current_clip_->frames.size()) - 1)));
     const auto& fb = current_clip_->frames[f0].bones;
     const int pivot_idx = model_.bone_by_name(al.pivot_part);  // UE / `this.os`
@@ -3002,7 +3107,7 @@ void Fighter::wall_repulsion_step() {
     if (current_move_ == nullptr || current_clip_ == nullptr) return;
     const int clip_len = static_cast<int>(current_clip_->frames.size());
     if (clip_len <= 0) return;
-    const int ff = std::max(0, current_move_->first_frame);
+    const int ff = std::max(0, move_base_);
     const int size = clip_len - ff + 2;  // `jc.J$a()`
     if (size <= 0) return;
     if (wall_shift_.size() != static_cast<std::size_t>(size)) {
@@ -3069,7 +3174,8 @@ void Fighter::build_prepend(const MoveDef& move) {
         return;
     }
     prepend_.assign(nclip * 2 * 3, 0.0f);
-    const int ff = std::max(0, move.first_frame);
+    // The `Pka` base (JS `Te.Skb` L23024 passes the local `f`, unclamped).
+    const int ff = std::max(0, move_base_);
     // [F1] JS `Te.Skb` L551 order is `Peb()` (mirror) THEN `Gub()` (align), so
     // the prepend slots end up as `-(clip x) + align`. The two transforms
     // differ per branch (`vu.shift`/`vu.Neb` both start at `this.jW?2:0`):

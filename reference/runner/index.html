@@ -162,6 +162,72 @@
 				var qp = new URLSearchParams(window.location.search);
 				if (qp.get("postTutorial") === "0") ORACLE_POST_TUTORIAL = false;
 			} catch (e) { /* no query string */ }
+
+			// PACK-AVAILABILITY SEED (state harness). The game's pack registry
+			// lives in its own storage key `Aa.Y6 = "SF2Packs"` (sf2.readable.js
+			// L102537), SEPARATE from the savegame: `Aa.OJ()` (L2907-2913)
+			// parses its value as a `<Packs>` document, `Mc.IS()` (L39710-39729)
+			// turns the `<Pack>` children into the CDN list `wq`, and `T1`
+			// (L39736-39748) answers "is this pack downloaded?" by matching the
+			// PlatformID="3" entry of res/config_cdn.xml (`hd.IS` L47192-47215:
+			// grouped by Name, `c[1][0]` = FIRST record per name in document
+			// order) against the SF2Packs record BY URL (`b.url == c.url`).
+			//
+			// The browser has no CDN download step, so without this seed every
+			// pack name resolves to "not downloaded" and `yEa` (L39730-39735)
+			// makes all pack-gated moves unavailable — the oracle would then
+			// build a ~163-move registry while the port builds the full one.
+			// The seed below is exactly the 20 first-per-name PlatformID="3"
+			// Name/Url pairs of res/config_cdn.xml (Name+Url only: the fields
+			// `T1` compares).
+			var SF2_PACKS_XML = "<Packs>" + [
+					["ZONE_2", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_2_13-38-33_29_07_2019_local"],
+					["ZONE_3", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_3_13-38-33_29_07_2019_local"],
+					["ZONE_4", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_4_13-38-33_29_07_2019_local"],
+					["ZONE_5", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_5_13-38-33_29_07_2019_local"],
+					["ZONE_6", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_6_13-38-33_29_07_2019_local"],
+					["ZONE_IM", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_im_13-38-33_29_07_2019_local"],
+					["ZONE_7", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_7_13-38-33_29_07_2019_local"],
+					["ZONE_7_2", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_7_2_06_06_2019_local"],
+					["ZONE_7_3", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_7_3_13-38-33_29_07_2019_local"],
+					["MODELS", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/models_06_06_2019_local"],
+					["ZONE_RAID", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_raid_13-38-33_29_07_2019_local"],
+					["ASIAN", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/asian_13-38-33_29_07_2019_local"],
+					["CLANS", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/clans_12-12-09_03_11_2022_local"],
+					["TACTICS", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/tactics_12-39-56_11_10_2022_local"],
+					["CONFIGS", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/configs_20-15-33_29_09_2023_079e8d1fd57cd4258918238c5b3363e6_2446564143_local"],
+					["ANIMATIONS", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/animations_15-50-19_14_10_2024_fd6d320b84134db36e84967b17c20d62_2982195134_local"],
+					["EVENT_FALL_24", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/event_fall_24_15-50-19_14_10_2024_938a66cb9446d620957bbc355fee2e23_3313501493_local"],
+					["FUNGUS_SET", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/fungus_set_15-50-19_14_10_2024_1cc6c29cc74391bb53759e9ce8ea6cbf_1860275678_local"],
+					["VERSIONAL_ASSETS", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/versional_assets_15-50-19_14_10_2024_9bafed0f75086abcd22d42a4f35d069b_4136321134_local"],
+					["ZONE_1", "https://assets.nekkimobile.ru/shadowfight/unity_packs/SF2_paid/zone_1_15-50-19_14_10_2024_2880cf8eed98cb1da9814f4af4300172_2349435233_local"]
+				].map(function (pair) {
+					return '<Pack Name="' + pair[0] + '" Url="' + pair[1] + '" />';
+				}).join("") + "</Packs>";
+
+			// Merge `SF2Packs` into the GameInterface envelope's `data` map
+			// (`GameInterface.storage.getItem` reads `savegame[name]`, see
+			// microsite-game-interface.js L61173-61194). When `userBlob` is
+			// null the existing `SF2User` (if any) is preserved — the dojo
+			// scenario boots a fresh profile and only needs the packs.
+			function seedOraclePacks(userBlob) {
+				var key = "shadow-fight-2:savegame";
+				var env = null;
+				var data = {};
+				try { env = JSON.parse(window.localStorage.getItem(key) || "null"); } catch (e) { env = null; }
+				if (env && env.data && typeof env.data === "object") data = env.data;
+				if (userBlob) data.SF2User = userBlob;
+				data.SF2Packs = SF2_PACKS_XML;
+				window.localStorage.setItem(key, JSON.stringify({
+					__gameInterfaceEnvelope: true,
+					data: data,
+					updatedAt: Date.now(),
+					version: 1,
+					level: null
+				}));
+				console.log("[SEED] SF2Packs installed (" + SF2_PACKS_XML.length + " chars)");
+			}
+
 			if (ORACLE_POST_TUTORIAL) {
 				try {
 					var SEED = "CxsAADxSb290PgoJPEN1cnJlbnRVc2VyIElEPSIxIj4KCQk8SW5wdXRCaW5kIC8+CgkJPFNvdW5kcz4KCQkJPE11c2ljIE11dGU9IjAiIFZhbHVlPSIxLjAiIC8+CgkJCTxTb3VuZCBNdXRlPSIwIiBWYWx1ZT0iMS4wIiAvPgoJCTwvU291bmRzPgoJCTxXYXRjaGVkVmlkZW9zIC8+Cgk8L0N1cnJlbnRVc2VyPgoJPEdhbWVMYXVuY2hJbmRleCBWYWx1ZT0iMSIgLz4KCTxWZXJzaW9ucz4KCQk8RGF0YVZlcnNpb24gVmFsdWU9IjEuMC4xMy4wIiAvPgoJCTxIYXhlVmVyc2lvbiB2YWx1ZT0iMS4xLjE1IiAvPgoJCTxWZXJzaW9uIFZhbHVlPSIxLjAuMTMiIC8+Cgk8L1ZlcnNpb25zPgoJPFdhcnJpb3JzPgoJCTxXYXJyaW9yIEFyZW5hUmFuaz0iMCIKCQlBcmVuYVJhdGluZz0iMCIKCQlBcm1vcj0iQm9keSIKCQlBc2tlZEZvckR1bXBzPSIwIgoJCUF2YXRhcj0iYXZhdGFyX2hlcm8iCgkJQm9udXM9IjUwIgoJCUN1cnJlbnRab25lPSJaT05FXzEiCgkJRGlmZmljdWx0eT0iNTAiCgkJRXhwZXJpZW5jZT0iMCIKCQlGaXJzdE5hbWU9Ik5BTUVfU0hBRE9XIgoJCUhlbG09IkhlYWQiCgkJSUQ9IjEiCgkJTGFzdExvdHRlcnlFbnRlclRpbWU9IjAiCgkJTGFzdExvdHRlcnlQbGF5VGltZT0iMCIKCQlMZXZlbD0iMSIKCQlMb3R0ZXJ5RGF5cz0iMCIKCQlMb3R0ZXJ5RGF5c01heD0iNiIKCQlNYWdpYz0iTm9NYWdpYyIKCQlNb25leT0iMCIKCQlQb3dlcj0iNSIKCQlQb3dlclN5bmNUaW1lPSIxMzc4NDQ1OTAxIgoJCVJhbmdlZD0iTm9SYW5nZWQiCgkJUmF0ZVRpbWU9IjAiCgkJU2F2ZVNsb3Q9IjAiCgkJU2VydmVyVXNlcklEPSIgIgoJCVNob3dVcGdyYWRlcz0iMCIKCQlTa2VsZXRvbj0iU2tlbGV0b24iCgkJU3RhbWluYT0iMyIKCQlTdHJlbmd0aD0iMyIKCQlUYWN0aWM9IlBsYXllciIKCQlUdXRvcmlhbD0iRU5EIgoJCVZvaWNlPSJNYWxlIgoJCVdlYXBvbj0iRmlzdHMiPgoJCQk8QWNoaWV2ZW1lbnRzIC8+CgkJCTxBY3RpdmVMb3R0ZXJpZXMgLz4KCQkJPEFkdmVydGlzaW5nIC8+CgkJCTxCYXR0bGVzPgoJCQkJPEJhdHRsZSBMb2NrZWQ9IjAiIE5hbWU9IlpPTkVfMXxCT1NTX0xZTlh8IiAvPgoJCQk8L0JhdHRsZXM+CgkJCTxDb3VudGVycyAvPgoJCQk8Q3VycmVuY2llcyAvPgoJCQk8RmlnaHRzPgoJCQkJPEZpZ2h0IENvbXBsZXRlZENvdW50PSIwIiBDb21wbGV0ZWRUaW1lPSIwIiBFY2xpcHNlQ29tcGxldGVkQ291bnQ9IjAiIEVjbGlwc2VMb3NzQ291bnQ9IjAiIElEPSItMSIgSURTPSJaT05FXzF8RHVlbHwxIiBMZXZlbD0iMCIgTG9zc0NvdW50PSIwIiBSYW5kb21pemVUaW1lTGVmdD0iMCIgU3RvcnlDb3VudD0iMCIgVGltZUxlZnQ9IjAiIC8+CgkJCQk8RmlnaHQgQ29tcGxldGVkQ291bnQ9IjAiIENvbXBsZXRlZFRpbWU9IjAiIEVjbGlwc2VDb21wbGV0ZWRDb3VudD0iMCIgRWNsaXBzZUxvc3NDb3VudD0iMCIgSUQ9Ii0xIiBJRFM9IlpPTkVfMXxEdWVsX0lOVEVSTUlTU0lPTnwxIiBMZXZlbD0iMCIgTG9zc0NvdW50PSIwIiBSYW5kb21pemVUaW1lTGVmdD0iMCIgU3RvcnlDb3VudD0iMCIgVGltZUxlZnQ9IjAiIC8+CgkJCQk8RmlnaHQgQ29tcGxldGVkQ291bnQ9IjAiIENvbXBsZXRlZFRpbWU9IjAiIEVjbGlwc2VDb21wbGV0ZWRDb3VudD0iMCIgRWNsaXBzZUxvc3NDb3VudD0iMCIgSUQ9Ii0xIiBJRFM9IlpPTkVfMnxEdWVsfDEiIExldmVsPSIwIiBMb3NzQ291bnQ9IjAiIFJhbmRvbWl6ZVRpbWVMZWZ0PSIwIiBTdG9yeUNvdW50PSIwIiBUaW1lTGVmdD0iMCIgLz4KCQkJCTxGaWdodCBDb21wbGV0ZWRDb3VudD0iMCIgQ29tcGxldGVkVGltZT0iMCIgRWNsaXBzZUNvbXBsZXRlZENvdW50PSIwIiBFY2xpcHNlTG9zc0NvdW50PSIwIiBJRD0iLTEiIElEUz0iWk9ORV8yfER1ZWxfSU5URVJNSVNTSU9OfDEiIExldmVsPSIwIiBMb3NzQ291bnQ9IjAiIFJhbmRvbWl6ZVRpbWVMZWZ0PSIwIiBTdG9yeUNvdW50PSIwIiBUaW1lTGVmdD0iMCIgLz4KCQkJCTxGaWdodCBDb21wbGV0ZWRDb3VudD0iMCIgQ29tcGxldGVkVGltZT0iMCIgRWNsaXBzZUNvbXBsZXRlZENvdW50PSIwIiBFY2xpcHNlTG9zc0NvdW50PSIwIiBJRD0iLTEiIElEUz0iWk9ORV8zfER1ZWx8MSIgTGV2ZWw9IjAiIExvc3NDb3VudD0iMCIgUmFuZG9taXplVGltZUxlZnQ9IjAiIFN0b3J5Q291bnQ9IjAiIFRpbWVMZWZ0PSIwIiAvPgoJCQkJPEZpZ2h0IENvbXBsZXRlZENvdW50PSIwIiBDb21wbGV0ZWRUaW1lPSIwIiBFY2xpcHNlQ29tcGxldGVkQ291bnQ9IjAiIEVjbGlwc2VMb3NzQ291bnQ9IjAiIElEPSItMSIgSURTPSJaT05FXzN8RHVlbF9JTlRFUk1JU1NJT058MSIgTGV2ZWw9IjAiIExvc3NDb3VudD0iMCIgUmFuZG9taXplVGltZUxlZnQ9IjAiIFN0b3J5Q291bnQ9IjAiIFRpbWVMZWZ0PSIwIiAvPgoJCQkJPEZpZ2h0IENvbXBsZXRlZENvdW50PSIwIiBDb21wbGV0ZWRUaW1lPSIwIiBFY2xpcHNlQ29tcGxldGVkQ291bnQ9IjAiIEVjbGlwc2VMb3NzQ291bnQ9IjAiIElEPSItMSIgSURTPSJaT05FXzR8RHVlbHwxIiBMZXZlbD0iMCIgTG9zc0NvdW50PSIwIiBSYW5kb21pemVUaW1lTGVmdD0iMCIgU3RvcnlDb3VudD0iMCIgVGltZUxlZnQ9IjAiIC8+CgkJCQk8RmlnaHQgQ29tcGxldGVkQ291bnQ9IjAiIENvbXBsZXRlZFRpbWU9IjAiIEVjbGlwc2VDb21wbGV0ZWRDb3VudD0iMCIgRWNsaXBzZUxvc3NDb3VudD0iMCIgSUQ9Ii0xIiBJRFM9IlpPTkVfNHxEdWVsX0lOVEVSTUlTU0lPTnwxIiBMZXZlbD0iMCIgTG9zc0NvdW50PSIwIiBSYW5kb21pemVUaW1lTGVmdD0iMCIgU3RvcnlDb3VudD0iMCIgVGltZUxlZnQ9IjAiIC8+CgkJCQk8RmlnaHQgQ29tcGxldGVkQ291bnQ9IjAiIENvbXBsZXRlZFRpbWU9IjAiIEVjbGlwc2VDb21wbGV0ZWRDb3VudD0iMCIgRWNsaXBzZUxvc3NDb3VudD0iMCIgSUQ9Ii0xIiBJRFM9IlpPTkVfNXxEdWVsfDEiIExldmVsPSIwIiBMb3NzQ291bnQ9IjAiIFJhbmRvbWl6ZVRpbWVMZWZ0PSIwIiBTdG9yeUNvdW50PSIwIiBUaW1lTGVmdD0iMCIgLz4KCQkJCTxGaWdodCBDb21wbGV0ZWRDb3VudD0iMCIgQ29tcGxldGVkVGltZT0iMCIgRWNsaXBzZUNvbXBsZXRlZENvdW50PSIwIiBFY2xpcHNlTG9zc0NvdW50PSIwIiBJRD0iLTEiIElEUz0iWk9ORV81fER1ZWxfSU5URVJNSVNTSU9OfDEiIExldmVsPSIwIiBMb3NzQ291bnQ9IjAiIFJhbmRvbWl6ZVRpbWVMZWZ0PSIwIiBTdG9yeUNvdW50PSIwIiBUaW1lTGVmdD0iMCIgLz4KCQkJCTxGaWdodCBDb21wbGV0ZWRDb3VudD0iMCIgQ29tcGxldGVkVGltZT0iMCIgRWNsaXBzZUNvbXBsZXRlZENvdW50PSIwIiBFY2xpcHNlTG9zc0NvdW50PSIwIiBJRD0iLTEiIElEUz0iWk9ORV82fER1ZWx8MSIgTGV2ZWw9IjAiIExvc3NDb3VudD0iMCIgUmFuZG9taXplVGltZUxlZnQ9IjAiIFN0b3J5Q291bnQ9IjAiIFRpbWVMZWZ0PSIwIiAvPgoJCQkJPEZpZ2h0IENvbXBsZXRlZENvdW50PSIwIiBDb21wbGV0ZWRUaW1lPSIwIiBFY2xpcHNlQ29tcGxldGVkQ291bnQ9IjAiIEVjbGlwc2VMb3NzQ291bnQ9IjAiIElEPSItMSIgSURTPSJaT05FXzZ8RHVlbF9JTlRFUk1JU1NJT058MSIgTGV2ZWw9IjAiIExvc3NDb3VudD0iMCIgUmFuZG9taXplVGltZUxlZnQ9IjAiIFN0b3J5Q291bnQ9IjAiIFRpbWVMZWZ0PSIwIiAvPgoJCQkJPEZpZ2h0IENvbXBsZXRlZENvdW50PSIwIiBDb21wbGV0ZWRUaW1lPSIwIiBFY2xpcHNlQ29tcGxldGVkQ291bnQ9IjAiIEVjbGlwc2VMb3NzQ291bnQ9IjAiIElEPSItMSIgSURTPSJaT05FXzd8RHVlbHwxIiBMZXZlbD0iMCIgTG9zc0NvdW50PSIwIiBSYW5kb21pemVUaW1lTGVmdD0iMCIgU3RvcnlDb3VudD0iMCIgVGltZUxlZnQ9IjAiIC8+CgkJCQk8RmlnaHQgQ29tcGxldGVkQ291bnQ9IjAiIENvbXBsZXRlZFRpbWU9IjAiIEVjbGlwc2VDb21wbGV0ZWRDb3VudD0iMCIgRWNsaXBzZUxvc3NDb3VudD0iMCIgSUQ9Ii0xIiBJRFM9IlpPTkVfN3xDM19EdWVsfDEiIExldmVsPSIwIiBMb3NzQ291bnQ9IjAiIFJhbmRvbWl6ZVRpbWVMZWZ0PSIwIiBTdG9yeUNvdW50PSIwIiBUaW1lTGVmdD0iMCIgLz4KCQkJPC9GaWdodHM+CgkJCTxJdGVtcz4KCQkJCTxJdGVtIEFjcXVpcmVUeXBlPSJJdGVtIiBDb3VudD0iMSIgRGVsaXZlcnlUaW1lPSIwIiBEZWxpdmVyeVVwZ3JhZGVMZXZlbD0iLTEiIEVxdWlwcGVkPSIxIiBOYW1lPSJCb2R5IiBVcGdyYWRlTGV2ZWw9IjAiIC8+CgkJCQk8SXRlbSBBY3F1aXJlVHlwZT0iSXRlbSIgQ291bnQ9IjEiIERlbGl2ZXJ5VGltZT0iMCIgRGVsaXZlcnlVcGdyYWRlTGV2ZWw9Ii0xIiBFcXVpcHBlZD0iMSIgTmFtZT0iSGVhZCIgVXBncmFkZUxldmVsPSIwIiAvPgoJCQkJPEl0ZW0gQWNxdWlyZVR5cGU9Ikl0ZW0iIENvdW50PSIxIiBEZWxpdmVyeVRpbWU9IjAiIERlbGl2ZXJ5VXBncmFkZUxldmVsPSItMSIgRXF1aXBwZWQ9IjEiIE5hbWU9IkZpc3RzIiBVcGdyYWRlTGV2ZWw9IjAiIC8+CgkJCQk8SXRlbSBBY3F1aXJlVHlwZT0iSXRlbSIgQ291bnQ9IjEiIERlbGl2ZXJ5VGltZT0iMCIgRGVsaXZlcnlVcGdyYWRlTGV2ZWw9Ii0xIiBFcXVpcHBlZD0iMSIgTmFtZT0iTm9SYW5nZWQiIFVwZ3JhZGVMZXZlbD0iMCIgLz4KCQkJCTxJdGVtIEFjcXVpcmVUeXBlPSJJdGVtIiBDb3VudD0iMSIgRGVsaXZlcnlUaW1lPSIwIiBEZWxpdmVyeVVwZ3JhZGVMZXZlbD0iLTEiIEVxdWlwcGVkPSIxIiBOYW1lPSJOb01hZ2ljIiBVcGdyYWRlTGV2ZWw9IjAiIC8+CgkJCTwvSXRlbXM+CgkJCTxNYXBCdXR0b25zIC8+CgkJCTxPZmZlcnMgLz4KCQkJPFBheW1lbnRzIC8+CgkJCTxRdWVzdHM+CgkJCQk8UXVlc3RzPgoJCQkJCTxRdWVzdCBGaWxlTmFtZT0icXVlc3RfZXh0ZW5zaW9ucy90dXRvcmlhbF9xdWVzdHMueG1sIiBOYW1lPSJTdG9yeVR1dG9yaWFsV2VsY29tZSI+CgkJCQkJCTxRdWVzdFBhcmFtZXRlcnMgQ2hla1BvaW50SW5kZXg9IjAiIFNjcmVlbkluZGV4PSI1Ij4KCQkJCQkJCTxGaWdodCBOYW1lPSIiIC8+CgkJCQkJCQk8RmlnaHRBdmdGUFMgVmFsdWU9IjAiIC8+CgkJCQkJCQk8RmlnaHRSZXN1bHQgTmFtZT0iIiAvPgoJCQkJCQkJPExldmVsVXAgVmFsdWU9IjAiIC8+CgkJCQkJCQk8UG93ZXJBbW91bnQgVmFsdWU9IjAiIC8+CgkJCQkJCQk8UmFpZFJlc3VsdCBOYW1lPSIiIC8+CgkJCQkJCTwvUXVlc3RQYXJhbWV0ZXJzPgoJCQkJCTwvUXVlc3Q+CgkJCQk8L1F1ZXN0cz4KCQkJCTxWYXJpYWJsZXM+CgkJCQkJPFZhcmlhYmxlIE5hbWU9IkZyZWVSZW1pbmRlclNob3duIiBWYWx1ZT0iMCIgLz4KCQkJCQk8VmFyaWFibGUgTmFtZT0iVXBncmFkZVRvTGV2ZWxSZW1pbmRlclNob3duIiBWYWx1ZT0iMCIgLz4KCQkJCQk8VmFyaWFibGUgTmFtZT0iTG93RnBzV2FybmluZ1Nob3duIiBWYWx1ZT0iMCIgLz4KCQkJCQk8VmFyaWFibGUgTmFtZT0iU2NyaXB0c1Jlc3VtZWQiIFZhbHVlPSIxIiAvPgoJCQkJCTxWYXJpYWJsZSBOYW1lPSJUaW1lU2V0IiBWYWx1ZT0iMSIgLz4KCQkJCQk8VmFyaWFibGUgTmFtZT0iTGFzdFJhdGluZ09mZmVyVGltZSIgVmFsdWU9IjAiIC8+CgkJCQk8L1ZhcmlhYmxlcz4KCQkJPC9RdWVzdHM+CgkJCTxSZXBvc3RBY2hpZXZlbWVudHMgLz4KCQkJPFJlc2lzdGFuY2VzIFJlc2lzdGFuY2VfMj0iMCIgLz4KCQkJPFRpbWVycyAvPgoJCTwvV2Fycmlvcj4KCTwvV2FycmlvcnM+CjwvUm9vdD4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -204,15 +270,16 @@
 								wantBattle + "| (CurrentZone " + wantZone + ")");
 						}
 					} catch (e2) { console.log("[SEED] battle override err " + e2); }
-					localStorage.setItem("shadow-fight-2:savegame", JSON.stringify({
-						__gameInterfaceEnvelope: true,
-						data: { SF2User: SEED },
-						updatedAt: Date.now(),
-						version: 1,
-						level: null
-					}));
+					seedOraclePacks(SEED);
 					console.log("[SEED] post-tutorial savegame installed (Tutorial=END)");
 				} catch (e) { console.log("[SEED] err " + e); }
+			} else {
+				// Dojo/tutorial scenario: NO savegame blob is seeded (the stock
+				// fresh profile must boot), but the pack registry still has to be
+				// installed — otherwise the oracle builds its move registry with
+				// every pack unavailable and diverges from the port.
+				try { seedOraclePacks(null); }
+				catch (e) { console.log("[SEED] packs-only err " + e); }
 			}
 
 			if (!supportsWebGL2()) {

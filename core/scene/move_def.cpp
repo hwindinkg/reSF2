@@ -1081,12 +1081,14 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
         // if (!Fa.zcb(l ?? null)) { d.add(n); continue; }` — a move whose
         // pack is unavailable never reaches `c.push(l)` (`ra.Lk`), so it is
         // absent from every fighter's `me` (and from the Random candidate
-        // set). `Fa.zcb` (L30154-30159) -> `Mc.F().T1` (L39736-39748):
-        // available iff packs.xml lists the pack (`Mc.wq`) AND the
-        // config_cdn `<packs>` manifest (PlatformID="3", `hd.tm.IQ`
-        // L39737/L47298) has no entry or the same Url. Placed BEFORE the
-        // `profile_order` assignment so the skipped moves do not consume a
-        // document index — `ra.Lk` is the push order of the KEPT moves.
+        // set). `Fa.zcb` (L30154-30159) -> `Mc.F().T1` (L39736-39748), which
+        // compares the persistent install slot (`Mc.wq`, `SF2Packs`) against
+        // the config_cdn PlatformID="3" manifest; `app.cpp`'s
+        // `move_pack_availability()` models the fully downloaded end state of
+        // that comparison (see its comment for the full JS chain). Placed
+        // BEFORE the `profile_order` assignment so the skipped moves do not
+        // consume a document index — `ra.Lk` is the push order of the KEPT
+        // moves.
         if (available_packs != nullptr) {
             if (pugi::xml_attribute pn = move.attribute("PackName")) {
                 const std::string pk = pn.value();
@@ -1265,6 +1267,32 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
 
         // Intervals (own + inherited).
         merge_intervals(templates, move.child("Intervals"), def.end_frame, def.intervals);
+
+        // Transitions (JS `Fa.xbb` L30213-30216: `d.p6 = Fa.Cxb(a.A(
+        // "Transitions"))`). OWN node only - `Fa.Cxb` (L30298-30316) walks the
+        // `<Transition>` children of the move's own `<Transitions>` block and
+        // never the templates' (`xbb` hands it `a` = the own node while `b`
+        // = the template chain is used for Hc/rb/locks/xb/actions/Ts only).
+        if (pugi::xml_node trs = move.child("Transitions")) {
+            for (pugi::xml_node tr : trs.children("Transition")) {
+                MoveTransition mt;
+                if (pugi::xml_node tc = tr.child("Conditions")) {
+                    parse_cond_children(tc, mt.conditions);
+                }
+                // `FirstFrame` (VD=false, absolute) first, then `FrameShift`
+                // (VD=true, relative) - the JS tests them in that order, so an
+                // element carrying both wins with the shift (L30305-30312).
+                if (tr.attribute("FirstFrame")) {
+                    mt.relative = false;
+                    mt.frame = tr.attribute("FirstFrame").as_int(0);
+                }
+                if (tr.attribute("FrameShift")) {
+                    mt.relative = true;
+                    mt.frame = tr.attribute("FrameShift").as_int(0);
+                }
+                def.transitions.push_back(std::move(mt));
+            }
+        }
 
         // Actions (JS `Fa.CIa` L718): own `<Actions>` first, then each
         // inherited template's, in template order.

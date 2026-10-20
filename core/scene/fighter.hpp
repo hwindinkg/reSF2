@@ -380,7 +380,8 @@ public:
     // `try_react`/`try_every_frame_move` is stashed here and STARTED on the
     // next frame — the JS order (`ia`'s Qnb/Bnb run before `Ax`'s every-frame
     // event). `qs` (physics) wins and clears `Ml`.
-    void queue_reaction(const MoveDef* m, bool physics, bool bind_pivot = false);
+    void queue_reaction(const MoveDef* m, bool physics, bool bind_pivot = false,
+                        const sf2::scene::FightContext* ctx = nullptr);
     std::string process_reaction_queues(sf2::scene::FightContext& ctx,
                                         float wall_min, float wall_max);
     bool reaction_pending() const {
@@ -1238,6 +1239,24 @@ private:
     // `block: 0`. Cleared by `clear_move` and every move start (`Te.Skb`).
     bool vn_pending_ = false;
     const sf2::data::anim_clip* current_clip_ = nullptr; // clip for `current_move_`
+    // JS `Te.Mq` (animator ctor L22750, set in `Te.Skb` L23012): the CLIP
+    // START OFFSET of the current move. Default = the new move's `qx`
+    // (FirstFrame), but `Gc.DK` seats a move through `Gc.Nsb`
+    // (L28711-28728) first: the FIRST passing `<Transition>` of the move
+    // being started makes `Skb` take `Mq = ip() + 1 + FrameShift` (relative)
+    // or `Mq = FirstFrame` (absolute) instead (L23003-23008), clamped to
+    // `Lj-1`. `Mq` is the base of BOTH the logical frame
+    // (`Te.M0()` = `(Xh<=2?0:Xh-2)+Mq`) and the play buffer
+    // (`Pka(jc, Mq, ...)`), so it must NOT be conflated with the move's
+    // `first_frame` (the `qx` used by `c7a`'s interval lower bound
+    // `max(start, qx)`).
+    int move_start_ = 0;                    // JS `Te.Mq`
+    // JS `Te.Skb` L23024: `Ua.Pka(this.jc, f, ...)` -> `vu.Pka(f > -1 ? f :
+    // this.qx, ...)` — the UNCLAMPED start frame the play buffer (and thus
+    // `J$a()`, the clip-end check, and the `Kh(2)` reference slot used by
+    // `Gub`/`lwa`) was built from. Equal to `move_start_` except when the
+    // `Lj-1` clamp fired.
+    int move_base_ = 0;                     // JS `Te.Skb`'s local `f`
     int move_frame_ = 0;                    // clip frame (JS `Te.M0()`) for intervals/cf
     // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED
     // clip's frame count when `EndFrame` is absent. Resolved in
@@ -1268,9 +1287,10 @@ private:
     StrikeMemory strike_memory_;
     double strike_time_ = 0.0;
     // JS `Te.Xh` (the playback/buffer index). The play buffer is
-    // [slot0, slot1, clip[FirstFrame], clip[FirstFrame+1], ...]: slots 0,1
+    // [slot0, slot1, clip[Mq], clip[Mq+1], ...] where `Mq` = `move_start_`
+    // (`Te.Skb`): slots 0,1
     // are the clip-start prepend (JS `vu.Pka` L340543 copies of clip
-    // [FirstFrame+2] when `NoInterpolationFrames`, else `Te.qrb` L282683's
+    // [Mq+2] when `NoInterpolationFrames`, else `Te.qrb` L282683's
     // `ma ± 1.5·(ma-mf)`). `move_frame_` stays the CLIP frame for the
     // interval/cf consumers; `playhead_` drives sampling (JS `Te.Gka`).
     int playhead_ = 0;
@@ -1350,6 +1370,14 @@ private:
     // Part>` for the start-time `<Tactics>` re-test (`ee.j8a`), reproducing
     // `de.V1`/`Gc.Pkb`. Hit-reaction picks leave it false.
     bool ml_bind_pivot_ = false;
+    // JS `wd.Ml.VD` / `wd.Ml.pD` (`Gc.Nsb` L28711-28728 -> `wd.fJa` L20892):
+    // the clip-start directive of the FIRST passing `<Transition>` of the
+    // queued `ml_move_`, consumed by the next `Te.Skb` (L23004-23008):
+    //   `if (d) f = this.ip() + 1 + e; else if (e > -1) f = e;`
+    // `ml_shift_rel_` = `d` (the transition used `FrameShift`), `ml_shift_`
+    // = `e` (`pD`, -1 = no transition matched -> `f = a.qx`).
+    bool ml_shift_rel_ = false;
+    int ml_shift_ = -1;
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550
     // (`jc.shift`)] The move's <Align> offset, applied ONCE at clip start as
     // a shift of the whole clip buffer. Native equivalent: added to every

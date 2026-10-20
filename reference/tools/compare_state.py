@@ -354,7 +354,8 @@ def collect_fields(nf, of, swap):
         if not isinstance(a, dict) or not isinstance(b, dict):
             continue
         p = "fighters.%s." % label
-        for k in ("hp", "mhp", "combo", "style", "unhit", "shock", "block",
+        for k in ("x", "y", "w",
+                  "hp", "mhp", "combo", "style", "unhit", "shock", "block",
                   "invuln", "move", "af", "rag", "ragf"):
             va = a.get(k)
             vb = b.get(k)
@@ -505,7 +506,12 @@ def run(args):
             s["compared"] += 1
             ok = False
             if field in ("fighters.Me.hp", "fighters.Enemy.hp",
-                         "fighters.Me.mhp", "fighters.Enemy.mhp"):
+                         "fighters.Me.mhp", "fighters.Enemy.mhp",
+                         "fighters.Me.x", "fighters.Enemy.x",
+                         "fighters.Me.y", "fighters.Enemy.y"):
+                # Positions are floats on both sides (native `%.4f`, oracle
+                # rounded to 4 decimals): compare with the same tolerance the
+                # hp fields use, so 1e-4 rounding never reads as a divergence.
                 ok = scalar_eq(nv, ov, FLOAT_TOL)
             else:
                 ok = nv == ov

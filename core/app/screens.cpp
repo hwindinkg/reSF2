@@ -4731,8 +4731,15 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
             const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
             const float art_right = cx + art_w * 0.5f;      // `b.N` (image right)
             const float art_top = cy - art_h * 0.5f;        // `b.P` (image top)
+            // JS `Cr.tca` (L84218-84225) shows its `a` VERBATIM, and the
+            // round-start caller (L16679-16683) passes `this.round.round`
+            // AFTER the `round.round++` — i.e. the SAME 1-based count the
+            // state dump reports, NOT a further `+1` (the old `+ 1` made the
+            // first round display as 2). The 0 -> 1 fallback mirrors the
+            // banner trigger (`banner_round_`, L581/L3226).
+            const int rnum = fight.round().number;
             app.draw_text_with_font(*rf, rtex, art_right - art_h * 0.25f, art_top,
-                                    std::to_string(fight.round().number + 1),
+                                    std::to_string(rnum == 0 ? 1 : rnum),
                                     rscale, 1.0f, 1.0f, 1.0f, 1.0f);
         }
     }
@@ -12890,6 +12897,12 @@ std::string FightScreen::enemy_wave_name() const {
 void FightScreen::probe_set_hp(float player_hp, float enemy_hp) {
     if (fight_ != nullptr) fight_->debug_set_hp(player_hp, enemy_hp);
 }
+float FightScreen::player_hp() const {
+    return fight_ != nullptr ? fight_->player().hp : 0.0f;
+}
+float FightScreen::enemy_hp() const {
+    return fight_ != nullptr ? fight_->enemy().hp : 0.0f;
+}
 int FightScreen::probe_phase() const {
     return fight_ != nullptr ? static_cast<int>(fight_->phase()) : -1;
 }
@@ -12903,6 +12916,21 @@ std::string FightScreen::move_list_digest() const {
     if (fight_ == nullptr) return std::string();
     std::string out;
     for (const sf2::scene::MoveDef* m : fight_->player().fighter.hb()) {
+        if (m == nullptr) continue;
+        if (!out.empty()) out += ",";
+        out += m->name;
+    }
+    return out;
+}
+
+// The ENEMY's ordered move-list names (same digest form as above) — the
+// `--enemy-move-audit` evidence for the "enemy is passive" report: the LIST
+// is printed before the observation window, so an empty/short list is
+// distinguishable from a list that exists but never fires.
+std::string FightScreen::enemy_move_list_digest() const {
+    if (fight_ == nullptr) return std::string();
+    std::string out;
+    for (const sf2::scene::MoveDef* m : fight_->enemy().fighter.hb()) {
         if (m == nullptr) continue;
         if (!out.empty()) out += ",";
         out += m->name;

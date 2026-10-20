@@ -739,6 +739,10 @@ public:
     std::string enemy_wave_name() const;
     // [probe] Force both fighters' live HP so the probe can KO a round.
     void probe_set_hp(float player_hp, float enemy_hp);
+    // [probe] The fighters' live HP (`FightFighter::hp`, JS `parameters.gd`):
+    // the `--doublesweep-verify` damage check reads the enemy's before/after.
+    float player_hp() const;
+    float enemy_hp() const;
     // [probe] The live fight phase id (1=start_stance, 2=fight; -1 = none).
     int probe_phase() const;
     // [probe, authorised] `--wave-probe`: the fight's battle-over flag (JS
@@ -771,6 +775,11 @@ public:
         return player_owned_;
     }
     std::string move_list_digest() const;
+    // [probe, authorised] `--enemy-move-audit`: the ENEMY's ordered move-list
+    // names in the same ","-joined digest form (`move_list_digest`). The
+    // passive-AI report's "which moves does the enemy actually own" evidence;
+    // the caller classifies each name by its moves.xml `Type`. Read-only.
+    std::string enemy_move_list_digest() const;
 
     // [fidelity] The fight controller's frame counter (JS `ca.frame`). The
     // fidelity tour uses it to capture a fight state at a deterministic frame

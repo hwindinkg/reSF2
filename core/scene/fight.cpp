@@ -2944,8 +2944,14 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     // JS `D0(i)` (L728049) via `S6a`/`PU` (L621758): the mode row's reward is
     // consumed at setup time and granted on the terminal win.
     mode_reward_ = setup.reward;
-    player_.params.attributes["DamageFactor"] +=
-        static_cast<float>(setup.player_damage_factor);
+    // NOTE: the mode row's `<Attributes DamageFactor=... ApplyTo=...>` rows are
+    // `FightRuleKind::attributes` rules and are applied by the ROUND rule pass
+    // (`rules_apply_round_effects` = JS `Zi.Zk` L849-851, reached from
+    // `ud.F1(a)` L17570 at EVERY round setup — `IKa` L17061 -> `cYa` L17565).
+    // Applying `player_damage_factor`/`enemy_damage_factor` here as well
+    // double-counted them: the tournament enemy dealt 2^-0.4 = 0.758x the JS
+    // damage (the `fighters.Me.hp` divergence). The parsed values stay for the
+    // `[mode]` diagnostic line only.
     set_no_bullets_replenish(setup.no_bullets);
     // Enemy rebuild from the resolved warrior (items/tactic/attrs/perks).
     const float ex = enemy_.fighter.world_x();
@@ -2972,8 +2978,6 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     for (const auto& kv : setup.enemy.attrs) {
         enemy_.params.attributes[kv.first] += static_cast<float>(kv.second);
     }
-    enemy_.params.attributes["DamageFactor"] +=
-        static_cast<float>(setup.enemy_damage_factor);
     if (!setup.enemy.tactic.empty() && enemy_.ai != nullptr &&
         tactic_defs_ != nullptr) {
         const auto it = tactic_defs_->find(setup.enemy.tactic);
@@ -8030,13 +8034,13 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 }
             }
             if (chosen != nullptr) {
-                sf2::scene::FightContext ctx;
-        ctx.roll01 = [this]() { return draw01(); };  // shared fight stream (`Da.pg`)
-                ctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-                ctx.anims_me = anim_names_of(me.fighter);
-                ctx.anims_enemy = anim_names_of(foe.fighter);
-                fill_ctx_geometry(ctx, me, foe);
-                ctx.health_ratio = me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+                // `Gc.Nsb` (L28711-28728) evaluates the picked move's own
+                // `<Transitions>` at THIS decision frame with the fighter as
+                // the condition context: the same `pick_ctx()` the candidate
+                // resolution used (it carries BOTH fighters' active intervals,
+                // which `<CurrentInterval>` reads, and the live geometry /
+                // animation names `<CurrentAnimation>` reads).
+                const sf2::scene::FightContext tr_ctx = pick_ctx();
                 // [FIX decision-application latency] The Random-tactic
                 // decision is QUEUED, not started here. JS chain:
                 //   `wd.Anb` (L20631 `a.type==1 -> this.hJa()`) ->
@@ -8065,8 +8069,11 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     // candidate's own `<Align><Pivot Part>` bound (`Gc.Pkb`),
                     // so the queued start re-tests the `<Tactics>` in the SAME
                     // context (see `Fighter::queue_reaction`).
+                    // `&tr_ctx`: `Gc.Nsb` (L28711-28728) evaluates the picked
+                    // move's own `<Transitions>` HERE, at the decision frame,
+                    // with the fighter as the condition context.
                     me.fighter.queue_reaction(chosen, /*physics=*/false,
-                                              /*bind_pivot=*/true);
+                                              /*bind_pivot=*/true, &tr_ctx);
                     ++me.moves_started;
                 } else {
                     // [FIX Tabular decision latency] The Tabular decision is
@@ -8080,7 +8087,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     // enemy's `StepForward` at nat f=223 while the oracle
                     // starts it at nat f=224 (ora f=355, af=1).
                     me.fighter.queue_reaction(chosen, /*physics=*/false,
-                                              /*bind_pivot=*/false);
+                                              /*bind_pivot=*/false, &tr_ctx);
                     ++me.moves_started;
                 }
             }
@@ -9076,11 +9083,14 @@ void FightController::dump_state_frame() {
             if (move_name.empty()) move_name = m->file_name;
         }
         std::fprintf(state_dump_file_,
-                     "%s{\"id\":\"%s\",\"hp\":%.3f,\"mhp\":%.3f,\"combo\":%d,"
+                     "%s{\"id\":\"%s\",\"x\":%.4f,\"y\":%.4f,\"w\":\"%s\","
+                     "\"hp\":%.3f,\"mhp\":%.3f,\"combo\":%d,"
                      "\"style\":%d,\"unhit\":%d,\"shock\":%d,\"block\":%d,"
                      "\"invuln\":%d,\"move\":\"%s\",\"af\":%d,\"rag\":%d,"
                      "\"ragf\":%d,\"iv\":[",
                      i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
+                     static_cast<double>(f.world_x()),
+                     static_cast<double>(f.world_y()), ff.weapon.c_str(),
                      static_cast<double>(ff.hp), static_cast<double>(ff.max_hp),
                      ff.combo_run, ff.style.level, ff.round_unhit ? 1 : 0,
                      ff.shock.shocked_vc ? 1 : 0, f.has_block() ? 1 : 0,

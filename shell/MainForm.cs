@@ -406,7 +406,7 @@ public sealed class MainForm : Form
             }
 
             items.Add(command.InnerKind == InputCommandKind.Key
-                ? $"{{f:{command.Milliseconds},t:'key',c:{command.KeyCode}}}"
+                ? $"{{f:{command.Milliseconds},t:'key',c:{command.KeyCode},d:{(command.KeyDown ? 1 : 0)}}}"
                 : command.InnerKind == InputCommandKind.Drag
                 ? $"{{f:{command.Milliseconds},t:'drag',x1:{command.X},y1:{command.Y},x2:{command.X2},y2:{command.Y2}}}"
                 : command.InnerKind == InputCommandKind.Press

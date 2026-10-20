@@ -2467,7 +2467,7 @@ private:
     float banner_arm_delay_ = 0.f; // JS `wh.delay(...,500)` — the 500 ms arm
     banner_action banner_action_ = banner_action::none;  // the `vhb` dispatch
     int banner_start_ = 0;         // frame_ when the banner was raised
-    int banner_round_ = 0;        // the ROUND N number (banner_round_+1 shown)
+    int banner_round_ = 0;        // the ROUND N number shown on the banner
     // The `ik` VS overlay (`screens.cpp`) holds the intro's plate clock: while
     // set, `banner_tick` does not run, so the ROUND plate is not consumed
     // during the overlay. Cleared by `release_intro` once `!vs_active_`.

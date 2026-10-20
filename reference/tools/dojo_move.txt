@@ -1,0 +1,39 @@
+# Stage-1 SHARED input script (one file, both sides): Training dojo (Punchbag).
+#
+# The user's scenario: start the dojo, hold "d" 3 s, hold "a" 3 s, jump,
+# throw at the wall. Key codes are the JS/browser keyCode values, which are
+# also the GLFW codes the native key handler maps (`FightScreen::
+# key_type_for_glfw`): 68 = D -> Forward(3), 65 = A -> Back(7), 87 = W ->
+# Up(1), 75 = K -> Punch(9).
+#
+# ORACLE side (one run):
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=0&maxFrames=1200" ^
+#     --input-script reference/tools/dojo_move.txt --timeout-ms 90000
+#   python reference\tools\extract_state.py
+#
+# NATIVE side (same script, read by `--replay`; key edges go through the GLFW
+# key handler — `parse_replay_file` maps `keydown/keyup` to
+# `ReplayEdge{frame, code, down, glfw=true}`):
+#   build\app\game\Release\game.exe --replay reference/tools/dojo_move.txt ^
+#     --headless 900 --dump-state 900 --watchdog 900 ^
+#     reference/www/res reference/saves/save.xml
+#
+# Frames are the FIGHT's phase-local frame counter (`FightController::
+# frame_` / JS `fight.frame`), the same `f` field both state traces carry: an
+# edge at frame f is applied before the tick that advances the fight past f.
+#
+# 3 s of Forward.
+atframe 120 keydown 68
+atframe 300 keyup 68
+# 3 s of Back.
+atframe 330 keydown 65
+atframe 510 keyup 65
+# Jump.
+atframe 540 keydown 87
+atframe 560 keyup 87
+# Throw attempt at the wall: Back held + Punch tap.
+atframe 600 keydown 65
+atframe 600 keydown 75
+atframe 630 keyup 75
+atframe 660 keyup 65

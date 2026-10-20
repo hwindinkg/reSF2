@@ -51,6 +51,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 
@@ -465,7 +467,30 @@ bool eval_distance(const Cond& c, const FightContext& ctx) {
             default: b = ctx.dist_3d; break;
         }
     }
-return (!c.has_min || c.min <= b) && (!c.has_max || b <= c.max);
+    const bool result = (!c.has_min || c.min <= b) && (!c.has_max || b <= c.max);
+    // [DIAGNOSTIC] `SF2_TRACE_COND=1`: dump the ref-resolved operands of a
+    // FAILING Distance leaf. The condition's `b` is NOT the printed root gap
+    // (`ctx.dist_x`): it is `(tx - fx) * ctx.direction` from the resolved
+    // From/To refs (Pivot -> the current move's align node, Nodes -> the posed
+    // node), so a FALSE at a plausible root gap is explained by `fx`/`tx`.
+    if (!result) {
+        static const bool trace_dist = std::getenv("SF2_TRACE_COND") != nullptr;
+        if (trace_dist) {
+            std::fprintf(stdout,
+                         "[dist] axis=%d from=%s/%s to=%s/%s refs=%d fx=%.1f "
+                         "fy=%.1f tx=%.1f ty=%.1f dir=%.2f b=%.1f min=%s "
+                         "max=%s\n",
+                         c.axis, c.from_obj.c_str(), c.from_part.c_str(),
+                         c.to_obj.c_str(), c.to_part.c_str(), have_refs ? 1 : 0,
+                         static_cast<double>(fx), static_cast<double>(fy),
+                         static_cast<double>(tx), static_cast<double>(ty),
+                         static_cast<double>(ctx.direction), static_cast<double>(b),
+                         c.has_min ? std::to_string(c.min).c_str() : "-",
+                         c.has_max ? std::to_string(c.max).c_str() : "-");
+            std::fflush(stdout);
+        }
+    }
+    return result;
 }
 
 // JS `Hm.he` (Weapon/Player) and `um.he` (Item): match my items by

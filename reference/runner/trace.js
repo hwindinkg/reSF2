@@ -106,6 +106,50 @@
     console.log('{"t":"savegame","b64":"' + b64 + '"}');
   }
 
+  /* MOVE-LIST probe (pack-availability verification). Once per run, on the
+   * first LIVE fight frame, dump each fighter's OWN move list (`wd.me`,
+   * sf2.readable.js L20295 — filled by the fighter build at L28904-28913:
+   * iterate the global registry `ra.Lk` and push every move whose conditions
+   * `f.nw(d, b)` pass and that is not locked by `<Skeleton>`; the registry
+   * itself is built by `ra.load()` -> `Fa.parse(ra.Lk, ...)` (L28790-28801),
+   * which drops pack-gated moves via `Mc.F().yEa(name)` (L14602 ->
+   * `T1` L39736). The native side prints the SAME lists as
+   * `--enemy-move-audit`'s `[emaudit] enemy moves:` digest / `move_list_digest`
+   * so the two pack models can be compared name-for-name. Also reports how
+   * many `<Pack>` records the SF2Packs seed carries, to prove the seed
+   * actually landed in `GameInterface.storage`. */
+  function emitMovesOnce(fight) {
+    if (tr.movesEmitted) return;
+    var names = function (f) {
+      var out = [];
+      try {
+        if (f && f.me && f.me.length) {
+          for (var i = 0; i < f.me.length; i++) {
+            var nm = f.me[i] && f.me[i].name != null ? String(f.me[i].name) : "";
+            if (nm) out.push(nm);
+          }
+        }
+      } catch (e) { /* ignore */ }
+      return out;
+    };
+    var packs = 0;
+    try {
+      var raw = window.localStorage.getItem("shadow-fight-2:savegame");
+      var env = raw ? JSON.parse(raw) : null;
+      var xml = env && env.data ? env.data.SF2Packs : null;
+      if (typeof xml === "string") {
+        packs = xml.split("<Pack ").length - 1;
+      }
+    } catch (e) { /* ignore */ }
+    tr.movesEmitted = true;
+    console.log(JSON.stringify({
+      t: "moves",
+      packs: packs,
+      p: names(fight.pb),
+      e: names(fight.yb)
+    }));
+  }
+
   /* Run marker: OracleShell's console.log ACCUMULATES every run (a fresh page
    * per run appends to the same file), so a state extractor must be able to
    * keep ONLY the last run — otherwise the mixed frames make
@@ -125,7 +169,8 @@
     cam: null, /* {cx,cy,zoom} set by the Ut.Al hook */
     seenClips: {}, /* clip label -> true (dump once per clip per run) */
     lastFightFrame: -1, /* last emitted `fight.frame` (one line per fight frame) */
-    lastClip: new WeakMap() /* fighter -> clip label seen last tick */
+    lastClip: new WeakMap(), /* fighter -> clip label seen last tick */
+    movesEmitted: false /* one-shot `{"t":"moves"}` line per run */
   };
 
   window.__sf2Trace = {
@@ -454,11 +499,26 @@
    * `FightController::dump_state_frame` line exactly. */
   function fighterState(f, id) {
     var o = {
-      id: id, hp: null, mhp: null, combo: null, style: null, unhit: null,
+      id: id, x: null, y: null, w: null,
+      hp: null, mhp: null, combo: null, style: null, unhit: null,
       shock: 0, block: 0, invuln: 0, move: null, af: null, rag: 0, ragf: 0,
       iv: []
     };
     if (!f) return o;
+    try {
+      // World position of the posed body (`fighterJson`'s `f.oa.Fe().ma`,
+      // the same source the visual trace uses).
+      var fe = f.oa && typeof f.oa.Fe === "function" ? f.oa.Fe() : null;
+      if (fe && fe.ma) {
+        o.x = Math.round(fe.ma.x * 1e4) / 1e4;
+        o.y = Math.round(fe.ma.y * 1e4) / 1e4;
+      }
+    } catch (e) { /* body not posed yet */ }
+    try {
+      // The wielded weapon = the `Weapon`-slot item (`xc.hk("Weapon",item)`
+      // L34259-34261 stores it on `Hd`; `I.vg = "Weapon"` L102807).
+      o.w = f.parameters && f.parameters.Hd ? String(f.parameters.Hd.name) : null;
+    } catch (e) { /* no params yet */ }
     try {
       if (f.parameters) {
         o.hp = r3(f.parameters.gd);
@@ -635,6 +695,95 @@
     }
   }
 
+  /* ---------- frame-exact stimulus (page side, SHARED script) ----------
+   * OracleShell forwards every `atframe` line once as window.__oracleStimulus
+   * (MainForm.cs: {f,t:'key',c,d} / tap / drag / press / release). The native
+   * side reads THE SAME FILE through `--replay` (parse_replay_file) and routes
+   * the key edges through FightScreen::on_key with the same numeric codes, so
+   * one script drives both runs. Key edges fire BEFORE the tick that advances
+   * the fight past frame f — the native applies `edges[ei].frame <=
+   * fight_frames` right before `run_one_frame()`, so both sides gate on the
+   * identical comparison. */
+  var STIM = { items: null, next: 0 };
+
+  function pollStimulus() {
+    try {
+      if (!STIM.items && window.__oracleStimulus && window.__oracleStimulus.length) {
+        STIM.items = window.__oracleStimulus.slice();
+        STIM.items.sort(function (a, b) { return a.f - b.f; });
+        console.log("[STIM] armed: " + STIM.items.length + " items");
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function stimTarget() {
+    try {
+      return document.getElementById("gfx") || document.body || document;
+    } catch (e) { return null; }
+  }
+
+  function keyCodeToCode(c) {
+    /* The game's input manager resolves the DOM `code` string first
+     * (`ey.hi(a.code)` = `Os.v[code]`, L100859 + `Gz` L834-859: "KeyA".."KeyZ"
+     * -> 65..90, "Digit0".."Digit9" -> 48..57) and only falls back to
+     * `a.which`. Feeding the real `code` keeps the release path (`gFa`)
+     * resolving the same key as the press. */
+    if (c >= 65 && c <= 90) return "Key" + String.fromCharCode(c);
+    if (c >= 48 && c <= 57) return "Digit" + String.fromCharCode(c);
+    if (c === 32) return "Space";
+    if (c >= 37 && c <= 40) return ["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"][c - 37];
+    return "";
+  }
+
+  function fireKey(item, down) {
+    try {
+      var target = stimTarget();
+      if (!target) return;
+      var code = keyCodeToCode(item.c);
+      var init = {
+        bubbles: true, cancelable: true, keyCode: item.c, which: item.c
+      };
+      if (code) init.code = code;
+      var ev = new KeyboardEvent(down ? "keydown" : "keyup", init);
+      console.log("[STIM] " + (down ? "keydown" : "keyup") + " " + item.c +
+        " at f=" + item.f);
+      target.dispatchEvent(ev);
+    } catch (e) { /* ignore */ }
+  }
+
+  /* Stimulus self-check: a window-level listener that reports what the engine's
+   * own handlers see (the events bubble from the canvas), so a dropped or
+   * mis-resolved key shows up in the trace instead of silently doing nothing. */
+  function hookStimCheck() {
+    try {
+      ["keydown", "keyup"].forEach(function (type) {
+        window.addEventListener(type, function (e) {
+          try {
+            console.log("[STIMCHK] " + type + " code=" + e.code + " keyCode=" +
+              e.keyCode + " which=" + e.which + " repeat=" + e.repeat +
+              " f=" + tr.lastFightFrame + " target=" +
+              (e.target && e.target.id ? e.target.id : (e.target && e.target.tagName)));
+          } catch (e2) { /* ignore */ }
+        }, true);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function beforeFrame() {
+    if (tr.done || !tr.enabled) return;
+    pollStimulus();
+    if (!STIM.items || STIM.next >= STIM.items.length) return;
+    var fight = fightObj();
+    if (!fight) return;
+    var f = null;
+    try { f = typeof fight.frame === "number" ? fight.frame : null; } catch (e) { f = null; }
+    if (f == null) return;
+    while (STIM.next < STIM.items.length && STIM.items[STIM.next].f <= f) {
+      var it = STIM.items[STIM.next++];
+      if (it.t === "key") fireKey(it, it.d !== 0);
+    }
+  }
+
   /* ---------- per-tick driver ---------- */
 
   function afterFrame() {
@@ -661,6 +810,7 @@
         return;
       tr.lastFightFrame = fight.frame;
     } catch (e) { /* ignore */ }
+    emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
     console.log(JSON.stringify(fightState(fight)));
     emitAudio(fight);
@@ -721,6 +871,11 @@
 
   function wrapFrameMethod(fn) {
     return function (a) {
+      try {
+        beforeFrame();
+      } catch (err) {
+        fail(err);
+      }
       var result = fn.apply(this, arguments);
       try {
         afterFrame();
@@ -738,6 +893,7 @@
 
     app.aa = wrapFrameMethod(app.aa);
     hookAudio(app);
+    hookStimCheck();
 
     if (typeof app.lbb === "function") {
       var origLbb = app.lbb;
@@ -771,6 +927,7 @@
     if (Pg && Pg.prototype && typeof Pg.prototype.aa === "function") {
       Pg.prototype.aa = wrapFrameMethod(Pg.prototype.aa);
       markHooked("Pg.prototype.aa (direct)");
+      hookStimCheck();
       return true;
     }
     return false;

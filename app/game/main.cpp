@@ -1370,15 +1370,66 @@ std::vector<ReplayEdge> build_verify_edges() {
 std::vector<ReplayEdge> parse_replay_file(const std::string& path) {
     std::ifstream in(path);
     std::map<int, std::map<int, int>> by_frame;  // frame -> control -> count
+    std::map<int, std::map<int, int>> up_at;     // frame -> control -> releases
+    bool has_release = false;
+    std::vector<ReplayEdge> key_edges;  // shared-script key edges (GLFW path)
     std::string line;
     while (std::getline(in, line)) {
         if (line.empty() || line[0] == '#') continue;
         std::istringstream ss(line);
-        std::string tag, press;
-        int frame = 0, control = 0, player = 0, value = 0;
-        if (!(ss >> tag >> frame >> press >> control >> player >> value)) continue;
-        if (tag != "atframe" || press != "press") continue;
-        by_frame[frame][control] += 1;
+        std::string tag, verb;
+        int frame = 0;
+        if (!(ss >> tag >> frame >> verb)) continue;
+        if (tag != "atframe") continue;
+        if (verb == "press" || verb == "release") {
+            int control = 0, player = 0, value = 0;
+            if (!(ss >> control >> player >> value)) continue;
+            if (verb == "press") {
+                by_frame[frame][control] += 1;
+            } else {
+                // Explicit release (the OracleShell script verb `atframe f
+                // release c x t`, also understood by the web stimulus driver):
+                // ONE script drives both sides.
+                up_at[frame][control] += 1;
+                has_release = true;
+            }
+        } else if (verb == "keydown" || verb == "keyup") {
+            // Shared-script key edge (shell/InputScript.cs): the page turns the
+            // SAME line into a DOM KeyboardEvent, this side routes it through
+            // FightScreen::on_key (the GLFW key path), so the two runs consume
+            // one input stream. Editor/injection note: `glfw = true`.
+            int code = 0;
+            if (!(ss >> code)) continue;
+            key_edges.push_back(ReplayEdge{frame, code, verb == "keydown", true});
+        } else if (verb == "key") {
+            // Legacy shell verb: down at the frame, up 7 frames later (~117 ms,
+            // the shell's tap hold).
+            int code = 0;
+            if (!(ss >> code)) continue;
+            key_edges.push_back(ReplayEdge{frame, code, true, true});
+            key_edges.push_back(ReplayEdge{frame + 7, code, false, true});
+        }
+    }
+    if (has_release || !key_edges.empty()) {
+        // Edge-driven script (press/release or keydown/keyup pairs): the frames
+        // ARE the edges.
+        std::vector<ReplayEdge> edges;
+        for (const auto& f : by_frame) {
+            for (const auto& c : f.second) {
+                for (int x = 0; x < c.second; ++x) edges.push_back(ReplayEdge{f.first, c.first, true});
+            }
+        }
+        for (const auto& f : up_at) {
+            for (const auto& c : f.second) {
+                for (int x = 0; x < c.second; ++x) edges.push_back(ReplayEdge{f.first, c.first, false});
+            }
+        }
+        edges.insert(edges.end(), key_edges.begin(), key_edges.end());
+        // stable_sort keeps same-frame file order (press-before-release, a
+        // 1-frame tap; keydown-before-keyup).
+        std::stable_sort(edges.begin(), edges.end(),
+                         [](const ReplayEdge& a, const ReplayEdge& b) { return a.frame < b.frame; });
+        return edges;
     }
     std::set<int> controls;
     for (const auto& f : by_frame) {
@@ -1842,6 +1893,31 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // proven end-to-end. The existing `--boss-hit-probe` alternated Punch(9)/
     // Kick(10), so a round could never be kick-only.
     bool kick_ko_probe = false;
+    // --doublesweep-verify [probe]: the user report №10 repro — learn
+    // `PERK_DOUBLE_SWEEP` into the probe-baseline save (DriverSaveGuard
+    // restores the ambient save on exit), boot a zone-1 fight, and drive the
+    // HUMAN input path with the move's own key sequence (moves.xml
+    // `DoubleSweep` L14345 `<Keys>`: Kick Tap x2 + Down Hold) at the gap its
+    // sibling candidates resolve at, proving the move STARTS and its ATTACK
+    // intervals (frames 9-12 / 15-19) DAMAGE the enemy. No OS input.
+    bool doublesweep_verify = false;
+    // --enemy-move-audit [probe]: the user report №9 repro — boot a zone-1
+    // NON-BOSS fight (default Stranger/ZONE_1 -> `Man_Nunchaku`, stages.xml
+    // L955) and, with NO input at all, count every started ENEMY move by
+    // name over `--audit-frames` frames, classifying each name by its
+    // moves.xml `Type`. PASS requires >= 1 started ATTACK. No OS input.
+    bool enemy_move_audit = false;
+    int audit_frames = 600;
+    // --move-x-probe [probe]: user report №1 measurement ONLY (no fix). Boot
+    // the Training dojo (`Punchbag`, stages.xml L4-5 `NotAI="1"` — a static
+    // dummy, no AI interference) and HOLD each direction key for
+    // `--move-x-frames` live frames via `inject_game_key` (3=Forward /
+    // 7=Back, JS `sa.$h`), printing the player's world-x displacement for
+    // Forward vs Back. A hold IS a continuous walk: `StepForward`'s
+    // `Forward:Hold` re-fires at every clip end while the key is down
+    // (fighter.hpp L325-329; moves.xml L10658-10662). No OS input.
+    bool move_x_probe = false;
+    int move_x_frames = 60;
     // --boss-loss-probe: boot a BOSS fight and drive a COMPETENT scripted
     // player (approach + punch/kick via `inject_game_key`, NO OS input) until
     // the battle ends, so the per-second `[fight]` HP log, the `[hit]` damage
@@ -2502,6 +2578,18 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             boss_hit_probe = true;
         } else if (arg == "--kick-ko") {
             kick_ko_probe = true;
+        } else if (arg == "--doublesweep-verify") {
+            doublesweep_verify = true;
+        } else if (arg == "--enemy-move-audit") {
+            enemy_move_audit = true;
+        } else if (arg == "--audit-frames" && i + 1 < argc) {
+            audit_frames = std::atoi(argv[++i]);
+            if (audit_frames < 1) audit_frames = 1;
+        } else if (arg == "--move-x-probe") {
+            move_x_probe = true;
+        } else if (arg == "--move-x-frames" && i + 1 < argc) {
+            move_x_frames = std::atoi(argv[++i]);
+            if (move_x_frames < 1) move_x_frames = 1;
         } else if (arg == "--wave-probe") {
             wave_probe = true;
         } else if (arg == "--fight-ordinal" && i + 1 < argc) {
@@ -6889,6 +6977,23 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pb.owned = loadout_owned(loadout);
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
+        if (dump_state_frames > 0) {
+            // [trace, state harness] Arm the FightController's per-frame STATE
+            // dump exactly like the `--fight` branch does, so a `--replay` run
+            // (the native side of a SHARED input script) produces the same
+            // reference/traces/native_state.jsonl trace. Pure trace.
+            std::filesystem::create_directories("reference/traces");
+            if (app.screens().top() != nullptr) {
+                static_cast<sf2::app::FightScreen*>(app.screens().top())
+                    ->enable_state_dump("reference/traces/native_state.jsonl",
+                                        dump_state_frames);
+            }
+            std::fprintf(stdout,
+                         "[dump] state trace armed: first %d fight frames -> "
+                         "reference/traces/native_state.jsonl\n",
+                         dump_state_frames);
+            std::fflush(stdout);
+        }
 
         // Unit-level buffer check (JS `zl.Sgb`/`ia` L798): the `!a.sl`
         // guard means a second down of a key that is still held is IGNORED
@@ -6929,14 +7034,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // `<Defense>`. The counts below are the XML-tree scan over the
         // BOOT-TIME REGISTRY (`fight_assets().moves`), i.e. the `<Move>` set
         // that survives the JS `Fa.Ueb` `PackName` gate (`Fa.zcb` L30154 ->
-        // `Mc.F().T1` L39736) — 163 of the 1048 shipped `<Move>` elements (the
-        // pack-availability filter drops every `PackName`-tagged move, see
-        // `move_pack_availability` in app.cpp). Over the FULL moves.xml the
-        // scan is 617 outer blocks / 568 with 2 sub-`<Damage>` / 120 with a
-        // `<Defense>` / 1182 sub-`<Damage>` / 3 with no sub-entry; the
-        // filtered registry is a strict subset, so the denominators below are
-        // the registry-scoped numbers (a port-internal audit — the JS holds no
-        // such counter).
+        // `Mc.F().T1` L39736): 1030 of the 1048 shipped `<Move>` elements (the
+        // end-state pack availability drops the 18 `_UNUSED_` moves only, see
+        // `move_pack_availability` in app.cpp). The registry-scoped scan
+        // (own + inherited `<Intervals>`, `Type="Attack"` + first `<Damage>`)
+        // is 603 outer blocks / 557 with 2 sub-`<Damage>` / 119 with a
+        // `<Defense>` / 1160 sub-`<Damage>` / 3 with no sub-entry; over the
+        // FULL moves.xml the same scan is 614 / 568 / 120 / 1182 / 3. A
+        // port-internal audit — the JS holds no such counter.
         if (verify_input) {
             int outer = 0, two_sub = 0, with_defense = 0, sub_total = 0, no_sz = 0;
             for (const auto& kv : app.fight_assets().moves) {
@@ -6952,12 +7057,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     if (!iv.defense_names.empty()) ++with_defense;
                 }
             }
-            const bool parse_ok = outer == 46 && two_sub == 18 &&
-                                  with_defense == 4 && sub_total == 64 &&
-                                  no_sz == 2;
+            const bool parse_ok = outer == 603 && two_sub == 557 &&
+                                  with_defense == 119 && sub_total == 1160 &&
+                                  no_sz == 3;
             std::fprintf(stdout,
-                         "[verify] damage parse: outer=%d/46 2sub=%d/18 "
-                         "defense=%d/4 subTotal=%d/64 noSZ=%d/2 -> %s\n",
+                         "[verify] damage parse: outer=%d/603 2sub=%d/557 "
+                         "defense=%d/119 subTotal=%d/1160 noSZ=%d/3 -> %s\n",
                          outer, two_sub, with_defense, sub_total, no_sz,
                          parse_ok ? "PASS" : "FAIL");
             std::fflush(stdout);
@@ -8934,6 +9039,184 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return ok ? 0 : 1;
+    } else if (doublesweep_verify) {
+        // [probe] `--doublesweep-verify`: the user report №10 repro — after
+        // the `PERK_DOUBLE_SWEEP` lesson the move must be SELECTABLE from the
+        // human input path and its hits must DAMAGE. moves.xml `DoubleSweep`
+        // (L14345): `<Keys><Key Type="Kick" PressType="Tap"/><Key Type="Kick"
+        // PressType="Tap"/><Key Type="Down" PressType="Hold"/></Keys>`,
+        // `<Locks><Perk Name="PERK_DOUBLE_SWEEP"/>`, attack frames 9-12
+        // (0.08) + 15-19 (0.06). The pre-fix pack model dropped the move
+        // even with the perk learned (its `PackName="ZONE_1"` was not
+        // "downloaded"), so the lesson left the move unselectable; this
+        // probe drives the exact key edges and proves start + damage. No OS
+        // input.
+        {
+            // The lesson's `GivePerk` effect (`learn_perk`): write it into
+            // the probe-baseline save BEFORE the fight screen resolves its
+            // perk set (the fight-perk resolution reads `app.save()`).
+            // DriverSaveGuard restores the ambient save on exit, so this
+            // never touches the user's file.
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                w.learn_perk("PERK_DOUBLE_SWEEP", 1, 0);
+                app.save().save(w);
+                std::fprintf(stdout,
+                             "[dsverify] learned PERK_DOUBLE_SWEEP (save perks=%zu)\n",
+                             w.perks.size());
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "[dsverify] learn_perk failed: %s\n", e.what());
+            }
+            std::fflush(stdout);
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("Stranger") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location =
+                fight_location.empty() ? std::string("mountain") : fight_location;
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[dsverify] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        auto at_fight = [&]() { return app.screens().current_id() == kScreenFight; };
+        for (int g = 0; g < 20000 && at_fight() &&
+                        !(fs->probe_phase() == 2 && fs->fight_frame() >= 145);
+             ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const bool ds_in_hb =
+            fs->move_list_digest().find("DoubleSweep") != std::string::npos;
+        std::fprintf(stdout,
+                     "[dsverify] live phase=%d f=%d hb=%zu ds_in_hb=%d enemy='%s'\n",
+                     fs->probe_phase(), fs->fight_frame(), fs->move_list_size(),
+                     ds_in_hb ? 1 : 0, fs->enemy_current_move().c_str());
+        std::fflush(stdout);
+        bool started = false, damaged = false;
+        int attempts = 0, select_frame = -1, damage_at = -1;
+        float hp_before = 0.0f, hp_after = 0.0f;
+        for (int attempt = 0; attempt < 3 && at_fight() && !damaged; ++attempt) {
+            ++attempts;
+            // Neutral: drop any stale held keys and wait for the player to
+            // stand idle again (a previous attempt's DoubleSweep recovery).
+            fs->inject_game_key(10, false);
+            fs->inject_game_key(5, false);
+            for (int f = 0; f < 900 && at_fight(); ++f) {
+                glfwPollEvents();
+                const std::string mv = fs->player_current_move();
+                if (mv.empty() || mv.find("Idle") != std::string::npos) break;
+                app.run_one_frame();
+            }
+            fs->probe_set_hp(100.0f, 100.0f);
+            // Hold the DoubleSweep window: the move's `<Conditions>` carry
+            // NO Distance (that is `<Tactics>`, AI-only — moves.xml L14346-
+            // 14353), but sibling `LowKick`'s `<Conditions><Distance
+            // Max="100">` (L14471) drops it past 100, so at ~150 the
+            // candidates settle on HighKick(110)/Sweep(120)/DoubleSweep(130).
+            for (int f = 0; f < 60 && at_fight(); ++f) {
+                const float px = fs->player_world_x();
+                const float ex = fs->enemy_world_x();
+                if (std::fabs((ex - px) - 150.0f) > 8.0f) {
+                    const float side = (ex >= px) ? 1.0f : -1.0f;
+                    fs->place_fighters(px, px + side * 150.0f);
+                }
+                glfwPollEvents();
+                const std::string mv0 = fs->player_current_move();
+                if (mv0.empty() || mv0.find("Idle") != std::string::npos) {
+                    // Down press FIRST: its Tap row is evicted by the two
+                    // Kick taps (the 2-slot `sh` trim, JS `zl.Sgb`), while
+                    // the Down HOLD row (`Fh`, rebuilt from the held set)
+                    // stays — exactly the `$ga` multiset DoubleSweep needs
+                    // ({Kick-tap x2} + {Down-hold}); Sweep's requirement is a
+                    // subset, so DoubleSweep's 130 beats Sweep's 120.
+                    fs->inject_game_key(5, true);
+                    fs->inject_game_key(10, true);
+                    fs->inject_game_key(10, false);
+                    fs->inject_game_key(10, true);
+                    hp_before = fs->enemy_hp();
+                    // Frame A: `Gc.DK` resolves + QUEUES the pick (`Fighter::
+                    // try_select_move` -> `queue_reaction`; the clip seats at
+                    // the head of the NEXT frame's `process_reaction_queues`).
+                    app.run_one_frame();
+                    const std::string picked = fs->player_decision();
+                    // Frame B: the queued clip seats — the move is now live.
+                    app.run_one_frame();
+                    const std::string mv = fs->player_current_move();
+                    std::fprintf(stdout,
+                                 "[dsverify] attempt=%d pick: %s\n"
+                                 "[dsverify] attempt=%d inject -> move='%s'\n",
+                                 attempt + 1, picked.c_str(), attempt + 1,
+                                 mv.c_str());
+                    std::fflush(stdout);
+                    if (mv == "DoubleSweep") {
+                        started = true;
+                        select_frame = fs->fight_frame();
+                        break;
+                    }
+                }
+                app.run_one_frame();
+            }
+            if (!started) continue;
+            // Damage hold: sweep the legs into the enemy (clamp the gap to
+            // melee), release the held keys, and watch the ATTACK intervals
+            // (frames 9-12 / 15-19) land.
+            for (int f = 0; f < 40 && at_fight(); ++f) {
+                const float px = fs->player_world_x();
+                const float ex = fs->enemy_world_x();
+                if (std::fabs(ex - px) > 34.0f) {
+                    const float side = (ex >= px) ? 1.0f : -1.0f;
+                    fs->place_fighters(px, px + side * 28.0f);
+                }
+                glfwPollEvents();
+                fs->inject_game_key(5, false);
+                fs->inject_game_key(10, false);
+                const std::string mv = fs->player_current_move();
+                const int mf = fs->player_move_frame();
+                const float hp = fs->enemy_hp();
+                if (f < 26 || (f % 5) == 0) {
+                    std::fprintf(stdout,
+                                 "[dsverify] f=%d move='%s' mf=%d hp=%.6f "
+                                 "gap=%.1f\n",
+                                 f, mv.c_str(), mf, static_cast<double>(hp),
+                                 static_cast<double>(fs->enemy_world_x() -
+                                                     fs->player_world_x()));
+                    std::fflush(stdout);
+                }
+                // Any strict HP decrease is a landed hit (hp only falls via
+                // the hit pipeline; the printed drop matches the engine's
+                // `[hitbase]`/`[hit]` lines when it fires).
+                if (hp < hp_before) {
+                    damaged = true;
+                    damage_at = mf;
+                    break;
+                }
+                app.run_one_frame();
+            }
+        }
+        hp_after = fs->enemy_hp();
+        const bool ok = started && damaged;
+        std::fprintf(stdout,
+                     "[dsverify] done: started=%d select_frame=%d damaged=%d "
+                     "at_move_frame=%d enemy_hp %.6f -> %.6f attempts=%d -> %s\n",
+                     started ? 1 : 0, select_frame, damaged ? 1 : 0, damage_at,
+                     static_cast<double>(hp_before),
+                     static_cast<double>(hp_after), attempts, ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
     } else if (mode_enemy_probe) {
         // [probe, authorised] `--mode-enemy-probe`: boot a TOURNAMENT mode
         // fight (default Tournament/ZONE_1 -> the "monkey", `Man_Fist`) and
@@ -9124,6 +9407,267 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return 0;
+    } else if (enemy_move_audit) {
+        // [probe] `--enemy-move-audit`: the user report №9 repro — in a
+        // zone-1 NON-BOSS fight (default Stranger/ZONE_1 -> `Man_Nunchaku`,
+        // stages.xml L955) the enemy must be ACTIVE on its own: NO input at
+        // all, watch `--audit-frames` frames, and name every started ENEMY
+        // move (a `current_move` NAME CHANGE is a start; the AI decisions
+        // queue their clip one frame before it seats, so the counter alone
+        // would mis-attribute early frames). Each name is classified by its
+        // moves.xml `Type`. PASS requires >= 1 started ATTACK — the old pack
+        // model left most template moves unavailable, so the enemy owned
+        // few/no attacks (the passive-AI report). No OS input.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name =
+                fight_battle.empty() ? std::string("Stranger") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+            pb.location =
+                fight_location.empty() ? std::string("mountain") : fight_location;
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[emaudit] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        auto at_fight = [&]() { return app.screens().current_id() == kScreenFight; };
+        for (int g = 0; g < 20000 && at_fight() &&
+                        !(fs->probe_phase() == 2 && fs->fight_frame() >= 145);
+             ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto move_type = [&](const std::string& name) -> std::string {
+            if (!app.has_fight_assets()) return std::string("?");
+            const auto& mv = app.fight_assets().moves;
+            const auto it = mv.find(name);
+            if (it == mv.end()) return std::string("?");
+            return it->second.type.empty() ? std::string("-") : it->second.type;
+        };
+        const std::string digest = fs->enemy_move_list_digest();
+        int list_attack = 0, list_move = 0, list_other = 0;
+        {
+            std::string cur;
+            const auto flush_one = [&]() {
+                if (cur.empty()) return;
+                const std::string t = move_type(cur);
+                if (t == "ATTACK") ++list_attack;
+                else if (t == "MOVE") ++list_move;
+                else ++list_other;
+                cur.clear();
+            };
+            for (const char ch : digest) {
+                if (ch == ',') flush_one();
+                else cur += ch;
+            }
+            flush_one();
+        }
+        std::fprintf(stdout,
+                     "[emaudit] battle=%s zone=%s location=%s enemy_hb=%zu "
+                     "list ATTACK=%d MOVE=%d other=%d\n",
+                     fight_battle.empty() ? "Stranger" : fight_battle.c_str(),
+                     fight_zone.empty() ? "ZONE_1" : fight_zone.c_str(),
+                     fight_location.empty() ? "mountain" : fight_location.c_str(),
+                     fs->enemy_move_list_size(), list_attack, list_move, list_other);
+        std::fprintf(stdout, "[emaudit] enemy moves: %s\n", digest.c_str());
+        // The PLAYER's own list, same digest form: the oracle trace emits
+        // `{"t":"moves"}` (`fight.pb.me` / `fight.yb.me`, sf2.readable.js
+        // L20295 + L28904-28913) on its first live fight frame, so both
+        // pack models can be compared name-for-name on BOTH fighters.
+        const std::string pd = fs->move_list_digest();
+        std::fprintf(stdout, "[emaudit] player_hb=%zu moves: %s\n",
+                     fs->move_list_size(), pd.c_str());
+        std::fflush(stdout);
+        std::map<std::string, int> starts;
+        int attack_starts = 0, move_starts = 0, other_starts = 0;
+        int observed = 0;
+        std::string prev_move = fs->enemy_current_move();
+        for (int f = 0; f < audit_frames && at_fight(); ++f) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++observed;
+            const std::string nm = fs->enemy_current_move();
+            if (nm != prev_move) {
+                const std::string t = move_type(nm);
+                ++starts[nm];
+                if (t == "ATTACK") ++attack_starts;
+                else if (t == "MOVE") ++move_starts;
+                else ++other_starts;
+                std::fprintf(stdout,
+                             "[emaudit] f=%d started=%d move='%s' type=%s "
+                             "gap=%.0f\n",
+                             f, fs->enemy_moves_started(), nm.c_str(), t.c_str(),
+                             static_cast<double>(fs->enemy_world_x() -
+                                                 fs->player_world_x()));
+                std::fflush(stdout);
+                prev_move = nm;
+            }
+        }
+        std::fprintf(stdout, "[emaudit] per-move:");
+        for (const auto& kv : starts) {
+            std::fprintf(stdout, " %s=%d", kv.first.c_str(), kv.second);
+        }
+        std::fprintf(stdout, "\n");
+        const bool ok = attack_starts >= 1;
+        std::fprintf(stdout,
+                     "[emaudit] done: frames=%d observed=%d starts=%d (ATTACK=%d "
+                     "MOVE=%d other=%d) moves_started=%d enemy_hp=%.1f "
+                     "player_hp=%.1f -> %s\n",
+                     audit_frames, observed,
+                     attack_starts + move_starts + other_starts, attack_starts,
+                     move_starts, other_starts, fs->enemy_moves_started(),
+                     static_cast<double>(fs->enemy_hp()),
+                     static_cast<double>(fs->player_hp()), ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
+    } else if (move_x_probe) {
+        // [probe] `--move-x-probe`: user report №1 measurement ONLY (no fix).
+        // Boot the Training dojo and HOLD each direction key across
+        // `--move-x-frames` live frames via `inject_game_key` (3=Forward /
+        // 7=Back, JS `sa.$h`), reporting the player's world-x displacement
+        // for Forward vs Back. The JS semantic (fighter.hpp L325-329):
+        // `StepForward`'s `Forward:Hold` re-fires at every clip end while the
+        // key is down (`zl.yLa` rebuilds `zg.Fh` per frame) — a hold IS a
+        // continuous walk. The punchbag is static (`NotAI="1"`,
+        // stages.xml L12), so nothing else moves the player. No OS input.
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Training";
+            pb.zone.clear();
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(loadout);
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[movex] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        auto at_fight = [&]() { return app.screens().current_id() == kScreenFight; };
+        for (int g = 0; g < 20000 && at_fight() &&
+                        !(fs->probe_phase() == 2 && fs->fight_frame() >= 145);
+             ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[movex] live phase=%d f=%d enemy='%s'\n",
+                     fs->probe_phase(), fs->fight_frame(),
+                     fs->enemy_current_move().c_str());
+        std::fflush(stdout);
+        struct MoveXPass {
+            const char* label;
+            int key;
+            float me_x, en_x;
+        };
+        // Room to walk: the dojo floor is [80,1880] (`dojo_params`: Width
+        // 1960 / Wall 80). The Back pass starts WITHIN StepBack's own
+        // `<Tactics><Distance Max="401"/>` (moves.xml L11544-11551): the
+        // queued-seat re-test drops the clip past 401, so 272 from the
+        // punchbag keeps the whole 60-frame walk inside the gate (272+~108 <
+        // 401) while leaving 620 units to the left wall.
+        const MoveXPass kPasses[2] = {
+            {"Forward", 3, 100.0f, 1000.0f},
+            {"Back", 7, 700.0f, 1000.0f},
+        };
+        const int N = move_x_frames;
+        bool live_ok = fs->probe_phase() == 2;
+        int ran_min = 0;
+        for (const MoveXPass& pass : kPasses) {
+            // Neutral: drop any held key and let the previous walk recover to
+            // the stance idle (a release drops the Hold, so nothing re-fires).
+            fs->inject_game_key(3, false);
+            fs->inject_game_key(7, false);
+            for (int f = 0; f < 600 && at_fight(); ++f) {
+                glfwPollEvents();
+                const std::string mv = fs->player_current_move();
+                if (mv.empty() || mv.find("Idle") != std::string::npos) break;
+                app.run_one_frame();
+            }
+            fs->reset_player_move();
+            fs->place_fighters(pass.me_x, pass.en_x);
+            for (int f = 0; f < 3; ++f) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            const float x0 = fs->player_world_x();
+            const float ex0 = fs->enemy_world_x();
+            const std::string mv0 = fs->player_current_move();
+            fs->inject_game_key(pass.key, true);
+            float dx15 = 0.0f, dx30 = 0.0f;
+            std::string mv15 = "-", mv30 = "-", mvN = "-";
+            const char* stop_why = "none";
+            int ran = 0;
+            for (int f = 1; f <= N && at_fight(); ++f) {
+                glfwPollEvents();
+                app.run_one_frame();
+                ++ran;
+                const float px = fs->player_world_x();
+                const float ex = fs->enemy_world_x();
+                if (f == 15) {
+                    dx15 = px - x0;
+                    mv15 = fs->player_current_move();
+                }
+                if (f == 30) {
+                    dx30 = px - x0;
+                    mv30 = fs->player_current_move();
+                }
+                // Never measure into a clamp: break early if the walk runs
+                // into the punchbag or a wall, and report where.
+                if (std::fabs(ex - px) < 120.0f) {
+                    stop_why = "enemy-contact";
+                    break;
+                }
+                if (px <= 81.0f) {
+                    stop_why = "left-wall";
+                    break;
+                }
+                if (px >= 1879.0f) {
+                    stop_why = "right-wall";
+                    break;
+                }
+            }
+            const float x1 = fs->player_world_x();
+            const float dx = x1 - x0;
+            mvN = fs->player_current_move();
+            fs->inject_game_key(pass.key, false);
+            if (ran_min == 0 || (ran > 0 && ran < ran_min)) ran_min = ran;
+            const bool moved = (pass.key == 3) ? (dx > 0.0f) : (dx < 0.0f);
+            std::fprintf(stdout,
+                         "[movex] %s key(%d): x %.1f -> %.1f dx=%+.1f enemy_x "
+                         "%.1f (%.1f) over %d/%d frames dx@15=%+.1f dx@30=%+.1f "
+                         "stop=%s mv: '%s' -> f15='%s' f30='%s' end='%s' -> %s\n",
+                         pass.label, pass.key, x0, x1, dx, ex0,
+                         fs->enemy_world_x(), ran, N, dx15, dx30, stop_why,
+                         mv0.c_str(), mv15.c_str(), mv30.c_str(), mvN.c_str(),
+                         moved ? "WALKED" : "NO-DISPLACEMENT");
+            std::fflush(stdout);
+        }
+        const bool ok = live_ok && ran_min > 0;
+        std::fprintf(stdout,
+                     "[movex] done: frames=%d ran_min=%d -> %s (measurement "
+                     "only, no assertion)\n",
+                     N, ran_min, ok ? "MEASURED" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return ok ? 0 : 1;
     } else if (boss_loss_probe) {
         // [probe] Drive a COMPETENT scripted player through a full BOSS fight
         // via the internal `inject_game_key` path (NO OS input): approach the

@@ -87,61 +87,71 @@ std::string extracted_xml(const std::string& name) {
 }
 
 // JS `Fa.zcb` (L30154-30159) -> `Mc.F().T1` (L39736-39748). A `<Move
-// PackName="X">` is kept in `ra.Lk` (`Fa.Ueb` L30040-30044) only when the
-// pack `X` is "available": `T1` looks the pack up in the packs.xml list
-// (`Mc.wq`, built by `Mc.IS` L39710 from `Aa.OJ()` -> `<Pack Name>` entries)
-// and in the config_cdn `<packs>` manifest's PlatformID="3" set (`hd.tm`,
-// `hd.IS` L47192; `tm.IQ` L47298 returns the FIRST PlatformID="3" `<item>`
-// for the name, whose `Url` L47213 is the stored url). If packs.xml has no
-// such pack -> unavailable (`c == null` -> false). If the CDN manifest has
-// no entry for it -> available (`b == null` -> true). Otherwise available
-// only when the two Urls are equal. The shipped packs.xml `<Pack>` carries
-// NO `Url` while config_cdn's does, so every pack listed in BOTH is
-// unavailable — this is what drops AxeKick (`PackName="ANIMATIONS"`),
-// DoubleSweep / TwoFootJumpKick (`PackName="ZONE_1"`) and the other
-// PackName-tagged moves from the registry.
+// PackName="X">` is kept in `ra.Lk` (`Fa.Ueb` L30040-30044) only when `T1(X)`
+// reports the pack "available". `T1` (L39736-39748):
+//   b = hd.F().tm.IQ(a)      — the config_cdn `<packs>` manifest entry for X
+//                              (`hd.IS` L47192-47216 keeps only PlatformID="3"
+//                              items, groups by Name, the FIRST item per name
+//                              wins; `IQ` L47298-47299 is a plain map get);
+//   c = find(Mc.wq, name==X) — `Mc.wq` is the PERSISTENT install slot built by
+//                              `Mc.IS` (L39710-39729) from `Aa.OJ()`, i.e. the
+//                              `<Packs><Pack Name Url ...>` document persisted
+//                              under the `SF2Packs` storage key (L102537). It
+//                              is NOT built from packs.xml: packs.xml
+//                              (`Ja.ki(311)`, L14640+) is only the per-pack
+//                              `<DownloadConditions>` config.
+//   c == null -> false       (X not installed -> dropped)
+//   b != null -> b.url == c.url (installed url must match the CDN url)
+//   else      -> true        (installed pack absent from the CDN manifest)
+// Packs only ever enter the slot through `Mc.F().dXa(Name, Url, ...)`
+// (L39791-39817), and the download flow (`Qn.S` L44708-44719, driven by the
+// `<DownloadPack>` quests in quest_extensions/packs.xml) passes the CDN entry
+// verbatim: `dXa(Ux.name, Ux.url, ...)`. So for a fully downloaded install
+// `T1(X)` <=> X is a config_cdn PlatformID="3" name, with url equality
+// satisfied by construction. The port ships every pack's content: model that
+// end state exactly — availability = the CDN first-per-name set. In
+// particular `_UNUSED_` (in moves.xml, in neither packs.xml nor the CDN
+// manifest) stays unavailable, and its 18 moves stay out of the registry.
+// The port deliberately does not evaluate packs.xml `<DownloadConditions>`
+// (e.g. ZONE_1 = `WinCount(BOSS_LYNX|1) >= 1`): it stands in for the fully
+// downloaded game, the state the oracle save seeds.
+// Fallback when config_cdn.xml cannot be read: the manifest is empty, so
+// `T1` degrades to `c != null` and the packs.xml `<Pack>` names stand in for
+// the installed slot (still dropping anything else, e.g. `_UNUSED_`).
 std::set<std::string> move_pack_availability() {
-    std::map<std::string, std::string> pack_url;  // packs.xml `Mc.wq` (Url may be "")
-    std::map<std::string, std::string> cdn_url;   // config_cdn PlatformID="3" `hd.tm`
     auto parse_doc = [](const std::string& text, sf2::data::xml_doc& doc) {
         doc.parse(reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
     };
-    try {
-        sf2::data::xml_doc pd;
-        parse_doc(extracted_xml("packs.xml"), pd);
-        for (pugi::xml_node p : pd.root().child("Packs").children("Pack")) {
-            const char* n = p.attribute("Name") ? p.attribute("Name").value() : nullptr;
-            if (n == nullptr) continue;
-            const char* u = p.attribute("Url") ? p.attribute("Url").value() : nullptr;
-            pack_url.emplace(std::string(n), u ? std::string(u) : std::string());
-        }
-    } catch (...) {
-        // No packs.xml -> `Mc.wq` empty -> every pack unavailable.
-    }
+    std::set<std::string> available;  // CDN PlatformID="3" first-per-name set
     try {
         sf2::data::xml_doc cd;
         parse_doc(extracted_xml("config_cdn.xml"), cd);
         // Root element `<data>`; the pack manifest is its `<packs>` child
         // (`Ja.ki(1313).A("packs")`).
+        std::set<std::string> seen;
         for (pugi::xml_node it : cd.root().child("data").child("packs").children("item")) {
             const char* pid = it.attribute("PlatformID") ? it.attribute("PlatformID").value() : "";
             if (std::string(pid) != "3") continue;
             const char* n = it.attribute("Name") ? it.attribute("Name").value() : nullptr;
             if (n == nullptr) continue;
-            const char* u = it.attribute("Url") ? it.attribute("Url").value() : nullptr;
             // `hd.IS` (L47206-47213): the FIRST PlatformID="3" node for a
             // name wins (`X.uh` -> `b.set` only when absent).
-            cdn_url.emplace(std::string(n), u ? std::string(u) : std::string());
+            if (seen.insert(n).second) available.insert(n);
+        }
+        return available;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "app: config_cdn.xml pack manifest unreadable (%s); "
+                             "falling back to the packs.xml pack names\n", e.what());
+    }
+    try {
+        sf2::data::xml_doc pd;
+        parse_doc(extracted_xml("packs.xml"), pd);
+        for (pugi::xml_node p : pd.root().child("Packs").children("Pack")) {
+            const char* n = p.attribute("Name") ? p.attribute("Name").value() : nullptr;
+            if (n != nullptr) available.insert(n);
         }
     } catch (...) {
-        // No manifest -> `b == null` -> packs listed in packs.xml stay available.
-    }
-    std::set<std::string> available;
-    for (const auto& kv : pack_url) {
-        const auto cit = cdn_url.find(kv.first);
-        if (cit == cdn_url.end() || cit->second == kv.second) {
-            available.insert(kv.first);
-        }
+        // No packs.xml either -> available stays empty -> every PackName drop.
     }
     return available;
 }

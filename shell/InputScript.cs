@@ -39,7 +39,12 @@ internal sealed record InputCommand(
     InputCommandKind InnerKind = InputCommandKind.Tap,
     int X2 = 0,
     int Y2 = 0,
-    string ShotName = "");
+    string ShotName = "",
+    /// <summary>
+    /// `atframe f keydown|keyup c`: false = up edge, true = down edge. The
+    /// legacy `atframe f key c` = down with an auto-up 7 frames later.
+    /// </summary>
+    bool KeyDown = true);
 
 /// <summary>
 /// Parses an input script file. One command per line:
@@ -50,6 +55,13 @@ internal sealed record InputCommand(
 ///   shot &lt;name&gt;   — screenshot to ui/oracle_&lt;name&gt;.png (UI harness)
 ///   atframe &lt;f&gt; tap &lt;x&gt; &lt;y&gt; — page-side tap at exact fight.frame f
 ///   atframe &lt;f&gt; key &lt;code&gt;        — page-side key at exact fight.frame f
+///   atframe &lt;f&gt; keydown &lt;code&gt;  — key DOWN edge at exact fight.frame f
+///   atframe &lt;f&gt; keyup &lt;code&gt;    — key UP edge at exact fight.frame f
+///                                  (keydown/keyup = the SHARED script form:
+///                                  the native `--replay` parser understands
+///                                  the same lines and routes them through its
+///                                  GLFW key handler, the page through a DOM
+///                                  KeyboardEvent — one script, both sides)
 ///   atframe &lt;f&gt; drag &lt;x1&gt; &lt;y1&gt; &lt;x2&gt; &lt;y2&gt; — page-side joystick drag
 ///   atframe &lt;f&gt; press &lt;c&gt; &lt;x&gt; &lt;t&gt; — exact replay: fight.N0a(control c)
 ///   atframe &lt;f&gt; release &lt;c&gt; &lt;x&gt; &lt;t&gt; — exact replay: fight.O0a(control c)
@@ -102,6 +114,14 @@ internal static class InputScriptParser
                     && int.TryParse(parts[3], out int afKeyCode):
                     commands.Add(new InputCommand(InputCommandKind.AtFrame, KeyCode: afKeyCode,
                         Milliseconds: keyFrame, InnerKind: InputCommandKind.Key));
+                    break;
+                case "atframe" when parts.Length >= 4 && int.TryParse(parts[1], out int kdFrame)
+                    && (string.Equals(parts[2], "keydown", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(parts[2], "keyup", StringComparison.OrdinalIgnoreCase))
+                    && int.TryParse(parts[3], out int kdKeyCode):
+                    commands.Add(new InputCommand(InputCommandKind.AtFrame, KeyCode: kdKeyCode,
+                        Milliseconds: kdFrame, InnerKind: InputCommandKind.Key,
+                        KeyDown: string.Equals(parts[2], "keydown", StringComparison.OrdinalIgnoreCase)));
                     break;
                 case "atframe" when parts.Length >= 7 && int.TryParse(parts[1], out int dragFrame)
                     && string.Equals(parts[2], "drag", StringComparison.OrdinalIgnoreCase)
