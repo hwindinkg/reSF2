@@ -20,9 +20,27 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const EDIT_TOOLS = new Set(["edit", "write", "patch"]);
+const EDIT_TOOLS = new Set(["edit", "write", "patch", "apply_patch"]);
 const TRIGGER_DIRS = ["core", "app"];
 const BUDGET_MS = 10 * 60 * 1000;
+
+/**
+ * Resolve the edited path across the tool family: edit/write carry
+ * `filePath`, some variants use `path`/`file`, and patch-style tools carry the
+ * diff text instead (`*** Update File: core/...`). A patch whose text touches
+ * core/ or app/ triggers the gate even without a single path.
+ */
+function touchedPath(args: any): string {
+  const direct = args?.filePath ?? args?.path ?? args?.file;
+  if (typeof direct === "string" && direct) return direct;
+  const text = args?.patchText ?? args?.patch ?? args?.diff;
+  if (typeof text === "string" && text) {
+    const m = /\*\*\* (?:Update|Add|Delete) File:\s*(.+)$/m.exec(text);
+    if (m) return m[1].trim();
+    if (/(^|[\\/])(core|app)[\\/]/.test(text)) return "core/__patch__";
+  }
+  return "";
+}
 
 type GateRow = {
   id: string;
@@ -170,8 +188,8 @@ export const GatePlugin: Plugin = async ({ directory }) => ({
 
   "tool.execute.after": async (input, output) => {
     if (!EDIT_TOOLS.has(input.tool)) return;
-    const raw = input.args?.filePath ?? input.args?.path ?? "";
-    if (typeof raw !== "string" || !raw) return;
+    const raw = touchedPath(input.args);
+    if (!raw) return;
     const rel = path
       .relative(directory, path.resolve(directory, raw))
       .split(path.sep)
