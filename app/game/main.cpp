@@ -4238,6 +4238,24 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fprintf(stdout, "[tutreal2] BEFORE profile=%d step=%s nav_flash=%s\n",
                      on_profile ? 1 : 0, before_step.c_str(), before_nav.c_str());
         std::fflush(stdout);
+        // Bug #10 regression test, part 1 (the WRITE): while the Profile is on
+        // top, run the exact press the armed improve plate performs
+        // (`vb.Jzb` case 1 -> `perk_buy` -> `Bt.L1a` L306 -> `Qua` L307) and
+        // require `<Perks><Perk Name="PERK_DOUBLE_SWEEP" Level="..">` in the
+        // save. `DoubleSweep` is locked by `<Locks><Perk Name=
+        // "PERK_DOUBLE_SWEEP"/>` (moves.xml:14385), so a perk that never
+        // reaches the save leaves the move locked in every later fight.
+        bool perk_pressed = false;
+        std::size_t perk_row_count = 0;
+        if (auto* es = dynamic_cast<sf2::app::EquipmentScreen*>(app.screens().top())) {
+            perk_pressed = es->perk_press_named_for_test("PERK_DOUBLE_SWEEP",
+                                                         &perk_row_count);
+            tick_n(2);
+        }
+        std::fprintf(stdout, "[tutreal2] LEARN_PRESS row=%s rows=%zu top=%d\n",
+                     perk_pressed ? "PASS" : "FAIL", perk_row_count,
+                     app.screens().current_id());
+        std::fflush(stdout);
         // Drain the guidance Notification (BlockRaycast=0 in the JS) so its
         // plate cannot swallow the injected nav taps.
         for (int k = 0; k < 6 && q2.has_modal(); ++k) {
@@ -4296,8 +4314,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const bool ok_goto = on_profile && before_step == "SHOW_DOUBLE_SWEEP" &&
                              before_nav == "Dojo" && on_dojo &&
                              after_step == "SHOW_BLOCK" && after_nav == "Profile";
-        std::fprintf(stdout,
-                     "[tutreal2] RESULT profile=%s before_step=%s before_nav=%s "
+        // Bug #10 regression test, part 2 (the READ-BACK): the perk written by
+        // the LEARN_PRESS above must be in the profile (`<Perks><Perk ...>`).
+        bool perk_learned = false;
+        int perk_level = -1;
+        try {
+            for (const auto& p : app.save().load().perks) {
+                if (p.name == "PERK_DOUBLE_SWEEP") {
+                    perk_learned = true;
+                    perk_level = p.level;
+                    break;
+                }
+            }
+        } catch (const std::exception&) {
+        }
+        std::fprintf(stdout, "[tutreal2] RESULT profile=%s before_step=%s before_nav=%s "
                      "dojo=%s after_step=%s after_nav_profile=%d lock=%s -> %s\n",
                      on_profile ? "PASS" : "FAIL",
                      before_step == "SHOW_DOUBLE_SWEEP" ? "PASS" : "FAIL",
