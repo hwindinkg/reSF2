@@ -4729,8 +4729,15 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
         const unsigned int rtex = app.round_texture();
         if (rf != nullptr && rtex != 0) {
             const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
-            const float art_right = cx + art_w * 0.5f;      // `b.N` (image right)
-            const float art_top = cy - art_h * 0.5f;        // `b.P` (image top)
+            // JS `Cr.init` (L84302-84321) with `b=true`:
+            //   a = imageH;  round.x = imageLeft + 0.25a;  round.y = imageTop;
+            //   then BOTH are shifted by -a/2 (`image.C(image.ya - a/2)` and
+            //   `round.C(round.ya - a/2)`) -> round.x = imageLeft - 0.25a.
+            // The plate is DRAWN at `plate_cx` (= cx - a/2), so the number must
+            // follow the drawn art's left edge, not `cx` (the old
+            // `cx + artW/2 - a/4` put it on the wrong side of the plate).
+            const float art_left = plate_cx - art_w * 0.5f;  // `b.N`
+            const float art_top = cy - art_h * 0.5f;         // `b.P`
             // JS `Cr.tca` (L84218-84225) shows its `a` VERBATIM, and the
             // round-start caller (L16679-16683) passes `this.round.round`
             // AFTER the `round.round++` — i.e. the SAME 1-based count the
@@ -4738,7 +4745,7 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
             // first round display as 2). The 0 -> 1 fallback mirrors the
             // banner trigger (`banner_round_`, L581/L3226).
             const int rnum = fight.round().number;
-            app.draw_text_with_font(*rf, rtex, art_right - art_h * 0.25f, art_top,
+            app.draw_text_with_font(*rf, rtex, art_left - art_h * 0.25f, art_top,
                                     std::to_string(rnum == 0 ? 1 : rnum),
                                     rscale, 1.0f, 1.0f, 1.0f, 1.0f);
         }
