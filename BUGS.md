@@ -232,3 +232,20 @@ JS: по событию боя `fe.Dsb`/`Brb`/`wqb`/`Fsb`/`setTime`/`Cqb`/`Rrb`/
 Следующий шаг: завести в порте список триггеров предмета (`SP`) и гасить их
 в том же месте, где сейчас `disable_by_perks` (fight.cpp:7387-7402), плюс
 сценарий-проверка: `SF2_FORCE_DISARM=1` уже есть (fight.cpp:6126-6132).
+
+### №6 — живое измерение (SF2_FORCE_DISARM=1, `--kick-ko`, BOSS_LYNX)
+Лог `.harness/disarm1.log`:
+- F428 `[disarm] Player->NAME_SHIN wield='WEAPON_KUNAI' roll=0 gate=pass sn=1 wx=12`
+  (гейт прошёл — кулак не «выбивает» — только `SF2_FORCE_DISARM`).
+- F441 `[fight] NAME_SHIN WQB drop weapon=WEAPON_KUNAI model=mdl_weapon_kunai
+  flung_nodes=8 ...` + 8 кадров `WQB fling` (меш реально улетает).
+- `bc.FE dropped=...` НЕ печатается: у `WEAPON_KUNAI` нет `<Perks>`, гасить
+  нечего (это согласуется с BUGS: гасятся только перки).
+- Звуки: `snd_m_pl_attack*` играет и безоружный игрок (F422/F470) → это НЕ
+  звук оружия (m = male), так что «звуки оружия» по логу не подтверждаются.
+- Анимации: после дропа враг продолжает брать мувы с `Template="...|Weapon|..."`,
+  напр. `KatarsUpperCut` (F840). Нужно сверить с JS-мувлистом после `ra.Hza`
+  для Fists: если там таких мувов нет — это и есть «анимации оружия остались».
+Следующий шаг: снять мувлист врага сразу после F441 (порт: лог
+`build_move_list_locks` с именем оружия) и сравнить с JS `ra.Hza(f,!0)` —
+какие `Weapon`-мувы остаются при оружии "Fists".
