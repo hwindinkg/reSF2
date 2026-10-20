@@ -3586,6 +3586,9 @@ sf2::scene::AchievementRoundRecord& FightController::achievement_cur_round() {
         r.round_number = round_.number;
         achievement_rounds_.push_back(std::move(r));
     }
+    // Every caller MUTATES the record right after this (a `wqb` hit, the
+    // `JZa` round outcome), so bumping here covers each `fe`-feeding write.
+    ++achievement_version_;
     return achievement_rounds_.back();
 }
 
@@ -3632,6 +3635,7 @@ void FightController::apply_round_result(round_result result, const FightFighter
         rr.player_hp_end = player_.hp;            // `a.gd` -> `xrb`
         rr.duration = round_.gma - round_.time_nf;  // `R4 - Pz()` -> `setTime`
         if (!winner.is_player) achievement_lost_round_ = true;  // `this.lW=!1`
+        ++achievement_version_;  // the round outcomes are now readable
     }
 
     // JS `E3a` (L413): `a.kh=!0; b.kh=!0;` — both fighters latch the
@@ -6735,7 +6739,10 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                 prize_fh_.jU = atk.combo_j2;
             }
             // JS `ca.Ihb` (L17317) `this.fe.Brb(a.Vx.j2)` on the combo signal.
-            if (atk.is_player) achievement_brb_.push_back(atk.combo_j2);
+            if (atk.is_player) {
+                achievement_brb_.push_back(atk.combo_j2);
+                ++achievement_version_;
+            }
             // Perk-bus slot 4 (Combo): JS `Gc.Ihb` (L215492) -> `this.tb.Gj(a,4)`
             // (no `withInfo`, so the `Hc` gate is skipped — `xG.info=null`).
             fire_bus_slot(sf2::scene::kEvCombo, sf2::scene::TrigVars(),
@@ -8558,7 +8565,10 @@ void FightController::update(float dt) {
                         fr->combo_announced = 0;
                         if (fr->combo_j2 >= combo_min_hits) {
                             // JS `ca.Ihb` (L17323) `this.fe.Brb(a.Vx.j2)`.
-                            if (fr->is_player) achievement_brb_.push_back(fr->combo_j2);
+                            if (fr->is_player) {
+                                achievement_brb_.push_back(fr->combo_j2);
+                                ++achievement_version_;
+                            }
                             // Perk-bus slot 4 (Combo), the `iu.wyb` window-expiry
                             // signal (`Jt.Z(Ui)` -> `Gc.Ihb` L215492 `Gj(a,4)`).
                             fire_bus_slot(sf2::scene::kEvCombo,

@@ -16,7 +16,7 @@
 | D | Номер раунда | первый раунд показан как 2 | `round.round++` L16679 → `ha.tca(round.round,false)` L16680-16683 | **—** (HUD-номер никто не снимает) | правка в дереве, теста нет → OPEN |
 | E | 1-кадровый дёрг | бросок/отскок швыряет в другую часть локации на 1 кадр | не найдено (отскок/`Wall`/`Ringout`) | **—** (сценария с броском нет) | OPEN |
 | F | Выбивание оружия | меш исчез, звуки/анимации оружия остались | `Hd`→Fists-конфиг, анимации/звуки оружия не играют (`wd.Wqb`→`P2a`) | `diff:*` сравнивают поле `w`, но сценария с выбиванием нет → **—** | OPEN |
-| G | Ачивки | «агрессор» раньше; ачивки в конце боя | `Dsb` L15185-15192, `Nk` L15354-15363, тост `EE` L17279-17287 | **—** | OPEN |
+| G | Ачивки | «агрессор» раньше; ачивки в конце боя | `Dsb` L15185-15192, `Nk` L15354-15363, тост `EE` L17279-17287 | `settings-profile-shop-probe` (ix-c) + `kick-ko` | GREEN — ачивка и тост теперь **в бою** (см. раздел №7) |
 | H | Меню после Шина/Мей | кнопки не нажимаются | не найдено (лок ввода после диалога/боя) | `diff:*` UI-стек (oracle-only) — ловит только стек, не фокус кнопок | OPEN |
 | I | ИИ пассивен | у всех, кроме Шина/Кенжи/обезьяны | тактика из стадии + `Gc.DK` | `enemy-move-audit` (0) + `diff:boss-lynx|tournament|survival` | OPEN (аудит зелёный, кейс не репродуцирован) |
 | J | Двойная подсечка | после изучения не работает | гейт мува (перк), `Te.Skb` L23003-23017 | `doublesweep-verify` (0) | OPEN (гейт зелёный) |
@@ -150,3 +150,41 @@ JS `efa(node, count)` (L7360-7420) резолвит `count` бойцов (по �
 Проверка (a): вывести пул `Generic_1` из JS (хук `efa`/`Lk`) и сравнить
 name-в-name с портом; проверка (b): сравнить значение первого розыгрыша боя
 (порт 0.8057) с первым AI-розыгрышем оракула после старта.
+### №7 (G) — ачивка и тост В БОЮ, а не пачкой на результате — ИСПРАВЛЕНО
+JS: по событию боя `fe.Dsb`/`Brb`/`wqb`/`Fsb`/`setTime`/`Cqb`/`Rrb`/`xrb`
+(L15174-15244) зовут `Nk` (L15354) -> `Rab` (значение +1) -> `ca.EE(a)`
+(L17279) -> `v.X4a(counter, value)` (L50046, окно `e <= CounterValue <= e+value`)
+-> `ca.xH.push` + `Wga=!0`; `kHa`/`UMa` (L17341-17347) показывают тост ПОКА ИДЁТ
+БОЙ. Счётчики `<Counters>` пишутся в сейв только в конце (`ika` L11896).
+Условие `Da.I1` (L7954): `type != FightNone && type != FightPVP` — в Dojo/PVP
+разблокировки нет вовсе.
+
+Порт раньше считал все дельты ОДИН раз в `apply_fight_reward` (экран
+результата) — тост появлялся только там.
+
+Сделано:
+- `FightController::achievement_version_` (+`style_value()`): монотонный счётчик,
+  инкрементится в точках записи `fe` (хит через `achievement_cur_round`, комбо-
+  сигналы `Brb`, исход раунда). Такт игры проверяет одно целое за кадр.
+- `FightScreen::tick_infight_achievements()` (из `update_impl` после
+  `fight_->update`): гейт `Da.I1`, `fight_result_counter_deltas(..., fight_over=false)`
+  (в мид-бою НЕ применяются `WinBattle`/`Losses` и `complete`-нормализация
+  `CounterSpan="Fight"` — они живут только на конце), затем
+  `unlock_achievements_infight` = порт `X4a`: окно `(saved, saved+session]`,
+  дедуп по уже открытым, тост в `PendingBattle::achievement_toasts` (общий
+  тикер `tick_global_achievement_toasts`, app.cpp) и имя в
+  `achievement_infight_unlocks`.
+- `apply_fight_reward` сливает `achievement_infight_unlocks` в `<Achievements>`
+  перед `ika`-флашем (сейв пишется один раз, как в JS), поэтому повторного
+  тоста нет; `toasts.clear()` убран, чтобы недренированные тосты не терялись.
+
+Проверка (настоящая, может упасть):
+- `--settings-profile-shop-probe` пункт (ix-c): мид-бой даёт `midLoss=0` и
+  `endLoss=1` (лестница конца боя не течёт в бой), `PerfectRound` считается,
+  `unlock_achievements_infight` реально кладёт `achievement_name_perfect_1`
+  в список и в тост, второй вызов — не дублирует.
+- `--kick-ko` (живой бой): `[achievement] UNLOCK (in fight)
+  achievement_name_kickfights_1 (KickFights=1 >= 1)` на кадре 897 и
+  `[achievement] TOAST DRAW ...` сразу, а на результате —
+  `[result] ika flush: ... 0 achievement(s) unlocked` + `[counter] KickFights +2`.
+- `--full`: 22/22 OK, exit 0, 717.9 с.

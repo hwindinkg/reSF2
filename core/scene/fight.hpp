@@ -2198,6 +2198,14 @@ public:
     bool achievement_lost_round() const { return achievement_lost_round_; }
     // JS `fe.Brb(a.Vx.j2)` calls (L15174) — the combo-window signal payloads.
     const std::vector<int>& achievement_brb() const { return achievement_brb_; }
+    // A monotone counter bumped on every `fe`-feeding event (a recorded hit, a
+    // combo-window signal, a round outcome). The app's in-fight achievement
+    // tick (JS `ca.EE` L17279) only re-evaluates when this changes, so the
+    // per-frame cost of an idle fight is one integer compare.
+    int achievement_version() const { return achievement_version_; }
+    // JS `Fh.b6` (L2055): the style high-water mark (0..5) the `Dsb`
+    // achievement hook reads (`fe.Dsb(Uwb)`, L17296).
+    int style_value() const { return prize_fh_.b6; }
     // JS `round.eL` = the ROUNDS-TO-WIN; `complete(round.eL)` (L15310) uses it
     // to normalise a `CounterSpan="Fight"` session value to 0/1.
     int rounds_to_win() const { return round_.length; }
@@ -2396,6 +2404,9 @@ private:
     bool achievement_lost_round_ = false;
     // JS `fe.Brb(a.Vx.j2)` (L15174) calls (the combo-window signal, per call).
     std::vector<int> achievement_brb_;
+    // Bumped on every `fe`-feeding event; the app's in-fight achievement tick
+    // re-evaluates the counter thresholds only when this changes.
+    int achievement_version_ = 0;
     bool round_wait_ = false;      // JS: between a round's end and `FNa`
                                    // (the round-break banner holds it)
     // JS `ca.o1a` L403 / `kg` L387: the `FightNone` viewer (the Dojo hub)

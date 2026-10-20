@@ -891,6 +891,18 @@ private:
     // input-tape harness's per-key evidence.
     int last_input_key_type_ = 0;
 
+    // --- in-fight achievement unlocks (JS `yt.Nk` L15354 -> `ca.EE` L17279) --
+    // The toast is shown WHILE THE FIGHT RUNS: `Nk` bumps the achievement's
+    // session value on each event, `EE` tests the threshold window against the
+    // SAVED counter (`v.X4a` L50046) and queues the `ur` toast. The counter
+    // write stays at the fight end (`yt.ika`). Ticked from `update_impl` only
+    // when `fight_->achievement_version()` moves.
+    void tick_infight_achievements();
+    int infight_ach_version_ = -1;
+    bool infight_ach_loaded_ = false;
+    std::map<std::string, int> infight_ach_base_;   // saved `<Counter>` values
+    std::set<std::string> infight_ach_known_;       // unlocked (save + this fight)
+
     // --- on-screen gamepad (JS `Za` virtual controls, JS_GAMEPLAY §2) ----
     // The original's touch gamepad: the joystick `ze` (base + knob, the
     // pointer drags the knob -> a movement sector 1-8) bottom-left and the

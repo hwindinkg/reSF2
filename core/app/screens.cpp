@@ -13745,6 +13745,14 @@ void draw_global_achievement_toast(App& app) {
     }
 }
 
+// JS `yt.Nk` (L15354) -> `ca.EE` (L17279): evaluate the achievement threshold
+// windows against the LIVE session records and queue the toast the moment one
+// is crossed, so the player sees it during the fight (not in a batch on the
+// results plate). Gated on `achievement_version()`: an unchanged fight costs
+// one integer compare per frame. DEFINED LOWER in this file (it needs the
+// counter-def/delta helpers below).
+// void FightScreen::tick_infight_achievements() { ... }
+
 void FightScreen::update_impl(float dt) {
     // JS `Ut.kyb` (`kyb` L825): `$O` advances once per 60 Hz frame; the
     // uncapped present loop must not step it (see DojoScreen::update_impl).
@@ -13888,6 +13896,8 @@ void FightScreen::update_impl(float dt) {
     // the buffered keys land this frame (the same ordering as on_key).
     update_gamepad_input();
     fight_->update(dt);
+    // JS `yt.Nk`/`ca.EE` (L15354/L17279): unlock + toast DURING the fight.
+    tick_infight_achievements();
     // Drain the `Gr` HUD callout signals the sim recorded (`Sf.strike` flags
     // + the hot-ground rule tick) into the per-side `Gr.Gu` lists (JS
     // `Gr.addElement`, L2051). JS pushes synchronously from the producers;
@@ -15643,6 +15653,11 @@ struct AchievementCounterDef {
 };
 
 // Parse internal_settings.xml `<AchievementCounter><Counter>` (JS `iY.parse`).
+// Cached: the in-fight achievement tick (JS `ca.EE` L17279) re-evaluates the
+// threshold windows on every recorded hit, and re-parsing the XML each time
+// would stall a 60 Hz fight.
+static const std::vector<AchievementCounterDef>& achievement_counter_defs();
+
 static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
     std::vector<AchievementCounterDef> out;
     sf2::data::xml_doc doc;
@@ -15680,6 +15695,12 @@ static std::vector<AchievementCounterDef> load_achievement_counter_defs() {
         out.push_back(std::move(d));
     }
     return out;
+}
+
+static const std::vector<AchievementCounterDef>& achievement_counter_defs() {
+    static const std::vector<AchievementCounterDef> defs =
+        load_achievement_counter_defs();
+    return defs;
 }
 
 // Build the per-fight counter deltas the native fight hooks source. Each delta
@@ -15738,9 +15759,10 @@ static std::map<std::string, int> fight_result_counter_deltas(
     const std::vector<sf2::scene::AchievementRoundRecord>& rounds = {},
     bool lost_round = false, const std::string& fight_type = std::string(),
     int survival_wave = 0, const std::vector<int>& combo_triggers = {},
-    bool ladder_final = false, int rounds_to_win = 0) {
+    bool ladder_final = false, int rounds_to_win = 0,
+    bool fight_over = true) {
     std::map<std::string, int> deltas;
-    for (const AchievementCounterDef& d : load_achievement_counter_defs()) {
+    for (const AchievementCounterDef& d : achievement_counter_defs()) {
         // `EclipseMode="1"` counters need the fight's eclipse state, which the
         // native `PendingBattle` does not carry -> SKIP (no invention). The
         // `EclipseMode="0"` / absent rows are the normal-mode hooks.
@@ -15750,7 +15772,10 @@ static std::map<std::string, int> fight_result_counter_deltas(
         {
             const std::string& t = d.type;
             // --- fight-end ladder (JS `KZa` L17219, win only) -------------
-            if (player_won) {
+            // `fight_over == false` is the MID-FIGHT pass (JS `ca.EE` L17279
+            // runs on the live `fe` session): the win/loss ladder (`KZa`/
+            // `zrb`) only exists at the battle end, so its rows are skipped.
+            if (fight_over && player_won) {
                 if (t == "WinBattle") {
                     for (const std::string& wb : d.win_battles) {
                         if (wb == ids) {
@@ -15796,7 +15821,7 @@ static std::map<std::string, int> fight_result_counter_deltas(
                     if (ladder_final && fight_type == "FightChallenge")
                         deltas[d.name] += 1;
                 }
-            } else if (t == "Losses") {
+            } else if (fight_over && t == "Losses") {
                 deltas[d.name] += 1;  // `zrb`
             }
             if (reached_max_level && t == "MaximumLevel") deltas[d.name] += 1;  // `Psb`
@@ -15854,7 +15879,7 @@ static std::map<std::string, int> fight_result_counter_deltas(
                         }
                         if (ok) deltas[d.name] += lethal;
                     }
-                } else if (d.counter_span == 2) {
+                } else if (fight_over && d.counter_span == 2) {
                     bool ok = true;
                     int lethal = 0;
                     for (const auto& r : rounds)
@@ -15900,6 +15925,110 @@ static std::map<std::string, int> fight_result_counter_deltas(
     return deltas;
 }
 
+// JS `v.X4a` (L50046) + `ca.EE` (L17279) + `yt.Nk` (L15354): the IN-FIGHT
+// unlock. `X4a(counter, value)` takes the achievement's live session value,
+// adds the SAVED `<Counter>` value (`p.o.yi.rD(name).AB`) and returns the row
+// whose `CounterValue` falls inside `[saved, saved+value]` and is not
+// completed yet; `EE` pushes it onto `ca.xH`, which the fight's toast
+// (`UMa`/`Cf`) shows WHILE THE FIGHT IS STILL RUNNING. The counter write itself
+// stays at the fight end (`yt.ika` L11896), so this only records the names in
+// `PendingBattle::achievement_infight_unlocks` (+ the toast rows).
+static void unlock_achievements_infight(
+    App& app, const std::map<std::string, int>& deltas,
+    std::map<std::string, int>& infight_base,
+    std::set<std::string>& infight_known) {
+    PendingBattle& pb = app.pending_battle();
+    // The achievements table, once (the `<Counter>` -> `<Achievement>` rows).
+    static std::vector<std::pair<std::string, std::vector<std::pair<std::string, int>>>>
+        table;  // counter name -> [(achievement name, CounterValue)]
+    static std::map<std::string, std::pair<std::string, int>> icon_prio;
+    if (table.empty()) {
+        sf2::data::xml_doc doc;
+        if (load_res_doc("reference/extracted/xml/res/achievements.xml", doc)) {
+            const pugi::xml_node root = doc.root().first_child();
+            if (root) {
+                for (pugi::xml_node c : root.children("Counter")) {
+                    const std::string cname = c.attribute("Name").value();
+                    if (cname.empty()) continue;
+                    std::vector<std::pair<std::string, int>> rows;
+                    for (pugi::xml_node a : c.children("Achievement")) {
+                        const std::string an = a.attribute("Name").value();
+                        if (an.empty()) continue;
+                        rows.emplace_back(an, sf2::data::xml_attr_int(a, "CounterValue", 0));
+                        icon_prio[an] = {a.attribute("Icon").value(),
+                                         sf2::data::xml_attr_int(a, "Priority", 0)};
+                    }
+                    table.emplace_back(cname, std::move(rows));
+                }
+            }
+        }
+    }
+    for (const auto& counter : table) {
+        const auto it = deltas.find(counter.first);
+        if (it == deltas.end() || it->second <= 0) continue;
+        const int saved = infight_base.count(counter.first)
+                              ? infight_base[counter.first]
+                              : 0;
+        const int limit = saved + it->second;  // `b = e + value`
+        for (const auto& row : counter.second) {
+            // `h.counter >= e && h.counter <= b && !h.completed`
+            if (row.second < saved || row.second > limit) continue;
+            if (!infight_known.insert(row.first).second) continue;  // already done
+            pb.achievement_infight_unlocks.push_back(row.first);
+            PendingBattle::AchievementToastRow t;
+            t.name = row.first;
+            const auto& ip = icon_prio[row.first];
+            t.icon = ip.first;
+            t.priority = ip.second;
+            pb.achievement_toasts.push_back(std::move(t));
+            std::fprintf(stdout, "[achievement] UNLOCK (in fight) %s (%s=%d >= %d)\n",
+                         row.first.c_str(), counter.first.c_str(), limit, row.second);
+            std::fflush(stdout);
+        }
+    }
+}
+
+// JS `yt.Nk` (L15354) -> `ca.EE` (L17279): evaluate the achievement threshold
+// windows against the LIVE session records and queue the toast the moment one
+// is crossed, so the player sees it during the fight (not in a batch on the
+// results plate). Gated on `achievement_version()`: an unchanged fight costs
+// one integer compare per frame.
+void FightScreen::tick_infight_achievements() {
+    if (fight_ == nullptr) return;
+    // JS `Da.I1` (L7954) `c != "FightNone" && c != "FightPVP"`: `ca.EE`
+    // (L17280) unlocks nothing outside a real mode fight, so neither does
+    // the Dojo viewer or a PVP duel.
+    const std::string& type = fight_->fight_type();
+    if (type == "FightNone" || type == "FightPVP") return;
+    const int version = fight_->achievement_version();
+    if (version == infight_ach_version_) return;
+    infight_ach_version_ = version;
+    if (!infight_ach_loaded_) {
+        // The saved baseline (`e = p.o.yi.rD(name).AB`). The save is not
+        // written during a fight, so the counters cannot move under us.
+        try {
+            const WarriorSave w = app().save().load();
+            for (const WarriorSave::AchievementCounter& c : w.counters)
+                infight_ach_base_[c.name] = c.value;
+            for (const WarriorSave::AchievementUnlock& u : w.achievement_unlocks)
+                infight_ach_known_.insert(u.name);
+        } catch (const std::exception&) {
+        }
+        infight_ach_loaded_ = true;
+    }
+    const PendingBattle& pb = app().pending_battle();
+    const std::string ids =
+        pb.fight_triple.empty() ? pb.battle_name : pb.fight_triple;
+    const std::map<std::string, int> deltas = fight_result_counter_deltas(
+        ids, /*player_won=*/false, /*reached_max_level=*/false,
+        fight_->player_shocked(), fight_->style_value(),
+        fight_->achievement_rounds(), fight_->achievement_lost_round(),
+        fight_->fight_type(), fight_->survival_wave(), fight_->achievement_brb(),
+        /*ladder_final=*/false, fight_->rounds_to_win(), /*fight_over=*/false);
+    unlock_achievements_infight(app(), deltas, infight_ach_base_,
+                                infight_ach_known_);
+}
+
 // JS `yt.ika()` L297 + `v.Cpb` L616881: apply each delta to the saved counter
 // (the `WinBattle` cap uses the counter DEF's `type`) and auto-unlock the
 // matching achievements. Returns the number of achievements unlocked.
@@ -15909,7 +16038,7 @@ static int flush_achievement_counters(App& app, WarriorSave& w,
     (void)app;
     if (deltas.empty()) return 0;
     std::map<std::string, std::string> type_of;
-    for (const AchievementCounterDef& d : load_achievement_counter_defs())
+    for (const AchievementCounterDef& d : achievement_counter_defs())
         type_of[d.name] = d.type;
     std::vector<std::string> changed;  // JS `ika`'s `b` (the flushed names)
     for (const auto& kv : deltas) {
@@ -15991,6 +16120,23 @@ bool apply_fight_reward(App& app) {
         return false;
     }
     bool leveled_up = false;
+    // The achievements already unlocked DURING this fight (JS `yt.Nk` ->
+    // `ca.EE` L17279). The save is only written here (the fight-end `ika`
+    // flush), so merge them in first; the flush below then skips the
+    // re-unlock/toast (`already` test), keeping one toast per achievement.
+    if (!pb.achievement_infight_unlocks.empty()) {
+        for (const std::string& name : pb.achievement_infight_unlocks) {
+            bool already = false;
+            for (const WarriorSave::AchievementUnlock& u : w.achievement_unlocks) {
+                if (u.name == name) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already) w.achievement_unlocks.push_back({name, false});
+        }
+        pb.achievement_infight_unlocks.clear();
+    }
     // JS `dmb` -> `emb` (L93552): Money -> `Pa.Fwa` (Tb += money), Exp ->
     // `Pa.Iab` -> `p.o.Jab` (XP + the `OLa` level-up), Bonus -> `Ewa(Uo,3)`
     // (`p.o.vl(p.o.fd+c,3,false)`; `pb.prize_gems` carries `hj.Uo` =
@@ -16089,7 +16235,9 @@ bool apply_fight_reward(App& app) {
                 pb.achievement_ladder_final, pb.achievement_rounds_to_win);
         std::vector<PendingBattle::AchievementToastRow>& toasts =
             pb.achievement_toasts;
-        toasts.clear();
+        // NO `clear()`: the in-fight unlocks (`tick_infight_achievements`)
+        // already queued their toasts here, and the global ticker drains them
+        // each frame; a queued-but-undrained row must survive the flush.
         const int unlocked = flush_achievement_counters(app, w, deltas, &toasts);
         std::fprintf(stdout,
                      "[result] ika flush: %zu counter delta(s), %d achievement(s) unlocked\n",
@@ -23477,6 +23625,67 @@ int run_shell_probe(App& app) {
                   chk.achievement_unlocks.size() > ul_before,
               "(ix-b) ShockWin counter: only a shocked win emits + unlocks "
               "Win_After_Shock");
+    }
+    // (ix-c) IN-FIGHT unlock (JS `yt.Nk` L15354 -> `ca.EE` L17279): while the
+    // fight is STILL RUNNING a crossed threshold must unlock at once and queue
+    // the toast, and the fight-END-only rows (`Losses`/`WinBattle`) must NOT
+    // fire mid-fight. Uses the REAL delta builder + the REAL unlock path.
+    {
+        std::vector<sf2::scene::AchievementRoundRecord> rounds(1);
+        rounds[0].round_number = 1;
+        rounds[0].player_won = true;            // `a.qb` (a won round)
+        rounds[0].player_round_unhit = true;    // `a.cE` -> PerfectRound
+        sf2::scene::AchievementHitRecord h;
+        h.first = true;                         // the round's first hit
+        rounds[0].player_hits.push_back(h);
+        const std::map<std::string, int> mid = fight_result_counter_deltas(
+            "ZONE_1|Training|1", /*player_won=*/false, false, false, 0, rounds,
+            false, "FightTraining", 0, {}, false, 2, /*fight_over=*/false);
+        const std::map<std::string, int> done = fight_result_counter_deltas(
+            "ZONE_1|Training|1", /*player_won=*/false, false, false, 0, rounds,
+            false, "FightTraining", 0, {}, false, 2, /*fight_over=*/true);
+        const bool mid_no_loss = mid.find("Losses") == mid.end();
+        const bool end_has_loss = done.find("Losses") != done.end();
+        const bool mid_perfect =
+            mid.find("PerfectRound") != mid.end() && mid.at("PerfectRound") == 1;
+        // The unlock itself: saved 0 + session 1 crosses `perfect_1`
+        // (`CounterValue="1"`, achievements.xml).
+        PendingBattle& pb = app.pending_battle();
+        const std::vector<PendingBattle::AchievementToastRow> toasts_before =
+            pb.achievement_toasts;
+        const std::vector<std::string> names_before =
+            pb.achievement_infight_unlocks;
+        pb.achievement_toasts.clear();
+        pb.achievement_infight_unlocks.clear();
+        std::map<std::string, int> base;
+        base["PerfectRound"] = 0;
+        std::set<std::string> known;
+        unlock_achievements_infight(app, {{"PerfectRound", 1}}, base, known);
+        const auto has_name = [](const std::vector<std::string>& v) {
+            return std::find(v.begin(), v.end(), "achievement_name_perfect_1") !=
+                   v.end();
+        };
+        const bool unlocked = has_name(pb.achievement_infight_unlocks);
+        bool toasted = false;
+        for (const PendingBattle::AchievementToastRow& t : pb.achievement_toasts)
+            if (t.name == "achievement_name_perfect_1") toasted = true;
+        // `!h.completed` / the `known` latch: a second event must not re-toast.
+        const std::size_t toasts_once = pb.achievement_toasts.size();
+        unlock_achievements_infight(app, {{"PerfectRound", 2}}, base, known);
+        const bool fired_once = pb.achievement_toasts.size() == toasts_once &&
+                                pb.achievement_infight_unlocks.size() == 1;
+        std::fprintf(stdout,
+                     "[sps] ach in-fight: midLoss=%d endLoss=%d midPerfect=%d "
+                     "unlocked=%d toasted=%d once=%d\n",
+                     mid_no_loss ? 1 : 0, end_has_loss ? 1 : 0, mid_perfect ? 1 : 0,
+                     unlocked ? 1 : 0, toasted ? 1 : 0, fired_once ? 1 : 0);
+        std::fflush(stdout);
+        pb.achievement_toasts = toasts_before;
+        pb.achievement_infight_unlocks = names_before;
+        check(mid_no_loss && end_has_loss && mid_perfect && unlocked && toasted &&
+                  fired_once,
+              "(ix-c) in-fight achievement unlock: mid-fight rows exclude the "
+              "fight-end ladder, the threshold unlocks + toasts at once, once");
     }
     // (x) Settings language cycle -> RESTART (JS `un.rHa` case 4/5, offsets
     // 995437/995553): cycling `$u` reveals RESTART (`t9`), selects the

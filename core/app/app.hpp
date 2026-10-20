@@ -155,6 +155,12 @@ struct PendingBattle {
         int priority = 0;
     };
     std::vector<AchievementToastRow> achievement_toasts;
+    // Achievements unlocked WHILE the fight is still running (JS `ca.EE`
+    // L17279 + `v.X4a` L50046: `Nk` -> `value++` -> the threshold window test
+    // -> `xH.push` -> the `ur` toast). The `yt.ika` counter/save flush still
+    // happens at the fight end, so the names are collected here and merged
+    // into `<Achievements>` by `apply_fight_reward`.
+    std::vector<std::string> achievement_infight_unlocks;
 };
 
 // A text glyph run: screen-space position + the glyph quads. The shell
