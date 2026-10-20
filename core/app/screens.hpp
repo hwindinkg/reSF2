@@ -1302,6 +1302,21 @@ public:
     // press (`vb.Jzb` case 1 -> `perk_buy`). Read/press from the probe.
     int perk_sel_for_test() const { return perk_sel_; }
     void perk_press_for_test() { if (perk_sel_ >= 0) perk_buy(perk_sel_); }
+    // [probe] Select a perk ROW BY NAME and run the same write the armed
+    // improve press performs (`perk_buy`). Used by `--tutorial-real-verify` to
+    // prove the LEARN_PERK lesson persists `<Perks><Perk ...>` into the save
+    // (bug 10: `DoubleSweep` is locked by `<Perk Name="PERK_DOUBLE_SWEEP"/>`).
+    bool perk_press_named_for_test(const std::string& name,
+                                   std::size_t* rows_out = nullptr) {
+        if (rows_out != nullptr) *rows_out = perk_rows_.size();
+        for (std::size_t i = 0; i < perk_rows_.size(); ++i) {
+            if (perk_rows_[i].name != name) continue;
+            perk_sel_ = static_cast<int>(i);
+            perk_buy(perk_sel_);
+            return true;
+        }
+        return false;
+    }
 
     // --- [probe] `--settings-profile-shop-probe` (ii) --------------------
     // The folded Moves tab selection (`vb.uj` L2198 -> `umb`/`$r.refresh`

@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "updated": "2026-10-20T08:48:42",
-    "mode": "full"
+    "updated": "2026-10-20T19:47:54",
+    "mode": "only"
   },
   "gates": {
     "verify-input": {
@@ -131,10 +131,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-move": {
-      "metric": 1527,
-      "commit": "db4c58c2",
-      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
-      "date": "2026-10-20T08:48:42"
+      "metric": 236,
+      "commit": "db4fc9aa",
+      "reason": "bug 1/2 fix: the queued player pick no longer runs the AI Tactics re-test (StartStance/StepBack start now); 236 = the remaining 1-frame press-queue latency on JumpUp (541) + the dojo dummy spawn y",
+      "date": "2026-10-20T19:47:54"
     }
   }
 }
