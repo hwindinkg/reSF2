@@ -381,7 +381,8 @@ public:
     // next frame — the JS order (`ia`'s Qnb/Bnb run before `Ax`'s every-frame
     // event). `qs` (physics) wins and clears `Ml`.
     void queue_reaction(const MoveDef* m, bool physics, bool bind_pivot = false,
-                        const sf2::scene::FightContext* ctx = nullptr);
+                        const sf2::scene::FightContext* ctx = nullptr,
+                        bool player_pick = false);
     std::string process_reaction_queues(sf2::scene::FightContext& ctx,
                                         float wall_min, float wall_max);
     bool reaction_pending() const {
@@ -1370,6 +1371,11 @@ private:
     // Part>` for the start-time `<Tactics>` re-test (`ee.j8a`), reproducing
     // `de.V1`/`Gc.Pkb`. Hit-reaction picks leave it false.
     bool ml_bind_pivot_ = false;
+    // The queued `Ml` pick came from the CONTROLLED fighter's input path
+    // (`Gc.DK` `eb == false` -> `try_select_move`), not from the AI. The JS
+    // `Bnb` drain (`Nd.start`) does NOT re-run the `<Tactics>` tree for it -
+    // only the AI's `Pkb` decision is Tactics-tested (before the queue).
+    bool ml_player_pick_ = false;
     // JS `wd.Ml.VD` / `wd.Ml.pD` (`Gc.Nsb` L28711-28728 -> `wd.fJa` L20892):
     // the clip-start directive of the FIRST passing `<Transition>` of the
     // queued `ml_move_`, consumed by the next `Te.Skb` (L23004-23008):

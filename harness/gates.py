@@ -821,7 +821,7 @@ def print_report(results: list[GateResult], baseline: dict, mode: str,
                  duration: float, save_guard: SaveGuard, refwww_changed: list[str],
                  timeline: dict[str, list[str]]) -> None:
     print()
-    print(f"reSF2 gates — mode={mode}  commit={commit_id()}  "
+    print(f"reSF2 gates - mode={mode}  commit={commit_id()}  "
           f"exe={GAME.relative_to(ROOT) if GAME.exists() else 'MISSING'}  "
           f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 92)
@@ -840,12 +840,12 @@ def print_report(results: list[GateResult], baseline: dict, mode: str,
                 print(f"    ! {ln}")
         if r.kind == "diff":
             for ln in timeline.get(r.gate_id, [])[:5]:
-                print(f"    · {ln}")
+                print(f"    * {ln}")
             if r.extra.get("attempts", 1) > 1:
-                print(f"    · oracle navigation retries: {r.extra['attempts']} "
+                print(f"    * oracle navigation retries: {r.extra['attempts']} "
                       f"(wall-clock taps; the trace itself is deterministic)")
             if r.extra.get("ui_metric") is not None:
-                print(f"    · ui stack: {r.extra['ui_detail']}"
+                print(f"    * ui stack: {r.extra['ui_detail']}"
                       f" (metric {r.extra['ui_metric']})")
     print("-" * 92)
 
@@ -861,13 +861,13 @@ def print_report(results: list[GateResult], baseline: dict, mode: str,
         print("\nFAILED GATES (exit 1):")
         for r in failures:
             print(f"  {r.gate_id}: {r.verdict}"
-                  + (f" — {r.error.splitlines()[0]}" if r.error else ""))
+                  + (f" - {r.error.splitlines()[0]}" if r.error else ""))
     if improvements:
         print("\nIMPROVEMENTS (exit stays 0; move the baseline with a reason):")
         for r in improvements:
             base = baseline["gates"].get(r.gate_id, {})
             print(f"  {r.gate_id}: baseline {base.get('metric')} -> now {r.metric}"
-                  f"  →  python harness/gates.py --update-baseline "
+                  f"  ->  python harness/gates.py --update-baseline "
                   f"--only {r.gate_id} --reason \"...\" --yes")
     if save_guard.violations:
         print("\nSAVE GUARD:")
@@ -915,6 +915,13 @@ def write_json(path: Path, results: list[GateResult], mode: str,
 
 
 def main(argv=None) -> int:
+    # The Windows console defaults to a legacy code page; the report uses
+    # ASCII, but child output/errors can carry UTF-8. Never crash on a glyph.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     ap = argparse.ArgumentParser(description="reSF2 gate runner (single entry).")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--fast", action="store_true")

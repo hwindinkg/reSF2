@@ -1904,7 +1904,8 @@ std::string Fighter::try_select_move(FightContext& ctx, const std::string& event
     // `DK` branch, exactly like the reaction path, so it must not start
     // in-frame (that put the player's `Me.af` one frame early).
     const MoveDef* pick = f[idx];
-    queue_reaction(pick, pick->physics, /*bind_pivot=*/false, &ctx);  // JS `e.animation.MS`
+    queue_reaction(pick, pick->physics, /*bind_pivot=*/false, &ctx,
+                   /*player_pick=*/ctx.qb);  // JS `e.animation.MS`
     decision_.picked = pick->name;
     return pick->name;
 }
@@ -2150,13 +2151,15 @@ std::string Fighter::try_every_frame_move(FightContext& ctx, float wall_min,
 // `(false, -1)` -> `Skb`'s default `f = a.qx`. `Skb` then seats the clip at
 // `ip()+1+pD` (`FrameShift`) or at `pD` (`FirstFrame`) - see `move_start_`.
 void Fighter::queue_reaction(const MoveDef* m, bool physics, bool bind_pivot,
-                             const sf2::scene::FightContext* ctx) {
+                             const sf2::scene::FightContext* ctx,
+                             bool player_pick) {
     if (m == nullptr) return;
     if (physics) {
         qs_move_ = m;  // `this.qs.animation = a`
     } else {
         ml_move_ = m;  // `this.Ml.animation = a`
         ml_bind_pivot_ = bind_pivot;
+        ml_player_pick_ = player_pick;
         // JS `Gc.Nsb` (L28711-28728):
         //   `let e = false; let f = -1; let h = c.va.p6;`
         //   `while (g < h.length) { let k = h[g]; ++g;`
@@ -2231,7 +2234,17 @@ std::string Fighter::process_reaction_queues(sf2::scene::FightContext& ctx,
                 return candidate_align_pivot_world_xy(*cand, player, prev, x, y);
             };
         }
-        if (ai_start_move(*m, ctx)) return m->name;
+        // JS `Bnb` (L257860) starts the queued ordinary clip. The start-time
+        // `<Tactics>` re-test is the AI path only: the PLAYER's pick came from
+        // `Gc.DK`'s `eb == false` branch (`try_select_move`, which already ran
+        // the move's own `<Conditions>`), and the JS `Ml` drain does NOT re-run
+        // the Tactics tree. Using the AI path for it silently refused the
+        // player's AnimationEnd pick (measured: `StepBack` picked at F334,
+        // refused -> the fighter fell into the stance idle while Back was
+        // held).
+        const bool ai_pick = !ml_player_pick_;
+        ml_player_pick_ = false;
+        if (start_move_impl(*m, ctx, ai_pick)) return m->name;
         // The seat was refused by the start-time re-test: drop the
         // transition directive so a later, unrelated start cannot consume it
         // (`Skb` consumed it in the JS - the JS never reaches `Skb` here).
