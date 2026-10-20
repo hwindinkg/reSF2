@@ -777,6 +777,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
     return GateResult(gate.id, "diff", metric, detail,
                       time.time() - started,
                       extra={"ui_metric": ui_metric, "ui_detail": ui_detail,
+                             "attempts": attempts,
                              "artifacts": str(art.relative_to(ROOT))})
 
 
@@ -840,6 +841,9 @@ def print_report(results: list[GateResult], baseline: dict, mode: str,
         if r.kind == "diff":
             for ln in timeline.get(r.gate_id, [])[:5]:
                 print(f"    · {ln}")
+            if r.extra.get("attempts", 1) > 1:
+                print(f"    · oracle navigation retries: {r.extra['attempts']} "
+                      f"(wall-clock taps; the trace itself is deterministic)")
             if r.extra.get("ui_metric") is not None:
                 print(f"    · ui stack: {r.extra['ui_detail']}"
                       f" (metric {r.extra['ui_metric']})")
