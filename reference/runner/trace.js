@@ -170,7 +170,8 @@
     seenClips: {}, /* clip label -> true (dump once per clip per run) */
     lastFightFrame: -1, /* last emitted `fight.frame` (one line per fight frame) */
     lastClip: new WeakMap(), /* fighter -> clip label seen last tick */
-    movesEmitted: false /* one-shot `{"t":"moves"}` line per run */
+    movesEmitted: false /* one-shot `{"t":"moves"}` line per run */,
+    drawHooked: false /* `?drawTrace=1`: the `Da.pg.jf` wrapper is installed */
   };
 
   window.__sf2Trace = {
@@ -382,7 +383,65 @@
   /* Ut.prototype.Al — camera framing. args[0] = world focus point (Ut.Al is
    * called with `focus, fighterA_COM, fighterB_COM, scale, zoom`), this.Bj =
    * current zoom. Records the camera AFTER the fight tick computed it. */
-  function ensureHooks(fight) {
+  /* ---------------------------------------------------------------------------
+ * DRAW TRACE (`?drawTrace=1`, harness-only): log every `Da.pg.jf()` draw with
+ * its 1-based index, value, frame and caller frames. This is the only way to
+ * see WHERE the shared `Rk` stream sits when a setup routine (e.g. the
+ * survival warrior pick `efa`/`y8a`) consumes it - the port must replay the
+ * same draws. Off unless the query asks for it, so the state trace is
+ * unchanged.
+ * ------------------------------------------------------------------------- */
+var DRAW_TRACE = new URLSearchParams(window.location.search).get("drawTrace") === "1";
+
+function ensureDrawHook(fight) {
+  if (!DRAW_TRACE || tr.drawHooked) return;
+  var pg = null;
+  try {
+    if (fight && fight.Da && fight.Da.constructor && fight.Da.constructor.pg) {
+      pg = fight.Da.constructor.pg;
+    }
+  } catch (e0) { /* ignore */ }
+  if (!pg) {
+    try {
+      var ks = Object.keys(fight);
+      for (var ki = 0; ki < ks.length && !pg; ki++) {
+        var vv = null;
+        try { vv = fight[ks[ki]]; } catch (e1) { continue; }
+        if (vv && vv.constructor && vv.constructor.pg) pg = vv.constructor.pg;
+      }
+    } catch (e2) { /* ignore */ }
+  }
+  tr.drawHooked = true;
+  if (!pg || typeof pg.jf !== "function") {
+    var diag = { t: "drawprobe", ok: 0 };
+    try {
+      diag.da = typeof fight.Da;
+      diag.daKeys = fight.Da ? Object.keys(fight.Da).slice(0, 40).join(",") : "";
+      diag.ctorKeys = (fight.Da && fight.Da.constructor)
+          ? Object.keys(fight.Da.constructor).join(",") : "";
+      diag.pgInst = !!(fight.Da && fight.Da.pg);
+    } catch (eD) { diag.err = String(eD); }
+    console.log(JSON.stringify(diag));
+    return;
+  }
+  var n = 0;
+  var orig = pg.jf;
+  pg.jf = function () {
+    var v = orig.apply(this, arguments);
+    try {
+      n++;
+      var st = "";
+      try { st = (new Error().stack || "").split("\n").slice(2, 5).join(" | "); }
+      catch (e3) { /* ignore */ }
+      console.log('{"t":"draw","i":' + n + ',"v":' + v + ',"f":' +
+                  (fight.frame | 0) + ',"c":' + JSON.stringify(st) + '}');
+    } catch (e4) { /* ignore */ }
+    return v;
+  };
+  console.log('{"t":"drawprobe","ok":1}');
+}
+
+function ensureHooks(fight) {
     try {
       var ql = fight.Ta;
       if (ql && ql.ia) {
@@ -798,6 +857,7 @@
       } catch (e) { /* ignore */ }
     }
     ensureHooks(fight);
+    ensureDrawHook(fight);
     // One line per FIGHT frame, from the first LIVE frame — exactly like the
     // native `dump_state_frame` (`if (phase_ == fight_phase::idle) return;`
     // plus its once-per-update call). The JS `eu == 0` pre-round intro holds

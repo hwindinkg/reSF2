@@ -12385,6 +12385,13 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
         // the loss path (below) recomputes `D0(wave)`.
         mf.reward = sf2::scene::reward_for(mode_battle_.type, f, wave, true);
         std::vector<std::string> used;
+        // [experiment] `SF2_SURV_PREDRAW=<n>`: replay n draws before the
+        // warrior pick (measuring the JS stream position at the survival
+        // setup; see BUGS.md M/N).
+        if (const char* pd = std::getenv("SF2_SURV_PREDRAW")) {
+            const int n = std::atoi(pd);
+            for (int i = 0; i < n; ++i) (void)fight_->fight_draw01();
+        }
         resolved = sf2::scene::resolve_survival_warrior(
             f, wave, mode_templates_, mode_groups_,
             [this]() { return static_cast<double>(fight_->fight_draw01()); },

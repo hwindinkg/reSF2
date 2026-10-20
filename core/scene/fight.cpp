@@ -2976,6 +2976,19 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
                           battle_.enemy_not_animation, mode_model, enemy_own_perks,
                           merged_perk_names(perk_setup_.learned_refs,
                                             perk_setup_.player_refs));
+    // JS `Zb.Hd` (`xc.cM` L809-810): the rebuilt enemy's WIELDED item is its
+    // own Weapon slot item. `make_fighter` drives only the move LIST from the
+    // subtype; `weapon` (the disarm identity `Hd.name` and the state dump's
+    // `Enemy.w`) stayed at the default "Fists" because a survival/tournament
+    // stage `<Warrior>` carries no items - the kit is resolved HERE. The
+    // oracle's survival enemy wields `WEAPON_KNUCKLES` while the port reported
+    // "Fists" on every frame (the `Enemy.w` divergence).
+    for (const auto& o : setup.enemy.owned) {
+        if (o.type == "Weapon" && !o.name.empty()) {
+            enemy_.weapon = o.name;
+            break;
+        }
+    }
     for (const auto& kv : setup.enemy.attrs) {
         enemy_.params.attributes[kv.first] += static_cast<float>(kv.second);
     }
