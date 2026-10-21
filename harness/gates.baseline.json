@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-21T18:23:33",
+    "updated": "2026-10-21T18:57:32",
     "mode": "only"
   },
   "gates": {
@@ -119,10 +119,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:survival": {
-      "metric": 2649,
-      "commit": "db4c58c2",
-      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
-      "date": "2026-10-20T08:48:41"
+      "metric": 1957,
+      "commit": "b405f3cc",
+      "reason": "IMPROVEMENT from the group-kit fix (JS efa L7360): the survival enemy now resolves its own kit, 2649 -> 1957 and the metric is stable between isolated and --full runs (it used to flip 2649/137). Measured with SF2_SURV_PREDRAW: n=13 reaches 863, but the JS stream position is still unproven (M/N), so the shipped value stays n=0.",
+      "date": "2026-10-21T18:57:32"
     },
     "diff:challenge": {
       "metric": 0,
