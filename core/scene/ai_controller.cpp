@@ -1592,16 +1592,36 @@ int AiController::quick_slots(const AiFightState& st) {
         if (!quick_rolls_[f].na) continue;
         if (!tactic_->quick_attacks[f].names.empty())
             dbg_.qinfo += tactic_->quick_attacks[f].names[0];
+        // [probe, authorised] `SF2_TRACE_AI_QUICK=1`: why a FIRING quick slot
+        // contributes nothing (`added=0`) - the JS `Pqb` L606 branch would
+        // then fall through to the base slots and the AI only steps.
+        const bool trace_quick =
+            std::getenv("SF2_TRACE_AI_QUICK") != nullptr;
         for (const std::string& n : tactic_->quick_attacks[f].names) {
             const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
+            int passed = 0;
+            std::string first_why;
             for (const MoveDef* m : group) {
-                if (!v1(*m, st)) continue;
+                std::string why;
+                if (!v1(*m, st, &why)) {
+                    if (first_why.empty()) first_why = m->name + ":" + why;
+                    continue;
+                }
+                ++passed;
                 // JS `Pqb` L606: the quick-slot wait is `h.$I()` =
                 // `vBa(P.s$a())` = `0<b ? i0(b+1) : 0` (SUB-FRAME, L697), not
                 // the raw `strict_end`. A raw wait (often 1) made the AI
                 // re-decide every frame and restart the move (no translation).
                 wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
                 ++added;
+            }
+            if (trace_quick) {
+                std::fprintf(stdout,
+                             "[quick] slot=%zu key='%s' resolved=%zu passed=%d "
+                             "first_reject='%s'\n",
+                             f, n.c_str(), group.size(), passed,
+                             first_why.c_str());
+                std::fflush(stdout);
             }
         }
         dbg_.qinfo += ";";
@@ -1647,8 +1667,18 @@ void AiController::evade_ib(const AiFightState& st) {
         for (const std::string& n : tactic_->evades[d].names) {
             const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
             for (const MoveDef* m : group) {
-                if (v1(*m, foe)) {
+                std::string why;
+                if (v1(*m, foe, &why)) {
                     hit = true;
+                    if (std::getenv("SF2_TRACE_AI_QUICK") != nullptr) {
+                        std::fprintf(stdout,
+                                     "[ib] slot=%zu key='%s' move='%s' "
+                                     "ACCEPT (my_x=%.0f enemy_x=%.0f)\n",
+                                     d, n.c_str(), m->name.c_str(),
+                                     static_cast<double>(foe.my_x),
+                                     static_cast<double>(foe.enemy_x));
+                        std::fflush(stdout);
+                    }
                     break;
                 }
             }
@@ -1656,6 +1686,14 @@ void AiController::evade_ib(const AiFightState& st) {
         }
         if (hit) {
             IB_ = true;
+            // [probe, authorised] `SF2_TRACE_AI_QUICK=1`: the evade slot that
+            // resolved against the OPPONENT's view (`IB`), so a wasted
+            // BackHandflip against an idle opponent is traceable.
+            if (std::getenv("SF2_TRACE_AI_QUICK") != nullptr) {
+                std::fprintf(stdout, "[ib] slot=%zu names=%zu -> IB=1\n", d,
+                             tactic_->evades[d].names.size());
+                std::fflush(stdout);
+            }
             return;
         }
     }

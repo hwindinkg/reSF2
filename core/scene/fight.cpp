@@ -1852,6 +1852,21 @@ FightFighter FightController::make_fighter(
                                        subtype);
         f.owned_items = owned;  // the `ra.Hza` item set (disarm rebuild)
     }
+    // [probe, authorised] `SF2_TRACE_MOVELIST=1`: what the fighter's own list
+    // actually holds (the `de.V1` `my_moves` set the AI filters against).
+    if (std::getenv("SF2_TRACE_MOVELIST") != nullptr) {
+        int punches = 0;
+        bool hp = false;
+        for (const sf2::scene::MoveDef* m : f.fighter.hb()) {
+            if (m == nullptr) continue;
+            if (m->template_tags.count("Punch") > 0) ++punches;
+            if (m->name == "HighPunch") hp = true;
+        }
+        std::fprintf(stdout, "[movelist] %s hb=%zu punches=%d has_highpunch=%d\n",
+                     f.name.c_str(), f.fighter.hb().size(), punches,
+                     hp ? 1 : 0);
+        std::fflush(stdout);
+    }
     f.fighter.set_world_pos(x, y);
     f.fighter.set_enemy_x(x);  // patched each frame
     f.params.is_player = is_player;
@@ -8001,7 +8016,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          " qf=%d qp=%d qi='%s'"
                          " wea{target=%.3f old=%.3f wea=%.3f dw=%.3f hd=%d"
                          " mu=%.3f my_facing=%d label='%s'"
-                         " rec=%d rows=%d jrows=%d fl=%d rda0=%d huf0=%d} dec='%s'\n",
+                         " rec=%d rows=%d jrows=%d fl=%d rda0=%d huf0=%d}"
+                         " dist=%.1f dec='%s'\n",
                          frame_, me.name.c_str(), st.ranged,
                          me.ranged_available ? 1 : 0,
                          me.ranged_available ? 1 : -1,
@@ -8021,6 +8037,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          d.hd, d.mu, st.my_facing, d.label.c_str(),
                          d.rec ? 1 : 0, d.rows, d.jrows,
                          d.fl, d.rda0, d.huf0,
+                         static_cast<double>(std::fabs(foe.fighter.world_x() -
+                                                       me.fighter.world_x())),
                          decision.c_str());
             std::fflush(stdout);
             last_ai_log_ = decision;
