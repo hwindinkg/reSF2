@@ -499,6 +499,9 @@ public:
     // STATE ENTRY (`Ex`/`XOa` -> `L4`), NOT on the `wd`'s internal move
     // re-selection (`Gka` loop restart / `lS` selector). A caller restarting the
     // idle loop in place passes `false` so the accumulated root motion carries.
+    // JS `Pi.job` L444: re-seat the preview anchor at `Pi.J9` (called every
+    // update, so the clip's root motion never accumulates).
+    void reseat_preview_anchor(float node_x, float node_y);
     void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                             float node_x = 0.0f, float node_y = -93.0f,
                             bool reseat = true);

@@ -2795,6 +2795,33 @@ void Fighter::clear_move() {
 // `advance()`s exactly like the fight so the clip lasts
 // `(clipLen-FirstFrame)*(MidFrames+1)+1` 60 Hz frames — NOT one clip frame per
 // tick (the old raw `++frame` was 3x too fast for MidFrames=2).
+// JS `Pi.job` (L444) -> `wd.oL` L577 -> `Dl.oL`: the preview node is re-seated
+// at `Pi.J9` on EVERY update, so the clip's root motion never accumulates. The
+// port only re-seated on a state entry, and the `Pi` anchor drifted by up to 75
+// units inside one idle clip (the reported "the shop/profile models creep").
+void Fighter::reseat_preview_anchor(float node_x, float node_y) {
+    const int seat_a = model_.bone_by_name(fighter_pivot_bone());
+    if (seat_a < 0 || !solver_init_ ||
+        sol_ma_.size() != model_.bones.size() * 3 ||
+        sol_mf_.size() != sol_ma_.size()) {
+        return;
+    }
+    const std::size_t u = static_cast<std::size_t>(seat_a) * 3;
+    const float dx = node_x - sol_ma_[u];
+    const float dy = node_y - sol_ma_[u + 1];
+    const float dz = 0.0f - sol_ma_[u + 2];
+    for (std::size_t i = 0; i < sol_ma_.size(); i += 3) {
+        sol_ma_[i] += dx;
+        sol_ma_[i + 1] += dy;
+        sol_ma_[i + 2] += dz;
+        sol_mf_[i] += dx;
+        sol_mf_[i + 1] += dy;
+        sol_mf_[i + 2] += dz;
+    }
+    world_x_ = node_x;
+    world_y_ = node_y;
+}
+
 void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                                  float node_x, float node_y, bool reseat) {
     // [FIX shop idle drift — JS `Pi.Ex`/`wd.wI`/`Pi.job`] The JS `Pi` does NOT
@@ -2840,25 +2867,7 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // `X|Z` (Y is never an align axis), the JS `Gla` leaves the buffer y alone,
     // so the constant `J9.y - bind[anchor].y` (~40..73u) sank the whole move
     // (probe: HighBlockProfile world_y -93 -> -29 vs the JS clip y).
-    {
-        const int seat_a = model_.bone_by_name(fighter_pivot_bone());
-        if (reseat && seat_a >= 0 && solver_init_ &&
-            sol_ma_.size() == model_.bones.size() * 3 &&
-            sol_mf_.size() == sol_ma_.size()) {
-            const std::size_t u = static_cast<std::size_t>(seat_a) * 3;
-            const float dx = node_x - sol_ma_[u];
-            const float dy = node_y - sol_ma_[u + 1];
-            const float dz = 0.0f - sol_ma_[u + 2];
-            for (std::size_t i = 0; i < sol_ma_.size(); i += 3) {
-                sol_ma_[i] += dx;
-                sol_ma_[i + 1] += dy;
-                sol_ma_[i + 2] += dz;
-                sol_mf_[i] += dx;
-                sol_mf_[i + 1] += dy;
-                sol_mf_[i + 2] += dz;
-            }
-        }
-    }
+    if (reseat) reseat_preview_anchor(node_x, node_y);
     preview_mode_ = true;
     world_x_ = node_x;
     world_y_ = node_y;

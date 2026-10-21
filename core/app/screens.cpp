@@ -7470,6 +7470,9 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         // reported "the models stand frozen and creep sideways": each state
         // re-entry re-seated the anchor and the clip never played).
         fighter->advance(dt);
+        // JS `Pi.job` (L444): re-seat the anchor at `Pi.J9` (0,-93) EVERY
+        // update; the clip's root motion must not accumulate.
+        fighter->reseat_preview_anchor(0.0f, -93.0f);
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: the Pi model's
         // `<Sound>` frame actions (the stance draw's knife/sword swishes) fire
         // from the SAME dispatch the fight uses. The old port never dispatched
@@ -7519,10 +7522,26 @@ void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
     if (std::getenv("SF2_TRACE_PI") != nullptr) {
         const float ox = sf2::scene::LocationScene::destination_model_offset_x(
             kViewW, kViewH);
+        std::vector<float> vv;
+        fighter.build_vertices(vv);
+        float vx0 = 0, vx1 = 0, vy0 = 0, vy1 = 0;
+        if (vv.size() >= 2) {
+            vx0 = vx1 = vv[0];
+            vy0 = vy1 = vv[1];
+            for (std::size_t i = 0; i + 1 < vv.size(); i += 2) {
+                vx0 = std::min(vx0, vv[i]);
+                vx1 = std::max(vx1, vv[i]);
+                vy0 = std::min(vy0, vv[i + 1]);
+                vy1 = std::max(vy1, vv[i + 1]);
+            }
+        }
         std::fprintf(stdout,
-                     "[pi] world=(%.1f,%.1f) offset=(%.1f,%.1f) "
+                     "[pi] vx=(%.1f..%.1f) vy=(%.1f..%.1f) "
+                     "world=(%.1f,%.1f) offset=(%.1f,%.1f) "
                      "screen=(%.1f,%.1f) frame=%d bones=%zu "
                      "pv=%d\n",
+                     static_cast<double>(vx0), static_cast<double>(vx1),
+                     static_cast<double>(vy0), static_cast<double>(vy1),
                      static_cast<double>(fighter.world_x()),
                      static_cast<double>(fighter.world_y()),
                      static_cast<double>(ox),
@@ -18733,6 +18752,7 @@ void ShopScreen::update_impl(float dt) {
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
+        preview_fighter_->reseat_preview_anchor(0.0f, -93.0f);  // `Pi.job`
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
         // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
         // the actions collected by the advance() just run.
