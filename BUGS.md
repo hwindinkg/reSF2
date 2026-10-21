@@ -397,3 +397,25 @@ Ambush1400, игрок бездействует, тактика `Standard`:
 База (`ld`, строка 1376) уже кладёт имена мувов (как JS `nAa`), а вот
 quick-слот — расходится. Проверка после правки: в этом же бою у игрока должно
 начать падать HP и должен появиться `[strike] Enemy->Player`.
+### ГЛАВНЫЙ корень «ИИ не двигается / слабо атакует» — ИСПРАВЛЕНО
+`battle_warrior` (обычный stage-путь) вообще не читал `<Warrior><Groups>`: у
+такого врага `enemy items: 0` — ни оружия, ни перков, а при шипнутом
+`UnarmedDamage="0"` (так у `Duel`, stages.xml:903) он наносил НОЛЬ урона, и его
+мувлист терял все оружейные мувы. Именно так выглядят «обычные» бои: Duel,
+Stranger, скрытые амбуши (Ambush1400 — `Type="HIDDEN"`, `<Warrior Number="10">
+<Groups><Group Name="Generic_1" Random="1"/>`).
+JS `efa` (L7360) / `EQ` (L50237): боец берётся из `<Groups>`, член группы несёт
+`<Template>` и `<Items>`; `x8a` (L9167) выбирает члена как
+`Ix.length * Da.pg.jf() | 0`.
+Правка: в `battle_warrior` группа разворачивается в члена (`WarriorGroups` →
+`WarriorGroup` → `Warrior`), его `<Template>/<Items>/<Perks>` идут в кит, а
+атрибуты/`Tactic` владельца остаются сверху (JS `ur(g.node, l)`). Так как позиция
+общего потока в этот момент неизвестна (блокер M/N), выбор делается из
+`DaPrng(kBootSeed)` — детерминированно, одинаково для превью карты и боя.
+Проверка (может упасть): гейт `enemy-kit` (`--fight --battle Duel`), требует
+`enemy items >= 1` и оружие не `Fists`. С выключенным разворотом групп —
+`items=0 weapon=Fists` (метрика 1), с фиксом — `items=6
+weapon=WEAPON_NINJA_SWORD` (0).
+Эффект: враг Duel теперь Armed-ниндзя, у него появились атаки
+(`ShortUpwardElbowStrike`, `ElbowStrike`, `KatanaTransition`), стартов было 35
+(только стойки/шаги) -> 44 с атаками; `diff:survival` 2649 -> 1957.

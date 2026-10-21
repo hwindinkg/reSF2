@@ -6100,6 +6100,51 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         }
         if (!w) return out;
         out.has_warrior = true;
+        // JS `efa` (L7360) / `EQ` (L50237): an ordinary stage `<Warrior>` may
+        // take its KIT from `<Groups>` (`<Warrior Tactic="Standard">
+        // <Groups><Group Name="Generic_Duel_1" Random="1"/></Groups>` - Duel,
+        // Stranger and every hidden ambush). The member node carries the
+        // `<Template>` and `<Items>`; the owning warrior keeps its own attrs and
+        // `Tactic` (JS `ur(g.node, l)` merges member first, owner on top).
+        // Without this the enemy resolved with `enemy items: 0`: no weapon, and
+        // with the shipped `UnarmedDamage="0"` it dealt ZERO damage (every
+        // ordinary fight looked passive) while its move list lost the weapon
+        // moves. The random pick among the members stays a TODO (this takes the
+        // first member, the same one the non-random `<Group>` index 0 yields);
+        // the ITEM KIT is what makes the fight behave.
+        pugi::xml_node kit = w;
+        if (pugi::xml_node groups = w.child("Groups")) {
+            const std::string gname =
+                groups.child("Group").attribute("Name").value();
+            // The group defs are NESTED: `Stages/Warriors/WarriorGroups/
+            // WarriorGroup` (the template section is the sibling
+            // `Warriors/Templates`).
+            for (const pugi::xml_node wg : root.child("Warriors")
+                                               .child("WarriorGroups")
+                                               .children("WarriorGroup")) {
+                if (std::string(wg.attribute("Name").value()) != gname) continue;
+                // JS `x8a` (L9167): `Ix.length * Da.pg.jf() | 0` - the member
+                // is picked from the shared stream. The port cannot replay the
+                // stream POSITION here (the M/N blocker: the JS consumed draws
+                // before the battle setup), so it draws from a fresh
+                // `DaPrng(kBootSeed)` - deterministic, stable between the map
+                // preview and the fight, and, unlike a fixed index 0, it lands
+                // on an ARMED member of `Generic_Duel_1` (index 0 is
+                // `Ninja_Man_Kungfu`, and with the Duel's `UnarmedDamage="0"`
+                // the enemy dealt no damage at all).
+                std::vector<pugi::xml_node> members;
+                for (const pugi::xml_node m : wg.children("Warrior")) {
+                    members.push_back(m);
+                }
+                if (!members.empty()) {
+                    sf2::scene::DaPrng pick(sf2::scene::kBootSeed);
+                    const std::size_t idx = static_cast<std::size_t>(
+                        static_cast<double>(members.size()) * pick.jf());
+                    kit = members[idx < members.size() ? idx : 0];
+                }
+                break;
+            }
+        }
         {
             // `xc.IY`: the warrior's own rows appended after its `<Template>`'s
             // resolved rows (JS `pGa` L198; `stage_warrior_align` in modes.hpp).
@@ -6160,7 +6205,7 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
                 }
             }
             std::vector<std::string> chain;
-            for (std::string cur = w.attribute("Template").value();
+            for (std::string cur = kit.attribute("Template").value();
                  !cur.empty() && templates.count(cur) != 0;) {
                 chain.push_back(cur);
                 cur = templates[cur].attribute("Template").value();
@@ -6223,14 +6268,14 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         out.has_not_ai = w.attribute("NotAI") != nullptr;
         out.has_not_animation = w.attribute("NotAnimation") != nullptr;
         if (const pugi::xml_attribute a = w.attribute("Tactic")) out.tactic = a.value();
-        for (const pugi::xml_node it : w.child("Items").children("Item")) {
+        for (const pugi::xml_node it : kit.child("Items").children("Item")) {
             if (const pugi::xml_attribute nm = it.attribute("Name")) {
                 out.items.emplace_back(nm.value());
             }
         }
         // The Warrior's own `<Perks>` (`xc.AK`, JS `pGa` appends then the
         // parse dedups by def): the Warrior's `<Set>` replaces the template's.
-        for (const pugi::xml_node pk : w.child("Perks").children("Perk")) {
+        for (const pugi::xml_node pk : kit.child("Perks").children("Perk")) {
             WarriorPerkRef ref;
             if (const pugi::xml_attribute nm = pk.attribute("Name"))
                 ref.name = nm.value();

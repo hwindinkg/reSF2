@@ -465,6 +465,25 @@ def p_style_player_only(text: str) -> tuple[int, str]:
         % (pmax, emax, pstyle, "" if emax > pmax else " (enemy never ahead: weak)"))
 
 
+def p_enemy_kit(text: str) -> tuple[int, str]:
+    """A stage `<Warrior>` whose kit comes from `<Groups>` must be resolved to a
+    group MEMBER (JS `efa` L7360 / `EQ` L50237): the member carries the
+    `<Template>` + `<Items>`. Without it every ordinary fight (Duel/Stranger/
+    hidden ambushes) spawned an item-less enemy - no weapon, and with the
+    shipped `UnarmedDamage="0"` it dealt ZERO damage (the "enemies barely
+    attack" report). The gate requires the Duel enemy to ship a kit AND a
+    weapon.
+    """
+    items = re.findall(r"\[fight\] enemy items: (\d+)", text)
+    wield = re.findall(r"\[fight\] wield: player='[^']*' enemy='([^']*)'", text)
+    if not items or not wield:
+        raise AnchorMissing("[fight] enemy items / wield")
+    n = int(items[-1])
+    w = wield[-1]
+    ok = n >= 1 and w not in ("", "Fists")
+    return (0 if ok else 1), "items=%d weapon='%s'" % (n, w)
+
+
 def p_kick_ko(text: str) -> tuple[int, str]:
     """`--kick-ko` ends with `[result] WIN` (no RESULT line)."""
     m = _need(r"^\[result\]\s+(WIN|LOSE|DRAW)\s*$", text)
@@ -536,6 +555,7 @@ PARSERS = {
     "tape": p_tape,
     "boss_hit": p_boss_hit,
     "kick_ko": p_kick_ko,
+    "enemy_kit": p_enemy_kit,
     "banner_round": p_banner_round,
     "style_player_only": p_style_player_only,
     "disarm_ai": p_disarm_ai,
@@ -590,6 +610,10 @@ FLAG_GATES: list[Gate] = [
     # idle capture at fight frame 250 lands on it deterministically.
     # JS `z3` L17296: only model 0 (the PLAYER) feeds the style prize /
     # achievement counter; the enemy must not unlock "aggressor".
+    # JS `efa` L7360: a `<Groups>` warrior resolves to a member WITH a kit.
+    Gate("enemy-kit", "gate", ("full",), "--fight", 300, parser="enemy_kit",
+         args=("--battle", "Duel", "--zone", "ZONE_1", "--fight-ordinal", "0",
+               "--location", "mountain", "--headless", "60")),
     Gate("style-player-only", "gate", ("full",), "--kick-ko", 300,
          parser="style_player_only"),
     Gate("banner-round", "gate", ("full",), "--capture-idle-fight-at", 300,

@@ -1612,7 +1612,15 @@ int AiController::quick_slots(const AiFightState& st) {
                 // `vBa(P.s$a())` = `0<b ? i0(b+1) : 0` (SUB-FRAME, L697), not
                 // the raw `strict_end`. A raw wait (often 1) made the AI
                 // re-decide every frame and restart the move (no translation).
-                wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
+                // The candidate carries the SLOT's animation string (the
+                // `<QuickAttackChance Animation="ShortAttack">` key), not the
+                // resolved move name: `Md.iCa` weighs the candidate by that
+                // string, so `ShortAttack` scores `<Animation Name=
+                // "ShortAttack" Base="1000">` instead of the `Weapon` key
+                // (Base=200) it would inherit as a punch's template - which
+                // lost every roulette to `ForwardStep` (800) and left the
+                // Standard-tactic AI stepping instead of attacking.
+                wb_.push_back({n, vba_full(*m, strict_end(*m))});
                 ++added;
             }
             if (trace_quick) {

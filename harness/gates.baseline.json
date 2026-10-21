@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-21T08:28:35",
+    "updated": "2026-10-21T18:23:33",
     "mode": "only"
   },
   "gates": {
@@ -153,6 +153,12 @@
       "commit": "2d7ca8bd",
       "reason": "NEW gate (not a relaxation): JS z3 L17296 / Fh.b6 - the style prize + achievement counter is the PLAYER's own level (proven: without the is_player guard the prize reads the enemy's level 2 instead of the player's 1)",
       "date": "2026-10-21T08:28:35"
+    },
+    "enemy-kit": {
+      "metric": 0,
+      "commit": "81d27665",
+      "reason": "NEW gate (not a relaxation): JS efa L7360 - a stage <Warrior><Groups> must resolve to a group member with its kit; proven to fail (items=0, weapon=Fists) with the group resolution disabled",
+      "date": "2026-10-21T18:23:33"
     }
   }
 }
