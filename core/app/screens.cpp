@@ -4730,22 +4730,43 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
         if (rf != nullptr && rtex != 0) {
             const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
             // JS `Cr.init` (L84302-84321) with `b=true`:
-            //   a = imageH;  round.x = imageLeft + 0.25a;  round.y = imageTop;
-            //   then BOTH are shifted by -a/2 (`image.C(image.ya - a/2)` and
-            //   `round.C(round.ya - a/2)`) -> round.x = imageLeft - 0.25a.
-            // The plate is DRAWN at `plate_cx` (= cx - a/2), so the number must
-            // follow the drawn art's left edge, not `cx` (the old
-            // `cx + artW/2 - a/4` put it on the wrong side of the plate).
-            const float art_left = plate_cx - art_w * 0.5f;  // `b.N`
-            const float art_top = cy - art_h * 0.5f;         // `b.P`
+            //   a = b.W - b.P  (HEIGHT: getBounds uses `N-J` = width and
+            //                   `W-P` = height, L67359-67362)
+            //   round.x = b.N + 0.25a   (b.N = the RIGHT edge)
+            //   round.y = b.P           (top)
+            //   then BOTH shift by -a/2 (`image.C(image.ya - a/2)`,
+            //   `round.C(round.ya - a/2)`)
+            // -> relative to the DRAWN art: round.x = drawn_right + 0.25a,
+            //    i.e. the digit sits just OUTSIDE the plate, after the word.
+            const float art_left = plate_cx - art_w * 0.5f;   // drawn left
+            const float art_right = plate_cx + art_w * 0.5f;  // drawn right
+            const float art_top = cy - art_h * 0.5f;          // `b.P`
             // JS `Cr.tca` (L84218-84225) shows its `a` VERBATIM, and the
             // round-start caller (L16679-16683) passes `this.round.round`
-            // AFTER the `round.round++` — i.e. the SAME 1-based count the
+            // AFTER the `round.round++` - i.e. the SAME 1-based count the
             // state dump reports, NOT a further `+1` (the old `+ 1` made the
             // first round display as 2). The 0 -> 1 fallback mirrors the
             // banner trigger (`banner_round_`, L581/L3226).
             const int rnum = fight.round().number;
-            app.draw_text_with_font(*rf, rtex, art_left - art_h * 0.25f, art_top,
+            (void)art_left;
+            const float num_x = art_right + art_h * 0.25f;  // `b.N - 0.25a`
+            // [probe, authorised] `SF2_TRACE_BANNER=1`: the plate/number
+            // geometry, so the gate can assert the JS invariant (the digit
+            // sits OUTSIDE the plate, 0.25a to the right of its right edge -
+            // `round.x = b.N - 0.25a` after both nodes shift by -a/2).
+            if (std::getenv("SF2_TRACE_BANNER") != nullptr) {
+                std::fprintf(stdout,
+                             "[banner] kind=round art_l=%.2f art_r=%.2f "
+                             "art_t=%.2f a=%.2f num_x=%.2f num_y=%.2f\n",
+                             static_cast<double>(art_left),
+                             static_cast<double>(art_right),
+                             static_cast<double>(art_top),
+                             static_cast<double>(art_h),
+                             static_cast<double>(num_x),
+                             static_cast<double>(art_top));
+                std::fflush(stdout);
+            }
+            app.draw_text_with_font(*rf, rtex, num_x, art_top,
                                     std::to_string(rnum == 0 ? 1 : rnum),
                                     rscale, 1.0f, 1.0f, 1.0f, 1.0f);
         }
@@ -14150,10 +14171,10 @@ void FightScreen::update_impl(float dt) {
                                              pb.reward_bonus, prize_kq);
             std::fprintf(stdout,
                          "[fight] prize: perfect=%d first=%d combo=%d shocks=%d "
-                         "rowMoney=%lld rowBonus=%lld prizeBaseAttr=%lld "
+                         "style=%d rowMoney=%lld rowBonus=%lld prizeBaseAttr=%lld "
                          "m6=%lld mOa=%lld\n",
                          prize.perfect ? 1 : 0, prize.first_strike ? 1 : 0,
-                         prize.max_combo, prize.shocks,
+                         prize.max_combo, prize.shocks, prize.style_value,
                          static_cast<long long>(pb.reward_money),
                          static_cast<long long>(pb.reward_bonus),
                          static_cast<long long>(pb.reward_prize_base),

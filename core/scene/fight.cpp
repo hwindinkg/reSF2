@@ -6303,7 +6303,15 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         const double credit =
             style_credit(kStyle, atk.style, move.name, move.style_factor);
         style_vma(atk.style, credit, static_cast<int>(kStyle.sna.size()));
-        if (atk.style.best > prize_fh_.b6) prize_fh_.b6 = atk.style.best;
+        // JS `Jh.Gua` -> `Fh.b6` and `z3` (L17296 `if (a.model == 0)
+        // this.fe.Dsb(a_Uwb)`): the style PRIZE / achievement counter is the
+        // PLAYER's own meter. Crediting the attacker unconditionally let the
+        // ENEMY's Aggressive level unlock the player's "aggressor" achievement
+        // (reported). The enemy still builds its own HUD meter, it just does
+        // not feed the player's counter.
+        if (atk.is_player && atk.style.best > prize_fh_.b6) {
+            prize_fh_.b6 = atk.style.best;
+        }
         // JS `z3` (L215000): `b!=f.dz && (... this.tb.Gj(f,3) [slot 3 Style],
         // f.z3(b,c,d,e), this.PC(8, a.model==0?1:2))`. The `dz` written by
         // `f.z3` IS the style level (`B9a` L1044602 = `Sh.bn`), so a level

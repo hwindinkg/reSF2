@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-20T22:47:33",
+    "updated": "2026-10-21T08:28:35",
     "mode": "only"
   },
   "gates": {
@@ -141,6 +141,18 @@
       "commit": "874b413c",
       "reason": "NEW gate (not a relaxation): JS de.V1 L601-602 false-negative guard; metric 0 = no AI start of a move outside the fighter's own weapon-filtered list after a forced disarm (proven to fail at 1 with the filter disabled)",
       "date": "2026-10-20T22:47:33"
+    },
+    "banner-round": {
+      "metric": 0,
+      "commit": "2d7ca8bd",
+      "reason": "NEW gate (not a relaxation): JS Cr.init L84302-84321 geometry - the round digit must sit OUTSIDE the plate, 0.25a right of the art (round.x = b.N - 0.25a after both shift by -a/2). Proven to fail (502) with the old left-side formula",
+      "date": "2026-10-21T08:24:13"
+    },
+    "style-player-only": {
+      "metric": 0,
+      "commit": "2d7ca8bd",
+      "reason": "NEW gate (not a relaxation): JS z3 L17296 / Fh.b6 - the style prize + achievement counter is the PLAYER's own level (proven: without the is_player guard the prize reads the enemy's level 2 instead of the player's 1)",
+      "date": "2026-10-21T08:28:35"
     }
   }
 }

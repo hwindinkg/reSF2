@@ -421,6 +421,50 @@ def p_disarm_ai(text: str) -> tuple[int, str]:
     return len(leaks), f"{len(drops)} drop(s), {len(leaks)} foreign-move start(s)"
 
 
+def p_banner_round(text: str) -> tuple[int, str]:
+    """`SF2_TRACE_BANNER=1`: the round plate/number geometry must match the JS
+    `Cr.init` (L84302-84321): the digit sits OUTSIDE the plate, 0.25a to the
+    right of the art's right edge (`round.x = b.N - 0.25a`, both nodes shifted
+    by -a/2). A number drawn over/before the art (the old port) fails.
+    """
+    rows = re.findall(
+        r"\[banner\] kind=round art_l=(-?[\d.]+) art_r=(-?[\d.]+) "
+        r"art_t=(-?[\d.]+) a=(-?[\d.]+) num_x=(-?[\d.]+) num_y=(-?[\d.]+)",
+        text,
+    )
+    if not rows:
+        raise AnchorMissing("[banner] kind=round geometry")
+    bad = 0
+    for art_l, art_r, art_t, a, num_x, num_y in rows:
+        art_l, art_r, a = float(art_l), float(art_r), float(a)
+        num_x, num_y = float(num_x), float(num_y)
+        gap = num_x - art_r                      # must be 0.25a, outside
+        if not (0.20 * a <= gap <= 0.30 * a):
+            bad += 1
+        if num_x <= art_r:                       # never over the art
+            bad += 1
+    return bad, f"{len(rows)} round banner(s), gap ok={len(rows) - bad}"
+
+
+def p_style_player_only(text: str) -> tuple[int, str]:
+    """JS `z3` (L17296 `if (a.model == 0) this.fe.Dsb(...)`) + `Jh.Gua` ->
+    `Fh.b6`: the style PRIZE / achievement level is the PLAYER's own meter.
+    The gate requires the enemy to have out-styled the player (so a max-of-both
+    implementation differs) and the results' `style=` to equal the PLAYER's
+    best level.
+    """
+    pm = [int(x) for x in re.findall(r"\[style\] P lvl=(\d+)", text)]
+    em = [int(x) for x in re.findall(r"\[style\] P lvl=\d+.*?E lvl=(\d+)", text)]
+    pr = re.findall(r"\[fight\] prize:.*?\bstyle=(\d+)", text)
+    if not pm or not em or not pr:
+        raise AnchorMissing("[style] P/E lvl + [fight] prize style=")
+    pmax, emax, pstyle = max(pm), max(em), int(pr[-1])
+    ok = (pstyle == pmax) and (emax > pmax)
+    return (0 if ok else 1), (
+        "player=%d enemy=%d prize=%d%s"
+        % (pmax, emax, pstyle, "" if emax > pmax else " (enemy never ahead: weak)"))
+
+
 def p_kick_ko(text: str) -> tuple[int, str]:
     """`--kick-ko` ends with `[result] WIN` (no RESULT line)."""
     m = _need(r"^\[result\]\s+(WIN|LOSE|DRAW)\s*$", text)
@@ -492,6 +536,8 @@ PARSERS = {
     "tape": p_tape,
     "boss_hit": p_boss_hit,
     "kick_ko": p_kick_ko,
+    "banner_round": p_banner_round,
+    "style_player_only": p_style_player_only,
     "disarm_ai": p_disarm_ai,
     "dialog": p_dialog,
     "total_div": p_total_divergences,
@@ -516,6 +562,7 @@ class Gate:
     scenario: str = ""  # kind="diff"
     note: str = ""
     env: dict[str, str] = field(default_factory=dict)  # probe-only switches
+    args: tuple[str, ...] = ()  # extra argv AFTER the flag (e.g. a frame)
 
     def outer_timeout(self) -> int:
         return self.timeout_s or (self.watch + 120)
@@ -537,6 +584,17 @@ FLAG_GATES: list[Gate] = [
     # the drop deterministic (fight.cpp `[probe, authorised]`).
     Gate("disarm-ai", "gate", ("full",), "--kick-ko", 300, parser="disarm_ai",
          env={"SF2_FORCE_DISARM": "1", "SF2_TRACE_MOVELIST": "1"}),
+    # JS `Cr.init` (L84302-84321): the round digit sits OUTSIDE the plate,
+    # 0.25a to the right (`round.x = b.N - 0.25a` after both the art and
+    # the number shift by -a/2). The banner shows at the round start; the
+    # idle capture at fight frame 250 lands on it deterministically.
+    # JS `z3` L17296: only model 0 (the PLAYER) feeds the style prize /
+    # achievement counter; the enemy must not unlock "aggressor".
+    Gate("style-player-only", "gate", ("full",), "--kick-ko", 300,
+         parser="style_player_only"),
+    Gate("banner-round", "gate", ("full",), "--capture-idle-fight-at", 300,
+         parser="banner_round", env={"SF2_TRACE_BANNER": "1"},
+         args=("250",)),
     Gate("quest-verify", "gate", ("full",), "--quest-verify", 300, parser="kv:qverify"),
     Gate("quest-verify-buy", "gate", ("full",), "--quest-verify-buy", 300, parser="kv:qverify"),
     Gate("dialog-verify", "gate", ("full",), "--dialog-verify", 300, parser="dialog"),
@@ -692,7 +750,8 @@ def build_gate(force: bool) -> GateResult:
 
 
 def run_flag_gate(gate: Gate) -> GateResult:
-    argv = [str(GAME), gate.flag, "--watchdog", str(gate.watch), RES, SAVE_REL]
+    argv = [str(GAME), gate.flag, *gate.args, "--watchdog", str(gate.watch),
+            RES, SAVE_REL]
     res = run_proc(argv, gate.id, gate.outer_timeout(), gate.env or None)
     started = res.seconds
     if res.timed_out:
