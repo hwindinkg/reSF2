@@ -7461,10 +7461,15 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
                                const sf2::data::anim_clip* idle,
                                const sf2::scene::MoveDef* move,
                                const sf2::data::anim_clip* idle_loop,
-                               const sf2::scene::MoveDef* move_loop) {
+                               const sf2::scene::MoveDef* move_loop, float dt) {
     if (fighter == nullptr || idle == nullptr || idle->frames.empty()) return;
     if (fighter->preview_active()) {
-        fighter->advance(0.0f);
+        // JS `Pi.aa` L445 (`super.aa(a)` -> `wd.ia` -> `Te.ia`) advances the
+        // clip by the FRAME dt. The port passed 0.0f here, so the shop/profile
+        // idle never left its first frame (`[pi] frame=2` on every tick, the
+        // reported "the models stand frozen and creep sideways": each state
+        // re-entry re-seated the anchor and the clip never played).
+        fighter->advance(dt);
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: the Pi model's
         // `<Sound>` frame actions (the stance draw's knife/sword swishes) fire
         // from the SAME dispatch the fight uses. The old port never dispatched
@@ -7509,6 +7514,25 @@ void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
     // current pose only, exactly like `draw_dojo_figure` does for the hub.
     sf2::render::Camera cam;
     sf2::scene::LocationScene::destination_camera(cam, kViewW, kViewH);
+    // [probe, authorised] `SF2_TRACE_PI=1`: the Pi model's anchor in SCREEN
+    // space (the shop/profile "the model shifts between states" report).
+    if (std::getenv("SF2_TRACE_PI") != nullptr) {
+        const float ox = sf2::scene::LocationScene::destination_model_offset_x(
+            kViewW, kViewH);
+        std::fprintf(stdout,
+                     "[pi] world=(%.1f,%.1f) offset=(%.1f,%.1f) "
+                     "screen=(%.1f,%.1f) frame=%d bones=%zu "
+                     "pv=%d\n",
+                     static_cast<double>(fighter.world_x()),
+                     static_cast<double>(fighter.world_y()),
+                     static_cast<double>(ox),
+                     static_cast<double>(kDestinationModelY),
+                     static_cast<double>(cam.world_to_screen_x(ox, 1.0f)),
+                     static_cast<double>(cam.world_to_screen_y(kDestinationModelY)),
+                     frame, fighter.model().bones.size(),
+                     fighter.preview_active() ? 1 : 0);
+        std::fflush(stdout);
+    }
     draw_dojo_figure(ren, cam, fighter, kDestinationModelScale,
                      sf2::scene::LocationScene::destination_model_offset_x(kViewW, kViewH),
                      kDestinationModelY);
@@ -18705,7 +18729,7 @@ void ShopScreen::update_impl(float dt) {
     // TryOn preview owns the `Pi` model (`Ex(a,7)` replaces it).
     if (!preview_active_) {
         advance_destination_model(backdrop_fighter_, backdrop_idle_, backdrop_move_,
-                                  backdrop_idle_loop_, backdrop_move_loop_);
+                                  backdrop_idle_loop_, backdrop_move_loop_, dt);
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
@@ -20796,7 +20820,7 @@ void EquipmentScreen::update_impl(float dt) {
             // (the fallback `Pi` backdrop when no persistent avatar exists).
             advance_destination_model(backdrop_fighter_, backdrop_idle_,
                                       backdrop_move_, backdrop_idle_loop_,
-                                      backdrop_move_loop_);
+                                      backdrop_move_loop_, dt);
         }
         if (block_preview_active_ && block_preview_fighter_ != nullptr) {
             // `Pi.ia` -> `wd.ia` -> `Te.ia`: the SAME (MidFrames+1) subframe
