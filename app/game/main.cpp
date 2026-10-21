@@ -7166,7 +7166,20 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             sf2::app::FightScreen* fs =
                 fight_seen ? static_cast<sf2::app::FightScreen*>(app.screens().top()) : nullptr;
             if (fight_seen && fs != nullptr) {
-                while (ei < edges.size() && edges[ei].frame <= fight_frames) {
+                // [harness frame mapping] The shared script's frames are the
+                // ORACLE's (`trace.js` frameNo()), which is ONE AHEAD of this
+                // loop's `fight_frames` (the fight screen's own counter starts
+                // at 1 after its first update): with `<= fight_frames` the
+                // scripted `atframe 540 keydown 87` (jump) reached the fight at
+                // its frame 541, i.e. the port always acted one frame late
+                // (`diff:dojo-move`: the oracle is in `jumpup` while the port
+                // still idles). Inject one frame earlier.
+                // The +1 applies to the SHARED-SCRIPT replay only: the
+                // embedded `--verify-input` tape asserts its probes at exact
+                // `fight_frames` values and must keep the old mapping.
+                const int edge_now =
+                    verify_input ? fight_frames : fight_frames + 1;
+                while (ei < edges.size() && edges[ei].frame <= edge_now) {
                     if (edges[ei].glfw) {
                         fs->on_key(edges[ei].control, edges[ei].down);
                     } else {

@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-21T18:57:32",
+    "updated": "2026-10-21T21:35:49",
     "mode": "only"
   },
   "gates": {
@@ -131,10 +131,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-move": {
-      "metric": 236,
-      "commit": "db4fc9aa",
-      "reason": "bug 1/2 fix: the queued player pick no longer runs the AI Tactics re-test (StartStance/StepBack start now); 236 = the remaining 1-frame press-queue latency on JumpUp (541) + the dojo dummy spawn y",
-      "date": "2026-10-20T19:47:54"
+      "metric": 2,
+      "commit": "29926faf",
+      "reason": "HARNESS frame mapping fixed: the shared input script's frames are the ORACLE's (trace.js frameNo()), one ahead of the replay loop's fight_frames, so every scripted edge landed one frame late (atframe 540 keydown 87 -> the port acted at its 541). Injecting at <= fight_frames+1 aligns the streams: 236 -> 2 (the remaining 2 are the f=0 dummy Enemy.y/sep_x shared with dojo-demo).",
+      "date": "2026-10-21T21:35:49"
     },
     "disarm-ai": {
       "metric": 0,
