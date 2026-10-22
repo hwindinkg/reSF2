@@ -677,3 +677,31 @@ F/I частично, B/H/J/M/N/O открыты.
 человеком), `--full` exit 0, 29 гейтов OK. Остаток 863: первое расхождение
 nat f=204 / ora f=350 — враг оракула начинает `StepForward`, порт стоит
 (`fighters.Enemy.move/iv/af`), т.е. решение ИИ; далее f=212 `Enemy.block`.
+
+
+### M/N — остаток 863: источник кандидатов ИИ (измерено 22.10 21:40)
+Первое расхождение `diff:survival`: nat f=204 / ora f=345 — враг оракула стартует
+`StepForward`, порт стоит до F212 и берёт `ShortUpwardElbowStrike`.
+Замеры (SF2_TRACE_AI_QUICK + `random`/`random_pre` оракула):
+- Порт: слот `ShortAttack` даёт `resolved=240 passed=2`, проходят только
+  `KnucklesHeavyPunch`/`KnucklesSuperSlash` (`[quick] ... pass=[...]`).
+- Оракул: `Gc.Pkb` получает список `Gc.DK` из 31 мува (все удары ногами
+  `HighKick/FrontKick/AxeKick/Sweep/...`, `ElbowStrike/DodgeKick`, 6 Knuckles-мувов)
+  и `de.fk = -2` (watch) в те же кадры.
+- Проверено и НЕ является причиной: фильтр `v1` (пробовал `mirror_filter=false` —
+  `passed` не изменился, откатил); `Locks` ударов ногами проходят (нужен только
+  `Skeleton`, он у врага есть).
+Причина: **источник кандидатов**. JS кормит рулетку `Md.jL` списком `Gc.DK`
+(мувы с type-2 событием `<KeyPressed/>` + прошедшие условия), а
+`<AnimationWeights>` — только ВЕСА (`Md.iCa` по ключу анимации). Порт в
+Tabular-ветке строит кандидатов из ключей слотов тактики, поэтому в рулетке
+2 мува вместо 31.
+Второй связанный пробел: тактика ИИ берётся из ГЛОБАЛЬНОГО
+`tactic_settings.xml` (`assets.tactic_defs`, screens.cpp:12099), а JS берёт её из
+парных `.dat`-таблиц по паре оружий (`Si.cxb`/`Si.dxb`, `select_tactics` порта
+их парсит, но в `TacticDef` не превращает) — у survival-врага пары
+`Fists/Knuckles`, а не `Fists/Fists`.
+Следующий шаг: (1) в Tabular-ветке собирать кандидатов как `update_random`
+(мувы с `<KeyPressed/>` + `v1` + `Gc.DK`-дубль `Aua`), веса — из
+`<AnimationWeights>`; (2) резолвить тактику врага из `select_tactics` по
+фактическому оружию после `resolve_mode_setup`.
