@@ -7508,6 +7508,96 @@ void draw_pi_fighter(sf2::render::Renderer& ren, sf2::scene::Fighter& fighter,
                      const sf2::data::anim_clip& clip, int frame) {
     (void)clip;
     (void)frame;
+    // [probe, authorised] `SF2_TRACE_CLOTH=1`: the worst-stretched EDGES of the
+    // drawn preview model (the reported "stretched polygons at the legs" and
+    // the bandage that flies up). Prints the drawn length vs the rest length.
+    if (std::getenv("SF2_TRACE_CLOTH") != nullptr) {
+        const std::vector<float>& pv = fighter.positions();
+        float worst[3] = {0.0f, 0.0f, 0.0f};
+        std::string wname[3];
+        for (const sf2::scene::EdgeDef& e : fighter.model().edges) {
+            const int i1 = fighter.model().bone_by_name(e.end1);
+            const int i2 = fighter.model().bone_by_name(e.end2);
+            if (i1 < 0 || i2 < 0) continue;
+            const std::size_t a = static_cast<std::size_t>(i1) * 2;
+            const std::size_t b = static_cast<std::size_t>(i2) * 2;
+            if (a + 1 >= pv.size() || b + 1 >= pv.size()) continue;
+            const float dx = pv[a] - pv[b];
+            const float dy = pv[a + 1] - pv[b + 1];
+            const float d = std::sqrt(dx * dx + dy * dy);
+            // Only CLOTH edges are simulated (a non-cloth skeleton edge is
+            // posed by the clip and its drawn length legitimately differs).
+            if (!fighter.model().bones[i1].cloth &&
+                !fighter.model().bones[i2].cloth) {
+                continue;
+            }
+            const float excess = d - e.length;
+            for (int k = 0; k < 3; ++k) {
+                if (excess > worst[k]) {
+                    for (int m = 2; m > k; --m) {
+                        worst[m] = worst[m - 1];
+                        wname[m] = wname[m - 1];
+                    }
+                    worst[k] = excess;
+                    wname[k] = e.end1 + "->" + e.end2 + " d=" +
+                               std::to_string(static_cast<int>(d)) + " rest=" +
+                               std::to_string(static_cast<int>(e.length));
+                    break;
+                }
+            }
+        }
+        // The flags of the worst edge's endpoints: why it is not relaxed.
+        std::string flags = "-";
+        if (!wname[0].empty()) {
+            const std::size_t arrow = wname[0].find("->");
+            const std::string n1 = wname[0].substr(0, arrow);
+            const std::string n2 = wname[0].substr(
+                arrow + 2, wname[0].find(" d=") - (arrow + 2));
+            const int a1 = fighter.model().bone_by_name(n1);
+            const int a2 = fighter.model().bone_by_name(n2);
+            auto fl = [&](int i) {
+                if (i < 0) return std::string("?");
+                const sf2::scene::Bone& b = fighter.model().bones[i];
+                std::string r = std::string("cloth=") + (b.cloth ? "1" : "0") +
+                                " macro=" + (b.is_macro ? "1" : "0") +
+                                " fixed=" + (b.fixed ? "1" : "0") +
+                                " shock=" + (b.shock ? "1" : "0") +
+                                " weak=" + (b.weak ? "1" : "0") +
+                                " mass=" + std::to_string(b.mass);
+                return r;
+            };
+            flags = "[" + n1 + " " + fl(a1) + "] [" + n2 + " " + fl(a2) + "]";
+            auto pos_of = [&](int i) {
+                if (i < 0) return std::string("?");
+                const std::size_t u = static_cast<std::size_t>(i) * 2;
+                if (u + 1 >= pv.size()) return std::string("?");
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "(%.0f,%.0f)", pv[u], pv[u + 1]);
+                return std::string(buf);
+            };
+            flags += " " + n1 + pos_of(a1) + " " + n2 + pos_of(a2);
+        }
+        std::string first8;
+        for (std::size_t bi = 0; bi < fighter.model().bones.size() && bi < 8; ++bi) {
+            first8 += fighter.model().bones[bi].name + ",";
+        }
+        std::fprintf(stdout,
+                     "[cloth] edges=%zu worst1=%s (+%.1f) flags=%s "
+                     "idx118=%d bones=%zu first8=%s\n",
+                     fighter.model().edges.size(), wname[0].c_str(),
+                     static_cast<double>(worst[0]), flags.c_str(),
+                     fighter.model().bone_by_name("HEAD-Node118"),
+                     fighter.model().bones.size(), first8.c_str());
+        const int i118 = fighter.model().bone_by_name("HEAD-Node118");
+        if (i118 >= 0) {
+            const sf2::scene::Bone& b118 = fighter.model().bones[i118];
+            std::fprintf(stdout, "[cloth] bone118 bind=(%.1f,%.1f)\n",
+                         static_cast<double>(b118.x), static_cast<double>(b118.y));
+            std::fflush(stdout);
+        }
+        std::fflush(stdout);
+    }
+
     // The pose is the fighter's LIVE `advance()`d sample (`Te.eda` through the
     // `(MidFrames+1)` subframe pacing), already seated at the `Pi` node J9 by
     // `start_preview_clip`. The old extra `sample(clip, frame, ..., interp=
@@ -18752,7 +18842,6 @@ void ShopScreen::update_impl(float dt) {
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
-        preview_fighter_->reseat_preview_anchor(0.0f, -93.0f);  // `Pi.job`
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
         // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
         // the actions collected by the advance() just run.

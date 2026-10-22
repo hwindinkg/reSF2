@@ -3700,23 +3700,46 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const float dist = std::sqrt(ex * ex + ey * ey + ez * ez);
                 if (dist < 1e-9f) continue;
                 const float r = e.length / dist;
-                const float w1 = bones[i1].mass;
-                const float w2 = bones[i2].mass;
-                const float fk = (1.0f - r) / (w1 + w2);
-                const float g1 = w1 * fk;
-                const float g2 = w2 * fk;
-                const float bx = sol_ma_[u1] * g1 + sol_ma_[u2] * g2;
-                const float by = sol_ma_[u1 + 1] * g1 + sol_ma_[u2 + 1] * g2;
-                const float bz = sol_ma_[u1 + 2] * g1 + sol_ma_[u2 + 2] * g2;
-                if (cA1) {
-                    sol_ma_[u1] = sol_ma_[u1] * r + bx;
-                    sol_ma_[u1 + 1] = sol_ma_[u1 + 1] * r + by;
-                    sol_ma_[u1 + 2] = sol_ma_[u1 + 2] * r + bz;
-                }
-                if (cA2) {
-                    sol_ma_[u2] = sol_ma_[u2] * r + bx;
-                    sol_ma_[u2 + 1] = sol_ma_[u2 + 1] * r + by;
-                    sol_ma_[u2 + 2] = sol_ma_[u2 + 2] * r + bz;
+                // [FIX hanging cloth] When ONE endpoint is immovable (`cA`
+                // false: a MacroNode / Fixed node), the JS mass-weighted
+                // midpoint gives the movable side only its OWN mass share of
+                // the correction: with the shipped masses (macro 0.00112 vs
+                // cloth 0.1) that is 0.9% per pass, so the cloth node free-falls
+                // away from the macro (the reported "the bandage rises and
+                // wobbles, the leg mesh stretches": the worst edge grew to
+                // +181 over the rest length 16). A pinned partner is a HARD
+                // constraint: pull the movable node to exactly `rest`.
+                if (preview_mode_ && cA1 && !cA2) {
+                    sol_ma_[u1] = sol_ma_[u2] + (sol_ma_[u1] - sol_ma_[u2]) * r;
+                    sol_ma_[u1 + 1] =
+                        sol_ma_[u2 + 1] + (sol_ma_[u1 + 1] - sol_ma_[u2 + 1]) * r;
+                    sol_ma_[u1 + 2] =
+                        sol_ma_[u2 + 2] + (sol_ma_[u1 + 2] - sol_ma_[u2 + 2]) * r;
+                } else if (preview_mode_ && cA2 && !cA1) {
+                    sol_ma_[u2] = sol_ma_[u1] + (sol_ma_[u2] - sol_ma_[u1]) * r;
+                    sol_ma_[u2 + 1] =
+                        sol_ma_[u1 + 1] + (sol_ma_[u2 + 1] - sol_ma_[u1 + 1]) * r;
+                    sol_ma_[u2 + 2] =
+                        sol_ma_[u1 + 2] + (sol_ma_[u2 + 2] - sol_ma_[u1 + 2]) * r;
+                } else {
+                    const float w1 = bones[i1].mass;
+                    const float w2 = bones[i2].mass;
+                    const float fk = (1.0f - r) / (w1 + w2);
+                    const float g1 = w1 * fk;
+                    const float g2 = w2 * fk;
+                    const float bx = sol_ma_[u1] * g1 + sol_ma_[u2] * g2;
+                    const float by = sol_ma_[u1 + 1] * g1 + sol_ma_[u2 + 1] * g2;
+                    const float bz = sol_ma_[u1 + 2] * g1 + sol_ma_[u2 + 2] * g2;
+                    if (cA1) {
+                        sol_ma_[u1] = sol_ma_[u1] * r + bx;
+                        sol_ma_[u1 + 1] = sol_ma_[u1 + 1] * r + by;
+                        sol_ma_[u1 + 2] = sol_ma_[u1 + 2] * r + bz;
+                    }
+                    if (cA2) {
+                        sol_ma_[u2] = sol_ma_[u2] * r + bx;
+                        sol_ma_[u2 + 1] = sol_ma_[u2 + 1] * r + by;
+                        sol_ma_[u2 + 2] = sol_ma_[u2 + 2] * r + bz;
+                    }
                 }
             }
         }

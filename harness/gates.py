@@ -491,6 +491,25 @@ def p_enemy_kit(text: str) -> tuple[int, str]:
     return (0 if ok else 1), "items=%d weapon='%s'" % (n, w)
 
 
+def p_cloth_hangs(text: str) -> tuple[int, str]:
+    """`SF2_TRACE_CLOTH=1` over the fidelity tour: the CLOTH edges of the
+    shop/profile `Pi` model must stay near their rest length. The JS
+    mass-weighted relax gives the movable side only its own mass share, so with
+    the shipped masses (macro 0.00112 vs cloth 0.1) the cloth node free-fell
+    away from its macro (the reported "the bandage rises and wobbles, the mesh
+    stretches"): the worst cloth edge reached +181 over a rest length of 16.
+    Skips the first 30 samples (the state inherited at entry) and bounds the
+    steady state.
+    """
+    rows = re.findall(
+        r"\[cloth\] edges=\d+ worst1=(\S+) d=\d+ rest=\d+ \(\+([\d.]+)\)", text)
+    if len(rows) < 40:
+        raise AnchorMissing("[cloth] edge lines")
+    worst = max((float(x), n) for n, x in rows[30:])
+    return (0 if worst[0] <= 80.0 else 1), (
+        "worst cloth edge after warmup +%.1f (%s)" % worst)
+
+
 def p_kick_ko(text: str) -> tuple[int, str]:
     """`--kick-ko` ends with `[result] WIN` (no RESULT line)."""
     m = _need(r"^\[result\]\s+(WIN|LOSE|DRAW)\s*$", text)
@@ -562,6 +581,7 @@ PARSERS = {
     "tape": p_tape,
     "boss_hit": p_boss_hit,
     "kick_ko": p_kick_ko,
+    "cloth_hangs": p_cloth_hangs,
     "enemy_kit": p_enemy_kit,
     "banner_round": p_banner_round,
     "style_player_only": p_style_player_only,
@@ -606,6 +626,10 @@ FLAG_GATES: list[Gate] = [
     Gate("headless-loop", "gate", ("full",), "--headless-loop", 700, parser="loop:13"),
     Gate("boss-hit-probe", "gate", ("full",), "--boss-hit-probe", 300, parser="boss_hit"),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
+    # The cloth edges of the preview model must stay near their rest
+    # length (the bandage/leg mesh stretch).
+    Gate("cloth-hangs", "gate", ("full",), "--fidelity-tour", 600,
+         parser="cloth_hangs", env={"SF2_TRACE_CLOTH": "1"}),
     # JS `de.V1` (L601-602) `!model.me.includes(a)`: after a DISARM the AI must
     # never resolve/start a foreign weapon's move. `SF2_FORCE_DISARM=1` makes
     # the drop deterministic (fight.cpp `[probe, authorised]`).

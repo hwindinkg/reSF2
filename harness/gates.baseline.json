@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-21T21:35:49",
+    "updated": "2026-10-22T08:45:34",
     "mode": "only"
   },
   "gates": {
@@ -159,6 +159,12 @@
       "commit": "81d27665",
       "reason": "NEW gate (not a relaxation): JS efa L7360 - a stage <Warrior><Groups> must resolve to a group member with its kit; proven to fail (items=0, weapon=Fists) with the group resolution disabled",
       "date": "2026-10-21T18:23:33"
+    },
+    "cloth-hangs": {
+      "metric": 0,
+      "commit": "b65c69f6",
+      "reason": "NEW gate (not a relaxation): the preview cloth must stay near its rest length. The JS mass-weighted relax moves the movable side by its own mass share only, so with the shipped masses (macro 0.00112 vs cloth 0.1) the cloth node free-fell from its macro; a pinned partner is treated as a hard constraint for PREVIEWS only. Proven: +289.6 without the branch (metric 1), +77.0 with it (0).",
+      "date": "2026-10-22T08:45:34"
     }
   }
 }
