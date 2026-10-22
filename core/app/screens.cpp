@@ -7457,6 +7457,13 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
                 // JS `Pi.Ex` L2301 -> `wd.wI` seats the clip at the `Pi` node
                 // J9=(0,-93) (`Pi.J9` L439 -> `Pi.job` L444 `oL`).
                 fighter->start_preview_clip(*move, *idle);
+                // JS `Pi.Ex` (L2301) runs its own `ia()` (one `Al.ia` solver
+                // step) BEFORE the first draw - the shop's TryOn path already
+                // does this (`advance(0.0f)` after `start_preview_clip`), the
+                // idle backdrop did not, so its first drawn frame was the
+                // unrelaxed bind pose (the reported "at first the leg polygons
+                // are stretched").
+                fighter->advance(0.0f);
                 ok = true;
             }
         }

@@ -505,7 +505,10 @@ def p_cloth_hangs(text: str) -> tuple[int, str]:
         r"\[cloth\] edges=\d+ worst1=(\S+) d=\d+ rest=\d+ \(\+([\d.]+)\)", text)
     if len(rows) < 40:
         raise AnchorMissing("[cloth] edge lines")
-    worst = max((float(x), n) for n, x in rows[30:])
+    # Only the first 1-2 samples are the entry transient (the JS `Pi.Ex` runs
+    # one solver step before the first draw, so it is small now: +13 vs +81
+    # before the entry solve).
+    worst = max((float(x), n) for n, x in rows[2:])
     return (0 if worst[0] <= 80.0 else 1), (
         "worst cloth edge after warmup +%.1f (%s)" % worst)
 
