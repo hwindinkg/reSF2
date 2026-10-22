@@ -1492,6 +1492,11 @@ struct QuestVerifyDriver {
     std::string last_step;        // frame-stamped story-step census
     bool saw_buy_item = false;    // reached STEP_BUY_ITEM (the knives quest)
     bool saw_map_step = false;    // reached MAP after the purchase
+    std::int64_t money_saved = 0; // the money before the 0-gold armed press
+    // The armed buy plate must resume the parked chain even when the purchase
+    // itself buys nothing (JS `Ao.Qg` L574833 ends with `this.sa()`).
+    bool resumed_without_gold = false;
+    bool gold_press_done = false;   // the 0-gold armed press happened
 
     // Queue an internal click at the view coordinate (no OS input).
     void tap(sf2::app::App& app, int x, int y, int cd = 8) {
@@ -1525,7 +1530,10 @@ struct QuestVerifyDriver {
                 std::fflush(stdout);
             }
             if (st == "STEP_BUY_ITEM") saw_buy_item = true;
-            if (st == "MAP") saw_map_step = true;
+            if (st == "MAP") {
+                saw_map_step = true;
+                if (gold_press_done) resumed_without_gold = true;
+            }
         }
         if (app.quest_engine().scene_actions() > 0) saw_chain = true;
         if (app.quest_engine().shop_actions() > 0) go_map = true;
@@ -1589,15 +1597,60 @@ struct QuestVerifyDriver {
                 }
             } catch (const std::exception&) {
             }
-            if (owns) {
+            if (owns || resumed_without_gold) {
+                // The guided step is over either way: the knives were bought,
+                // or the 0-gold press already resumed the parked chain (the
+                // quest then moved the guidance to the Map, so the buy plate
+                // is REJECTED from here on and this block must stop
+                // intercepting the driver's later steps).
                 bought_knives = true;
             } else if (cooldown == 0) {
-                if (shop_buy_phase == 0) {
-                    shop_buy_phase = 1;
-                    tap(app, 305, 199);  // the TRY plate (arms the `Pi` panel)
-                } else {
-                    shop_buy_phase = 0;
-                    tap(app, 934, 460);  // the `M8` price plate (buy+equip)
+                // [REGRESSION: the chain must resume on ANY armed press]
+                // JS `Ao.Qg` (L574833) ends with `this.sa()` UNCONDITIONALLY:
+                // the `Pa.iwa(b)` purchase inside it is a separate,
+                // best-effort step. The port resumed only when the purchase
+                // succeeded, so a press that bought nothing (a shortfall, or
+                // the item already owned) left the parked chain stuck - the
+                // reported "after buying the knives nothing happened, I had to
+                // reload the game" (a reload re-fires the quest, which then
+                // finds the knives owned and runs the tail).
+                // The probe presses the armed plate with the money ZEROED
+                // first and requires the story step to leave STEP_BUY_ITEM.
+                switch (shop_buy_phase) {
+                    case 0:
+                        shop_buy_phase = 1;
+                        tap(app, 305, 199);  // the TRY plate (arms the `Pi` panel)
+                        break;
+                    case 1:
+                        shop_buy_phase = 2;
+                        gold_press_done = true;
+                        try {
+                            sf2::app::WarriorSave w = app.save().load();
+                            money_saved = w.money;
+                            w.money = 0;
+                            app.save().save(w);
+                        } catch (const std::exception&) {
+                        }
+                        std::fprintf(stdout,
+                                     "[qverify] 0-gold armed press (money forced "
+                                     "to 0)\n");
+                        std::fflush(stdout);
+                        tap(app, 934, 460);  // the `M8` price plate
+                        break;
+                    case 2:
+                        shop_buy_phase = 3;
+                        try {  // restore the money, then buy for real
+                            sf2::app::WarriorSave w = app.save().load();
+                            w.money = money_saved;
+                            app.save().save(w);
+                        } catch (const std::exception&) {
+                        }
+                        tap(app, 305, 199);  // re-arm the TRY plate
+                        break;
+                    default:
+                        shop_buy_phase = 4;
+                        tap(app, 934, 460);  // the real buy
+                        break;
                 }
             }
             return;
@@ -4538,7 +4591,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              ? (drv.saw_buy_item && drv.saw_map_step)
                              : quest_verify_buy
                              ? (ok_chain && ok_change && ok_flash && ok_shop && ok_open &&
-                                ok_lynx && ok_shin && ok_story_advance)
+                                ok_lynx && ok_shin && ok_story_advance &&
+                                drv.resumed_without_gold)
                              : (ok_chain && ok_change && ok_fight);
         // [harness] `navflash/Shop/OpenShop/LynxDialog/ShinFight/StoryAdvance`
         // are driven ONLY by the `--quest-verify-buy` (STEP_BUY_ITEM) chain; the

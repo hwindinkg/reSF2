@@ -18490,14 +18490,19 @@ void ShopScreen::update_impl(float dt) {
                 // the plate the player pressed picks the currency.
                 const bool ok = on_gem ? purchase_gem_price_plate(app(), bit)
                                        : purchase_price_plate(app(), bit);
-                if (ok) {
-                    // JS `Ao.Qg` (L574833): the guided buy completes ->
-                    // `Sb.F().kk(!1)` + `this.sa()` — resume the parked
-                    // `StoryTutorialBuyItem` tail (step -> MAP + the
-                    // `tutorial_buy_knives` dialog + the Map guidance).
-                    app().quest_engine().resume_buy_item(app());
-                    buy_armed_ = -1;
-                }
+                (void)ok;
+                // JS `Ao.Qg` (L574833) UNCONDITIONALLY ends with `this.sa()`:
+                // `Sb.F().kk(!1)` + the parked `StoryTutorialBuyItem` tail
+                // (step -> MAP + the `tutorial_buy_knives` dialog + the Map
+                // guidance) resume on ANY press of the armed plate - the
+                // `Pa.iwa(b)` purchase inside it is a separate, best-effort
+                // step. The port resumed ONLY when the purchase succeeded, so a
+                // press that bought nothing (a shortfall, or the item already
+                // owned) left the chain parked: the quests did not continue
+                // until the game was restarted (the reported "after buying the
+                // knives nothing happened, I had to reload").
+                app().quest_engine().resume_buy_item(app());
+                buy_armed_ = -1;
                 return;
             }
         }
