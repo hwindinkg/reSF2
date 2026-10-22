@@ -7473,6 +7473,9 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         // JS `Pi.job` (L444): re-seat the anchor at `Pi.J9` (0,-93) EVERY
         // update; the clip's root motion must not accumulate.
         fighter->reseat_preview_anchor(0.0f, -93.0f);
+        // JS `Pi.job` (L444): re-seat the anchor at `Pi.J9` (0,-93) EVERY
+        // update; the clip's root motion must not accumulate.
+        fighter->reseat_preview_anchor(0.0f, -93.0f);
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: the Pi model's
         // `<Sound>` frame actions (the stance draw's knife/sword swishes) fire
         // from the SAME dispatch the fight uses. The old port never dispatched
@@ -18842,6 +18845,7 @@ void ShopScreen::update_impl(float dt) {
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
+        preview_fighter_->reseat_preview_anchor(0.0f, -93.0f);  // `Pi.job`
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
         // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
         // the actions collected by the advance() just run.

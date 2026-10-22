@@ -651,6 +651,11 @@ FLAG_GATES: list[Gate] = [
          parser="banner_round", env={"SF2_TRACE_BANNER": "1"},
          args=("250",)),
     Gate("quest-verify", "gate", ("full",), "--quest-verify", 300, parser="kv:qverify"),
+    # The FULL fresh tutorial chain (no seed): training fight -> the knives
+    # Shop quest -> the Map (the reported "the quests stop after the
+    # knives"), driven with real injected clicks.
+    Gate("tutorial-chain-verify", "gate", ("full",), "--tutorial-chain-verify", 400,
+         parser="kv:qverify"),
     Gate("quest-verify-buy", "gate", ("full",), "--quest-verify-buy", 300, parser="kv:qverify"),
     Gate("dialog-verify", "gate", ("full",), "--dialog-verify", 300, parser="dialog"),
     Gate("tutorial-real-verify", "gate", ("full",), "--tutorial-real-verify", 400, parser="kv:tutreal2"),
