@@ -1601,6 +1601,7 @@ int AiController::quick_slots(const AiFightState& st) {
             const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
             int passed = 0;
             std::string first_why;
+            std::string passed_names;
             for (const MoveDef* m : group) {
                 std::string why;
                 if (!v1(*m, st, &why)) {
@@ -1608,6 +1609,8 @@ int AiController::quick_slots(const AiFightState& st) {
                     continue;
                 }
                 ++passed;
+                passed_names += " ";
+                passed_names += m->name;
                 // JS `Pqb` L606: the quick-slot wait is `h.$I()` =
                 // `vBa(P.s$a())` = `0<b ? i0(b+1) : 0` (SUB-FRAME, L697), not
                 // the raw `strict_end`. A raw wait (often 1) made the AI
@@ -1626,9 +1629,9 @@ int AiController::quick_slots(const AiFightState& st) {
             if (trace_quick) {
                 std::fprintf(stdout,
                              "[quick] slot=%zu key='%s' resolved=%zu passed=%d "
-                             "first_reject='%s'\n",
+                             "first_reject='%s' pass=[%s]\n",
                              f, n.c_str(), group.size(), passed,
-                             first_why.c_str());
+                             first_why.c_str(), passed_names.c_str());
                 std::fflush(stdout);
             }
         }
