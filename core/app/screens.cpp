@@ -6112,10 +6112,19 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         // moves. The random pick among the members stays a TODO (this takes the
         // first member, the same one the non-random `<Group>` index 0 yields);
         // the ITEM KIT is what makes the fight behave.
+        // ALL groups merge in order (JS `efa` L7360: `for(...groups){... l =
+        // this.ur(g.node, l)}`): the identity (`<Template>`) comes from the
+        // LAST group's member and the `<Items>` of every member are appended.
+        // A warrior like `Ambush1400`'s (`<Groups><Group Name="Survival_1"/>
+        // <Group Name="Generic_1" Random="1"/></Groups>`) takes its attributes
+        // from `Survival_1` and its body/weapon from `Generic_1`; using only
+        // the first group gave the attributes row (a bare `Default`) as the
+        // kit - no weapon again.
         pugi::xml_node kit = w;
+        std::vector<pugi::xml_node> kit_members;
         if (pugi::xml_node groups = w.child("Groups")) {
-            const std::string gname =
-                groups.child("Group").attribute("Name").value();
+            for (const pugi::xml_node gref : groups.children("Group")) {
+            const std::string gname = gref.attribute("Name").value();
             // The group defs are NESTED: `Stages/Warriors/WarriorGroups/
             // WarriorGroup` (the template section is the sibling
             // `Warriors/Templates`).
@@ -6141,8 +6150,10 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
                     const std::size_t idx = static_cast<std::size_t>(
                         static_cast<double>(members.size()) * pick.jf());
                     kit = members[idx < members.size() ? idx : 0];
+                    kit_members.push_back(kit);
                 }
                 break;
+            }
             }
         }
         {
@@ -6268,9 +6279,26 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         out.has_not_ai = w.attribute("NotAI") != nullptr;
         out.has_not_animation = w.attribute("NotAnimation") != nullptr;
         if (const pugi::xml_attribute a = w.attribute("Tactic")) out.tactic = a.value();
-        for (const pugi::xml_node it : kit.child("Items").children("Item")) {
+        // Every resolved group member contributes its `<Items>` (JS `efa`'s
+        // `ur(g.node, l)` merge); the owner's own rows come first (they are the
+        // outer node in the merge).
+        for (const pugi::xml_node it : w.child("Items").children("Item")) {
             if (const pugi::xml_attribute nm = it.attribute("Name")) {
                 out.items.emplace_back(nm.value());
+            }
+        }
+        for (const pugi::xml_node member : kit_members) {
+            for (const pugi::xml_node it : member.child("Items").children("Item")) {
+                if (const pugi::xml_attribute nm = it.attribute("Name")) {
+                    out.items.emplace_back(nm.value());
+                }
+            }
+        }
+        if (kit_members.empty()) {
+            for (const pugi::xml_node it : kit.child("Items").children("Item")) {
+                if (const pugi::xml_attribute nm = it.attribute("Name")) {
+                    out.items.emplace_back(nm.value());
+                }
             }
         }
         // The Warrior's own `<Perks>` (`xc.AK`, JS `pGa` appends then the

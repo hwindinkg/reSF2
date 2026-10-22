@@ -574,3 +574,12 @@ Qg() {
 обнуляет деньги, жмёт взведённую плату и ТРЕБУЕТ, чтобы шаг сюжета ушёл из
 `STEP_BUY_ITEM` (`resumed_without_gold` в условии гейта). С прежним поведением
 гейт падает (зонд уходит в watchdog), с фиксом — `9 pass / 0 fail`.
+### Глубокая проверка фикса групп: MERGE всех групп, а не только первой
+JS `efa` (L7360) перебирает ВСЕ `<Group>` воина и мержит их
+(`l = this.ur(g.node, l)`), а мой первый фикс брал только первую группу. Для
+`Ambush1400` (`<Groups>Survival_1, Generic_1</Groups>`) это давало китом строку
+`Survival_1` (голый `Default` — атрибуты, БЕЗ оружия) ✗. Теперь:
+идентичность (`<Template>`) — от ПОСЛЕДНЕЙ группы, `<Items>` всех членов
+добавляются по порядку. Проверка на живом бою: `enemy items: 6 subtype=NinjaSword`,
+`enemy loadout: warrior perks=5 items=10 -> refs=5` (было бы 0/без оружия).
+Гейты: `enemy-kit` 0, `diff:boss-lynx`/`diff:challenge` 0, `diff:dojo-demo` 2, `--full` exit 0.
