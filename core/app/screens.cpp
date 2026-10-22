@@ -12629,10 +12629,47 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
             const int n = std::atoi(pd);
             for (int i = 0; i < n; ++i) (void)fight_->fight_draw01();
         }
-        resolved = sf2::scene::resolve_survival_warrior(
-            f, wave, mode_templates_, mode_groups_,
-            [this]() { return static_cast<double>(fight_->fight_draw01()); },
-            used, mf.enemy);
+        // JS survival setup (measured; see BUGS.md M/N): the row's FULL warrior
+        // list is resolved by `efa(row, row.number)` THREE times before the
+        // fight's first frame — the VS intro (`v.vJa` -> `v.EQ(a.Xs)`, L50341),
+        // then `cl.$Ja` (L58953) -> `pmb()` (L58969) + `qmb()` (L58999) — each
+        // call consuming the group Random picks (with `y8a`'s NoDoubles
+        // re-draws) off the shared `Da.pg` stream. The WAVE enemy is the warrior
+        // of the SECOND call (`qmb`), NOT the first: the oracle's enemy is
+        // `Generic_1` idx 1 = Ninja_Man_Knuckles (call B's first pick = JS draw
+        // 227 = the port stream's n=43, 0.128793068), while call A's first pick
+        // is idx 7. Replaying all three also lines the fight's own stream up.
+        auto mode_draw = [this]() {
+            return static_cast<double>(fight_->fight_draw01());
+        };
+        // The JS stream is at `Da.rL()`'s WALL-CLOCK seed when the survival
+        // roster is resolved (`Da.rL()` = `Da.pg.sL(ed.getDate().getTime())`,
+        // L97723 — a SEED, not a draw; the harness freezes the clock to
+        // `kRoundClockSeed`). The VS-intro/`cl` resolutions therefore start
+        // from that state, not from the boot seed — the measured first pick
+        // (0.714283016 = the clock seed's first draw) proves it. The round
+        // begin reseeds to the same value afterwards (`du.qob`), which is why
+        // these setup draws do not leak into the fight's own stream.
+        fight_->mode_reseed_stream(static_cast<int>(sf2::scene::kRoundClockSeed));
+        std::vector<sf2::scene::ResolvedWarrior> roster;
+        const bool ok_a = sf2::scene::resolve_survival_roster(
+            f, wave, mode_templates_, mode_groups_, mode_draw, roster);
+        const bool ok_b = sf2::scene::resolve_survival_roster(
+            f, wave, mode_templates_, mode_groups_, mode_draw, roster);
+        int wave_off = wave;
+        for (const sf2::scene::StageWarrior& cand : f.warriors) {
+            if (wave_off < cand.number) break;
+            wave_off -= cand.number;
+        }
+        if (ok_a && ok_b && wave_off >= 0 &&
+            wave_off < static_cast<int>(roster.size())) {
+            mf.enemy = roster[static_cast<std::size_t>(wave_off)];
+            resolved = true;
+        }
+        // The third resolution (the post-wave roster) is stream-relevant only.
+        (void)sf2::scene::resolve_survival_roster(
+            f, wave, mode_templates_, mode_groups_, mode_draw, roster);
+        (void)used;
     } else {
         resolved = sf2::scene::resolve_tournament_fight(
             mode_battle_, fight_index, mode_templates_, mode_groups_, mf);

@@ -697,35 +697,26 @@ inline int survival_waves(const StageFight& fight) {
     return total;
 }
 
-// Resolve one survival wave warrior (`efa`, L89866): walk the Number counts,
-// then pick from the wave's Groups (Random via draw01 with NoDoubles memory,
-// else sequential Ix[f%len]) and MERGE every group (`ur`, L94004) rather than
-// first-match. Returns false when the wave is out of range.
-inline bool resolve_survival_warrior(
-    const StageFight& fight, int wave,
+// `efa`'s (L7360-7420) group walk for ONE warrior of a survival row. `f` is
+// the CALL-LOCAL pick index (`efa`'s `f`, L7370 `f = e++` inside
+// `for(e = 0; e < b;)`), `used` the per-group NoDoubles memory of the SAME
+// call (`h[k]`, L7364-7368) — fresh per `efa` call, shared by all its picks.
+inline bool resolve_survival_one(
+    const StageWarrior& slot, int f,
     const std::map<std::string, TemplateDef>& templates,
-    const std::map<std::string, GroupDef>& groups, std::function<double()> draw01,
-    std::vector<std::string>& used_templates, ResolvedWarrior& out) {
-    int w = wave;
-    const StageWarrior* slot = nullptr;
-    for (const StageWarrior& cand : fight.warriors) {
-        if (w < cand.number) {
-            slot = &cand;
-            break;
-        }
-        w -= cand.number;
-    }
-    if (slot == nullptr) return false;
+    const std::map<std::string, GroupDef>& groups,
+    std::function<double()> draw01, std::vector<std::vector<int>>& used,
+    ResolvedWarrior& out) {
     out = ResolvedWarrior();
-    out.tactic = slot->tactic;
-    out.attrs = slot->attrs;
-    out.perks = slot->perks;
+    out.tactic = slot.tactic;
+    out.attrs = slot.attrs;
+    out.perks = slot.perks;
     // The ordered equip list the JS `parameters.jt()` exposes (see the `ur`
     // note in the group walk below); filled for both the group and the
     // no-group path, then handed to the app layer's equip-by-type bucketing.
     std::vector<std::string> merged_items;
-    if (slot->groups.empty()) {
-        out.template_name = slot->template_name;
+    if (slot.groups.empty()) {
+        out.template_name = slot.template_name;
     } else {
         // `efa` group walk (L89866-L90100): EVERY resolvable group
         // contributes — not a first-match pick. `q=a.groups`; per group `k`
@@ -755,38 +746,56 @@ inline bool resolve_survival_warrior(
         // `WEAPON_NINJA_SWORD` (SubType `NinjaSword`), which changes the
         // `FistsStartStanceIdle-Right` `<Locks>` outcome (readable.js:28897
         // `d.items = a.parameters.jt()` = the EQUIPPED slots).
-        for (const StageWarrior::GroupRef& g : slot->groups) {
+        std::size_t gi = 0;
+        for (const StageWarrior::GroupRef& g : slot.groups) {
+            const std::size_t group_index = gi++;
+            if (used.size() <= group_index) used.resize(group_index + 1);
             const auto it = groups.find(g.name);
             if (it == groups.end() || it->second.members.empty()) continue;
             const std::vector<StageWarrior>& pool = it->second.members;
             std::size_t pick = 0;
             if (g.random && draw01) {
-                const double r = draw01();
-                pick = static_cast<std::size_t>(r * static_cast<double>(pool.size())) %
+                // JS `x8a` (L9167) = ONE draw (`Ix.length * Da.pg.jf() | 0`);
+                // `y8a` (L9171) = draw, then RE-DRAW while the index is
+                // already in THIS `efa` call's per-group memory
+                // (`while(true){ ... e[d]==b && (b = len*Da.pg.jf()|0) ... }`).
+                // The port's old sequential `(pick+1)%len` on a collision was
+                // a divergence: the JS consumes a NEW stream value instead, so
+                // every later draw (and the whole fight) shifted. Bounded to
+                // 64 re-draws so a constant stream cannot hang (the JS spins
+                // forever on one too).
+                pick = static_cast<std::size_t>(
+                           draw01() * static_cast<double>(pool.size())) %
                        pool.size();
                 if (g.no_doubles) {
-                    for (std::size_t tries = 0; tries < pool.size(); ++tries) {
-                        const std::string& nm = pool[pick].template_name;
-                        bool used = false;
-                        for (const std::string& u : used_templates) {
-                            if (u == nm) {
-                                used = true;
+                    for (int attempt = 0; attempt < 64; ++attempt) {
+                        bool dup = false;
+                        for (int u : used[group_index]) {
+                            if (u == static_cast<int>(pick)) {
+                                dup = true;
                                 break;
                             }
                         }
-                        if (!used) break;
-                        pick = (pick + 1) % pool.size();
+                        if (!dup) break;
+                        if (attempt == 63) {
+                            pick = (pick + 1) % pool.size();
+                            break;
+                        }
+                        pick = static_cast<std::size_t>(
+                                   draw01() * static_cast<double>(pool.size())) %
+                               pool.size();
                     }
+                    used[group_index].push_back(static_cast<int>(pick));
                 }
             } else {
-                pick = static_cast<std::size_t>(w) % pool.size();
+                pick = static_cast<std::size_t>(f) % pool.size();
             }
             const StageWarrior& m = pool[pick];
             // `l==null ? l=g`: only the first resolvable member stamps the
             // template (`ur` ignores Template on the merge hops).
             if (!have_base) {
                 out.template_name =
-                    m.template_name.empty() ? slot->template_name : m.template_name;
+                    m.template_name.empty() ? slot.template_name : m.template_name;
                 have_base = true;
             }
             if (!m.tactic.empty()) out.tactic = m.tactic;
@@ -812,12 +821,12 @@ inline bool resolve_survival_warrior(
                 if (!have) out.perks.push_back(pr);
             }
         }
-        if (!have_base) out.template_name = slot->template_name;
+        if (!have_base) out.template_name = slot.template_name;
     }
     // The Fight `<Warrior>`'s own `<Items>` merge LAST (`ur(a.node, l)` at
     // L7406 when the row carries no `Template`), i.e. they override the groups'
     // gear in the same slot.
-    for (const std::string& it2 : slot->items) merged_items.push_back(it2);
+    for (const std::string& it2 : slot.items) merged_items.push_back(it2);
     out.items = std::move(merged_items);
     if (!out.template_name.empty()) {
         // No resolvable group member (and no row items) -> fall back to the
@@ -834,8 +843,61 @@ inline bool resolve_survival_warrior(
         append_perks_unique(merged_perks, out.perks);
         out.perks = std::move(merged_perks);
     } else if (out.items.empty()) {
-        out.items = slot->items;
+        out.items = slot.items;
     }
+    return true;
+}
+
+// One `efa(row, count)` CALL (L7360): resolve EVERY warrior of the row that
+// holds `wave` (`b = f.number * this.ag`, L59012) in a single call, so the
+// per-group NoDoubles memory is shared by the picks of that call and reset
+// for the next one. Returns them in row order.
+inline bool resolve_survival_roster(
+    const StageFight& fight, int wave,
+    const std::map<std::string, TemplateDef>& templates,
+    const std::map<std::string, GroupDef>& groups,
+    std::function<double()> draw01, std::vector<ResolvedWarrior>& out) {
+    int w = wave;
+    const StageWarrior* slot = nullptr;
+    for (const StageWarrior& cand : fight.warriors) {
+        if (w < cand.number) {
+            slot = &cand;
+            break;
+        }
+        w -= cand.number;
+    }
+    if (slot == nullptr) return false;
+    out.clear();
+    std::vector<std::vector<int>> used;
+    for (int i = 0; i < slot->number; ++i) {
+        ResolvedWarrior r;
+        if (!resolve_survival_one(*slot, i, templates, groups, draw01, used, r)) {
+            return false;
+        }
+        out.push_back(std::move(r));
+    }
+    return true;
+}
+
+// Single-wave wrapper (kept for the golden test): resolves the row's FULL
+// roster in ONE `efa` call — the draws are that call's, not one per warrior —
+// and returns the `wave`-th warrior of it.
+inline bool resolve_survival_warrior(
+    const StageFight& fight, int wave,
+    const std::map<std::string, TemplateDef>& templates,
+    const std::map<std::string, GroupDef>& groups, std::function<double()> draw01,
+    std::vector<std::string>& used_templates, ResolvedWarrior& out) {
+    std::vector<ResolvedWarrior> roster;
+    if (!resolve_survival_roster(fight, wave, templates, groups, draw01, roster)) {
+        return false;
+    }
+    int w = wave;
+    for (const StageWarrior& cand : fight.warriors) {
+        if (w < cand.number) break;
+        w -= cand.number;
+    }
+    if (w < 0 || w >= static_cast<int>(roster.size())) return false;
+    out = roster[static_cast<std::size_t>(w)];
     used_templates.push_back(out.template_name);
     return true;
 }

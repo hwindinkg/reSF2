@@ -1747,6 +1747,13 @@ public:
     // `set_seed`, so survival waves pick from the live stream.
     float fight_draw01() { return draw01(); }
 
+    // Public `Da.rL()`/`Da.IT` analog: reseed the shared stream in place. The
+    // survival VS-intro/`cl` warrior resolutions run off the wall-clock seed
+    // (`Da.pg.sL(ed.getDate().getTime())`), NOT the boot seed, so the app
+    // layer has to set that state before resolving (see `rules_begin_round`,
+    // which reseeds to the same value at the round start).
+    void mode_reseed_stream(int seed) { reseed_stream(seed); }
+
 // Perk setup for fight init (`ZOa`/`Pma` analog, §5.4/§5.7): the parsed
 // perk catalog (res/perks.xml) + per-side equipped item→perk bindings
 // (list.xml `<Perks>`/`<Enchantments>`). Empty refs = no live triggers

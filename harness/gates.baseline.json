@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-22T16:14:46",
+    "updated": "2026-10-22T20:54:42",
     "mode": "only"
   },
   "gates": {
@@ -119,10 +119,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:survival": {
-      "metric": 1957,
-      "commit": "b405f3cc",
-      "reason": "IMPROVEMENT from the group-kit fix (JS efa L7360): the survival enemy now resolves its own kit, 2649 -> 1957 and the metric is stable between isolated and --full runs (it used to flip 2649/137). Measured with SF2_SURV_PREDRAW: n=13 reaches 863, but the JS stream position is still unproven (M/N), so the shipped value stays n=0.",
-      "date": "2026-10-21T18:57:32"
+      "metric": 863,
+      "commit": "aba9afab",
+      "reason": "survival enemy identity: the JS resolves the row roster 3x (VS intro + cl.pmb/cl.qmb) off the Da.rL() wall-clock seed, and y8a re-draws on a NoDoubles hit instead of advancing; the port now replays that, so the wave-0 enemy is Generic_1 idx 1 (Ninja_Man_Knuckles) like the oracle. 1957 -> 863",
+      "date": "2026-10-22T20:54:42"
     },
     "diff:challenge": {
       "metric": 0,
