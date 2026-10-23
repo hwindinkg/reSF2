@@ -416,6 +416,9 @@ public:
     // when no font is loaded.
     bool draw_text(float x, float y, const std::string& text, float scale,
                    float r, float g, float b);
+    // [debug overlay] Pixel width of `text` at `scale` with the menu font
+    // (falls back to a fixed advance when the font is not loaded yet).
+    float measure_text_px(const std::string& text, float scale);
     // Atlas rect (x,y = top-left, w,h = size).
     bool draw_atlas_rect(const std::string& name, float x, float y, float w, float h,
                          float alpha = 1.0f);

@@ -1482,18 +1482,30 @@
    * same readers the trace emits (AI branch/zone, chances, block state, dialog
    * queue, physics), so the panels show exactly what the log records.
    */
-  var dbgOverlay = { on: {}, el: null, y: 0 };
+  var dbgOverlay = { on: {}, boxes: null };
+
+  function dbgBox(id, css) {
+    var el = document.createElement("div");
+    el.id = id;
+    el.style.cssText = "position:fixed;z-index:2147483647;" +
+      "font:12px/15px monospace;color:#cfe;text-shadow:0 0 2px #000,1px 1px 0 #000;" +
+      "pointer-events:none;white-space:pre;padding:3px 5px;margin:6px;" +
+      "background:rgba(5,5,8,0.74);border:1px solid rgba(90,107,128,0.9);" + css;
+    document.body.appendChild(el);
+    return el;
+  }
 
   function dbgInit() {
     try {
-      if (dbgOverlay.el) return;
-      var el = document.createElement("div");
-      el.id = "__orDbg";
-      el.style.cssText = "position:fixed;left:0;top:0;z-index:2147483647;" +
-        "font:12px/13px monospace;color:#cfe;text-shadow:0 0 2px #000,1px 1px 0 #000;" +
-        "pointer-events:none;white-space:pre;padding:4px;background:rgba(0,0,0,0.25)";
-      document.body.appendChild(el);
-      dbgOverlay.el = el;
+      if (dbgOverlay.boxes) return;
+      if (typeof document === "undefined" || !document.body) return;
+      // Four anchored flows, exactly like the native overlay: panels in one
+      // flow stack, different flows never share pixels.
+      dbgOverlay.boxes = {
+        left: dbgBox("__orDbgL", "left:0;top:0;"),
+        right: dbgBox("__orDbgR", "right:0;top:0;"),
+        bl: dbgBox("__orDbgBL", "left:0;bottom:0;")
+      };
       window.addEventListener("keydown", function (ev) {
         var k = ev.key;
         if (k >= "0" && k <= "9") {
@@ -1506,40 +1518,50 @@
     } catch (e) { /* ignore */ }
   }
 
-  function dbgLine(out, txt) { out.push(txt); }
-
   function dbgTick() {
     dbgInit();
-    var el = dbgOverlay.el;
-    if (!el) return;
+    var boxes = dbgOverlay.boxes;
+    if (!boxes) return;
     var any = false;
     for (var i = 1; i < 10; i++) if (dbgOverlay.on[i]) any = true;
-    if (!any) { if (el.textContent !== "") el.textContent = ""; return; }
+    if (!any) {
+      if (boxes.left.textContent !== "") {
+        boxes.left.textContent = "";
+        boxes.right.textContent = "";
+        boxes.bl.textContent = "";
+      }
+      return;
+    }
     var fight = or.fight;
-    if (!fight) { el.textContent = "(no fight)"; return; }
+    if (!fight) {
+      boxes.left.textContent = "(no fight)";
+      boxes.right.textContent = "";
+      boxes.bl.textContent = "";
+      return;
+    }
     var me = fighterAt(fight, "Me"), en = fighterAt(fight, "Enemy");
     var side = aiSide(fight), de = deOfLabel(fight, side);
-    var out = [];
+    var L = [], R = [], BL = [];
     function n6(v) { return v == null ? "-" : (Math.round(v * 1e5) / 1e5); }
     if (dbgOverlay.on[1]) {
-      dbgLine(out, "[1] AI (" + side + ")");
-      dbgLine(out, " branch=" + (de ? de.fk : "?") + " zone=" + (de ? de.aqa : "?") +
+      L.push("[1] AI (" + side + ")");
+      L.push(" fj=" + (de ? de.fk : "?") + " aqa=" + (de ? de.aqa : "?") +
         " stage=" + (or.lastStage || "-"));
-      dbgLine(out, " chosen=" + (or.lastMove[side] || "(none)") +
+      L.push(" chosen=" + (or.lastMove[side] || "(none)") +
         " cands=" + (or.lastRandom[side] ? or.lastRandom[side].n : 0));
       try {
         var ch = chancesOf(de);
-        dbgLine(out, " CZ=" + n6(ch.CZ) + " bda=" + n6(ch.bda) + " tba=" + n6(ch.tba));
+        L.push(" CZ=" + n6(ch.CZ) + " bda=" + n6(ch.bda) + " tba=" + n6(ch.tba));
       } catch (e) { /* ignore */ }
     }
     if (dbgOverlay.on[3]) {
-      dbgLine(out, "[3] Collision");
+      L.push("[3] Collision");
       var bMe = blockInfo(me), bEn = blockInfo(en);
-      dbgLine(out, " P block=" + bMe.a + " iv=" + (me && me.P0 ? "?" : "?"));
-      dbgLine(out, " E block=" + bEn.a);
+      L.push(" P block=" + bMe.a);
+      L.push(" E block=" + bEn.a);
     }
     if (dbgOverlay.on[4]) {
-      dbgLine(out, "[4] Physics");
+      L.push("[4] Physics");
       var m = me && me.oa && me.oa.Va ? me.oa.Va.all : null;
       var best = 0, name = "-";
       try {
@@ -1554,20 +1576,22 @@
           }
         }
       } catch (e) { /* ignore */ }
-      dbgLine(out, " cloth worst +" + (Math.round(best * 10) / 10) + " " + name);
-      dbgLine(out, " nk=" + (me.Nd && me.Nd.nk ? 1 : 0) + " bodies=" + (m ? m.length : 0));
+      L.push(" cloth +" + (Math.round(best * 10) / 10) + " " + name);
+      L.push(" nk=" + (me.Nd && me.Nd.nk ? 1 : 0) + " bodies=" + (m ? m.length : 0));
     }
     if (dbgOverlay.on[6]) {
-      dbgLine(out, "[6] Fight");
-      dbgLine(out, " frame=" + frameNo() + " phase=" + fight.eu +
+      R.push("[6] Fight");
+      R.push(" f=" + frameNo() + " phase=" + fight.eu +
         " round=" + (fight.round ? fight.round.round : "?"));
     }
     if (dbgOverlay.on[5]) {
-      dbgLine(out, "[5] Damage");
-      dbgLine(out, " Me hp=" + (me && me.parameters ? me.parameters.gd : "?"));
-      dbgLine(out, " En hp=" + (en && en.parameters ? en.parameters.gd : "?"));
+      R.push("[5] Damage");
+      R.push(" Me hp=" + (me && me.parameters ? me.parameters.gd : "?"));
+      R.push(" En hp=" + (en && en.parameters ? en.parameters.gd : "?"));
     }
-    el.textContent = out.join("\n");
+    boxes.left.textContent = L.join("\n");
+    boxes.right.textContent = R.join("\n");
+    boxes.bl.textContent = BL.join("\n");
   }
 
   function oracleTick() {

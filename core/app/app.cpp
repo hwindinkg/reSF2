@@ -1941,6 +1941,13 @@ float App::measure_text(const sf2::data::font& font, const std::string& text,
     return sf2::data::measure_text_utf8(font, text, scale);
 }
 
+float App::measure_text_px(const std::string& text, float scale) {
+    if (menu_font_ == nullptr) {
+        return static_cast<float>(text.size()) * 7.0f * scale;
+    }
+    return sf2::data::measure_text_utf8(*menu_font_, text, scale);
+}
+
 bool App::draw_text_with_font(const sf2::data::font& font, unsigned int tex, float x,
                               float y, const std::string& text, float scale, float r,
                               float g, float b, float a) {
@@ -2083,14 +2090,68 @@ const char* debug_overlay_status() {
 
 namespace {
 
-// One line with a 1px drop shadow (readable over any scene without a panel
-// background, so the overlay never hides gameplay).
-void dbg_line(App& app, float x, float& y, const std::string& text, float r,
-              float g, float b) {
-    constexpr float kDbgScale = 0.30f;
-    app.draw_text(x + 1.0f, y + 1.0f, text, kDbgScale, 0.0f, 0.0f, 0.0f);
-    app.draw_text(x, y, text, kDbgScale, r, g, b);
-    y += 13.0f;
+// --- debug overlay layout ---------------------------------------------------
+// Panels are laid out in four anchored flows (left, right, bottom-left,
+// bottom-right) and NEVER share pixels: each flow starts where the previous
+// panel in that flow ended, and a bottom-anchored panel is pushed DOWN if its
+// flow already reaches that far. Every panel also gets its own translucent
+// plate + 1px border, so neighbouring panels stay visually separate even when
+// they touch.
+constexpr float kDbgScale = 0.30f;
+constexpr float kDbgLineH = 18.0f;
+constexpr float kDbgPad = 4.0f;
+constexpr float kDbgGap = 5.0f;
+constexpr float kDbgEdge = 8.0f;
+
+struct DbgLine {
+    std::string text;
+    float r = 1.0f;
+    float g = 1.0f;
+    float b = 1.0f;
+};
+
+struct DbgPanel {
+    std::vector<DbgLine> rows;
+    float width = 0.0f;
+
+    void add(App& app, const std::string& text, float r, float g, float b) {
+        rows.push_back(DbgLine{text, r, g, b});
+        const float w = app.measure_text_px(text, kDbgScale);
+        if (w > width) width = w;
+    }
+    void title(App& app, const std::string& text, float r, float g, float b) {
+        rows.push_back(DbgLine{text, r, g, b});
+        const float w = app.measure_text_px(text, kDbgScale);
+        if (w > width) width = w;
+    }
+    float height() const {
+        return static_cast<float>(rows.size()) * kDbgLineH + kDbgPad * 2.0f;
+    }
+    float box_w() const { return width + kDbgPad * 2.0f; }
+};
+
+// Draws one panel with its plate; returns the panel's bottom y (for the flow).
+float dbg_panel(App& app, const DbgPanel& p, float x, float y) {
+    const float w = p.box_w();
+    const float h = p.height();
+    const float verts[12] = {x,     y,     x + w, y,     x,     y + h,
+                             x + w, y,     x + w, y + h, x,     y + h};
+    app.renderer().draw_triangles(verts, 6, 0.02f, 0.02f, 0.03f, 0.74f);
+    // 1px border (top + bottom + left + right).
+    const float top[12] = {x, y, x + w, y, x, y + 1.0f,
+                           x + w, y, x + w, y + 1.0f, x, y + 1.0f};
+    app.renderer().draw_triangles(top, 6, 0.35f, 0.42f, 0.50f, 0.9f);
+    const float bot[12] = {x, y + h - 1.0f, x + w, y + h - 1.0f, x, y + h,
+                           x + w, y + h - 1.0f, x + w, y + h, x, y + h};
+    app.renderer().draw_triangles(bot, 6, 0.35f, 0.42f, 0.50f, 0.9f);
+    float ty = y + kDbgPad;
+    for (const DbgLine& ln : p.rows) {
+        app.draw_text(x + kDbgPad + 1.0f, ty + 1.0f, ln.text, kDbgScale,
+                      0.0f, 0.0f, 0.0f);
+        app.draw_text(x + kDbgPad, ty, ln.text, kDbgScale, ln.r, ln.g, ln.b);
+        ty += kDbgLineH;
+    }
+    return y + h;
 }
 
 std::string fmt(const char* f, ...) {
@@ -2108,129 +2169,205 @@ void draw_debug_overlay(App& app) {
     DebugOverlay& d = DebugOverlay::get();
     if (!d.any()) return;
 
-    // The live fight (null on any non-fight screen).
+    // The live fight (invalid on any non-fight screen).
     FightDebugSnapshot f;
     if (app.screens().top() != nullptr &&
         app.screens().current_id() == kScreenFight) {
         f = static_cast<FightScreen*>(app.screens().top())->debug_snapshot();
     }
 
-    float left = 8.0f;
-    float right = static_cast<float>(app.view_w()) - 340.0f;
-    float yl = 8.0f;
-    float yr = 8.0f;
+    const float vw = static_cast<float>(app.view_w());
     const float vh = static_cast<float>(app.view_h());
 
-    // 1: AI (above the enemy in spirit: name/value pairs, left column top).
+    // ---- build the panels that are switched on ----------------------------
+    DbgPanel ai, quest, coll, phys, dmg, fight, save, screens, perf;
+
     if (d.on[1]) {
-        float y = yl;
-        dbg_line(app, left, y, "[1] AI  (enemy)", 1.0f, 0.9f, 0.3f);
+        ai.title(app, "[1] AI (enemy)", 1.0f, 0.90f, 0.30f);
         if (f.valid) {
-            dbg_line(app, left, y, fmt("tactic_type=%d", f.tactic_type), 0.8f, 1.0f, 0.8f);
-            dbg_line(app, left, y, fmt("branch=%s stage=%s fk=%d", f.branch.c_str(), f.stage.c_str(), f.fk), 0.8f, 1.0f, 0.8f);
-            dbg_line(app, left, y, fmt("aqa=%d wb=%d gate=%d", f.aqa, f.wb, f.gate ? 1 : 0), 0.8f, 1.0f, 0.8f);
-            dbg_line(app, left, y, fmt("chosen=%s", f.chosen.empty() ? "(none)" : f.chosen.c_str()), 0.8f, 1.0f, 0.8f);
-            dbg_line(app, left, y, fmt("dist=%.1f enemy=(%.1f,%.1f)", static_cast<double>(f.dist), static_cast<double>(f.enemy_x), static_cast<double>(f.enemy_y)), 0.8f, 1.0f, 0.8f);
+            ai.add(app, fmt("tactic_type=%d", f.tactic_type), 0.80f, 1.0f, 0.80f);
+            ai.add(app, fmt("branch=%s stage=%s",
+                            f.branch.empty() ? "-" : f.branch.c_str(),
+                            f.stage.c_str()), 0.80f, 1.0f, 0.80f);
+            ai.add(app, fmt("fk=%d aqa=%d wb=%d gate=%d", f.fk, f.aqa, f.wb,
+                            f.gate ? 1 : 0), 0.80f, 1.0f, 0.80f);
+            ai.add(app, fmt("chosen=%s",
+                            f.chosen.empty() ? "(none)" : f.chosen.c_str()),
+                   0.80f, 1.0f, 0.80f);
+            ai.add(app, fmt("dist=%.1f enemy=(%.1f,%.1f)",
+                            static_cast<double>(f.dist),
+                            static_cast<double>(f.enemy_x),
+                            static_cast<double>(f.enemy_y)),
+                   0.80f, 1.0f, 0.80f);
         } else {
-            dbg_line(app, left, y, "(no fight)", 0.7f, 0.7f, 0.7f);
+            ai.add(app, "(no fight)", 0.70f, 0.70f, 0.70f);
         }
-        yl = y + 4.0f;
     }
 
-    // 3: collision (intervals / block)
-    if (d.on[3]) {
-        float y = yl;
-        dbg_line(app, left, y, "[3] Collision", 1.0f, 0.7f, 0.4f);
-        if (f.valid) {
-            dbg_line(app, left, y, fmt("P iv=[%s] block=%d", f.iv_player.c_str(), f.block_p), 1.0f, 0.85f, 0.7f);
-            dbg_line(app, left, y, fmt("E iv=[%s] block=%d", f.iv_enemy.c_str(), f.block_e), 1.0f, 0.85f, 0.7f);
-        }
-        yl = y + 4.0f;
-    }
-
-    // 4: physics / ragdoll / cloth
-    if (d.on[4]) {
-        float y = yl;
-        dbg_line(app, left, y, "[4] Physics", 0.6f, 0.9f, 1.0f);
-        if (f.valid) {
-            dbg_line(app, left, y, fmt("rag=%d ragf=%d", f.rag ? 1 : 0, f.ragf), 0.7f, 0.95f, 1.0f);
-            dbg_line(app, left, y, fmt("cloth worst +%.1f %s", static_cast<double>(f.cloth_worst), f.cloth_edge.c_str()), 0.7f, 0.95f, 1.0f);
-        }
-        yl = y + 4.0f;
-    }
-
-    // 5: damage (for the final stats)
-    if (d.on[5]) {
-        float y = yr;
-        dbg_line(app, right, y, "[5] Damage", 1.0f, 0.5f, 0.5f);
-        if (f.valid) {
-            dbg_line(app, right, y, fmt("P hp=%.0f/%.0f  dealt=%.0f", static_cast<double>(f.hp_p), static_cast<double>(f.mhp_p), static_cast<double>(f.mhp_e - f.hp_e)), 1.0f, 0.75f, 0.75f);
-            dbg_line(app, right, y, fmt("E hp=%.0f/%.0f  dealt=%.0f", static_cast<double>(f.hp_e), static_cast<double>(f.mhp_e), static_cast<double>(f.mhp_p - f.hp_p)), 1.0f, 0.75f, 0.75f);
-        }
-        yr = y + 4.0f;
-    }
-
-    // 6: timing
-    if (d.on[6]) {
-        float y = yr;
-        dbg_line(app, right, y, "[6] Fight", 0.7f, 1.0f, 0.7f);
-        if (f.valid) {
-            dbg_line(app, right, y, fmt("frame=%d phase=%d round=%d timer=%d", f.frame, f.phase, f.round, f.timer), 0.8f, 1.0f, 0.8f);
-            dbg_line(app, right, y, fmt("taps=%d screen=%d depth=%zu", f.taps, static_cast<int>(app.screens().current_id()), app.screens().stack().size()), 0.8f, 1.0f, 0.8f);
-        }
-        yr = y + 4.0f;
-    }
-
-    // 7: save
-    if (d.on[7]) {
-        float y = yr;
-        dbg_line(app, right, y, "[7] Save", 1.0f, 0.9f, 0.5f);
-        try {
-            const sf2::app::WarriorSave w = app.save().load();
-            dbg_line(app, right, y, fmt("money=%lld level=%d weapon=%s", static_cast<long long>(w.money), w.level, w.weapon.c_str()), 1.0f, 0.95f, 0.7f);
-        } catch (const std::exception&) {
-            dbg_line(app, right, y, "(no save)", 0.7f, 0.7f, 0.7f);
-        }
-        yr = y + 4.0f;
-    }
-
-    // 9: frame time (top-right corner, one line)
-    if (d.on[9]) {
-        static double ema_ms = 16.0;
-        static auto prev = std::chrono::steady_clock::now();
-        const auto now = std::chrono::steady_clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(now - prev).count();
-        prev = now;
-        if (ms > 0.0 && ms < 1000.0) ema_ms = ema_ms * 0.9 + ms * 0.1;
-        float y = yr;
-        dbg_line(app, right, y, fmt("[9] %.2f ms  %.0f fps", ema_ms, ema_ms > 0.0 ? 1000.0 / ema_ms : 0.0), 0.9f, 0.9f, 1.0f);
-        yr = y + 4.0f;
-    }
-
-    // 2: quests — BOTTOM-LEFT (the user asked for the quest/dialog state there)
     if (d.on[2]) {
-        float y = vh - 120.0f;
-        dbg_line(app, left, y, "[2] Quest", 0.7f, 1.0f, 1.0f);
+        quest.title(app, "[2] Quest", 0.70f, 1.0f, 1.0f);
         try {
             sf2::app::QuestEngine& q = app.quest_engine();
             const std::size_t modal = q.has_dialog() ? q.modal_index() : 0;
             std::string step;
-            try { step = app.save().load().story_step(); } catch (const std::exception&) { }
-            dbg_line(app, left, y, fmt("step=%s", step.c_str()), 0.8f, 1.0f, 1.0f);
-            dbg_line(app, left, y, fmt("dialogs=%zu modal_i=%zu%s", q.dialog_count(), modal, q.has_dialog() ? " (BLOCKING)" : ""), 0.8f, 1.0f, 1.0f);
+            try { step = app.save().load().story_step(); } catch (const std::exception&) {}
+            quest.add(app, fmt("step=%s", step.empty() ? "-" : step.c_str()),
+                      0.80f, 1.0f, 1.0f);
+            quest.add(app, fmt("dialogs=%zu modal_i=%zu%s", q.dialog_count(), modal,
+                               q.has_dialog() ? " BLOCKING" : ""), 0.80f, 1.0f, 1.0f);
             if (q.has_dialog()) {
-                dbg_line(app, left, y, fmt("dlg=%s %s", q.dialog().type.c_str(), q.dialog().title.c_str()), 1.0f, 0.9f, 0.6f);
+                quest.add(app, fmt("dlg=%s %s", q.dialog().type.c_str(),
+                                   q.dialog().title.c_str()), 1.0f, 0.90f, 0.60f);
             }
         } catch (const std::exception&) {
-            dbg_line(app, left, y, "(quest engine unavailable)", 0.7f, 0.7f, 0.7f);
+            quest.add(app, "(quest engine unavailable)", 0.70f, 0.70f, 0.70f);
         }
     }
 
-    // 8: screens (id + stack depth), right column bottom
-    if (d.on[8]) {
-        float y = vh - 60.0f;
-        dbg_line(app, right, y, fmt("[8] screens id=%d depth=%zu", static_cast<int>(app.screens().current_id()), app.screens().stack().size()), 0.85f, 0.85f, 1.0f);
+    if (d.on[3]) {
+        coll.title(app, "[3] Collision", 1.0f, 0.70f, 0.40f);
+        if (f.valid) {
+            coll.add(app, fmt("P iv=[%s] block=%d", f.iv_player.c_str(), f.block_p),
+                     1.0f, 0.85f, 0.70f);
+            coll.add(app, fmt("E iv=[%s] block=%d", f.iv_enemy.c_str(), f.block_e),
+                     1.0f, 0.85f, 0.70f);
+        } else {
+            coll.add(app, "(no fight)", 0.70f, 0.70f, 0.70f);
+        }
     }
+
+    if (d.on[4]) {
+        phys.title(app, "[4] Physics", 0.60f, 0.90f, 1.0f);
+        if (f.valid) {
+            phys.add(app, fmt("rag=%d ragf=%d", f.rag ? 1 : 0, f.ragf),
+                     0.70f, 0.95f, 1.0f);
+            phys.add(app, fmt("cloth +%.1f %s", static_cast<double>(f.cloth_worst),
+                              f.cloth_edge.empty() ? "-" : f.cloth_edge.c_str()),
+                     0.70f, 0.95f, 1.0f);
+        } else {
+            phys.add(app, "(no fight)", 0.70f, 0.70f, 0.70f);
+        }
+    }
+
+    if (d.on[5]) {
+        dmg.title(app, "[5] Damage", 1.0f, 0.50f, 0.50f);
+        if (f.valid) {
+            dmg.add(app, fmt("P hp=%.0f/%.0f dealt=%.0f",
+                             static_cast<double>(f.hp_p),
+                             static_cast<double>(f.mhp_p),
+                             static_cast<double>(f.mhp_e - f.hp_e)),
+                    1.0f, 0.75f, 0.75f);
+            dmg.add(app, fmt("E hp=%.0f/%.0f dealt=%.0f",
+                             static_cast<double>(f.hp_e),
+                             static_cast<double>(f.mhp_e),
+                             static_cast<double>(f.mhp_p - f.hp_p)),
+                    1.0f, 0.75f, 0.75f);
+        } else {
+            dmg.add(app, "(no fight)", 0.70f, 0.70f, 0.70f);
+        }
+    }
+
+    if (d.on[6]) {
+        fight.title(app, "[6] Fight", 0.70f, 1.0f, 0.70f);
+        if (f.valid) {
+            fight.add(app, fmt("frame=%d phase=%d round=%d timer=%d", f.frame,
+                               f.phase, f.round, f.timer), 0.80f, 1.0f, 0.80f);
+            fight.add(app, fmt("taps=%d screen=%d depth=%zu", f.taps,
+                               static_cast<int>(app.screens().current_id()),
+                               app.screens().stack().size()),
+                      0.80f, 1.0f, 0.80f);
+        } else {
+            fight.add(app, fmt("screen=%d depth=%zu",
+                               static_cast<int>(app.screens().current_id()),
+                               app.screens().stack().size()),
+                      0.80f, 1.0f, 0.80f);
+        }
+    }
+
+    if (d.on[7]) {
+        save.title(app, "[7] Save", 1.0f, 0.90f, 0.50f);
+        try {
+            const sf2::app::WarriorSave w = app.save().load();
+            save.add(app, fmt("money=%lld level=%d",
+                              static_cast<long long>(w.money), w.level),
+                     1.0f, 0.95f, 0.70f);
+            save.add(app, fmt("weapon=%s", w.weapon.c_str()), 1.0f, 0.95f, 0.70f);
+        } catch (const std::exception&) {
+            save.add(app, "(no save)", 0.70f, 0.70f, 0.70f);
+        }
+    }
+
+    if (d.on[8]) {
+        screens.title(app, "[8] Screens", 0.85f, 0.85f, 1.0f);
+        screens.add(app, fmt("id=%d depth=%zu",
+                             static_cast<int>(app.screens().current_id()),
+                             app.screens().stack().size()),
+                    0.85f, 0.85f, 1.0f);
+        std::string names;
+        for (const auto& s : app.screens().stack()) {
+            if (s == nullptr) continue;
+            if (!names.empty()) names += " > ";
+            names += fmt("%d", static_cast<int>(s->id()));
+        }
+        if (!names.empty()) {
+            screens.add(app, names, 0.85f, 0.85f, 1.0f);
+        }
+    }
+
+    if (d.on[9]) {
+        static double ema_ms = 16.0;
+        static auto prev = std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
+        const double ms =
+            std::chrono::duration<double, std::milli>(now - prev).count();
+        prev = now;
+        if (ms > 0.0 && ms < 1000.0) ema_ms = ema_ms * 0.9 + ms * 0.1;
+        perf.title(app, "[9] Frame", 0.90f, 0.90f, 1.0f);
+        perf.add(app, fmt("%.2f ms  %.0f fps", ema_ms,
+                          ema_ms > 0.0 ? 1000.0 / ema_ms : 0.0),
+                 0.90f, 0.90f, 1.0f);
+    }
+
+    // ---- layout: two top flows + two bottom anchors, no shared pixels ----
+    float left_y = kDbgEdge;
+    float right_y = kDbgEdge;
+
+    auto flow_left = [&](const DbgPanel& p) {
+        if (p.rows.empty()) return;
+        const float bottom = dbg_panel(app, p, kDbgEdge, left_y);
+        left_y = bottom + kDbgGap;
+    };
+    auto flow_right = [&](const DbgPanel& p) {
+        if (p.rows.empty()) return;
+        const float bottom = dbg_panel(app, p, vw - kDbgEdge - p.box_w(), right_y);
+        right_y = bottom + kDbgGap;
+    };
+    // A bottom-anchored panel sits at the edge unless its flow already reaches
+    // there; then it is pushed below the flow instead of overlapping it.
+    auto anchored_left_bottom = [&](const DbgPanel& p) {
+        if (p.rows.empty()) return;
+        float y = vh - p.height() - 12.0f;
+        if (y < left_y) y = left_y;
+        dbg_panel(app, p, kDbgEdge, y);
+    };
+    auto anchored_right_bottom = [&](const DbgPanel& p) {
+        if (p.rows.empty()) return;
+        float y = vh - p.height() - 12.0f;
+        if (y < right_y) y = right_y;
+        dbg_panel(app, p, vw - kDbgEdge - p.box_w(), y);
+    };
+
+    flow_left(ai);
+    flow_left(coll);
+    flow_left(phys);
+
+    flow_right(dmg);
+    flow_right(fight);
+    flow_right(save);
+    flow_right(perf);
+
+    anchored_left_bottom(quest);
+    anchored_right_bottom(screens);
 }
 
 }  // namespace sf2::app

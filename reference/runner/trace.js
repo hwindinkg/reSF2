@@ -844,27 +844,38 @@ function ensureHooks(fight) {
   }
 
   /* ---------- debug overlay (oracle side) ----------
-   * Mirrors the port's `core/app/debug_overlay.hpp` panels with the fields this
-   * tracer already records, so a divergence can be READ on both sides while
-   * the oracle runs. Digit keys 1..9 toggle a panel, 0 clears all:
+   * The port's `core/app/debug_overlay.hpp` panels, toggled by the same digit
+   * keys (1..9, 0 = clear). Each panel is its OWN absolutely positioned box in
+   * one of four anchored flows - left, right, bottom-left, bottom-right - so
+   * panels can never cover each other, exactly like the native layout.
    *   2 quests/screens (bottom-left)  3 collision (block + intervals)
    *   5 damage (HP)                   6 fight (frame/phase/round/timer)
-   *   8 screen stack                  9 fps
-   * The AI panel (1) lives in `reference/tools/trace_oracle.js`, which reads
-   * the AI branch/zone/chosen move; this tracer does not collect those.
-   * Display-only: wrapped in try/catch, never touches the trace stream. */
-  var DBG = { on: {}, el: null, frames: 0, t0: 0 };
+   *   8 screen stack (bottom-right)   9 fps
+   * The AI panel (1) lives in `reference/tools/trace_oracle.js` (this tracer
+   * does not collect the AI branch/zone). Display-only: every call is wrapped
+   * in try/catch by the caller and never touches the trace stream. */
+  var DBG = { on: {}, boxes: null, frames: 0, t0: 0 };
+
+  function dbgBox(id, css) {
+    var el = document.createElement("div");
+    el.id = id;
+    el.style.cssText = "position:fixed;z-index:2147483647;" +
+      "font:12px/15px monospace;color:#cfe;text-shadow:0 0 2px #000,1px 1px 0 #000;" +
+      "pointer-events:none;white-space:pre;padding:3px 5px;margin:6px;" +
+      "background:rgba(5,5,8,0.74);border:1px solid rgba(90,107,128,0.9);" + css;
+    document.body.appendChild(el);
+    return el;
+  }
 
   function dbgInit() {
-    if (DBG.el) return;
+    if (DBG.boxes) return;
     if (typeof document === "undefined" || !document.body) return;
-    var el = document.createElement("div");
-    el.id = "__trDbg";
-    el.style.cssText = "position:fixed;left:0;top:0;z-index:2147483647;" +
-      "font:12px/13px monospace;color:#cfe;text-shadow:0 0 2px #000,1px 1px 0 #000;" +
-      "pointer-events:none;white-space:pre;padding:4px;background:rgba(0,0,0,0.22)";
-    document.body.appendChild(el);
-    DBG.el = el;
+    DBG.boxes = {
+      left: dbgBox("__trDbgL", "left:0;top:0;"),
+      right: dbgBox("__trDbgR", "right:0;top:0;text-align:left;"),
+      bl: dbgBox("__trDbgBL", "left:0;bottom:0;"),
+      br: dbgBox("__trDbgBR", "right:0;bottom:0;")
+    };
     window.addEventListener("keydown", function (ev) {
       var k = ev.key;
       if (k >= "0" && k <= "9") {
@@ -878,41 +889,49 @@ function ensureHooks(fight) {
 
   function dbgTick(st, fight) {
     dbgInit();
-    if (!DBG.el) return;
+    if (!DBG.boxes) return;
     var any = false;
     for (var i = 1; i < 10; i++) if (DBG.on[i]) any = true;
-    if (!any) { if (DBG.el.textContent !== "") DBG.el.textContent = ""; return; }
-    var out = [];
+    var keys = ["left", "right", "bl", "br"];
+    if (!any) {
+      for (var z = 0; z < keys.length; z++) {
+        if (DBG.boxes[keys[z]].textContent !== "")
+          DBG.boxes[keys[z]].textContent = "";
+      }
+      return;
+    }
+    var L = [], R = [], BL = [], BR = [];
     var me = st.fighters[0], en = st.fighters[1];
-    function push(s) { out.push(s); }
     if (DBG.on[2]) {
       var stack = [];
       try { stack = uiStack() || []; } catch (e) { /* ignore */ }
-      var names = [];
-      for (var s = 0; s < stack.length; s++) names.push(stack[s].name || stack[s].id);
-      push("[2] Quest/screens: " + names.join(" > "));
-      push("  dialogs: (see the port panel 2 / Sensei queue)");
+      var names = stack.map(function (s) { return s.name || s.id; });
+      BL.push("[2] Quest/screens");
+      BL.push("  " + names.join(" > "));
     }
     if (DBG.on[3]) {
-      push("[3] Collision");
-      push("  P block=" + me.block + " iv=" + JSON.stringify(me.iv));
-      push("  E block=" + en.block + " iv=" + JSON.stringify(en.iv));
+      L.push("[3] Collision");
+      L.push("  P block=" + me.block + " iv=" + JSON.stringify(me.iv));
+      L.push("  E block=" + en.block + " iv=" + JSON.stringify(en.iv));
     }
     if (DBG.on[5]) {
-      push("[5] Damage");
-      push("  P hp=" + me.hp + "/" + me.mhp + "  dealt=" + (me.mhp - me.hp).toFixed(2));
-      push("  E hp=" + en.hp + "/" + en.mhp + "  dealt=" + (en.mhp - en.hp).toFixed(2));
+      R.push("[5] Damage");
+      R.push("  P hp=" + me.hp + "/" + me.mhp + " dealt=" +
+             (me.mhp - me.hp).toFixed(2));
+      R.push("  E hp=" + en.hp + "/" + en.mhp + " dealt=" +
+             (en.mhp - en.hp).toFixed(2));
     }
     if (DBG.on[6]) {
-      push("[6] Fight f=" + st.f + " phase=" + st.phase + " round=" + st.round +
-           " timer=" + st.timer);
-      push("  P move=" + me.move + " af=" + me.af + " rag=" + me.rag);
-      push("  E move=" + en.move + " af=" + en.af + " rag=" + en.rag);
+      R.push("[6] Fight f=" + st.f + " phase=" + st.phase + " round=" + st.round +
+             " timer=" + st.timer);
+      R.push("  P move=" + me.move + " af=" + me.af + " rag=" + me.rag);
+      R.push("  E move=" + en.move + " af=" + en.af + " rag=" + en.rag);
     }
     if (DBG.on[8]) {
       var stack2 = [];
       try { stack2 = uiStack() || []; } catch (e) { /* ignore */ }
-      push("[8] screens: " + stack2.map(function (s) {
+      BR.push("[8] Screens");
+      BR.push("  " + stack2.map(function (s) {
         return (s.name || "?") + "/" + s.state;
       }).join(","));
     }
@@ -921,9 +940,12 @@ function ensureHooks(fight) {
       var now = Date.now();
       if (!DBG.t0) DBG.t0 = now;
       var dt = (now - DBG.t0) / 1000;
-      if (dt > 0) push("[9] " + (DBG.frames / dt).toFixed(1) + " fps (trace frames)");
+      if (dt > 0) R.push("[9] " + (DBG.frames / dt).toFixed(1) + " fps");
     }
-    DBG.el.textContent = out.join("\n");
+    DBG.boxes.left.textContent = L.join("\n");
+    DBG.boxes.right.textContent = R.join("\n");
+    DBG.boxes.bl.textContent = BL.join("\n");
+    DBG.boxes.br.textContent = BR.join("\n");
   }
 
   /* ---------- per-tick driver ---------- */
