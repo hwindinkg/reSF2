@@ -973,3 +973,29 @@ state-трейса оракула), иначе по совпадению `ai_bra
 даёт `block=1` с интервалом `['',5]` (Block) внутри стартовой стойки. Разница
 была только в имени: порт писал внутренний ключ `type5`, оракул — пустую
 строку; дамп теперь печатает `""` (fight.cpp, `dump_state_frame`).
+
+
+### M/N: замер кандидатов рулетки (24.10) — список = СВОИ мувы, а не группа слота
+Снял оракульный `random_pre` (survival, оракул f=342, `det[0..]`), 31 кандидат:
+`StepForward, StepBack, DoubleStepForward, BackRoll, ForwardRoll, FrontFlip,
+BackFlip, BackHandflip, JumpUp, Duck, HighKick, FrontKick, BackKick,
+ReverseJumpKick, DoubleJumpKick, FrontJumpKick, AxeKick, BackFlipKick, Sweep,
+DoubleSweep, DodgeReverseKick, TwoFootJumpKick, DodgeKick, ElbowStrike,
+KnucklesHighPunch, KnucklesHeavyPunch, KnucklesSuperSlash, KnucklesSpinningPunch,
+KnucklesUpperCut, KnucklesLowPunch, DoubleSweep`.
+Это ровно мувлист САМОГО бойца (Ninja_Man_Knuckles), а не «все короткие атаки
+мира»: в нём и шаги, и кувырки, и удары. То есть JS строит `ld` из собственных
+мувов бойца и взвешивает их `iCa` (вес из `<AnimationWeights>`, по умолчанию 1),
+а не из резолва ключа слота `ShortAttack`.
+Порт в том же бою (`SF2_TRACE_AI_QUICK=1`, 700 кадров):
+`[quick] slot=1 key='ShortAttack' resolved=240 passed=2 pass=[KnucklesHeavyPunch
+KnucklesSuperSlash]` — то есть порт честно резолвит ключ через fallback на
+`Weapon`-теги (240 чужих мувов), и своих из них только 2.
+`det[i].q` у оракула даёт для каждого имени его группу (`StepForward` ->
+`KatanaStepForward, TonfaStepForward, StaffStepForward, ...`), т.е. резолв
+имени через `<Template>`-теги порт уже умеет (`resolve_candidate`); неверен
+СОСТАВ списка кандидатов, а не резолв одного ключа.
+Следующий фикс: в `Pqb` строить `wb_`/базовый список из собственных мувов
+бойца (`my_moves`), вес брать из `anim_weights` (по умолчанию 1 — как `iCa`),
+и только потом применять `V1`/`bma`; число кандидатов сверить с 31 и уже после
+этого трогать поток `Da.pg`.
