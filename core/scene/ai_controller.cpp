@@ -2188,6 +2188,27 @@ void AiController::vaa(const AiFightState& st, int variant) {
 
 // JS `de.ia` (L592-594): the per-frame decision.
 std::string AiController::update(const AiFightState& st) {
+    // [probe] `SF2_TRACE_AIDRAW=1`: how often the AI actually runs and how many
+    // draws its per-frame stages would consume. The measured JS cadence is ~4.6
+    // `Da.pg` draws per frame; the port logs ~0.66, so this pinpoints whether
+    // `update()` is skipped, the tactic is null (0 slots), or the phase gate
+    // rejects.
+    if (std::getenv("SF2_TRACE_AIDRAW") != nullptr) {
+        static long calls = 0;
+        ++calls;
+        if (calls % 100 == 1) {
+            std::fprintf(stdout,
+                         "[aidraw] call=%ld phase_fight=%d tactic=%s type=%d "
+                         "qa=%zu ev=%zu playing=%d\n",
+                         calls, st.phase_fight ? 1 : 0,
+                         tactic_ != nullptr ? tactic_->name.c_str() : "null",
+                         tactic_ != nullptr ? tactic_->type : -1,
+                         tactic_ != nullptr ? tactic_->quick_attacks.size() : 0,
+                         tactic_ != nullptr ? tactic_->evades.size() : 0,
+                         st.playing ? 1 : 0);
+            std::fflush(stdout);
+        }
+    }
     if (tactic_ == nullptr || moves_ == nullptr) return "";
     // An injected source overrides the owned DaPrng stream (ai_demo uses
     // mt19937); otherwise ALL draws come from `prng_` in JS call order.
