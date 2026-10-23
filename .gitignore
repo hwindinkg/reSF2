@@ -209,3 +209,6 @@ reference/saves/
 build_head/
 # Gate runner runtime state (artifacts, samples, save backup, lock)
 .harness/
+
+# Project-local temp root (browser profiles, ad-hoc probe scratch)
+.harness/tmp/

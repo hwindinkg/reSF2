@@ -35,6 +35,43 @@ public sealed class MainForm : Form
     private DateTime _navigationTime;
     private const int CompletionPollMs = 2000;
     private readonly int _completionTimeoutMs;
+    // The per-run WebView2 profile (project-local, gitignored):
+    // deleted when the window closes so profiles never pile up
+    // (480 stale ones had reached 12.2 GB in %TEMP%).
+    private string? _profileDir;
+
+    // Best-effort removal of this run's WebView2 profile. WebView2 keeps a few
+    // files locked until the control is disposed, so the delete is attempted
+    // after base dispose and failures are ignored (the next boot reuses the
+    // directory name never -- it is unique per run).
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        base.OnFormClosed(e);
+        try
+        {
+            var dir = _profileDir;
+            _profileDir = null;
+            if (dir != null && Directory.Exists(dir))
+            {
+                foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                }
+                try
+                {
+                    Directory.Delete(dir, true);
+                }
+                catch (Exception ex)
+                {
+                    AppendConsoleLine($"[shell] profile kept (locked): {ex.GetType().Name}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            try { AppendConsoleLine($"[shell] profile cleanup failed: {ex.GetType().Name}"); } catch { }
+        }
+    }
 
     public MainForm(string url, string tracesDir, string? inputScriptPath, string instrumentScriptPath,
         int completionTimeoutMs = 150000)
@@ -69,8 +106,46 @@ public sealed class MainForm : Form
             // Fresh browser profile per run: clean localStorage/saves every
             // time, so repeated runs start from identical game state
             // (deterministic oracle traces, Phase 1 gate).
-            string profileDir = Path.Combine(Path.GetTempPath(), "reSF2-oracle-" + Guid.NewGuid().ToString("N"));
+            //
+            // [no drive-C temp] Profiles NEVER go to %TEMP%: they live in the
+            // project tree (`.harness/tmp/oracle-profiles/`, gitignored) so the
+            // machine's C: drive is not filled (480 stale profiles had reached
+            // 12.2 GB there). `SF2_ORACLE_TMP` overrides the root when the
+            // shell is driven from another working directory.
+            string tmpRoot = Environment.GetEnvironmentVariable("SF2_ORACLE_TMP");
+            if (string.IsNullOrWhiteSpace(tmpRoot))
+            {
+                tmpRoot = Path.Combine(Directory.GetCurrentDirectory(), ".harness", "tmp");
+            }
+            string profilesRoot = Path.Combine(tmpRoot, "oracle-profiles");
+            // [no accumulation] WebView2 keeps file handles open until the
+            // process exits, so the close-time delete above can fail
+            // (`UnauthorizedAccessException`). Sweep every leftover profile
+            // BEFORE creating this run's: gates run sequentially under the
+            // harness lock, so nothing else is using them.
+            try
+            {
+                if (Directory.Exists(profilesRoot))
+                {
+                    foreach (var stale in Directory.EnumerateDirectories(profilesRoot))
+                    {
+                        try
+                        {
+                            foreach (var f in Directory.EnumerateFiles(stale, "*", SearchOption.AllDirectories))
+                            {
+                                try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                            }
+                            Directory.Delete(stale, true);
+                        }
+                        catch { /* still locked by a dying process: next run */ }
+                    }
+                }
+            }
+            catch { /* ignore */ }
+            string profileDir = Path.Combine(profilesRoot,
+                                             "reSF2-oracle-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(profileDir);
+            _profileDir = profileDir;
             var env = await CoreWebView2Environment.CreateAsync(null, profileDir);
             AppendConsoleLine($"[shell] webview profile: {profileDir}");
             await _webView.EnsureCoreWebView2Async(env);
