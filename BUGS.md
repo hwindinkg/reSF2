@@ -928,3 +928,22 @@ KeyPressed-мувов, а `DK` получает 30. Значит 15 отсека
 шаблона. Следующий фикс: в `quick_slots`/`resolve_candidate` резолвить ключ по
 `<Animation>`-именам клипов (группа `ra.b9a`), затем сверить число кандидатов
 с 31 и только потом трогать поток.
+
+
+## Отладочный оверлей (порт + оракул) — 23.10
+Обе стороны получили одинаковый набор панелей, переключаемых цифрами:
+`1` AI (branch/zone/fk/aqa/wb/gate/chosen/dist), `2` квесты (story step, число
+висящих диалогов, modal_i, тип/имя верхнего) — внизу слева, `3` коллизии
+(интервалы и блок), `4` физика (rag/ragf, худшее растянутое cloth-ребро),
+`5` урон (HP и нанесённый урон для финальной статистики), `6` тайминг боя
+(frame/phase/round/timer/taps/screen/depth), `7` сейв (money/level/weapon),
+`8` стек экранов, `9` кадровое время/fps. `0` — выключить всё.
+- Порт: `core/app/debug_overlay.hpp` + отрисовка в `App::render_frame`
+  (`draw_debug_overlay`); цифры ловит `App::inject_key` (только в оконном
+  режиме; `SF2_DEBUG_PANELS=1236` включает панели на старте для headless-снимков),
+  данные — `FightScreen::debug_snapshot()`.
+- Оракул: те же панели в `reference/tools/trace_oracle.js` (`dbgOverlay` /
+  `dbgTick`), цифры 1..9/0 на странице; данные — те же читатели, что пишут трейс.
+Проверка: снимок `reference/extracted/scene/direct_fight.png` с
+`SF2_DEBUG_PANELS=123456789` показывает все панели (AI type=2, cloth worst +43.6,
+quest step=END, save money=0 level=1 weapon=Fists, 3.87 ms / 259 fps).

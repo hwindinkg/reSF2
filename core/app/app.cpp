@@ -21,6 +21,10 @@
 #include "app/fight_assets.hpp"
 #include "app/quest_engine.hpp"
 #include "app/save_system.hpp"
+#include "app/debug_overlay.hpp"
+#include <chrono>
+#include <cstdarg>
+#include <cmath>
 #include "app/screen_manager.hpp"
 #include "app/screens.hpp"
 #include "atlas.hpp"
@@ -1471,6 +1475,7 @@ void App::render_frame() {
         // logo + "Loading 100%" while the target scene mounts.
         draw_boot_splash(/*force_loader=*/true);
     }
+    draw_debug_overlay(*this);
     renderer_->end_frame();
 }
 
@@ -1826,6 +1831,12 @@ bool App::capture_png(const std::string& path) {
 }
 
 void App::inject_key(int glfw_key, bool down) {
+    // [debug overlay] Digits toggle panels (windowed only: the harness probes
+    // and captures must not flip them).
+    if (down && !headless() && glfw_key >= 48 && glfw_key <= 57 &&
+        sf2::app::DebugOverlay::get().handle_key(glfw_key)) {
+        return;
+    }
     if (screens_ != nullptr && screens_->top() != nullptr) {
         screens_->top()->on_key(glfw_key, down);
     }
@@ -2018,3 +2029,208 @@ bool App::draw_text(float x, float y, const std::string& text, float scale, floa
 }
 
 } // namespace sf2::app
+
+// ===========================================================================
+// [debug overlay] Digit-key panels (see `debug_overlay.hpp`).
+// ===========================================================================
+namespace sf2::app {
+
+DebugOverlay& DebugOverlay::get() {
+    static DebugOverlay inst;
+    static bool init = false;
+    if (!init) {
+        init = true;
+        // `SF2_DEBUG_PANELS=1236` enables those panels at boot (headless
+        // captures, the harness, screenshots for the divergence report).
+        const char* env = std::getenv("SF2_DEBUG_PANELS");
+        if (env != nullptr) {
+            for (const char* p = env; *p != '\0'; ++p) {
+                if (*p >= '1' && *p <= '9') {
+                    inst.on[static_cast<std::size_t>(*p - '0')] = true;
+                }
+            }
+        }
+    }
+    return inst;
+}
+
+bool DebugOverlay::handle_key(int glfw_key) {
+    if (glfw_key < 48 || glfw_key > 57) return false;  // GLFW_KEY_0..9
+    const int digit = glfw_key - 48;
+    if (digit == 0) {
+        clear();
+    } else {
+        on[static_cast<std::size_t>(digit)] =
+            !on[static_cast<std::size_t>(digit)];
+    }
+    std::fprintf(stdout, "[dbg] %s\n", debug_overlay_status());
+    std::fflush(stdout);
+    return true;
+}
+
+const char* debug_overlay_status() {
+    static char buf[64];
+    const DebugOverlay& d = DebugOverlay::get();
+    char* p = buf;
+    *p++ = '1' + 0 * 0;
+    p = buf;
+    for (int i = 1; i < 10; ++i) {
+        *p++ = d.on[static_cast<std::size_t>(i)] ? static_cast<char>('0' + i) : '.';
+    }
+    *p = '\0';
+    return buf;
+}
+
+namespace {
+
+// One line with a 1px drop shadow (readable over any scene without a panel
+// background, so the overlay never hides gameplay).
+void dbg_line(App& app, float x, float& y, const std::string& text, float r,
+              float g, float b) {
+    constexpr float kDbgScale = 0.30f;
+    app.draw_text(x + 1.0f, y + 1.0f, text, kDbgScale, 0.0f, 0.0f, 0.0f);
+    app.draw_text(x, y, text, kDbgScale, r, g, b);
+    y += 13.0f;
+}
+
+std::string fmt(const char* f, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, f);
+    std::vsnprintf(buf, sizeof(buf), f, ap);
+    va_end(ap);
+    return std::string(buf);
+}
+
+}  // namespace
+
+void draw_debug_overlay(App& app) {
+    DebugOverlay& d = DebugOverlay::get();
+    if (!d.any()) return;
+
+    // The live fight (null on any non-fight screen).
+    FightDebugSnapshot f;
+    if (app.screens().top() != nullptr &&
+        app.screens().current_id() == kScreenFight) {
+        f = static_cast<FightScreen*>(app.screens().top())->debug_snapshot();
+    }
+
+    float left = 8.0f;
+    float right = static_cast<float>(app.view_w()) - 340.0f;
+    float yl = 8.0f;
+    float yr = 8.0f;
+    const float vh = static_cast<float>(app.view_h());
+
+    // 1: AI (above the enemy in spirit: name/value pairs, left column top).
+    if (d.on[1]) {
+        float y = yl;
+        dbg_line(app, left, y, "[1] AI  (enemy)", 1.0f, 0.9f, 0.3f);
+        if (f.valid) {
+            dbg_line(app, left, y, fmt("tactic_type=%d", f.tactic_type), 0.8f, 1.0f, 0.8f);
+            dbg_line(app, left, y, fmt("branch=%s stage=%s fk=%d", f.branch.c_str(), f.stage.c_str(), f.fk), 0.8f, 1.0f, 0.8f);
+            dbg_line(app, left, y, fmt("aqa=%d wb=%d gate=%d", f.aqa, f.wb, f.gate ? 1 : 0), 0.8f, 1.0f, 0.8f);
+            dbg_line(app, left, y, fmt("chosen=%s", f.chosen.empty() ? "(none)" : f.chosen.c_str()), 0.8f, 1.0f, 0.8f);
+            dbg_line(app, left, y, fmt("dist=%.1f enemy=(%.1f,%.1f)", static_cast<double>(f.dist), static_cast<double>(f.enemy_x), static_cast<double>(f.enemy_y)), 0.8f, 1.0f, 0.8f);
+        } else {
+            dbg_line(app, left, y, "(no fight)", 0.7f, 0.7f, 0.7f);
+        }
+        yl = y + 4.0f;
+    }
+
+    // 3: collision (intervals / block)
+    if (d.on[3]) {
+        float y = yl;
+        dbg_line(app, left, y, "[3] Collision", 1.0f, 0.7f, 0.4f);
+        if (f.valid) {
+            dbg_line(app, left, y, fmt("P iv=[%s] block=%d", f.iv_player.c_str(), f.block_p), 1.0f, 0.85f, 0.7f);
+            dbg_line(app, left, y, fmt("E iv=[%s] block=%d", f.iv_enemy.c_str(), f.block_e), 1.0f, 0.85f, 0.7f);
+        }
+        yl = y + 4.0f;
+    }
+
+    // 4: physics / ragdoll / cloth
+    if (d.on[4]) {
+        float y = yl;
+        dbg_line(app, left, y, "[4] Physics", 0.6f, 0.9f, 1.0f);
+        if (f.valid) {
+            dbg_line(app, left, y, fmt("rag=%d ragf=%d", f.rag ? 1 : 0, f.ragf), 0.7f, 0.95f, 1.0f);
+            dbg_line(app, left, y, fmt("cloth worst +%.1f %s", static_cast<double>(f.cloth_worst), f.cloth_edge.c_str()), 0.7f, 0.95f, 1.0f);
+        }
+        yl = y + 4.0f;
+    }
+
+    // 5: damage (for the final stats)
+    if (d.on[5]) {
+        float y = yr;
+        dbg_line(app, right, y, "[5] Damage", 1.0f, 0.5f, 0.5f);
+        if (f.valid) {
+            dbg_line(app, right, y, fmt("P hp=%.0f/%.0f  dealt=%.0f", static_cast<double>(f.hp_p), static_cast<double>(f.mhp_p), static_cast<double>(f.mhp_e - f.hp_e)), 1.0f, 0.75f, 0.75f);
+            dbg_line(app, right, y, fmt("E hp=%.0f/%.0f  dealt=%.0f", static_cast<double>(f.hp_e), static_cast<double>(f.mhp_e), static_cast<double>(f.mhp_p - f.hp_p)), 1.0f, 0.75f, 0.75f);
+        }
+        yr = y + 4.0f;
+    }
+
+    // 6: timing
+    if (d.on[6]) {
+        float y = yr;
+        dbg_line(app, right, y, "[6] Fight", 0.7f, 1.0f, 0.7f);
+        if (f.valid) {
+            dbg_line(app, right, y, fmt("frame=%d phase=%d round=%d timer=%d", f.frame, f.phase, f.round, f.timer), 0.8f, 1.0f, 0.8f);
+            dbg_line(app, right, y, fmt("taps=%d screen=%d depth=%zu", f.taps, static_cast<int>(app.screens().current_id()), app.screens().stack().size()), 0.8f, 1.0f, 0.8f);
+        }
+        yr = y + 4.0f;
+    }
+
+    // 7: save
+    if (d.on[7]) {
+        float y = yr;
+        dbg_line(app, right, y, "[7] Save", 1.0f, 0.9f, 0.5f);
+        try {
+            const sf2::app::WarriorSave w = app.save().load();
+            dbg_line(app, right, y, fmt("money=%lld level=%d weapon=%s", static_cast<long long>(w.money), w.level, w.weapon.c_str()), 1.0f, 0.95f, 0.7f);
+        } catch (const std::exception&) {
+            dbg_line(app, right, y, "(no save)", 0.7f, 0.7f, 0.7f);
+        }
+        yr = y + 4.0f;
+    }
+
+    // 9: frame time (top-right corner, one line)
+    if (d.on[9]) {
+        static double ema_ms = 16.0;
+        static auto prev = std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(now - prev).count();
+        prev = now;
+        if (ms > 0.0 && ms < 1000.0) ema_ms = ema_ms * 0.9 + ms * 0.1;
+        float y = yr;
+        dbg_line(app, right, y, fmt("[9] %.2f ms  %.0f fps", ema_ms, ema_ms > 0.0 ? 1000.0 / ema_ms : 0.0), 0.9f, 0.9f, 1.0f);
+        yr = y + 4.0f;
+    }
+
+    // 2: quests — BOTTOM-LEFT (the user asked for the quest/dialog state there)
+    if (d.on[2]) {
+        float y = vh - 120.0f;
+        dbg_line(app, left, y, "[2] Quest", 0.7f, 1.0f, 1.0f);
+        try {
+            sf2::app::QuestEngine& q = app.quest_engine();
+            const std::size_t modal = q.has_dialog() ? q.modal_index() : 0;
+            std::string step;
+            try { step = app.save().load().story_step(); } catch (const std::exception&) { }
+            dbg_line(app, left, y, fmt("step=%s", step.c_str()), 0.8f, 1.0f, 1.0f);
+            dbg_line(app, left, y, fmt("dialogs=%zu modal_i=%zu%s", q.dialog_count(), modal, q.has_dialog() ? " (BLOCKING)" : ""), 0.8f, 1.0f, 1.0f);
+            if (q.has_dialog()) {
+                dbg_line(app, left, y, fmt("dlg=%s %s", q.dialog().type.c_str(), q.dialog().title.c_str()), 1.0f, 0.9f, 0.6f);
+            }
+        } catch (const std::exception&) {
+            dbg_line(app, left, y, "(quest engine unavailable)", 0.7f, 0.7f, 0.7f);
+        }
+    }
+
+    // 8: screens (id + stack depth), right column bottom
+    if (d.on[8]) {
+        float y = vh - 60.0f;
+        dbg_line(app, right, y, fmt("[8] screens id=%d depth=%zu", static_cast<int>(app.screens().current_id()), app.screens().stack().size()), 0.85f, 0.85f, 1.0f);
+    }
+}
+
+}  // namespace sf2::app

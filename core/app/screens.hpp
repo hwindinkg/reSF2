@@ -588,6 +588,47 @@ private:
 // player's keyboard input (Punch/Block/Forward/Back per the key_type enum)
 // and the enemy AI. When the battle ends it pushes the Results screen with
 // the winner + the reward.
+// [debug overlay] One flattened snapshot of the live fight, consumed by
+// `debug_overlay.hpp`. Fields mirror the oracle tracer's per-frame record, so
+// the same numbers can be shown (and diffed) on both sides.
+struct FightDebugSnapshot {
+    bool valid = false;
+    // 1: AI
+    std::string tactic;
+    int tactic_type = -1;
+    std::string branch;
+    std::string stage;
+    int fk = -1;
+    int aqa = 0;
+    int wb = 0;
+    bool gate = false;
+    std::string chosen;
+    float dist = 0.0f;
+    float enemy_x = 0.0f;
+    float enemy_y = 0.0f;
+    // 2/3: state + collision
+    std::string iv_player;
+    std::string iv_enemy;
+    int block_p = 0;
+    int block_e = 0;
+    // 4: physics
+    bool rag = false;
+    int ragf = 0;
+    float cloth_worst = 0.0f;
+    std::string cloth_edge;
+    // 5: damage
+    float hp_p = 0.0f;
+    float mhp_p = 0.0f;
+    float hp_e = 0.0f;
+    float mhp_e = 0.0f;
+    // 6: timing
+    int frame = 0;
+    int phase = 0;
+    int round = 0;
+    int timer = 0;
+    int taps = 0;
+};
+
 class FightScreen : public Screen {
 public:
     // `battle_name`/`location` = the stages.xml battle; `reward_money`/
@@ -606,6 +647,9 @@ public:
     ~FightScreen() override;
 
     ScreenId id() const override { return kScreenFight; }
+
+    // [debug overlay] See `FightDebugSnapshot`.
+    FightDebugSnapshot debug_snapshot() const;
 
     void update_impl(float dt) override;
     void render_impl(App& app) override;

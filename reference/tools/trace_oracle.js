@@ -1476,10 +1476,105 @@
     return { xU: null, NF: null };
   }
 
+  /* ================= 12. Debug overlay (oracle side) =================
+   * Same panels as the port's `debug_overlay.hpp`, toggled by digit keys 1..9
+   * (0 clears), so a divergence can be read on both sides. Data comes from the
+   * same readers the trace emits (AI branch/zone, chances, block state, dialog
+   * queue, physics), so the panels show exactly what the log records.
+   */
+  var dbgOverlay = { on: {}, el: null, y: 0 };
+
+  function dbgInit() {
+    try {
+      if (dbgOverlay.el) return;
+      var el = document.createElement("div");
+      el.id = "__orDbg";
+      el.style.cssText = "position:fixed;left:0;top:0;z-index:2147483647;" +
+        "font:12px/13px monospace;color:#cfe;text-shadow:0 0 2px #000,1px 1px 0 #000;" +
+        "pointer-events:none;white-space:pre;padding:4px;background:rgba(0,0,0,0.25)";
+      document.body.appendChild(el);
+      dbgOverlay.el = el;
+      window.addEventListener("keydown", function (ev) {
+        var k = ev.key;
+        if (k >= "0" && k <= "9") {
+          var d = k.charCodeAt(0) - 48;
+          if (d === 0) dbgOverlay.on = {};
+          else dbgOverlay.on[d] = !dbgOverlay.on[d];
+          ev.preventDefault();
+        }
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function dbgLine(out, txt) { out.push(txt); }
+
+  function dbgTick() {
+    dbgInit();
+    var el = dbgOverlay.el;
+    if (!el) return;
+    var any = false;
+    for (var i = 1; i < 10; i++) if (dbgOverlay.on[i]) any = true;
+    if (!any) { if (el.textContent !== "") el.textContent = ""; return; }
+    var fight = or.fight;
+    if (!fight) { el.textContent = "(no fight)"; return; }
+    var me = fighterAt(fight, "Me"), en = fighterAt(fight, "Enemy");
+    var side = aiSide(fight), de = deOfLabel(fight, side);
+    var out = [];
+    function n6(v) { return v == null ? "-" : (Math.round(v * 1e5) / 1e5); }
+    if (dbgOverlay.on[1]) {
+      dbgLine(out, "[1] AI (" + side + ")");
+      dbgLine(out, " branch=" + (de ? de.fk : "?") + " zone=" + (de ? de.aqa : "?") +
+        " stage=" + (or.lastStage || "-"));
+      dbgLine(out, " chosen=" + (or.lastMove[side] || "(none)") +
+        " cands=" + (or.lastRandom[side] ? or.lastRandom[side].n : 0));
+      try {
+        var ch = chancesOf(de);
+        dbgLine(out, " CZ=" + n6(ch.CZ) + " bda=" + n6(ch.bda) + " tba=" + n6(ch.tba));
+      } catch (e) { /* ignore */ }
+    }
+    if (dbgOverlay.on[3]) {
+      dbgLine(out, "[3] Collision");
+      var bMe = blockInfo(me), bEn = blockInfo(en);
+      dbgLine(out, " P block=" + bMe.a + " iv=" + (me && me.P0 ? "?" : "?"));
+      dbgLine(out, " E block=" + bEn.a);
+    }
+    if (dbgOverlay.on[4]) {
+      dbgLine(out, "[4] Physics");
+      var m = me && me.oa && me.oa.Va ? me.oa.Va.all : null;
+      var best = 0, name = "-";
+      try {
+        var js = me.Nd && me.Nd.oa ? me.Nd.oa.Nl.all : null;
+        if (js) {
+          for (var q = 0; q < js.length; q++) {
+            var j = js[q], A = j.sx, B = j.Zs;
+            if (!A || !B || !A.ma || !B.ma) continue;
+            var dx = A.ma.x - B.ma.x, dy = A.ma.y - B.ma.y;
+            var ex = Math.sqrt(dx * dx + dy * dy) - j.length;
+            if (ex > best) { best = ex; name = (A.name || "?") + "->" + (B.name || "?"); }
+          }
+        }
+      } catch (e) { /* ignore */ }
+      dbgLine(out, " cloth worst +" + (Math.round(best * 10) / 10) + " " + name);
+      dbgLine(out, " nk=" + (me.Nd && me.Nd.nk ? 1 : 0) + " bodies=" + (m ? m.length : 0));
+    }
+    if (dbgOverlay.on[6]) {
+      dbgLine(out, "[6] Fight");
+      dbgLine(out, " frame=" + frameNo() + " phase=" + fight.eu +
+        " round=" + (fight.round ? fight.round.round : "?"));
+    }
+    if (dbgOverlay.on[5]) {
+      dbgLine(out, "[5] Damage");
+      dbgLine(out, " Me hp=" + (me && me.parameters ? me.parameters.gd : "?"));
+      dbgLine(out, " En hp=" + (en && en.parameters ? en.parameters.gd : "?"));
+    }
+    el.textContent = out.join("\n");
+  }
+
   function oracleTick() {
     /* After finish: stay silent so the tail (frames past the done boundary,
      * whose count depends on poll timing) cannot pollute the trace. */
     if (window.__oracleDone) return;
+    try { dbgTick(); } catch (eDbg) { /* ignore */ }
     var fight = fightObj();
     if (!fight) return;
     or.fight = fight;

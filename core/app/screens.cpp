@@ -13374,6 +13374,83 @@ void FightScreen::enable_pose_dump(const std::string& path, int frames) {
 
 // [trace, state harness] Arms the FightController's per-frame STATE dump (the
 // full fight-state JSONL the oracle's `{"t":"state"}` line is diffed against).
+// [debug overlay] Flatten the live fight into the panel snapshot (see
+// `FightDebugSnapshot`). Read-only: no draws, no state changes.
+FightDebugSnapshot FightScreen::debug_snapshot() const {
+    FightDebugSnapshot d;
+    if (fight_ == nullptr) return d;
+    d.valid = true;
+    d.frame = fight_->frame();
+    d.phase = fight_->phase();
+    d.round = fight_->round().number;
+    d.timer = fight_->round().time_nf;  // `Sf.iPa` timer, public
+    const sf2::scene::FightFighter& p = fight_->player();
+    const sf2::scene::FightFighter& e = fight_->enemy();
+    d.hp_p = p.hp;
+    d.mhp_p = p.max_hp;
+    d.hp_e = e.hp;
+    d.mhp_e = e.max_hp;
+    d.block_p = p.fighter.has_block() ? 1 : 0;
+    d.block_e = e.fighter.has_block() ? 1 : 0;
+    d.taps = p.fighter.buffered_tap_count();
+    d.dist = std::fabs(e.fighter.world_x() - p.fighter.world_x());
+    d.enemy_x = e.fighter.world_x();
+    d.enemy_y = e.fighter.world_y();
+    d.rag = e.fighter.ragdoll_active();
+    d.ragf = e.fighter.ragdoll_frame_count();
+    auto join_iv = [](const sf2::scene::Fighter& f) {
+        std::string out;
+        for (const std::string& n : f.active_intervals()) {
+            if (!out.empty()) out += ",";
+            out += n;
+        }
+        return out;
+    };
+    d.iv_player = join_iv(p.fighter);
+    d.iv_enemy = join_iv(e.fighter);
+    if (e.ai != nullptr) {
+        const sf2::scene::AiController::AiDebug& a = e.ai->last_debug();
+        d.tactic_type = e.ai->tactic_type();
+        d.branch = a.branch != nullptr ? a.branch : "?";
+        d.fk = a.fk;
+        d.aqa = a.aqa;
+        d.wb = a.wb;
+        d.gate = a.gate;
+        d.stage = e.ai->last_stage();
+        d.chosen = e.last_decision;
+    }
+    // Worst stretched cloth edge of the enemy model (the shop/profile "leg
+    // mesh" metric, shown live here so both sides can compare the same number).
+    {
+        const std::vector<float>& pos = e.fighter.positions();
+        const sf2::scene::Model& m = e.fighter.model();
+        float worst = 0.0f;
+        std::string edge;
+        for (const sf2::scene::EdgeDef& ed : m.edges) {
+            const int i1 = m.bone_by_name(ed.end1);
+            const int i2 = m.bone_by_name(ed.end2);
+            if (i1 < 0 || i2 < 0) continue;
+            if (!m.bones[static_cast<std::size_t>(i1)].cloth &&
+                !m.bones[static_cast<std::size_t>(i2)].cloth) {
+                continue;
+            }
+            const std::size_t a1 = static_cast<std::size_t>(i1) * 2;
+            const std::size_t a2 = static_cast<std::size_t>(i2) * 2;
+            if (a1 + 1 >= pos.size() || a2 + 1 >= pos.size()) continue;
+            const float dx = pos[a1] - pos[a2];
+            const float dy = pos[a1 + 1] - pos[a2 + 1];
+            const float ex = std::sqrt(dx * dx + dy * dy) - ed.length;
+            if (ex > worst) {
+                worst = ex;
+                edge = ed.end1 + "->" + ed.end2;
+            }
+        }
+        d.cloth_worst = worst;
+        d.cloth_edge = edge;
+    }
+    return d;
+}
+
 void FightScreen::enable_state_dump(const std::string& path, int frames) {
     if (fight_ != nullptr) {
         fight_->set_state_dump(path, frames);
