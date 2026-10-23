@@ -66,16 +66,18 @@ def norm(v):
     return v
 
 
-def key_of_oracle(d):
+def key_of_oracle(d, swap=False):
     blk = d.get("block_state") or {}
-    # The oracle's `Me`/`Enemy` are the two sides of the JS fight; the port's
-    # `enemy_` is the AI fighter, which the JS calls `Enemy` (`ai_side`).
+    # The two tracers label the sides oppositely: the port's `Me`/`player_` is
+    # the oracle tracer's `Enemy` (verified on survival: the same move + `af`
+    # on both). `swap` selects that mapping; without it the raw labels are used.
+    key, other = ("me", "enemy") if not swap else ("enemy", "me")
     return {
         "fk": norm(d.get("ai_branch")),
         "aqa": norm(d.get("ai_zone")),
         "chosen": norm(d.get("chosen_move")),
-        "block": norm(blk.get("enemy")),
-        "block_p": norm(blk.get("me")),
+        "block": norm(blk.get(other)),
+        "block_p": norm(blk.get(key)),
     }
 
 
@@ -123,6 +125,9 @@ def main() -> int:
     ap.add_argument("oracle")
     ap.add_argument("--oracle-state", default="",
                     help="oracle_state.jsonl (positions) for alignment")
+    ap.add_argument("--swap", action="store_true",
+                    help="map port Me to the oracle tracer's Enemy (the "
+                         "tracers label the sides oppositely)")
     ap.add_argument("--label", default="")
     ap.add_argument("--report", default="")
     a = ap.parse_args()
@@ -162,7 +167,7 @@ def main() -> int:
             score = 0
             for p in port:
                 o = obf.get(p.get("f", 0) + off)
-                if o is not None and key_of_port(p)["fk"] == key_of_oracle(o)["fk"]:
+                if o is not None and key_of_port(p)["fk"] == key_of_oracle(o, a.swap)["fk"]:
                     score += 1
         if best[0] is None or score > best[0]:
             best = (score, off)
@@ -180,7 +185,7 @@ def main() -> int:
         if o is None:
             continue
         compared += 1
-        kp, ko = key_of_port(p), key_of_oracle(o)
+        kp, ko = key_of_port(p), key_of_oracle(o, a.swap)
         bad = []
         for k in FIELDS:
             if kp[k] != ko[k]:

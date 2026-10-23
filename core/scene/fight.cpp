@@ -9250,8 +9250,20 @@ void FightController::dump_state_frame() {
         const std::set<std::string>& ivs = f.active_intervals();
         std::size_t k = 0;
         for (const std::string& n : ivs) {
+            // The JS `Te.xj` carries the RAW interval name (`""` when the XML
+            // has no `<Name>`); the port's internal key is the placeholder
+            // "type<N>" (fighter.cpp). Emit "" so the two traces compare
+            // literally (`['',5]` vs `['type5',5]` was pure dump noise).
+            std::string nm = n;
+            if (nm.size() > 4 && nm.compare(0, 4, "type") == 0) {
+                bool digits = true;
+                for (std::size_t q = 4; q < nm.size(); ++q) {
+                    if (nm[q] < '0' || nm[q] > '9') { digits = false; break; }
+                }
+                if (digits) nm.clear();
+            }
             std::fprintf(state_dump_file_, "%s[\"%s\",%d]", k == 0 ? "" : ",",
-                         n.c_str(), f.active_interval_type(n));
+                         nm.c_str(), f.active_interval_type(n));
             ++k;
         }
         std::fprintf(state_dump_file_, "]}");
