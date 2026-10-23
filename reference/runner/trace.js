@@ -843,6 +843,89 @@ function ensureHooks(fight) {
     }
   }
 
+  /* ---------- debug overlay (oracle side) ----------
+   * Mirrors the port's `core/app/debug_overlay.hpp` panels with the fields this
+   * tracer already records, so a divergence can be READ on both sides while
+   * the oracle runs. Digit keys 1..9 toggle a panel, 0 clears all:
+   *   2 quests/screens (bottom-left)  3 collision (block + intervals)
+   *   5 damage (HP)                   6 fight (frame/phase/round/timer)
+   *   8 screen stack                  9 fps
+   * The AI panel (1) lives in `reference/tools/trace_oracle.js`, which reads
+   * the AI branch/zone/chosen move; this tracer does not collect those.
+   * Display-only: wrapped in try/catch, never touches the trace stream. */
+  var DBG = { on: {}, el: null, frames: 0, t0: 0 };
+
+  function dbgInit() {
+    if (DBG.el) return;
+    if (typeof document === "undefined" || !document.body) return;
+    var el = document.createElement("div");
+    el.id = "__trDbg";
+    el.style.cssText = "position:fixed;left:0;top:0;z-index:2147483647;" +
+      "font:12px/13px monospace;color:#cfe;text-shadow:0 0 2px #000,1px 1px 0 #000;" +
+      "pointer-events:none;white-space:pre;padding:4px;background:rgba(0,0,0,0.22)";
+    document.body.appendChild(el);
+    DBG.el = el;
+    window.addEventListener("keydown", function (ev) {
+      var k = ev.key;
+      if (k >= "0" && k <= "9") {
+        var d = k.charCodeAt(0) - 48;
+        if (d === 0) DBG.on = {};
+        else DBG.on[d] = !DBG.on[d];
+        ev.preventDefault();
+      }
+    });
+  }
+
+  function dbgTick(st, fight) {
+    dbgInit();
+    if (!DBG.el) return;
+    var any = false;
+    for (var i = 1; i < 10; i++) if (DBG.on[i]) any = true;
+    if (!any) { if (DBG.el.textContent !== "") DBG.el.textContent = ""; return; }
+    var out = [];
+    var me = st.fighters[0], en = st.fighters[1];
+    function push(s) { out.push(s); }
+    if (DBG.on[2]) {
+      var stack = [];
+      try { stack = uiStack() || []; } catch (e) { /* ignore */ }
+      var names = [];
+      for (var s = 0; s < stack.length; s++) names.push(stack[s].name || stack[s].id);
+      push("[2] Quest/screens: " + names.join(" > "));
+      push("  dialogs: (see the port panel 2 / Sensei queue)");
+    }
+    if (DBG.on[3]) {
+      push("[3] Collision");
+      push("  P block=" + me.block + " iv=" + JSON.stringify(me.iv));
+      push("  E block=" + en.block + " iv=" + JSON.stringify(en.iv));
+    }
+    if (DBG.on[5]) {
+      push("[5] Damage");
+      push("  P hp=" + me.hp + "/" + me.mhp + "  dealt=" + (me.mhp - me.hp).toFixed(2));
+      push("  E hp=" + en.hp + "/" + en.mhp + "  dealt=" + (en.mhp - en.hp).toFixed(2));
+    }
+    if (DBG.on[6]) {
+      push("[6] Fight f=" + st.f + " phase=" + st.phase + " round=" + st.round +
+           " timer=" + st.timer);
+      push("  P move=" + me.move + " af=" + me.af + " rag=" + me.rag);
+      push("  E move=" + en.move + " af=" + en.af + " rag=" + en.rag);
+    }
+    if (DBG.on[8]) {
+      var stack2 = [];
+      try { stack2 = uiStack() || []; } catch (e) { /* ignore */ }
+      push("[8] screens: " + stack2.map(function (s) {
+        return (s.name || "?") + "/" + s.state;
+      }).join(","));
+    }
+    if (DBG.on[9]) {
+      DBG.frames++;
+      var now = Date.now();
+      if (!DBG.t0) DBG.t0 = now;
+      var dt = (now - DBG.t0) / 1000;
+      if (dt > 0) push("[9] " + (DBG.frames / dt).toFixed(1) + " fps (trace frames)");
+    }
+    DBG.el.textContent = out.join("\n");
+  }
+
   /* ---------- per-tick driver ---------- */
 
   function afterFrame() {
@@ -872,7 +955,9 @@ function ensureHooks(fight) {
     } catch (e) { /* ignore */ }
     emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
-    console.log(JSON.stringify(fightState(fight)));
+    var stDbg = fightState(fight);
+    console.log(JSON.stringify(stDbg));
+    try { dbgTick(stDbg, fight); } catch (eDbg) { /* overlay is display-only */ }
     emitAudio(fight);
     tr.frameCount++;
     captureClips(fight);

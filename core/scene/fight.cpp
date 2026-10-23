@@ -9159,6 +9159,34 @@ void FightController::dump_state_frame() {
     }
 
     const int nf = hud_timer();
+    // [debug log] `SF2_DEBUG_LOG=1`: one JSON line per LIVE fight frame (the
+    // same cadence as the oracle's `t:"oracle"` rows), with the panel fields
+    // so the two sides diff mechanically (reference/tools/compare_debug.py).
+    // The oracle's role map puts the port's `Enemy` in `Me`, so its
+    // `block_state.me` is compared against `block_e` here.
+    if (std::getenv("SF2_DEBUG_LOG") != nullptr) {
+        const AiController::AiDebug& a = enemy_.ai != nullptr
+                                             ? enemy_.ai->last_debug()
+                                             : AiController::AiDebug{};
+        std::fprintf(stdout,
+                     "[dbg] {\"t\":\"dbg\",\"f\":%d,\"phase\":%d,\"round\":%d,"
+                     "\"timer\":%d,\"ai_branch\":%d,\"ai_zone\":%d,\"fk\":%d,"
+                     "\"aqa\":%d,\"wb\":%d,\"gate\":%d,\"chosen\":\"%s\","
+                     "\"hp_p\":%.3f,\"hp_e\":%.3f,\"block_p\":%d,\"block_e\":%d,"
+                     "\"rag\":%d,\"ragf\":%d,\"sep\":%.4f}\n",
+                     frame_, phase(), round_.number, round_.time_nf,
+                     enemy_.ai != nullptr ? a.fk : -1, a.aqa, a.fk, a.aqa, a.wb,
+                     a.gate ? 1 : 0, enemy_.last_decision.c_str(),
+                     static_cast<double>(player_.hp),
+                     static_cast<double>(enemy_.hp),
+                     player_.fighter.has_block() ? 1 : 0,
+                     enemy_.fighter.has_block() ? 1 : 0,
+                     enemy_.fighter.ragdoll_active() ? 1 : 0,
+                     enemy_.fighter.ragdoll_frame_count(),
+                     static_cast<double>(std::fabs(
+                         enemy_.fighter.world_x() - player_.fighter.world_x())));
+        std::fflush(stdout);
+    }
     std::fprintf(state_dump_file_,
                  "{\"t\":\"state\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"
                  "\"nf\":%d,\"result\":%d,"

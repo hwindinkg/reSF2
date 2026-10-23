@@ -947,3 +947,22 @@ KeyPressed-мувов, а `DK` получает 30. Значит 15 отсека
 Проверка: снимок `reference/extracted/scene/direct_fight.png` с
 `SF2_DEBUG_PANELS=123456789` показывает все панели (AI type=2, cloth worst +43.6,
 quest step=END, save money=0 level=1 weapon=Fists, 3.87 ms / 259 fps).
+
+
+## Сверка панелей с оракулом (`compare_debug.py`) — 23.10
+`SF2_DEBUG_LOG=1` печатает в порте одну строку `[dbg]` на КАЖДЫЙ живой кадр боя
+из `FightController::dump_state_frame` (та же частота, что у оракульных
+`{"t":"oracle"}`), поля: f/phase/round/timer, ai_branch/ai_zone/fk/aqa/wb/gate,
+chosen, hp обоих, block обоих, rag/ragf, sep (|ex-px|).
+Инструмент: `python reference/tools/compare_debug.py PORT_LOG ORACLE_CONSOLE
+[--oracle-state oracle_state.jsonl]`. Выравнивание — по `sep` (при наличии
+state-трейса оракула), иначе по совпадению `ai_branch`; отчёт: число
+расхождений по каждому полю + первые 10 кадров.
+Замер на survival (порт 1268 кадров, оракул 3109 строк, offset −9):
+`fk=907, aqa=404, chosen=913, block=506, block_p=581, total=3311`,
+средняя ошибка выравнивания по `sep` = 110.6 px — то есть бой расходится не
+только по ИИ, но и по позициям (это и есть 863 в гейте).
+Побочный вывод: у порта `has_block()` = 1 у ОБОИХ бойцов с первых же кадров
+(интервал `type5` в `FistsStartStance-Left`), оракул на тех же кадрах даёт 0.
+Гейт это тоже видит (`nat f=212 ora f=353: fighters.Enemy.block`) — открытый
+баг, записан в таблицу ниже.
