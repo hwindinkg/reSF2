@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-23T08:56:56",
+    "updated": "2026-10-23T09:41:54",
     "mode": "only"
   },
   "gates": {
@@ -177,6 +177,12 @@
       "commit": "53840b3e",
       "reason": "new gate (bug Q): the winner's EndStance Win_<weapon> must actually start. RED on the pre-fix log (0 '[stance] ... EndStance move=' lines), GREEN after the retry fix (Win_Fists/Win_Knives).",
       "date": "2026-10-23T08:56:56"
+    },
+    "equip-fight": {
+      "metric": 0,
+      "commit": "c7c17fd9",
+      "reason": "new gate: the PLAYER's move-list subtype/stance must follow the equipped Weapon slot (JS ra.Hza L684-685 + Fd L808). RED before the fix: the subtype was the constant 'Fists' (137 fists moves even with WEAPON_KNIVES equipped, the reported bug); GREEN now: subtype=Knives, KnivesStartStance present, 140 moves.",
+      "date": "2026-10-23T09:41:54"
     }
   }
 }

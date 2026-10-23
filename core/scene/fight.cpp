@@ -456,16 +456,24 @@ void FightController::init_locks(
     // round via `DKa`; the once-only groups' picks are cached across rounds.
     random_pick_.clear();
 
-    // NOTE (W2 blocker): the move-LIST weapon subtype stays "Fists". The JS
-    // derives it from the equipped weapon (`xc.cM` L809-810 -> `ra.Hza`
-    // L684-685), so a knives fighter should select the Knives moves
-    // (`KnivesStartStanceIdle`, `KnivesSlash`, ...). Deriving it here makes
-    // that JS-correct change but breaks the `--verify-input` probe
-    // expectations, which are built on the shipped Fists loadout
-    // (reference/tools/input_phase1.txt): 7/7 -> 5/7. The gate fix belongs in
-    // the probe harness (app/game/main.cpp), outside the owned file set.
+    // JS `ra.Hza` L684-685 + `Fd` L808: the move-LIST subtype comes from the
+    // fighter's OWN equipped Weapon slot (`SubType`), not from a constant. The
+    // old hardcoded "Fists" made a player who BOUGHT and equipped knives keep
+    // the fists stance/idle animations in the fight (reported: "купил ножи, в
+    // бою остались кулаки") — `player_owned` (the save's six equipped slots)
+    // carried the weapon, but the stance subtype never followed it.
+    std::string player_subtype = "Fists";
+    for (const sf2::scene::OwnedItem& o : player_owned) {
+        if (o.type == "Weapon" && !o.name.empty()) {
+            player_subtype = o.subtype.empty() ? o.name : o.subtype;
+            break;
+        }
+    }
+    std::fprintf(stdout, "[fight] player equip subtype='%s' owned=%zu\n",
+                 player_subtype.c_str(), player_owned.size());
+    std::fflush(stdout);
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
-                           "Fists", player_owned, false, false, player_model,
+                           player_subtype, player_owned, false, false, player_model,
                            merged_perk_names(perks.learned_refs, perks.player_refs),
                            merged_perk_names(perks.learned_refs, perks.player_refs));
     // JS `ur` L194-195 gates the enemy: NotAI -> no AiController, and

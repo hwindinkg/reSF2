@@ -27,6 +27,7 @@
 | O | dojo: спавн манекена | `Me`-сторона манекена: `y` на 1.05 юнита выше/ниже | поза рэгдолла; кости сравнивает `compare_pose.py` | `diff:dojo-demo` (2: `Enemy.y`, `sep_x` только на f=0) | OPEN (мелочь) |
 | P | (измерение, не баг) абсолютный `x` | оракул отдаёт **позу тела** (со Shift локации), порт — логический `x`; смещение константно и одинаково для обоих бойцов (dojo 0.000, moon 0.598, arena/autumn 22.211) | сравнивать инвариант `sep_x` (расстояние по x) | все `diff:*` — `fighters.*.x` переведён в INFORMATIONAL, `sep_x` считается | решено в харнессе (комментарий в `compare_state.py`) |
 | Q | Конец боя: у победителя не играет EndStance/`Win_*` | победитель стоит в стойке (idle), победа не анимируется | `Win_Fists`/`Win_Knuckles` (moves.xml: `<RoundStageStart Name="EndStance"/>`, условия `RoundResult Victory` + `RoundStage EndStance` + `CurrentInterval Uninterrupt Not=1`); JS пере-выбирает EndStance-мув на каждом кадре | `end-stance-win` (0) | GREEN — выбор ретраится каждый кадр; было 0 строк `[stance] ... EndStance move=` во ВСЕХ логах харнесса |
+| R | Купил ножи, в бою кулаки | после покупки/экипировки оружия боец дерётся кулаками (стойка и мувлист Fists) | `ra.Hza` L684-685 + `Fd` L808: подтип мувлиста = `SubType` надетого Weapon-слота; `parameters.jt()` — шесть надетых слотов | `equip-fight` (0) | GREEN — подтип игрока берётся из его экипировки (`player_subtype`), было жёстко `"Fists"`; на сейве с WEAPON_KNIVES: `subtype=Knives`, 140 мувов, `KnivesStartStance*` |
 
 ## Чем это ловится автоматически
 
@@ -752,3 +753,25 @@ Tabular-ветке строит кандидатов из ключей слот�
 `F2440 NAME_SHIN EndStance move=Win_Knives`, `F2662 Player EndStance move=Win_Fists`
 и в кадрах `P:0 (Win_Fists)` / `E:0 (Loss_1)`. Новый гейт `end-stance-win`:
 на СТАРОМ логе 1 (FAIL), на новом 0 (PASS) — один и тот же парсер. `--full` exit 0.
+
+
+### R — купил ножи, в бою остались кулаки (ИСПРАВЛЕНО, гейт `equip-fight`)
+Симптом (сообщение пользователя): в магазине куплены ножи, но в бою персонаж
+бьёт кулаками.
+Причина (код, не догадка): `FightController::init_locks` строил ИГРОКА с
+жёстко зашитым подтипом `"Fists"` (`fight.cpp`, комментарий «W2 blocker»):
+`make_fighter(player_name, true, ..., "Fists", player_owned, ...)`. Оружие в
+сейве/экипировке уже было (`player_owned` = шесть надетых слотов), и `wield:`
+печатал `WEAPON_KNIVES`, но подтип мувлиста/стойки оставался Fists — поэтому
+вместо `KnivesStartStance*`/`KnivesSlash` играли `FistsStartStance*` и кулаки.
+JS (`ra.Hza` L684-685 + `Fd` L808) берёт подтип из надетого Weapon-слота.
+Фикс: подтип игрока вычисляется из его `player_owned` (Weapon-слот, `SubType`),
+как уже делалось для врага (`enemy_weapon_subtype`).
+Проверка (гейт `equip-fight`): `--fight --loadout SAVE --equip-probe
+WEAPON_KNIVES --headless 40` — реальный путь резолва из сейва (`--loadout SAVE`
+= `pending_battle.owned` пуст, как при запуске с карты), `--equip-probe`
+записывает оружие в сейв после baseline драйвера. Лог:
+`[probe] equip -> WEAPON_KNIVES`, `player equip subtype='Knives'`,
+`player move list (140 moves)`, в списке `KnivesStartStanceIdle/Left/Right`.
+Парсер на старых логах (до правки, `ach_kickko.log`/`eq_fists.log`) = FAIL
+(нет якоря, а подтип был Fists). `--full` exit 0.

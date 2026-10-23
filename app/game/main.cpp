@@ -1207,6 +1207,11 @@ struct VerifyProbe {
 // (`owned_items`). The Weapon row's SubType is what the scene layer derives
 // the move-list subtype from (`Fd` L808, `I.vg` L2473).
 std::vector<sf2::scene::OwnedItem> loadout_owned(const std::string& weapon) {
+    // `--loadout SAVE`: resolve the player's kit from the SAVE (the real app
+    // path — the Map launch leaves `pending_battle().owned` empty and
+    // `FightScreen` reads the equipped slots). Drivers default to an explicit
+    // "Fists" loadout, which hid the save path entirely.
+    if (weapon == "SAVE") return {};
     if (weapon.empty()) return {};
     return {
         {"Skeleton", "Skeleton", "Skeleton"},
@@ -1869,6 +1874,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
+    // --equip-probe <item>: put <item> into the save's Weapon slot right after
+    // the driver baseline is written, so a `--fight` boot proves the PLAYER's
+    // stance/move list follows the equipped weapon (JS `ra.Hza` L684-685 +
+    // `Fd` L808). The reported bug: bought knives, but the fight kept fists.
+    std::string equip_probe_item;
     // --shop-tables-probe: re-parse internal_settings.xml and assert the
     // runtime <Attributes>/<BarScales> tables equal the shipped XML.
     bool shop_tables_probe = false;
@@ -2140,6 +2150,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             map_button_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
+        } else if (arg == "--equip-probe" && i + 1 < argc) {
+            equip_probe_item = argv[++i];
         } else if (arg == "--shop-tables-probe") {
             shop_tables_probe = true;
         } else if (arg == "--quest-action-probe") {
@@ -3331,9 +3343,25 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
     }
 
+    // [probe] `--equip-probe <item>`: equip a weapon on top of the driver
+    // baseline, so a `--fight` boot proves the PLAYER's stance/move list
+    // follows the save's Weapon slot (JS `ra.Hza` L684-685 + `Fd` L808 — the
+    // reported "купил ножи, в бою остались кулаки").
+    if (!equip_probe_item.empty()) {
+        try {
+            sf2::app::SaveSystem ss(save_path, save_path);
+            sf2::app::WarriorSave w = ss.load();
+            w.weapon = equip_probe_item;
+            ss.save(w);
+            std::fprintf(stdout, "[probe] equip -> %s\n", equip_probe_item.c_str());
+            std::fflush(stdout);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[probe] equip failed: %s\n", e.what());
+        }
+    }
+
     // `--fidelity-tour` captures the stock FRESH tutorial beats, so start the
-    // story at NotStarted BEFORE boot: the JS loads `quests.xml` with the
-    // `tutorial_quests.xml` include gated on `_$StoryTutorialStep != END`
+    // story at NotStarted BEFORE boot: the JS loads `quests.xml` with the    // `tutorial_quests.xml` include gated on `_$StoryTutorialStep != END`
     // (L2478) and the port's `QuestEngine::ensure_loaded` short-circuits on an
     // END step (L200) — once short-circuited the chain cannot be armed, so a
     // stale completed local save would make the tutorial steps stall. The

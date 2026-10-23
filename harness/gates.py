@@ -564,6 +564,25 @@ def p_total_divergences(text: str) -> tuple[int, str]:
     return n, f"{n} divergences"
 
 
+def p_equip_fight(text: str) -> tuple[int, str]:
+    """The PLAYER's stance/move list must follow the equipped Weapon slot.
+
+    `--fight --loadout SAVE --equip-probe WEAPON_KNIVES` equips knives in the
+    save and boots the real save-resolution path, so the reported
+    "купил ножи, в бою остались кулаки" is caught: the move-list subtype must
+    become `Knives` (JS `ra.Hza` L684-685 + `Fd` L808) and the knives stance
+    must be in the list.
+    """
+    m = _need(r"player equip subtype='([^']*)'", text)
+    if m.group(1) != "Knives":
+        return 1, "player move-list subtype='%s' (expected Knives)" % m.group(1)
+    if "KnivesStartStance" not in text:
+        return 1, "no KnivesStartStance in the move list (fists kept)"
+    n = re.search(r"player move list \((\d+) moves\)", text)
+    return 0, "subtype=Knives, KnivesStartStance present, %s moves" % (
+        n.group(1) if n else "?")
+
+
 def p_end_stance_win(text: str) -> tuple[int, str]:
     """The winner must START its `Win_<weapon>` EndStance move.
 
@@ -603,6 +622,7 @@ PARSERS = {
     "boss_hit": p_boss_hit,
     "kick_ko": p_kick_ko,
     "end_stance_win": p_end_stance_win,
+    "equip_fight": p_equip_fight,
     "cloth_hangs": p_cloth_hangs,
     "enemy_kit": p_enemy_kit,
     "banner_round": p_banner_round,
@@ -672,6 +692,13 @@ FLAG_GATES: list[Gate] = [
     Gate("enemy-kit", "gate", ("full",), "--fight", 300, parser="enemy_kit",
          args=("--battle", "Duel", "--zone", "ZONE_1", "--fight-ordinal", "0",
                "--location", "mountain", "--headless", "60")),
+    # The PLAYER's stance/move list must follow the equipped Weapon slot:
+    # buy knives -> equip -> fight. `--loadout SAVE` = the real app resolution
+    # path (the save's six equipped slots); `--equip-probe` writes the weapon
+    # after the driver baseline.
+    Gate("equip-fight", "gate", ("full",), "--fight", 300, parser="equip_fight",
+         args=("--loadout", "SAVE", "--equip-probe", "WEAPON_KNIVES",
+               "--headless", "40")),
     Gate("style-player-only", "gate", ("full",), "--kick-ko", 300,
          parser="style_player_only"),
     Gate("banner-round", "gate", ("full",), "--capture-idle-fight-at", 300,
