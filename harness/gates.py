@@ -564,6 +564,24 @@ def p_total_divergences(text: str) -> tuple[int, str]:
     return n, f"{n} divergences"
 
 
+def p_end_stance_win(text: str) -> tuple[int, str]:
+    """The winner must START its `Win_<weapon>` EndStance move.
+
+    `--kick-ko` fights to a KO, so the phase-3 EndStance pick must resolve for
+    the winner. Measured BEFORE the retry fix: ZERO `[stance] ... EndStance
+    move=` lines in the whole harness log set (the one-shot latch marked the
+    pick as done before it ran, and the winner's killing attack still held
+    `<CurrentInterval Uninterrupt/>`, which rejects every `Win_*`).
+    """
+    wins = re.findall(r"\[stance\] F\d+ (\S+) EndStance move=(Win_\w+)", text)
+    if not wins:
+        return 1, "no 'EndStance move=Win_*' line (winner never played)"
+    return 0, "%d win stance(s): %s" % (
+        len(wins),
+        ",".join(sorted({n for _, n in wins})),
+    )
+
+
 def p_ui_total(text: str) -> tuple[int, str]:
     """compare_ui.py: depth mismatch + per-entry mismatch + oracle-only."""
     dep = int(_need(r"matched transitions with depth mismatch:\s*(\d+)", text).group(1))
@@ -584,6 +602,7 @@ PARSERS = {
     "tape": p_tape,
     "boss_hit": p_boss_hit,
     "kick_ko": p_kick_ko,
+    "end_stance_win": p_end_stance_win,
     "cloth_hangs": p_cloth_hangs,
     "enemy_kit": p_enemy_kit,
     "banner_round": p_banner_round,
@@ -629,6 +648,11 @@ FLAG_GATES: list[Gate] = [
     Gate("headless-loop", "gate", ("full",), "--headless-loop", 700, parser="loop:13"),
     Gate("boss-hit-probe", "gate", ("full",), "--boss-hit-probe", 300, parser="boss_hit"),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
+    # The winner's EndStance `Win_<weapon>` animation (bug Q): `--kick-ko`
+    # fights to a KO, so the phase-3 pick must resolve and start the win clip.
+    # RED before the retry fix (0 `[stance] ... EndStance move=` lines).
+    Gate("end-stance-win", "gate", ("full",), "--kick-ko", 300,
+         parser="end_stance_win"),
     # The cloth edges of the preview model must stay near their rest
     # length (the bandage/leg mesh stretch).
     Gate("cloth-hangs", "gate", ("full",), "--fidelity-tour", 600,

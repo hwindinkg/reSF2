@@ -8720,7 +8720,6 @@ void FightController::update(float dt) {
                 // (anim back to `Loss_*`, no longer `Physical`), so `Loss_fall`
                 // was wrongly admitted (the reported "applied loose_fall").
                 if (!f->end_stance_selected) {
-                    f->end_stance_selected = true;
                     sf2::scene::FightContext esctx;
                     esctx.roll01 = [this]() { return draw01(); };
                     esctx.stage = sf2::scene::round_stage::end_stance;
@@ -8750,19 +8749,48 @@ void FightController::update(float dt) {
                     esctx.physics_frame = f->fighter.ragdoll_frame_count();
                     const sf2::scene::MoveDef* es = f->fighter.end_stance_move(esctx);
                     if (es != nullptr && f->fighter.ai_start_move(*es, esctx)) {
+                        f->end_stance_selected = true;
                         std::fprintf(stdout, "[stance] F%d %s EndStance move=%s\n",
                                      frame_, f->name.c_str(), es->name.c_str());
                         std::fflush(stdout);
+                    } else if (std::getenv("SF2_TRACE_STANCE") != nullptr) {
+                        std::string an;
+                        for (const std::string& n : esctx.anims_me) {
+                            an += n;
+                            an += ',';
+                        }
+                        std::fprintf(stdout,
+                                     "[stance] F%d %s EndStance MISS es=%s winner=%d "
+                                     "stage=%d victory=%d kh=%d anims=[%s]\n",
+                                     frame_, f->name.c_str(),
+                                     es != nullptr ? es->name.c_str() : "null",
+                                     f->is_winner ? 1 : 0,
+                                     static_cast<int>(esctx.stage),
+                                     esctx.round_victory ? 1 : 0,
+                                     esctx.round_result_set ? 1 : 0, an.c_str());
+                        std::fflush(stdout);
                     }
                 }
-                // JS `kg` (L387) `eu==3 && animEnded` -> `h4a` (`JJ=!0`): the
-                // clip-end edge of the EndStance move / knockdown chain. Once
-                // the EndStance pick has been attempted and the fighter holds no
-                // move, its KO/victory animation is done.
-                if (f->end_stance_selected && !f->fighter.playing()) {
+                // [FIX win animation] The pick is RETRIED every frame: the
+                // winner's killing attack still holds `<CurrentInterval
+                // Uninterrupt/>`, so `Win_Fists` is only admitted once that
+                // clip ends (measured: `CurrentInterval 'Uninterrupt' [!] ->
+                // FALSE` rejects every `Win_*` on the KO frame). The old
+                // one-shot latch set `end_stance_selected = true` BEFORE the
+                // pick, so a rejected first attempt lost the win animation
+                // forever — 0 `[stance] ... EndStance move=` lines in every
+                // harness log. The KO'd loser can never select (`Loss_fall`
+                // gates on `CurrentAnimation Physical Not=1`), so it counts as
+                // done when its knockdown chain stops playing.
+                if (!f->fighter.playing() &&
+                    (f->end_stance_selected || !f->is_winner)) {
                     stance_ended = true;
                 }
             }
+            // Safety net: never hold phase 3 forever if a fighter's win move is
+            // missing from its own list (the JS has no such timeout, but a hang
+            // is worse than an early transition).
+            if (end_stance_frames_ > 1800) stance_ended = true;
             rebuild_body(player_, enemy_);
             rebuild_body(enemy_, player_);
             // JS `Onb` (L411): `JJ && !xJ -> Ewb()` (L404, `h9=!0`), then the

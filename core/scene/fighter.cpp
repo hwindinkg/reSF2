@@ -407,10 +407,19 @@ const MoveDef* Fighter::stance_move(const std::vector<std::string>& templates,
 // EndStance and `ctx.round_victory` set to this fighter's `is_winner`.
 const MoveDef* Fighter::end_stance_move(FightContext& ctx) {
     std::vector<const MoveDef*> group;
+    std::string first_why;
+    const char* first_name = nullptr;
     for (const MoveDef* m : hb_) {
         if (m == nullptr) continue;
         if (m->template_tags.count("EndStance") == 0) continue;
-        if (!move_conditions_pass(*m, ctx, nullptr)) continue;
+        std::string why;
+        if (!move_conditions_pass(*m, ctx, &why)) {
+            if (first_why.empty()) {
+                first_why = m->name + ": " + why;
+                first_name = m->name.c_str();
+            }
+            continue;
+        }
         if (group.empty() || m->priority > group.front()->priority) {
             group.clear();
             group.push_back(m);
@@ -418,6 +427,21 @@ const MoveDef* Fighter::end_stance_move(FightContext& ctx) {
             group.push_back(m);
         }
     }
+    if (group.empty() && !first_why.empty() &&
+        std::getenv("SF2_TRACE_STANCE") != nullptr) {
+        std::fprintf(stdout, "[stance] EndStance reject %s\n", first_name);
+        std::size_t pos = 0;
+        while (pos < first_why.size()) {
+            const std::size_t nl = first_why.find('\n', pos);
+            const std::string ln = first_why.substr(
+                pos, nl == std::string::npos ? std::string::npos : nl - pos);
+            std::fprintf(stdout, "[stance-reject] %s\n", ln.c_str());
+            if (nl == std::string::npos) break;
+            pos = nl + 1;
+        }
+        std::fflush(stdout);
+    }
+    (void)first_name;
     return group.empty() ? nullptr : group.front();
 }
 

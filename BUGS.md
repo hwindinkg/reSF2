@@ -26,6 +26,7 @@
 | N | `y8a` (NoDoubles) | линейный сдвиг вместо пере-розыгрыша | пере-розыгрыш `Da.pg.jf()` | `diff:survival` (2649) | OPEN |
 | O | dojo: спавн манекена | `Me`-сторона манекена: `y` на 1.05 юнита выше/ниже | поза рэгдолла; кости сравнивает `compare_pose.py` | `diff:dojo-demo` (2: `Enemy.y`, `sep_x` только на f=0) | OPEN (мелочь) |
 | P | (измерение, не баг) абсолютный `x` | оракул отдаёт **позу тела** (со Shift локации), порт — логический `x`; смещение константно и одинаково для обоих бойцов (dojo 0.000, moon 0.598, arena/autumn 22.211) | сравнивать инвариант `sep_x` (расстояние по x) | все `diff:*` — `fighters.*.x` переведён в INFORMATIONAL, `sep_x` считается | решено в харнессе (комментарий в `compare_state.py`) |
+| Q | Конец боя: у победителя не играет EndStance/`Win_*` | победитель стоит в стойке (idle), победа не анимируется | `Win_Fists`/`Win_Knuckles` (moves.xml: `<RoundStageStart Name="EndStance"/>`, условия `RoundResult Victory` + `RoundStage EndStance` + `CurrentInterval Uninterrupt Not=1`); JS пере-выбирает EndStance-мув на каждом кадре | `end-stance-win` (0) | GREEN — выбор ретраится каждый кадр; было 0 строк `[stance] ... EndStance move=` во ВСЕХ логах харнесса |
 
 ## Чем это ловится автоматически
 
@@ -720,3 +721,34 @@ Tabular-ветке строит кандидатов из ключей слот�
 ВСЮ покадровую `Gc`-петлю (кандидаты `Gc.DK` + `Pkb` + `jL` + хвост, с её
 розыгрышами на каждом кадре) и оставить `de.ia` только для слотов. Откатил
 (`git checkout`), гейт снова 863, дерево чистое.
+
+
+### Q — конец боя: победитель не играл `Win_*` (ИСПРАВЛЕНО, гейт `end-stance-win`)
+Симптом: после боя победитель остаётся в `idle`/StartStance, победная анимация не
+запускается (подтверждено пользователем: «везде»).
+Доказательства ДО правки:
+- `0` строк `[stance] ... EndStance move=` во всех логах `.harness/**`;
+- `ach_kickko.log` F1800 (первый кадр phase=3): `P:1 (HighKick)`, F1860: `P:1 (idle)`.
+Цепочка причин (замер трассой `SF2_TRACE_STANCE=1`):
+1. `Fighter::end_stance_move` возвращал `nullptr` → `Win_*` не стартовал.
+2. Условия `Win_Fists` не проходили: `CurrentInterval 'Uninterrupt' [!] -> FALSE`
+   (победитель ещё в окне своего добивающего HighKick), а вторая ветка
+   `CurrentAnimation 'IdleStance'` = FALSE.
+3. Почему не проходили: выбор EndStance был ONE-SHOT — `end_stance_selected`
+   ставился в `true` ДО попытки, поэтому единственный неудачный кадр (в окне
+   Uninterrupt) навсегда лишал победителя победной анимации. JS пере-выбирает
+   мув на каждом кадре (событийный проход `Gc`), поэтому `Win_*` стартует сразу
+   после конца клипа добивания.
+4. Почему победитель оказывался в idle: клип атаки заканчивался, а
+   `end_stance_selected` уже был `true` → повтора не было.
+Фикс (`core/scene/fight.cpp`, фаза `end_stance`):
+- `end_stance_selected = true` ставится ТОЛЬКО после успешного `ai_start_move`;
+- выбор повторяется каждый кадр, пока не сработает;
+- «фаза закончена» = `!playing() && (end_stance_selected || !is_winner)`
+  (KO-проигравший не может выбрать `Loss_fall` — у него `Physical`, поэтому
+  считается завершённым, когда его цепочка падения доиграла);
+- страховка `end_stance_frames_ > 1800` (не висеть, если победного мува нет в списке).
+Проверка: `--kick-ko` даёт `[stance] F1788 Player EndStance move=Win_Fists`,
+`F2440 NAME_SHIN EndStance move=Win_Knives`, `F2662 Player EndStance move=Win_Fists`
+и в кадрах `P:0 (Win_Fists)` / `E:0 (Loss_1)`. Новый гейт `end-stance-win`:
+на СТАРОМ логе 1 (FAIL), на новом 0 (PASS) — один и тот же парсер. `--full` exit 0.

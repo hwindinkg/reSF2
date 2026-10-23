@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-22T20:54:42",
+    "updated": "2026-10-23T08:56:56",
     "mode": "only"
   },
   "gates": {
@@ -171,6 +171,12 @@
       "commit": "6c94c593",
       "reason": "NEW gate (not a relaxation): the full fresh tutorial chain (no seed) - training fight -> knives Shop quest -> Map, driven with real injected clicks; it is the direct regression test for the reported 'the quests stop after the knives' (currently 3 pass / 0 fail)",
       "date": "2026-10-22T16:14:46"
+    },
+    "end-stance-win": {
+      "metric": 0,
+      "commit": "53840b3e",
+      "reason": "new gate (bug Q): the winner's EndStance Win_<weapon> must actually start. RED on the pre-fix log (0 '[stance] ... EndStance move=' lines), GREEN after the retry fix (Win_Fists/Win_Knives).",
+      "date": "2026-10-23T08:56:56"
     }
   }
 }
