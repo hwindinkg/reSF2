@@ -2328,46 +2328,110 @@ void draw_debug_overlay(App& app) {
                  0.90f, 0.90f, 1.0f);
     }
 
-    // ---- layout: two top flows + two bottom anchors, no shared pixels ----
-    float left_y = kDbgEdge;
-    float right_y = kDbgEdge;
-
-    auto flow_left = [&](const DbgPanel& p) {
-        if (p.rows.empty()) return;
-        const float bottom = dbg_panel(app, p, kDbgEdge, left_y);
-        left_y = bottom + kDbgGap;
+    // ---- layout -----------------------------------------------------------
+    // Every panel owns a RECTANGLE and a flow panel is pushed past anything
+    // already placed that it would touch (the floating AI plate included), so
+    // no two panels can share pixels regardless of screen size or camera.
+    struct DbgRect {
+        float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
     };
-    auto flow_right = [&](const DbgPanel& p) {
-        if (p.rows.empty()) return;
-        const float bottom = dbg_panel(app, p, vw - kDbgEdge - p.box_w(), right_y);
-        right_y = bottom + kDbgGap;
+    std::vector<DbgRect> placed;
+    auto hits = [](const DbgRect& a, const DbgRect& b) {
+        return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h &&
+               b.y < a.y + a.h;
     };
-    // A bottom-anchored panel sits at the edge unless its flow already reaches
-    // there; then it is pushed below the flow instead of overlapping it.
-    auto anchored_left_bottom = [&](const DbgPanel& p) {
-        if (p.rows.empty()) return;
-        float y = vh - p.height() - 12.0f;
-        if (y < left_y) y = left_y;
-        dbg_panel(app, p, kDbgEdge, y);
+    auto settle_down = [&](DbgRect r) {
+        for (bool moved = true; moved;) {
+            moved = false;
+            for (const DbgRect& o : placed) {
+                if (hits(r, o)) {
+                    r.y = o.y + o.h + kDbgGap;
+                    moved = true;
+                }
+            }
+        }
+        return r;
     };
-    auto anchored_right_bottom = [&](const DbgPanel& p) {
-        if (p.rows.empty()) return;
-        float y = vh - p.height() - 12.0f;
-        if (y < right_y) y = right_y;
-        dbg_panel(app, p, vw - kDbgEdge - p.box_w(), y);
+    auto settle_up = [&](DbgRect r) {
+        for (bool moved = true; moved;) {
+            moved = false;
+            for (const DbgRect& o : placed) {
+                if (hits(r, o)) {
+                    r.y = o.y - r.h - kDbgGap;
+                    moved = true;
+                }
+            }
+        }
+        if (r.y < kDbgEdge) r.y = kDbgEdge;
+        return r;
+    };
+    auto place = [&](const DbgPanel& p, const DbgRect& r) {
+        dbg_panel(app, p, r.x, r.y);
+        placed.push_back(r);
     };
 
-    flow_left(ai);
-    flow_left(coll);
-    flow_left(phys);
+    // Panel 1 is anchored ABOVE THE OPPONENT (the user's "действие ИИ над
+    // противником"): the enemy's feet project through the fight camera, the
+    // plate hangs over the head and a thin connector ties it to the fighter.
+    // Without a live fight (or with the fighter off-screen) it joins the left
+    // flow instead.
+    if (!ai.rows.empty() && f.valid && f.enemy_screen_valid) {
+        if (std::getenv("SF2_DEBUG_OVERLAY_POS") != nullptr) {
+            std::fprintf(stdout, "[dbgpos] esx=%.1f esy=%.1f valid=%d\n",
+                         static_cast<double>(f.enemy_screen_x),
+                         static_cast<double>(f.enemy_screen_y),
+                         f.enemy_screen_valid ? 1 : 0);
+            std::fflush(stdout);
+        }
+        const float w = ai.box_w();
+        const float h = ai.height();
+        float x = f.enemy_screen_x - w * 0.5f;
+        x = std::max(kDbgEdge, std::min(x, vw - kDbgEdge - w));
+        float y = f.enemy_screen_y - h - 190.0f;
+        y = std::max(kDbgEdge, std::min(y, vh - h - 12.0f));
+        const DbgRect r = settle_down(DbgRect{x, y, w, h});
+        place(ai, r);
+        const float cx = r.x + w * 0.5f;
+        const float bottom = r.y + h;
+        const float head_y = f.enemy_screen_y - 150.0f;
+        if (head_y > bottom) {
+            const float lead[12] = {cx - 1.0f, bottom, cx + 1.0f, bottom,
+                                    cx - 1.0f, head_y, cx + 1.0f, bottom,
+                                    cx + 1.0f, head_y, cx - 1.0f, head_y};
+            app.renderer().draw_triangles(lead, 6, 1.0f, 0.9f, 0.3f, 0.55f);
+        }
+    }
 
-    flow_right(dmg);
-    flow_right(fight);
-    flow_right(save);
-    flow_right(perf);
+    auto flow = [&](std::initializer_list<const DbgPanel*> panels, bool right) {
+        float y = kDbgEdge;
+        for (const DbgPanel* p : panels) {
+            if (p == nullptr || p->rows.empty()) continue;
+            const float x = right ? vw - kDbgEdge - p->box_w() : kDbgEdge;
+            const DbgRect r = settle_down(DbgRect{x, y, p->box_w(), p->height()});
+            place(*p, r);
+            y = r.y + r.h + kDbgGap;
+        }
+    };
+    // Panel 1 joins the left flow only when it is not floating over the enemy.
+    if (!(!ai.rows.empty() && f.valid && f.enemy_screen_valid)) {
+        flow({&ai}, false);
+    }
+    flow({&coll, &phys}, false);
+    flow({&dmg, &fight, &save, &perf}, true);
 
-    anchored_left_bottom(quest);
-    anchored_right_bottom(screens);
+    auto bottom = [&](const DbgPanel& p, bool right) {
+        if (p.rows.empty()) return;
+        const float x = right ? vw - kDbgEdge - p.box_w() : kDbgEdge;
+        const float y0 = std::max(kDbgEdge, vh - p.height() - 12.0f);
+        DbgRect r = settle_down(DbgRect{x, y0, p.box_w(), p.height()});
+        if (r.y + r.h > vh - 4.0f) {
+            r = settle_up(DbgRect{x, y0, p.box_w(), p.height()});
+        }
+        if (r.y + r.h > vh - 4.0f) r.y = vh - p.height() - 4.0f;
+        place(p, r);
+    };
+    bottom(quest, false);
+    bottom(screens, true);
 }
 
 }  // namespace sf2::app

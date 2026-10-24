@@ -606,6 +606,12 @@ struct FightDebugSnapshot {
     float dist = 0.0f;
     float enemy_x = 0.0f;
     float enemy_y = 0.0f;
+    // Screen-space anchor for the AI panel ("above the opponent"): the enemy's
+    // FEET projected with the same camera the fight render used. Invalid until
+    // a live fight fills it (the panel then falls back to the left column).
+    bool enemy_screen_valid = false;
+    float enemy_screen_x = 0.0f;
+    float enemy_screen_y = 0.0f;
     // 2/3: state + collision
     std::string iv_player;
     std::string iv_enemy;

@@ -13396,6 +13396,37 @@ FightDebugSnapshot FightScreen::debug_snapshot() const {
     d.dist = std::fabs(e.fighter.world_x() - p.fighter.world_x());
     d.enemy_x = e.fighter.world_x();
     d.enemy_y = e.fighter.world_y();
+    {
+        // Screen anchor for the "AI above the opponent" panel. The fighters
+        // are drawn inside the `tl` container (JS `tl.init` L843): x carries
+        // `-width/2`, y carries `height/2 - floor` (see `project()` in
+        // `render_impl`), so the same two terms are applied here before the
+        // camera projection - otherwise the anchor lands off-screen.
+        const sf2::app::FightAssets& assets = app().fight_assets();
+        const float arena_half = assets.fight_location.arena_width() * 0.5f;
+        const float cont_y = assets.fight_location.arena_height() * 0.5f -
+                             assets.fight_location.arena_floor();
+        const sf2::scene::FightCamera& cam = fight_->camera();
+        sf2::render::Camera c;
+        // EXACTLY the render framing (`render_impl`): center_x stays 0 and the
+        // game's Io lives in `arena_center_x = arena_half - cam.center_x`, so
+        // `world_to_screen_x(x - arena_half)` collapses to `(x - cam.center_x)`
+        // and the anchor lands on the drawn fighter.
+        c.center_x = 0.0f;
+        c.center_y = cam.center_y;
+        c.zoom = cam.zoom;
+        c.layer_zoom = cam.zoom_layer;
+        c.view_w = 1280.0f;
+        c.view_h = 720.0f;
+        c.arena_h = assets.fight_location.arena_height() > 0.0f
+                        ? assets.fight_location.arena_height()
+                        : 560.0f;
+        c.arena_floor = assets.fight_location.arena_floor();
+        c.arena_center_x = arena_half - cam.center_x;
+        d.enemy_screen_x = c.world_to_screen_x(d.enemy_x - arena_half, 1.0f);
+        d.enemy_screen_y = c.world_to_screen_y(d.enemy_y + cont_y);
+        d.enemy_screen_valid = true;
+    }
     d.rag = e.fighter.ragdoll_active();
     d.ragf = e.fighter.ragdoll_frame_count();
     auto join_iv = [](const sf2::scene::Fighter& f) {
