@@ -906,6 +906,12 @@ private:
     // JS `k_a` (L603): find the `<PlayerAnimation>` conditional entry whose
     // name matches MY current move and run `Nwa` on its `<Reactions>` slots.
     int ka(const AiFightState& st);
+    // [experiment] JS `Ykb` -> `Okb` -> `Gc` (L20643/L20887/L28330): after the
+    // roulette picks a move, its `<Keys>` combo is "pressed" and the Gc pump
+    // re-evaluates every own move bound to those keys (`Su.dea(2)`), keeps the
+    // highest-priority group (`Aua`) and picks uniformly (`uf.sja`). That is
+    // where the JS attacks come from - `de.ld` only carries the Steps.
+    std::string gc_attack(const AiFightState& st, const std::string& picked);
     // The dodge candidate list (JS `VAa` L617).
     void vaa(const AiFightState& st, int variant);
     // The weighted roulette pick (JS `Md.jL` L640).

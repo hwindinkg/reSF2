@@ -1743,6 +1743,49 @@ int AiController::ka(const AiFightState& st) {
     }
     return 0;
 }
+// [experiment] JS `Ykb` -> `Okb` -> `Gc` (L20643 / L20887 / L28330): the move
+// `de.ia` picked has a `<Keys>` combo; `Okb` injects that combo and the Gc pump
+// rebuilds the candidates from `Su.dea(2)` (every OWN move with a
+// `<KeyPressed/>` event), keeps those bound to the SAME key signature, then
+// `Pkb`/`DK(...,true)` takes the max-`priority` group and one uniform
+// `uf.sja` (`Math.random`) pick. Without this the port only ever "moves"
+// (Steps) and never attacks - the `enemy-move-audit` failure.
+std::string AiController::gc_attack(const AiFightState& st,
+                                    const std::string& picked) {
+    if (moves_ == nullptr || st.my_moves == nullptr || picked.empty()) return "";
+    const auto it = moves_->find(picked);
+    if (it == moves_->end()) return "";
+    const std::string sig = keys_signature(it->second);
+    if (sig.empty()) return "";
+    std::vector<const MoveDef*> group;
+    for (const MoveDef* m : *st.my_moves) {
+        if (m == nullptr || !m->has_event("KeyPressed")) continue;
+        if (keys_signature(*m) != sig) continue;
+        if (!v1(*m, st, nullptr, /*mirror_filter=*/true)) continue;
+        group.push_back(m);
+    }
+    if (group.empty()) return "";
+    // `Aua` (L28384): keep the max-`priority` group (strict `>` clears).
+    std::vector<const MoveDef*> best;
+    for (const MoveDef* m : group) {
+        if (m->no_animation) continue;  // `Rha` -> the `g` group (unused here)
+        if (best.empty() || m->priority > best.front()->priority) {
+            best.clear();
+            best.push_back(m);
+        } else if (m->priority == best.front()->priority) {
+            best.push_back(m);
+        }
+    }
+    if (best.empty()) return "";
+    // `uf.sja` (L28417) consumes one `Math.random` even for a single element.
+    float r = math_roll();
+    if (r < 0.0f) r = 0.0f;
+    if (r >= 1.0f) r = 0.9999999f;
+    std::size_t idx = static_cast<std::size_t>(r * static_cast<float>(best.size()));
+    if (idx >= best.size()) idx = best.size() - 1;
+    return best[idx]->name;
+}
+
 // JS `de.gfa` (L597) = `Gc.gfa(a)+1` where `G` = `Md.I0(z$)` (L640-643):
 // `I0(a,b) = Da.pg.dT(a,b)` truncated. `+1` is the de-level addition.
 int AiController::gfa_draw() const {
@@ -2466,7 +2509,13 @@ std::string AiController::update(const AiFightState& st) {
         const int idx = pick(ld_);
         if (idx >= 0) {
             eh_ = std::max(1, vs_[static_cast<std::size_t>(idx)]);
-            return ld_[static_cast<std::size_t>(idx)].animation;
+            const std::string picked = ld_[static_cast<std::size_t>(idx)].animation;
+            // [experiment] `SF2_GC_ATTACK=1`: the Gc pump's key-combo attack.
+            if (std::getenv("SF2_GC_ATTACK") != nullptr) {
+                const std::string atk = gc_attack(st, picked);
+                if (!atk.empty()) return atk;
+            }
+            return picked;
         }
         return "";
     }
