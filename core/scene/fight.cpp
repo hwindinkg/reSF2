@@ -9197,6 +9197,13 @@ void FightController::dump_state_frame() {
                      a.hcb_reason, a.branch, a.ld, a.vs0, a.nG ? 1 : 0, a.xw ? 1 : 0,
                      a.pf ? 1 : 0);
         std::fflush(stdout);
+        if (std::getenv("SF2_DEBUG_SLOTS") != nullptr) {
+            std::fprintf(stdout,
+                         "[dbgslot] {\"f\":%d,\"s\":[[%.6f,%.3f,%d],[%.6f,%.3f,%d]]}\n",
+                         frame_, a.slots_t4[0], a.slots_gz[0], a.slots_na[0],
+                         a.slots_t4[1], a.slots_gz[1], a.slots_na[1]);
+            std::fflush(stdout);
+        }
     }
     std::fprintf(state_dump_file_,
                  "{\"t\":\"state\",\"f\":%d,\"phase\":%d,\"round\":%d,\"timer\":%d,"

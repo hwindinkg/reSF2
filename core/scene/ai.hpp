@@ -694,6 +694,10 @@ public:
         int wb = 0;                // candidate count returned
     int ld = 0;                // `ld` size after `h2a` (`de.ld.length`)
     int vs0 = 0;               // first roulette wait (`de.vs[0]`)
+    // The <QuickAttacks> slot rolls of this pass (`de.cO`: [t4, gZ, N_]).
+    double slots_t4[2] = {0.0, 0.0};
+    double slots_gz[2] = {0.0, 0.0};
+    int slots_na[2] = {0, 0};
     bool pf = false;           // `st.phase_fight` of this pass
         // The last `Wea` (L600) target distance fed to `PBa`, with the row
         // label (`Ju.label`) and the `Mu_` term, for the before/after audit.

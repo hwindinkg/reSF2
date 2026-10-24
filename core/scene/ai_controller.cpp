@@ -1562,6 +1562,15 @@ void AiController::roll_slots() {
     const std::size_t nq = tactic_ != nullptr ? tactic_->quick_attacks.size() : 0;
     quick_rolls_.resize(nq);
     for (std::size_t i = 0; i < nq; ++i) quick_rolls_[i].t4 = next01();
+    // [probe] record the rolls + the chance they were compared against, so the
+    // port's slot cadence can be compared with the oracle's i_slots.
+    for (std::size_t i = 0; i < nq && i < 2; ++i) {
+        dbg_.slots_t4[i] = quick_rolls_[i].t4;
+        dbg_.slots_gz[i] = static_cast<double>(
+            weight_curve_eval(tactic_->quick_attacks[i].chance, feat_));
+        dbg_.slots_na[i] =
+            quick_rolls_[i].t4 < dbg_.slots_gz[i] ? 1 : 0;
+    }
     const std::size_t ne = tactic_ != nullptr ? tactic_->evades.size() : 0;
     evade_rolls_.resize(ne);
     for (std::size_t i = 0; i < ne; ++i) evade_rolls_[i].t4 = next01();
@@ -1571,12 +1580,22 @@ void AiController::roll_slots() {
 // Draw-free (the curves are evaluated, not rolled).
 void AiController::eval_slots() {
     if (tactic_ == nullptr) return;
+    for (int q = 0; q < 2; ++q) {
+        dbg_.slots_t4[q] = 0.0;
+        dbg_.slots_gz[q] = 0.0;
+        dbg_.slots_na[q] = 0;
+    }
     for (std::size_t i = 0;
          i < quick_rolls_.size() && i < tactic_->quick_attacks.size(); ++i) {
         quick_rolls_[i].gz =
             weight_curve_eval(tactic_->quick_attacks[i].chance, feat_);
         quick_rolls_[i].na =
             quick_rolls_[i].t4 < static_cast<double>(quick_rolls_[i].gz);
+        if (i < 2) {
+            dbg_.slots_t4[i] = quick_rolls_[i].t4;
+            dbg_.slots_gz[i] = static_cast<double>(quick_rolls_[i].gz);
+            dbg_.slots_na[i] = quick_rolls_[i].na ? 1 : 0;
+        }
     }
     for (std::size_t i = 0;
          i < evade_rolls_.size() && i < tactic_->evades.size(); ++i) {
@@ -1756,6 +1775,11 @@ std::string AiController::gc_attack(const AiFightState& st,
     const auto it = moves_->find(picked);
     if (it == moves_->end()) return "";
     const std::string sig = keys_signature(it->second);
+    if (std::getenv("SF2_TRACE_GCA") != nullptr) {
+        std::fprintf(stdout, "[gca] picked=%s sig=[%s] prio=%d\n",
+                     picked.c_str(), sig.c_str(), it->second.priority);
+        std::fflush(stdout);
+    }
     if (sig.empty()) return "";
     std::vector<const MoveDef*> group;
     for (const MoveDef* m : *st.my_moves) {
