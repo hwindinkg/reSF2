@@ -9174,7 +9174,8 @@ void FightController::dump_state_frame() {
                      "\"aqa\":%d,\"wb\":%d,\"gate\":%d,\"chosen\":\"%s\","
                      "\"hp_p\":%.3f,\"hp_e\":%.3f,\"block_p\":%d,\"block_e\":%d,"
                      "\"rag\":%d,\"ragf\":%d,\"sep\":%.4f,\"hcb\":%d,\"play\":%d,"
-                     "\"mf\":%d,\"mv\":\"%s\"}\n",
+                     "\"mf\":%d,\"mv\":\"%s\",\"eh\":%d,\"wait\":%d,\"hcbwhy\":%d,"
+                     "\"br\":\"%s\"}\n",
                      frame_, phase(), round_.number, round_.time_nf,
                      enemy_.ai != nullptr ? a.fk : -1, a.aqa, a.fk, a.aqa, a.wb,
                      a.gate ? 1 : 0, enemy_.last_decision.c_str(),
@@ -9191,7 +9192,9 @@ void FightController::dump_state_frame() {
                      enemy_.fighter.move_frame(),
                      enemy_.fighter.current_move() != nullptr
                          ? enemy_.fighter.current_move()->name.c_str()
-                         : "");
+                         : "",
+                     a.eh, a.waited ? 1 : 0,
+                     a.hcb_reason, a.branch);
         std::fflush(stdout);
     }
     std::fprintf(state_dump_file_,

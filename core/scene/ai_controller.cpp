@@ -487,7 +487,10 @@ bool AiController::hcb(const AiFightState& st) const {
     // `this.Ji.cBa(name) != null` = the interval is active on me.
     for (const auto& iv : st.my_intervals) {
         for (const std::string& n : no_decision_intervals_) {
-            if (iv.first == n) return false;
+            if (iv.first == n) {
+                dbg_.hcb_reason = 1;
+                return false;
+            }
         }
     }
     // JS `de.hcb` (L598-599):
@@ -509,12 +512,14 @@ bool AiController::hcb(const AiFightState& st) const {
     //     reaction. `st.playing` is set with that `!Nd.nk` term in
     //     `FightController::update_fighter`.
     if (!st.playing || st.my_reacting || st.current_move == nullptr) {
+        dbg_.hcb_reason = !st.playing ? 2 : (st.my_reacting ? 4 : 3);
         return false;
     }
     // JS `P.v$a()` = the NoDecision MOVES; `cs.$k(name)` matches the name or
     // an inherited template tag.
     for (const std::string& m : no_decision_moves_) {
         if (move_has_name(*st.current_move, m)) {
+            dbg_.hcb_reason = 5;
             return false;
         }
     }
@@ -2346,7 +2351,9 @@ std::string AiController::update(const AiFightState& st) {
     oC_ = 0;
 
     // The wait counter (JS L592-593): `if(this.eh>1) return --this.eh, null`.
+    dbg_.eh = eh_;
     if (eh_ > 1) {
+        dbg_.waited = true;
         --eh_;
         return "";
     }

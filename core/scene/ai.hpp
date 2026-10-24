@@ -685,6 +685,12 @@ public:
         bool pcb = false;          // JS `ds.pcb(Fl)`
         bool rua = false, caa = false, nG = false;  // safe/table/cautious
         bool hcb = false;          // JS `hcb` gate
+    int hcb_reason = 0;        // 0 = passed, 1..5 = hcb refusal
+    // The wait counter (`eh`) and whether this pass got past it. `eh > 1`
+    // returns BEFORE the `hcb` gate, so a large `eh` is itself the reason a
+    // frame shows no decision (the old `hcb=0` reading was misleading).
+    int eh = 0;
+    bool waited = false;
         int wb = 0;                // candidate count returned
         // The last `Wea` (L600) target distance fed to `PBa`, with the row
         // label (`Ju.label`) and the `Mu_` term, for the before/after audit.
@@ -775,7 +781,7 @@ private:
     // The per-frame feature state (JS `Ue` + `mQ`).
     AiFeatureState feat_;
     // Probe snapshot (see `AiDebug`).
-    AiDebug dbg_;
+    mutable AiDebug dbg_;  // hcb (const) records its refusal reason
 
     // --- helpers (JS de methods) ---
     // The JS `Da` stream selection (L2352): `Da.jf()` = the shared `Da.pg`
