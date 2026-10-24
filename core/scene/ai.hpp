@@ -903,15 +903,6 @@ private:
     // JS `k_a` (L603): find the `<PlayerAnimation>` conditional entry whose
     // name matches MY current move and run `Nwa` on its `<Reactions>` slots.
     int ka(const AiFightState& st);
-    // JS `Gc.EZa`/`Gc.Pkb` (L28531/L28437): the KEYPRESSED candidate set the
-    // Tabular `Gc` pipeline feeds to the roulette - every OWN move carrying the
-    // `<Events><KeyPressed/>` event whose `<Conditions>`/`$Q` gates pass, deduped
-    // by name. Pure: no `wb_`/`feat_`/PRNG side effects, so it can be measured
-    // against the oracle's `random_pre` before anything is wired.
-    int gc_candidates(const AiFightState& st,
-                      std::vector<const MoveDef*>* out) const;
-    // [experiment] Push the Gc set into `wb_` (env-gated by the caller).
-    int gc_fill_wb(const AiFightState& st);
     // The dodge candidate list (JS `VAa` L617).
     void vaa(const AiFightState& st, int variant);
     // The weighted roulette pick (JS `Md.jL` L640).
