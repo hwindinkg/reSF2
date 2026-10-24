@@ -2312,6 +2312,35 @@ std::string AiController::update(const AiFightState& st) {
     jwb_event(st);
     iwb_event(st);
 
+    // [probe] SF2_TRACE_GCP=1: the Gc KeyPressed bucket of this frame,
+    // printed in the oracle's random_pre shape (names + the max-priority
+    // group size), so the two can be compared BEFORE any wiring.
+    // Read-only: nothing is started.
+    if (std::getenv("SF2_TRACE_GCP") != nullptr) {
+        std::vector<const MoveDef*> bucket;
+        if (st.my_moves != nullptr) {
+            for (const MoveDef* m : *st.my_moves) {
+                if (m == nullptr || !m->has_event("KeyPressed")) continue;
+                if (m->no_animation) continue;
+                if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
+                bucket.push_back(m);
+            }
+        }
+        int top = -1;
+        for (const MoveDef* m : bucket) top = std::max(top, m->priority);
+        std::string names;
+        int ntop = 0;
+        for (const MoveDef* m : bucket) {
+            names += m->name;
+            names += ' ';
+            if (m->priority == top) ++ntop;
+        }
+        std::fprintf(stdout,
+                     "[gcp] f=%d playing=%d n=%zu top=%d ntop=%d names=[%s]\n",
+                     st.fight_frame, st.playing ? 1 : 0,
+                     bucket.size(), top, ntop, names.c_str());
+        std::fflush(stdout);
+    }
     // [experiment] SF2_GC_PUMP=1: the Gc pump pass. In the JS Gc.ia runs
     // every frame right after the fighter update and consumes the events
     // raised by move starts; a Tabular fighter's attacks come from here.
