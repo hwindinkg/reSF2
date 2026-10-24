@@ -9175,7 +9175,7 @@ void FightController::dump_state_frame() {
                      "\"hp_p\":%.3f,\"hp_e\":%.3f,\"block_p\":%d,\"block_e\":%d,"
                      "\"rag\":%d,\"ragf\":%d,\"sep\":%.4f,\"hcb\":%d,\"play\":%d,"
                      "\"mf\":%d,\"mv\":\"%s\",\"eh\":%d,\"wait\":%d,\"hcbwhy\":%d,"
-                     "\"br\":\"%s\",\"ld\":%d}\n",
+                     "\"br\":\"%s\",\"ld\":%d,\"vs0\":%d,\"ng\":%d,\"xw\":%d,\"pf\":%d}\n",
                      frame_, phase(), round_.number, round_.time_nf,
                      enemy_.ai != nullptr ? a.fk : -1, a.aqa, a.fk, a.aqa, a.wb,
                      a.gate ? 1 : 0, enemy_.last_decision.c_str(),
@@ -9194,7 +9194,8 @@ void FightController::dump_state_frame() {
                          ? enemy_.fighter.current_move()->name.c_str()
                          : "",
                      a.eh, a.waited ? 1 : 0,
-                     a.hcb_reason, a.branch, a.ld);
+                     a.hcb_reason, a.branch, a.ld, a.vs0, a.nG ? 1 : 0, a.xw ? 1 : 0,
+                     a.pf ? 1 : 0);
         std::fflush(stdout);
     }
     std::fprintf(state_dump_file_,

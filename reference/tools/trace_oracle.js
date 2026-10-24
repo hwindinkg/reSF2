@@ -1224,6 +1224,20 @@
       ai_eh: de ? num(de.eh) : null,
       ai_ld: de && de.ld ? de.ld.length : null,
       ai_vs: de && de.vs ? de.vs.slice(0, 4) : null,
+      // The roulette list's ANIMATION names: `ld` holds the chosen move objects
+      // (`h2a` copies `wb[i].animation`), so this is the exact candidate set the
+      // port's `wb_` must reproduce.
+      ai_ld_names: (function () {
+        try {
+          if (!de || !de.ld) return null;
+          var out = [];
+          for (var i = 0; i < de.ld.length && i < 6; i++) {
+            var a = de.ld[i];
+            out.push(a == null ? null : (a.name || a.animation && a.animation.name || "?"));
+          }
+          return out;
+        } catch (e) { return null; }
+      })(),
       chosen_move: or.lastMove[side],
       chosen_candidates: pqb && typeof pqb.cand === "number" ? pqb.cand : null,
       random: or.lastRandom[side] || null,

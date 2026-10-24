@@ -1726,6 +1726,7 @@ void AiController::h2a() {
         vs_.push_back(c.wait);
     }
     dbg_.ld = static_cast<int>(ld_.size());
+    dbg_.vs0 = vs_.empty() ? 0 : vs_.front();
 }
 
 // JS `k_a` (L603): find the `<ConditionalDecisions>` `<PlayerAnimation>`
@@ -2223,6 +2224,7 @@ std::string AiController::update(const AiFightState& st) {
     // No decision on a phase-1 (event-only) pass, so clear the previous
     // decision's debug snapshot — the fight's `[ai]` log gates on `d.gate`.
     dbg_ = AiDebug{};
+    dbg_.pf = st.phase_fight;
 
     // JS `wd.Anb` (L499): `a.type==1 ? this.hJa() : a.type==2 && this.Ykb()`
     // — a `Type=="Random"` tactic (`Md.getType` L642 `"Random"->1`) drives the
