@@ -6258,6 +6258,13 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         e.blocked = rec.blocked;
         e.critical = rec.critical;
         e.head = rec.head_hit;
+        if (std::getenv("SF2_TRACE_HITLOG") != nullptr) {
+            std::fprintf(stdout, "[hitlog] F%d %s %s dmg=%.2f hp=%.2f n=%zu\\n",
+                         e.frame, e.by_player ? "P->E" : "E->P",
+                         e.move.c_str(), static_cast<double>(e.damage),
+                         static_cast<double>(e.hp_after), hit_log_.size() + 1);
+            std::fflush(stdout);
+        }
         hit_log_.push_back(std::move(e));
         if (hit_log_.size() > 8) hit_log_.pop_front();
     }
@@ -9189,7 +9196,8 @@ void FightController::dump_state_frame() {
                      "\"hp_p\":%.3f,\"hp_e\":%.3f,\"block_p\":%d,\"block_e\":%d,"
                      "\"rag\":%d,\"ragf\":%d,\"sep\":%.4f,\"hcb\":%d,\"play\":%d,"
                      "\"mf\":%d,\"mv\":\"%s\",\"eh\":%d,\"wait\":%d,\"hcbwhy\":%d,"
-                     "\"br\":\"%s\",\"ld\":%d,\"vs0\":%d,\"ng\":%d,\"xw\":%d,\"pf\":%d}\n",
+                     "\"br\":\"%s\",\"ld\":%d,\"vs0\":%d,\"ng\":%d,\"xw\":%d,\"pf\":%d,"
+                     "\"hits\":%zu}\n",
                      frame_, phase(), round_.number, round_.time_nf,
                      enemy_.ai != nullptr ? a.fk : -1, a.aqa, a.fk, a.aqa, a.wb,
                      a.gate ? 1 : 0, enemy_.last_decision.c_str(),
@@ -9209,7 +9217,7 @@ void FightController::dump_state_frame() {
                          : "",
                      a.eh, a.waited ? 1 : 0,
                      a.hcb_reason, a.branch, a.ld, a.vs0, a.nG ? 1 : 0, a.xw ? 1 : 0,
-                     a.pf ? 1 : 0);
+                     a.pf ? 1 : 0, hit_log_.size());
         std::fflush(stdout);
         if (std::getenv("SF2_DEBUG_SLOTS") != nullptr) {
             std::fprintf(stdout,
