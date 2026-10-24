@@ -13426,6 +13426,73 @@ FightDebugSnapshot FightScreen::debug_snapshot() const {
         d.enemy_screen_x = c.world_to_screen_x(d.enemy_x - arena_half, 1.0f);
         d.enemy_screen_y = c.world_to_screen_y(d.enemy_y + cont_y);
         d.enemy_screen_valid = true;
+
+        // [panel 3] Collision geometry: every body capsule of both fighters
+        // projected to screen pixels, the <Attack>-interval capsules flagged,
+        // and the first overlapping attacker/target pair marked. The predicate
+        // is the SAME pure one the hit path uses (`capsule_capsule_overlap`,
+        // physics.cpp) - no latches, no PRNG draws, display-only.
+        auto project = [&](float wx, float wy, float* sx, float* sy) {
+            *sx = c.world_to_screen_x(wx - arena_half, 1.0f);
+            *sy = c.world_to_screen_y(wy + cont_y);
+        };
+        std::set<std::string> act[2];
+        for (int side = 0; side < 2; ++side) {
+            const sf2::scene::Fighter& fg =
+                side == 0 ? p.fighter : e.fighter;
+            const sf2::scene::MoveDef* mv = fg.current_move();
+            if (mv == nullptr) continue;
+            const int ff = std::max(0, mv->first_frame);
+            const int mf = fg.move_frame();
+            for (const sf2::scene::Interval& iv : mv->intervals) {
+                if (iv.type != 4) continue;
+                if (!(std::max(iv.start, ff) <= mf &&
+                      mf <= fg.interval_last(iv))) {
+                    continue;
+                }
+                for (const std::string& n : iv.attacking_parts) act[side].insert(n);
+            }
+        }
+        for (int side = 0; side < 2; ++side) {
+            const sf2::scene::BodyState& body =
+                side == 0 ? p.body : e.body;
+            for (const sf2::scene::HitCapsule& cap : body.capsules) {
+                const bool attack = act[side].count(cap.name) > 0;
+                // The body carries EVERY edge (the collidable flag is what the
+                // hit test filters on), so draw only the target collidables and
+                // the open-attack capsules - 277 edges per fighter is noise.
+                if (!cap.collidable && !attack) continue;
+                FightDebugSnapshot::DbgSeg seg;
+                project(cap.p1.x, cap.p1.y, &seg.x1, &seg.y1);
+                project(cap.p2.x, cap.p2.y, &seg.x2, &seg.y2);
+                seg.r_px = std::max(1.0f, cap.radius * 2.0f * cam.zoom);
+                seg.side = side;
+                seg.collidable = cap.collidable;
+                seg.active_attack = attack;
+                d.cap_segs.push_back(seg);
+            }
+            (side == 0 ? d.caps_p : d.caps_e) =
+                static_cast<int>(body.capsules.size());
+        }
+        for (int side = 0; side < 2 && !d.cap_hit; ++side) {
+            const sf2::scene::BodyState& atk_body =
+                side == 0 ? p.body : e.body;
+            const sf2::scene::BodyState& tgt_body =
+                side == 0 ? e.body : p.body;
+            for (const sf2::scene::HitCapsule& a : atk_body.capsules) {
+                if (act[side].count(a.name) == 0) continue;
+                for (const sf2::scene::HitCapsule& b : tgt_body.capsules) {
+                    if (!b.collidable) continue;
+                    sf2::scene::CapsuleHit ch;
+                    if (!sf2::scene::capsule_capsule_overlap(a, b, ch)) continue;
+                    d.cap_hit = true;
+                    project(ch.point.x, ch.point.y, &d.cap_hit_x, &d.cap_hit_y);
+                    d.cap_hit_pair = a.name + " x " + b.name;
+                    break;
+                }
+                if (d.cap_hit) break;
+            }
+        }
     }
     for (const sf2::scene::FightController::HitLogEntry& h : fight_->hit_log()) {
         char hbuf[160];

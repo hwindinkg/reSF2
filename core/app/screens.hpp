@@ -627,6 +627,23 @@ struct FightDebugSnapshot {
     float mhp_p = 0.0f;
     float hp_e = 0.0f;
     float mhp_e = 0.0f;
+    // 3: collision geometry (panel 3), already projected to SCREEN pixels so
+    // the overlay needs no camera. One segment per body capsule of both
+    // fighters; `active_attack` marks the capsules of the currently-open
+    // <Attack> interval, `hit_now` marks an overlapping attacker/target pair.
+    struct DbgSeg {
+        float x1 = 0.0f, y1 = 0.0f, x2 = 0.0f, y2 = 0.0f;
+        float r_px = 1.0f;
+        int side = 0;  // 0 = player, 1 = enemy
+        bool collidable = false;
+        bool active_attack = false;
+    };
+    std::vector<DbgSeg> cap_segs;
+    bool cap_hit = false;
+    float cap_hit_x = 0.0f, cap_hit_y = 0.0f;
+    std::string cap_hit_pair;
+    int caps_p = 0, caps_e = 0;
+
     // 5b: the last landed hits (panel 5), newest last.
     std::vector<std::string> hit_lines;
     // 6: timing

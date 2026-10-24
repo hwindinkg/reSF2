@@ -2231,6 +2231,10 @@ void draw_debug_overlay(App& app) {
                      1.0f, 0.85f, 0.70f);
             coll.add(app, fmt("E iv=[%s] block=%d", f.iv_enemy.c_str(), f.block_e),
                      1.0f, 0.85f, 0.70f);
+            coll.add(app, fmt("caps P=%d E=%d%s%s", f.caps_p, f.caps_e,
+                              f.cap_hit ? " HIT " : "",
+                              f.cap_hit ? f.cap_hit_pair.c_str() : ""),
+                     0.95f, 0.95f, 0.95f);
         } else {
             coll.add(app, "(no fight)", 0.70f, 0.70f, 0.70f);
         }
@@ -2437,6 +2441,56 @@ void draw_debug_overlay(App& app) {
     };
     bottom(quest, false);
     bottom(screens, true);
+
+    // [panel 3] Collision geometry, drawn AFTER the plates (the batch keeps
+    // submission order, so the lines would otherwise be covered): one capsule
+    // per segment, colour = fighter (player amber / enemy cyan), red = the
+    // currently-open <Attack> capsules, white = target collidables, and a green
+    // diamond where an attacker/target pair overlaps this frame.
+    if (d.on[3] && f.valid && !f.cap_segs.empty()) {
+        auto seg_quad = [&](float x1, float y1, float x2, float y2, float half,
+                            float r, float g, float b, float a) {
+            float dx = x2 - x1, dy = y2 - y1;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            if (len < 0.0001f) {
+                dx = 1.0f;
+                dy = 0.0f;
+            } else {
+                dx /= len;
+                dy /= len;
+            }
+            const float nx = -dy * half, ny = dx * half;
+            const float v[12] = {x1 + nx, y1 + ny, x2 + nx, y2 + ny, x1 - nx, y1 - ny,
+                                 x2 + nx, y2 + ny, x2 - nx, y2 - ny, x1 - nx, y1 - ny};
+            app.renderer().draw_triangles(v, 6, r, g, b, a);
+        };
+        const float cull_lo = -600.0f;
+        const float cull_hi_x = vw + 600.0f;
+        const float cull_hi_y = vh + 600.0f;
+        for (const FightDebugSnapshot::DbgSeg& sg : f.cap_segs) {
+            // Skip segments entirely outside the view (a few capsules have
+            // unresolved endpoints and would draw a line to the screen edge).
+            if ((sg.x1 < cull_lo && sg.x2 < cull_lo) ||
+                (sg.x1 > cull_hi_x && sg.x2 > cull_hi_x) ||
+                (sg.y1 < cull_lo && sg.y2 < cull_lo) ||
+                (sg.y1 > cull_hi_y && sg.y2 > cull_hi_y)) {
+                continue;
+            }
+            if (sg.active_attack) {
+                seg_quad(sg.x1, sg.y1, sg.x2, sg.y2, 1.6f, 1.0f, 0.15f, 0.15f, 0.95f);
+            } else if (sg.side == 0) {
+                seg_quad(sg.x1, sg.y1, sg.x2, sg.y2, 1.0f, 1.0f, 0.72f, 0.30f, 0.55f);
+            } else {
+                seg_quad(sg.x1, sg.y1, sg.x2, sg.y2, 1.0f, 0.35f, 0.85f, 1.0f, 0.55f);
+            }
+        }
+        if (f.cap_hit) {
+            const float cx = f.cap_hit_x, cy = f.cap_hit_y;
+            const float m[12] = {cx, cy - 7.0f, cx + 7.0f, cy, cx, cy + 7.0f,
+                                 cx, cy - 7.0f, cx, cy + 7.0f, cx - 7.0f, cy};
+            app.renderer().draw_triangles(m, 6, 0.2f, 1.0f, 0.35f, 0.95f);
+        }
+    }
 }
 
 }  // namespace sf2::app
