@@ -1762,6 +1762,43 @@ int AiController::ka(const AiFightState& st) {
     }
     return 0;
 }
+// [experiment] The `Gc` pump frame. JS `Gc.ia` (L28299) runs `Bx` (rebuild
+// the per-fighter ctx) + `Gnb` (L28336: `Rwa` -> `EZa` bucket -> `dxa` -> `DK`)
+// every frame, independently of `de.ia`. `DK` with `eb=false` takes the
+// max-`priority` (`Aua`) non-`Rha` candidate and one uniform `uf.sja` draw; the
+// result is STORED (`Ml.animation`) and `Bnb` (L20947) starts it only when the
+// fighter is not playing.
+std::string AiController::gc_frame(const AiFightState& st) {
+    if (moves_ == nullptr || st.my_moves == nullptr) return "";
+    std::vector<const MoveDef*> best;
+    for (const MoveDef* m : *st.my_moves) {
+        if (m == nullptr || !m->has_event("KeyPressed")) continue;
+        if (m->no_animation) continue;  // `Rha` -> the unused `g` group
+        if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
+        if (best.empty() || m->priority > best.front()->priority) {
+            best.clear();
+            best.push_back(m);
+        } else if (m->priority == best.front()->priority) {
+            best.push_back(m);
+        }
+    }
+    if (!best.empty()) {
+        float r = math_roll();
+        if (r < 0.0f) r = 0.0f;
+        if (r >= 1.0f) r = 0.9999999f;
+        std::size_t idx = static_cast<std::size_t>(r * static_cast<float>(best.size()));
+        if (idx >= best.size()) idx = best.size() - 1;
+        gc_stored_ = best[idx]->name;
+    }
+    // `Bnb`: start the stored animation only when nothing is playing.
+    if (!gc_stored_.empty() && !st.playing) {
+        std::string out = gc_stored_;
+        gc_stored_.clear();
+        return out;
+    }
+    return "";
+}
+
 // [experiment] JS `Ykb` -> `Okb` -> `Gc` (L20643 / L20887 / L28330): the move
 // `de.ia` picked has a `<Keys>` combo; `Okb` injects that combo and the Gc pump
 // rebuilds the candidates from `Su.dea(2)` (every OWN move with a

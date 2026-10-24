@@ -613,6 +613,12 @@ public:
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
     // move name, or "" when no move should start this frame.
     std::string update(const AiFightState& st);
+    // [experiment] The `Gc` pump frame (JS `Bg.ia` -> `Bx` + `Gnb` -> `Rwa`/
+    // `EZa` -> `dxa`/`DK`): rebuilds the KeyPressed bucket, picks the
+    // max-`priority` group with one uniform `uf.sja` draw and STORES it
+    // (`Ml.animation`); the caller starts it only when the fighter is idle
+    // (`Bnb` gates on `!Pe`). Returns "" when nothing is stored/ready.
+    std::string gc_frame(const AiFightState& st);
     // JS `wd.ctb(!0)` (L20376-20380, reached from `swb`->`Eaa(!0)` L16637):
     // `if (this.sN = a) { this.Kl.reset(); this.Mka(0); }` — arming the `hJa`
     // countdown (`tG`) at the ROUND boundary (`Z2` L21617 first sets `tG=-1`).
@@ -916,6 +922,7 @@ private:
     // highest-priority group (`Aua`) and picks uniformly (`uf.sja`). That is
     // where the JS attacks come from - `de.ld` only carries the Steps.
     std::string gc_attack(const AiFightState& st, const std::string& picked);
+    std::string gc_stored_;
     // [experiment] The `Gc` PUMP: JS `Ykb` -> `Okb` (L20643/L20887) fires when
     // `de.ia` starts a move; the next `Gc.ia` (L28299) rebuilds the KeyPressed
     // candidates and may start a different move (`Pkb`). Armed by `iwb_event`

@@ -8072,6 +8072,29 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             std::fflush(stdout);
             last_ai_log_ = decision;
         }
+        // [experiment] `SF2_GC_MOD=1`: the `Gc` pump (JS `Bg.ia` -> `Bx` +
+        // `Gnb`) runs EVERY frame independently of `de.ia`; its stored pick is
+        // started only when the fighter is idle (`Bnb` gates on `!Pe`).
+        if (me.ai != nullptr) {
+            const std::string g = me.ai->gc_frame(st);
+            if (!g.empty() && !me.fighter.playing()) {
+                const auto git = moves_->find(g);
+                if (git != moves_->end()) {
+                    sf2::scene::FightContext gctx;
+                    gctx.roll01 = [this]() { return draw01(); };
+                    gctx.stage = static_cast<sf2::scene::round_stage>(phase_);
+                    gctx.anims_me = anim_names_of(me.fighter);
+                    gctx.anims_enemy = anim_names_of(foe.fighter);
+                    fill_ctx_geometry(gctx, me, foe);
+                    gctx.health_ratio =
+                        me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+                    if (me.fighter.ai_start_move(git->second, gctx)) {
+                        ++me.moves_started;
+                        me.last_decision = "gc:" + g;
+                    }
+                }
+            }
+        }
         if (!decision.empty()) {
             const sf2::scene::MoveDef* chosen = nullptr;
             auto pick_ctx = [&]() {
