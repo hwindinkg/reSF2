@@ -1218,6 +1218,12 @@
       ai_side: side,
       ai_branch: de ? num(de.fk) : null,
       ai_zone: de ? num(de.aqa) : null,
+      // The wait counter (`eh`) and the roulette list (`ld`/`vs`): the port has
+      // the same numbers in `[dbg]` (eh/wait/chosen), so the decision cadence
+      // can be compared frame by frame.
+      ai_eh: de ? num(de.eh) : null,
+      ai_ld: de && de.ld ? de.ld.length : null,
+      ai_vs: de && de.vs ? de.vs.slice(0, 4) : null,
       chosen_move: or.lastMove[side],
       chosen_candidates: pqb && typeof pqb.cand === "number" ? pqb.cand : null,
       random: or.lastRandom[side] || null,

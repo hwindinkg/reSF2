@@ -1725,6 +1725,7 @@ void AiController::h2a() {
         ld_.push_back(c);
         vs_.push_back(c.wait);
     }
+    dbg_.ld = static_cast<int>(ld_.size());
 }
 
 // JS `k_a` (L603): find the `<ConditionalDecisions>` `<PlayerAnimation>`
