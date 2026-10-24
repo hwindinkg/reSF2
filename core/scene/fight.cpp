@@ -8626,15 +8626,36 @@ void FightController::update(float dt) {
                 sf2::scene::CapsuleHit ch;
                 const sf2::scene::HitCapsule* atk_cap = nullptr;
                 bool hit_player = false, hit_enemy = false;
-                if (p_move != nullptr &&
-                    hza_pick(player_, enemy_, *p_move, player_.fighter.move_frame()) != nullptr) {
-                    hit_enemy = hit_test(player_, enemy_, *p_move, player_.fighter.move_frame(),
-                                         hit_cap, ch, hit_iv, atk_cap);
-                }
-                if (e_move != nullptr && !hit_enemy &&
-                    hza_pick(enemy_, player_, *e_move, enemy_.fighter.move_frame()) != nullptr) {
-                    hit_player = hit_test(enemy_, player_, *e_move, enemy_.fighter.move_frame(),
-                                          hit_cap, ch, hit_iv, atk_cap);
+                auto test_player = [&]() {
+                    if (hit_iv != nullptr || p_move == nullptr) return;
+                    if (hza_pick(player_, enemy_, *p_move,
+                                 player_.fighter.move_frame()) != nullptr) {
+                        hit_enemy = hit_test(player_, enemy_, *p_move,
+                                             player_.fighter.move_frame(), hit_cap,
+                                             ch, hit_iv, atk_cap);
+                    }
+                };
+                auto test_enemy = [&]() {
+                    if (hit_iv != nullptr || e_move == nullptr) return;
+                    if (hza_pick(enemy_, player_, *e_move,
+                                 enemy_.fighter.move_frame()) != nullptr) {
+                        hit_player = hit_test(enemy_, player_, *e_move,
+                                              enemy_.fighter.move_frame(), hit_cap,
+                                              ch, hit_iv, atk_cap);
+                    }
+                };
+                // [experiment] `SF2_HIT_PARITY=1`: JS `ca.Enb` (L15925-15940)
+                // walks the fighter list FORWARD on even frames and REVERSED on
+                // odd ones (the last attacker wins the trade), while the port
+                // always tested the player first. The gate stays "one hit per
+                // frame" (`hit_test` sets `hit_iv`).
+                const bool enemy_first = (frame_ % 2) != 0;
+                if (enemy_first) {
+                    test_enemy();
+                    test_player();
+                } else {
+                    test_player();
+                    test_enemy();
                 }
                 if (hit_iv != nullptr) {
                     if (hit_enemy) {
