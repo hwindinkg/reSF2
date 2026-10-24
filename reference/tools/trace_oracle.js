@@ -1227,6 +1227,20 @@
       // The roulette list's ANIMATION names: `ld` holds the chosen move objects
       // (`h2a` copies `wb[i].animation`), so this is the exact candidate set the
       // port's `wb_` must reproduce.
+      // The per-frame slot rolls (cO/hN on de): [t4, gZ, N_] per
+      // <QuickAttacks> slot. The port has the same numbers in quick_rolls_,
+      // so the slot-firing cadence can be compared draw by draw.
+      ai_slots: (function () {
+        try {
+          if (!de || !de.cO) return null;
+          var out = [];
+          for (var i = 0; i < de.cO.length && i < 4; i++) {
+            var s2 = de.cO[i];
+            out.push([s2.t4, s2.gZ, s2.N_ ? 1 : 0]);
+          }
+          return out;
+        } catch (e) { return null; }
+      })(),
       ai_ld_names: (function () {
         try {
           if (!de || !de.ld) return null;
