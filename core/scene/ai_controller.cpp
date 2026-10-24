@@ -2378,17 +2378,45 @@ std::string AiController::update(const AiFightState& st) {
 
     // The core decision (JS L594).
     int cnt = pqb(st);
+    const int cnt_pqb = cnt;
     dbg_.fk = fk_;
     dbg_.wb = cnt;
 
     // The conditional-slot additions (JS L594: `b+=this.k_a(a.da,this.u$),
     // b+=this.Nwa(this.E7), this.iN.zZ.length>0&&(this.fk=11)`). `u$`/`E7`
     // are the <ConditionalDecisions> lists — NOT the base `$E`/`nD`.
+    int ka_add = 0;
+    int nwa_add = 0;
     if (!F8_ && fk_ != 11) {
         if (tactic_ != nullptr) {
+            const int b0 = static_cast<int>(wb_.size());
             cnt += ka(st);
+            ka_add = static_cast<int>(wb_.size()) - b0;
+            const int b1 = static_cast<int>(wb_.size());
             cnt += nwa(tactic_->conditional_bot, st.my_anim);
+            nwa_add = static_cast<int>(wb_.size()) - b1;
             if (!feat_.zz.empty()) fk_ = 11;
+        }
+    }
+    // [probe] `SF2_TRACE_AI_WB=1`: what the candidate list is made of per
+    // decision pass (`pqb` = quick/base slots, `ka`/`nwa` = the conditional
+    // table slots), with the names - the oracle's `random_pre.det` carries the
+    // same composition, so the two can be compared 1:1.
+    if (std::getenv("SF2_TRACE_AI_WB") != nullptr) {
+        static long pass_no = 0;
+        ++pass_no;
+        if (!wb_.empty() || pass_no % 120 == 0) {
+            std::string names;
+            for (const AiCandidate& c : wb_) {
+                names += c.animation;
+                names += ' ';
+            }
+            std::fprintf(stdout,
+                         "[wb] pass=%ld move_frame=%d cnt=%d pqb=%d ka=%d "
+                         "nwa=%d size=%zu fk=%d names=[%s]\n",
+                         pass_no, st.move_frame, cnt, cnt_pqb, ka_add, nwa_add,
+                         wb_.size(), fk_, names.c_str());
+            std::fflush(stdout);
         }
     }
 
