@@ -1741,6 +1741,74 @@ int AiController::ka(const AiFightState& st) {
     }
     return 0;
 }
+// JS `Gc.EZa` (L28531-28569) + `Gc.Pkb` (L28437-28452), the TABULAR candidate
+// assembly: `Su.dea(2)` = every move whose `<Events><KeyPressed/>` fires,
+// deduped by animation name (`Kbb`), filtered by the move's own `<Conditions>`
+// and by the `$Q`/mirror sibling gate (`M7.Wcb` = the port's
+// `MoveDef::mirror_exclusive`, applied by `v1(..., mirror_filter=true)` - the
+// same gate the Tabular `ABa` -> `V1` path uses).
+//
+// This is measurement-only for now: it returns the count and fills `out`, but
+// nothing is pushed into `wb_`, so the decision stream is untouched (the
+// previous attempt to wire a partial `Gc` call regressed survival 863 -> 960).
+int AiController::gc_candidates(const AiFightState& st,
+                                std::vector<const MoveDef*>* out) const {
+    if (out != nullptr) out->clear();
+    if (st.my_moves == nullptr) return 0;
+    std::vector<const MoveDef*> seen;
+    int keypressed = 0;
+    for (const MoveDef* m : *st.my_moves) {
+        if (m == nullptr) continue;
+        if (!m->has_event("KeyPressed")) continue;
+        ++keypressed;
+        bool dup = false;
+        for (const MoveDef* k : seen) {
+            if (k->name == m->name) { dup = true; break; }
+        }
+        if (dup) continue;
+        seen.push_back(m);
+        if (!v1(*m, st, nullptr, /*mirror_filter=*/true)) continue;
+        if (out != nullptr) out->push_back(m);
+    }
+    // `SF2_TRACE_GC2=1`: the composition probe (my_moves -> KeyPressed ->
+    // surviving). Compare with the oracle's `random_pre.n` (31 on survival).
+    if (std::getenv("SF2_TRACE_GC2") != nullptr) {
+        std::string names;
+        if (out != nullptr) {
+            for (const MoveDef* m : *out) {
+                names += m->name;
+                names += ' ';
+            }
+        }
+        std::fprintf(stdout,
+                     "[gc2] my_moves=%zu keypressed=%d kept=%zu names=[%s]\n",
+                     st.my_moves->size(), keypressed,
+                     out != nullptr ? out->size() : 0, names.c_str());
+        std::fflush(stdout);
+    }
+    return out != nullptr ? static_cast<int>(out->size()) : keypressed;
+}
+
+// [experiment, env-gated] Fill `wb_` from the KEYPRESSED (Gc) set instead of
+// the tactic's single `ShortAttack` slot key. `SF2_GC_TABULAR=1` switches the
+// Tabular base branch to this list; without the flag nothing changes.
+int AiController::gc_fill_wb(const AiFightState& st) {
+    std::vector<const MoveDef*> gc;
+    gc_candidates(st, &gc);
+    int added = 0;
+    for (const MoveDef* m : gc) {
+        bool dup = false;
+        for (const AiCandidate& c : wb_) {
+            if (c.animation == m->name) { dup = true; break; }
+        }
+        if (dup) continue;
+        wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
+        ++added;
+    }
+    if (added > 0) fk_ = 6;
+    return added;
+}
+
 // JS `de.gfa` (L597) = `Gc.gfa(a)+1` where `G` = `Md.I0(z$)` (L640-643):
 // `I0(a,b) = Da.pg.dT(a,b)` truncated. `+1` is the de-level addition.
 int AiController::gfa_draw() const {
@@ -2069,7 +2137,19 @@ int AiController::pqb(const AiFightState& st) {
     // moves with wait `$I()`; then the Evade (`nD`) slots decide `IB`.
     dbg_.branch = "base-slots";
     eval_slots();
-    const int qadd = quick_slots(st);
+    // [experiment] `SF2_GC_TABULAR=1`: a TABULAR tactic takes the JS `Gc`
+    // KEYPRESSED candidate set (the path the oracle actually uses) instead of
+    // resolving the single `ShortAttack` slot key.
+    const bool gc_tabular =
+        tactic_ != nullptr && tactic_->type == 2 &&
+        std::getenv("SF2_GC_TABULAR") != nullptr;
+    const int qadd = gc_tabular ? gc_fill_wb(st) : quick_slots(st);
+    // [probe] SF2_TRACE_GC2=1: the KEYPRESSED (Gc) candidate set of this
+    // pass, measured next to the oracle's random_pre - nothing is pushed.
+    if (std::getenv("SF2_TRACE_GC2") != nullptr) {
+        std::vector<const MoveDef*> gc;
+        gc_candidates(st, &gc);
+    }
     evade_ib(st);
     dbg_.qfired = 0;
     dbg_.qpushed = qadd;
