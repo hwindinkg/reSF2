@@ -643,6 +643,12 @@ struct FightDebugSnapshot {
     float cap_hit_x = 0.0f, cap_hit_y = 0.0f;
     std::string cap_hit_pair;
     int caps_p = 0, caps_e = 0;
+    // Counts matching the oracle's `caps` dump: open-attack capsules and
+    // target-collidable capsules per side, plus whether a hit landed on THIS
+    // frame (the hit log's last entry).
+    int atk_n_p = 0, atk_n_e = 0;
+    int body_n_p = 0, body_n_e = 0;
+    bool hit_now = false;
 
     // 5b: the last landed hits (panel 5), newest last.
     std::vector<std::string> hit_lines;

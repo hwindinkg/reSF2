@@ -68,16 +68,24 @@ def norm(v):
 
 def key_of_oracle(d, swap=False):
     blk = d.get("block_state") or {}
+    caps = d.get("caps") or {}
     # The two tracers label the sides oppositely: the port's `Me`/`player_` is
     # the oracle tracer's `Enemy` (verified on survival: the same move + `af`
     # on both). `swap` selects that mapping; without it the raw labels are used.
     key, other = ("me", "enemy") if not swap else ("enemy", "me")
+    ck, co = caps.get(key) or {}, caps.get(other) or {}
     return {
         "fk": norm(d.get("ai_branch")),
         "aqa": norm(d.get("ai_zone")),
         "chosen": norm(d.get("chosen_move")),
         "block": norm(blk.get(other)),
         "block_p": norm(blk.get(key)),
+        # Collision counts (oracle `caps`: per-side open-attack capsules and
+        # target-collidable body capsules) - the port dumps the same numbers.
+        "body_p": norm(ck.get("body")),
+        "body_e": norm(co.get("body")),
+        "atk_p": norm(ck.get("atk")),
+        "atk_e": norm(co.get("atk")),
     }
 
 
@@ -88,10 +96,15 @@ def key_of_port(d):
         "chosen": norm(d.get("chosen")),
         "block": norm(d.get("block_e")),
         "block_p": norm(d.get("block_p")),
+        "body_p": norm(d.get("bodyP")),
+        "body_e": norm(d.get("bodyN")),
+        "atk_p": norm(d.get("atkP")),
+        "atk_e": norm(d.get("atkN")),
     }
 
 
-FIELDS = ("fk", "aqa", "chosen", "block", "block_p")
+FIELDS = ("fk", "aqa", "chosen", "block", "block_p",
+           "body_p", "body_e", "atk_p", "atk_e")
 
 
 def load_oracle_state(path):

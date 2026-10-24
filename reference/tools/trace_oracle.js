@@ -1230,6 +1230,34 @@
       // The per-frame slot rolls (cO/hN on de): [t4, gZ, N_] per
       // <QuickAttacks> slot. The port has the same numbers in quick_rolls_,
       // so the slot-firing cadence can be compared draw by draw.
+      // Collision counts per side, mirroring the port's `[dbg]`
+      // atkP/atkN/bodyP/bodyN + `hit` (the port counts the capsules of the
+      // open <Attack> interval and the target-collidable ones).
+      caps: (function () {
+        try {
+          var out = {};
+          var pairs = [["me", me], ["enemy", en]];
+          for (var q = 0; q < pairs.length; q++) {
+            var key = pairs[q][0], fg = pairs[q][1];
+            if (!fg) { out[key] = null; continue; }
+            var atk = 0;
+            try { atk = fg.da && fg.da.GY ? fg.da.GY.length : 0; } catch (e2) { atk = 0; }
+            var body = 0;
+            try {
+              body = fg.oa && fg.oa.Nl && fg.oa.Nl.oI ? fg.oa.Nl.oI.length : 0;
+            } catch (e3) { body = 0; }
+            var latch = false;
+            try { latch = fg.Fu && fg.Fu.dW != null; } catch (e4) { latch = false; }
+            var pair = null;
+            try {
+              var st = fg.Fu && fg.Fu.strike;
+              if (st && st.Py && st.KD) pair = st.Py.name + " x " + st.KD.name;
+            } catch (e5) { pair = null; }
+            out[key] = { atk: atk, body: body, latch: latch ? 1 : 0, pair: pair };
+          }
+          return out;
+        } catch (e) { return null; }
+      })(),
       ai_slots: (function () {
         try {
           if (!de || !de.cO) return null;

@@ -9207,6 +9207,33 @@ void FightController::dump_state_frame() {
     // The oracle's role map puts the port's `Enemy` in `Me`, so its
     // `block_state.me` is compared against `block_e` here.
     if (std::getenv("SF2_DEBUG_LOG") != nullptr) {
+        // Capsule counts, the same numbers the overlay's panel 3 and the
+        // oracle's `caps` dump report: `atk` = capsules of the currently-open
+        // <Attack> interval, `body` = target-collidable capsules.
+        auto count_caps = [](const FightFighter& ff, int* atk, int* body) {
+            *atk = 0;
+            *body = 0;
+            std::set<std::string> act;
+            if (const MoveDef* mv = ff.fighter.current_move()) {
+                const int f0 = std::max(0, mv->first_frame);
+                const int mf = ff.fighter.move_frame();
+                for (const Interval& iv : mv->intervals) {
+                    if (iv.type != 4) continue;
+                    if (!(std::max(iv.start, f0) <= mf &&
+                          mf <= ff.fighter.interval_last(iv))) {
+                        continue;
+                    }
+                    for (const std::string& n : iv.attacking_parts) act.insert(n);
+                }
+            }
+            for (const HitCapsule& c : ff.body.capsules) {
+                if (c.collidable) ++*body;
+                if (act.count(c.name) != 0) ++*atk;
+            }
+        };
+        int atkP = 0, atkE = 0, bodyP = 0, bodyE = 0;
+        count_caps(player_, &atkP, &bodyP);
+        count_caps(enemy_, &atkE, &bodyE);
         const AiController::AiDebug& a = enemy_.ai != nullptr
                                              ? enemy_.ai->last_debug()
                                              : AiController::AiDebug{};
@@ -9218,7 +9245,8 @@ void FightController::dump_state_frame() {
                      "\"rag\":%d,\"ragf\":%d,\"sep\":%.4f,\"hcb\":%d,\"play\":%d,"
                      "\"mf\":%d,\"mv\":\"%s\",\"eh\":%d,\"wait\":%d,\"hcbwhy\":%d,"
                      "\"br\":\"%s\",\"ld\":%d,\"vs0\":%d,\"ng\":%d,\"xw\":%d,\"pf\":%d,"
-                     "\"hits\":%zu}\n",
+                     "\"hits\":%zu,\"atkP\":%d,\"atkN\":%d,\"bodyP\":%d,"
+                     "\"bodyN\":%d,\"hit\":%d}\n",
                      frame_, phase(), round_.number, round_.time_nf,
                      enemy_.ai != nullptr ? a.fk : -1, a.aqa, a.fk, a.aqa, a.wb,
                      a.gate ? 1 : 0, enemy_.last_decision.c_str(),
@@ -9238,7 +9266,8 @@ void FightController::dump_state_frame() {
                          : "",
                      a.eh, a.waited ? 1 : 0,
                      a.hcb_reason, a.branch, a.ld, a.vs0, a.nG ? 1 : 0, a.xw ? 1 : 0,
-                     a.pf ? 1 : 0, hit_log_.size());
+                     a.pf ? 1 : 0, hit_log_.size(), atkP, atkE, bodyP, bodyE,
+                     (!hit_log_.empty() && hit_log_.back().frame == frame_) ? 1 : 0);
         std::fflush(stdout);
         if (std::getenv("SF2_DEBUG_SLOTS") != nullptr) {
             std::fprintf(stdout,

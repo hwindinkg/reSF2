@@ -13462,6 +13462,12 @@ FightDebugSnapshot FightScreen::debug_snapshot() const {
                 // hit test filters on), so draw only the target collidables and
                 // the open-attack capsules - 277 edges per fighter is noise.
                 if (!cap.collidable && !attack) continue;
+                if (attack) {
+                    (side == 0 ? d.atk_n_p : d.atk_n_e) += 1;
+                }
+                if (cap.collidable) {
+                    (side == 0 ? d.body_n_p : d.body_n_e) += 1;
+                }
                 FightDebugSnapshot::DbgSeg seg;
                 project(cap.p1.x, cap.p1.y, &seg.x1, &seg.y1);
                 project(cap.p2.x, cap.p2.y, &seg.x2, &seg.y2);
@@ -13494,6 +13500,8 @@ FightDebugSnapshot FightScreen::debug_snapshot() const {
             }
         }
     }
+    d.hit_now = !fight_->hit_log().empty() &&
+                 fight_->hit_log().back().frame == fight_->frame();
     for (const sf2::scene::FightController::HitLogEntry& h : fight_->hit_log()) {
         char hbuf[160];
         std::snprintf(hbuf, sizeof(hbuf), "%s %s %s%s%s dmg=%.1f hp=%.1f",
