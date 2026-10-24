@@ -1938,6 +1938,9 @@ void AiController::iwb_event(const AiFightState& st) {
     if (st.current_move == last_my_move_) return;
     last_my_move_ = st.current_move;
     if (!st.playing || st.current_move == nullptr) return;
+    // [experiment] Okb (L20887): a started move raises the KeyPressed event
+    // that arms the Gc pump for the next pass.
+    gc_pump_armed_ = true;
     for (const std::string& n : unexpected_moves_) {
         if (move_has_name(*st.current_move, n)) {
             eh_ = 1;
@@ -2309,6 +2312,17 @@ std::string AiController::update(const AiFightState& st) {
     jwb_event(st);
     iwb_event(st);
 
+    // [experiment] SF2_GC_PUMP=1: the Gc pump pass. In the JS Gc.ia runs
+    // every frame right after the fighter update and consumes the events
+    // raised by move starts; a Tabular fighter's attacks come from here.
+    if (tactic_->type == 2 && gc_pump_armed_ &&
+        std::getenv("SF2_GC_PUMP") != nullptr) {
+        gc_pump_armed_ = false;
+        if (st.phase_fight) {
+            const std::string gc = update_random(st);
+            if (!gc.empty()) return gc;
+        }
+    }
     if (tactic_->type == 1) {
         // JS `wd.x3` (L20990) — the OPPONENT-arm. `x3` is the `EStartAnimationEvent`
         // handler on MY model (`Te.x3` L23097 <- `Te.Skb` L23058), and it arms

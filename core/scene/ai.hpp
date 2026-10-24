@@ -916,6 +916,11 @@ private:
     // highest-priority group (`Aua`) and picks uniformly (`uf.sja`). That is
     // where the JS attacks come from - `de.ld` only carries the Steps.
     std::string gc_attack(const AiFightState& st, const std::string& picked);
+    // [experiment] The `Gc` PUMP: JS `Ykb` -> `Okb` (L20643/L20887) fires when
+    // `de.ia` starts a move; the next `Gc.ia` (L28299) rebuilds the KeyPressed
+    // candidates and may start a different move (`Pkb`). Armed by `iwb_event`
+    // when a move starts, consumed once per start.
+    bool gc_pump_armed_ = false;
     // The dodge candidate list (JS `VAa` L617).
     void vaa(const AiFightState& st, int variant);
     // The weighted roulette pick (JS `Md.jL` L640).
