@@ -627,6 +627,8 @@ struct FightDebugSnapshot {
     float mhp_p = 0.0f;
     float hp_e = 0.0f;
     float mhp_e = 0.0f;
+    // 5b: the last landed hits (panel 5), newest last.
+    std::vector<std::string> hit_lines;
     // 6: timing
     int frame = 0;
     int phase = 0;

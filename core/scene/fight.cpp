@@ -6247,6 +6247,20 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         rec.hp_after = def.hp;    // `aM(model, -0)` leaves HP untouched
     }
     def.hp = rec.hp_after;
+    // [debug overlay] Keep the last hits for panel 5 (damage / final stats).
+    {
+        HitLogEntry e;
+        e.frame = frame;
+        e.by_player = atk.is_player;
+        e.move = move.name;
+        e.damage = rec.final_damage;
+        e.hp_after = def.hp;
+        e.blocked = rec.blocked;
+        e.critical = rec.critical;
+        e.head = rec.head_hit;
+        hit_log_.push_back(std::move(e));
+        if (hit_log_.size() > 8) hit_log_.pop_front();
+    }
     // JS `ca.Cgb` L16187/L16189: feed the `fe` session tracker.
     //   attacker == player -> `fe.wqb(Sj(), Uq, ep, Yi, a_data, block)`
     //   attacker != player -> `fe.Cqb(block)` (the `O1` + BlockedRound latches)

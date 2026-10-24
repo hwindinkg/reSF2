@@ -13427,6 +13427,15 @@ FightDebugSnapshot FightScreen::debug_snapshot() const {
         d.enemy_screen_y = c.world_to_screen_y(d.enemy_y + cont_y);
         d.enemy_screen_valid = true;
     }
+    for (const sf2::scene::FightController::HitLogEntry& h : fight_->hit_log()) {
+        char hbuf[160];
+        std::snprintf(hbuf, sizeof(hbuf), "%s %s %s%s%s dmg=%.1f hp=%.1f",
+                      h.by_player ? "P->E" : "E->P", h.move.c_str(),
+                      h.blocked ? "BLK " : "", h.critical ? "CRIT " : "",
+                      h.head ? "HEAD" : "", static_cast<double>(h.damage),
+                      static_cast<double>(h.hp_after));
+        d.hit_lines.push_back(hbuf);
+    }
     d.rag = e.fighter.ragdoll_active();
     d.ragf = e.fighter.ragdoll_frame_count();
     auto join_iv = [](const sf2::scene::Fighter& f) {

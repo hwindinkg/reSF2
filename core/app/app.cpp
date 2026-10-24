@@ -2262,6 +2262,11 @@ void draw_debug_overlay(App& app) {
                              static_cast<double>(f.mhp_e),
                              static_cast<double>(f.mhp_p - f.hp_p)),
                     1.0f, 0.75f, 0.75f);
+            // The last landed hits (for the final statistics): newest last.
+            const std::size_t shown = f.hit_lines.size() > 5 ? 5 : f.hit_lines.size();
+            for (std::size_t i = f.hit_lines.size() - shown; i < f.hit_lines.size(); ++i) {
+                dmg.add(app, f.hit_lines[i], 0.95f, 0.70f, 0.70f);
+            }
         } else {
             dmg.add(app, "(no fight)", 0.70f, 0.70f, 0.70f);
         }

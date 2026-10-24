@@ -45,6 +45,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <deque>
 #include <vector>
 #include "anim_archive.hpp"
 #include "atlas.hpp"
@@ -1865,6 +1866,21 @@ public:
         fx_.set_color(rgb);
     }
 
+    // [debug overlay] The last landed hits: frame, attacker, move, damage,
+    // HP after, flags. Panel 5 (damage) renders these; the ring is capped so
+    // it stays a debug aid, not a sim state.
+    struct HitLogEntry {
+        int frame = 0;
+        bool by_player = false;
+        std::string move;
+        float damage = 0.0f;
+        float hp_after = 0.0f;
+        bool blocked = false;
+        bool critical = false;
+        bool head = false;
+    };
+    const std::deque<HitLogEntry>& hit_log() const { return hit_log_; }
+
     // --- fight state accessors -------------------------------------------
     const FightFighter& player() const { return player_; }
     const FightFighter& enemy() const { return enemy_; }
@@ -2341,6 +2357,7 @@ private:
     std::vector<CalloutSignal> callouts_;
 
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
+    std::deque<HitLogEntry> hit_log_;  // last 8 hits (debug overlay)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
     AnimStart player_anim_start_;  // [dojo lesson] see take_player_anim_start
     sf2::scene::TrigBus bus_;      // perk trigger bus (`tb`; ZOa registers)
