@@ -1142,7 +1142,15 @@ def main(argv=None) -> int:
     ap.add_argument("--yes", action="store_true",
                     help="confirm a baseline update (the human said ok)")
     ap.add_argument("--json", default="", help="write the machine report here")
+    ap.add_argument("--readme", action="store_true",
+                    help="regenerate README.md's status block and exit")
+    ap.add_argument("--check-readme", action="store_true",
+                    help="exit 1 when README.md's status block is stale")
     args = ap.parse_args(argv)
+
+    if args.readme or args.check_readme:
+        import readme_status  # same directory
+        return readme_status.rewrite(check_only=args.check_readme)
 
     all_gates = FLAG_GATES + DIFF_GATES
     if args.list:
@@ -1300,6 +1308,15 @@ def main(argv=None) -> int:
     if args.json:
         write_json(ROOT / args.json if not os.path.isabs(args.json) else Path(args.json),
                    results, mode_name, time.time() - started, exit_code, baseline)
+    # A full run is the moment the status is fully known: refresh the README's
+    # generated block so the repo can never advertise a stale state. Best
+    # effort - a README hiccup must not turn a green gate run red.
+    if args.full:
+        try:
+            import readme_status
+            readme_status.rewrite()
+        except Exception as exc:  # noqa: BLE001 - diagnostics only
+            print(f"gates: README status not regenerated: {exc}")
     return exit_code
 
 
