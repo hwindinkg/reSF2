@@ -978,6 +978,16 @@ int AiController::pick(const std::vector<AiCandidate>& cands) const {
     float r = roll01() * sum;
     last_pick_sum_ = sum;
     last_pick_roll_ = r;
+    // [probe] SF2_TRACE_PICK=1: the roulette operands (weights, sum, roll).
+    if (std::getenv("SF2_TRACE_PICK") != nullptr) {
+        std::fprintf(stdout, "[pick] sum=%.1f roll=%.1f:", sum, r);
+        for (const AiCandidate& c : cands) {
+            std::fprintf(stdout, " %s=%.1f", c.animation.c_str(),
+                         weight_of(c.animation));
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
     for (std::size_t i = 0; i < cands.size(); ++i) {
         r -= weight_of(cands[i].animation);
         if (r < 0.0f) return static_cast<int>(i);
@@ -1770,6 +1780,17 @@ int AiController::quick_slots(const AiFightState& st) {
 void AiController::evade_ib(const AiFightState& st) {
     IB_ = false;
     if (tactic_ == nullptr || moves_ == nullptr) return;
+    // [probe] SF2_TRACE_AI_QUICK=1: the `<Evades>` slot state of this pass
+    // (`t4` roll, chance, fired) - `IB` needs a FIRING slot first.
+    static const bool trace_ib = std::getenv("SF2_TRACE_AI_QUICK") != nullptr;
+    if (trace_ib) {
+        for (std::size_t d = 0; d < evade_rolls_.size(); ++d) {
+            std::fprintf(stdout, "[ev] f=%d slot=%zu t4=%.6f gz=%.4f na=%d\n",
+                         st.fight_frame, d, evade_rolls_[d].t4,
+                         evade_rolls_[d].gz, evade_rolls_[d].na ? 1 : 0);
+        }
+        std::fflush(stdout);
+    }
     AiFightState foe = st;  // the OPPONENT's own view = `a` in `Pqb(a)`
     std::swap(foe.my_moves, foe.enemy_moves);
     std::swap(foe.current_move, foe.enemy_move);
