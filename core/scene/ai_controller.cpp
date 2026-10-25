@@ -1952,7 +1952,8 @@ std::string AiController::gc_frame(const AiFightState& st) {
             std::string why;
             if (m->no_animation) {
                 why = "no_animation";
-            } else if (m->type != "ATTACK" && m->type != "MOVE") {
+            } else if (m->type != "ATTACK" && m->type != "MOVE" &&
+                       m->name.find("Block") == std::string::npos) {
                 why = "type:" + m->type;
             } else if (st.full_conditions && !st.full_conditions(*m)) {
                 why = "conditions";
