@@ -15341,117 +15341,6 @@ void FightScreen::render_impl(App& app) {
         // bar's opaque band is exactly frame rows 7..33 of 43).
     };
 
-    draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
-                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false);
-    // The oracle's two bars are the SAME orange art (FIDELITY_MATRIX
-    // fight_stance: "bars orange/blue vs oracle both orange"); mirror the
-    // enemy fill to the inner (left) end.
-    draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
-                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true);
-
-    // Fighter portraits + names (JS `lk.obb` L2029 `Sh = Fr`; `lk.gbb` L2030
-    // two `ea` name labels `ua(70)`). The oracle anchors: portrait centres
-    // (307,122)/(973,122), ring diameter ~180. Both portraits are the
-    // `oe`/`Hf` user-image art drawn at its natural 512 px canvas, whose
-    // circular frame is BAKED IN at ~300/512 = 0.586 of the canvas, so a
-    // 307 px canvas renders the capture's 180 px ring (canvas-centred: the
-    // oracle's ring centre == the canvas centre). Names sit at the bar's
-    // shoulder: player centred 432 (capture bbox x395..469), enemy 847.5
-    // (x811..884); the capture's ink rows are 59..80.
-    {
-        // `oe(Hf)` natural canvas (the old 165 px canvas shrank the art 1.9x).
-        // The canvas is the alpha-fit that reproduces the oracle ring (the
-        // 512-canvas art's opaque ring is 307/512 wide; a 300 px canvas puts
-        // it at the captured 176-180 px).
-        const float port_d = 300.0f;
-        // JS `Sf.layout` (L84773): panel centre = (J+N)/2 ∓ 520*c*e with the
-        // 1280x720 clamp (c = 0.58667, e = 1.1) -> 304.43 / 975.57, panel_y
-        // 115.72. The old 307/973/116.5 was hand-tuned and 2.6 px off on both
-        // sides, which pushed the enemy portrait over its HP bar.
-        const float hud_c = 0.58667f;
-        const float panel_px = 304.43f, panel_ex = 975.57f;
-        const float panel_py = 115.72f;
-        const float port_px = panel_px, port_ex = panel_ex;
-        const float port_py = panel_py;
-        if (!draw_user_image(app, vs_player_image_, port_px, port_py, port_d, port_d, 1.0f,
-                             /*flip_x=*/true)) {
-            draw_user_image(app, "avatar_hero", port_px, port_py, port_d, port_d, 1.0f,
-                            /*flip_x=*/true);
-        }
-        if (!draw_user_image(app, vs_enemy_image_, port_ex, port_py, port_d, port_d, 1.0f)) {
-            draw_user_image(app, "avatar_masked", port_ex, port_py, port_d, port_d, 1.0f);
-        }
-        const sf2::data::font* nf = app.menu_font();
-        const unsigned int nt = app.font_texture();
-        if (nf != nullptr && nt != 0) {
-            // `ea.ua(70)` = font-en size 100 -> 0.70 (FONT_METRICS §2). The
-            // native menu font renders Cyrillic wider than the oracle's at a
-            // given height, so 0.48 minimises the capture ink-box error
-            // (oracle "ТЕНЬ" 75x22; native 0.63 -> 106x27, so both dims
-            // scale by ~0.48 to 81x20.6). `draw_text_centered` takes the
-            // glyph-box TOP; the capture's ink rows are 59..80.
-            // JS `lk.gbb` (L84486-84493): the name label is a 400x80 box at
-            // `C((t==0?150:-550)+c)` / `D(-100+c)` - i.e. the PLAYER name is
-            // LEFT-aligned at panel_x + 150*c and the ENEMY name RIGHT-aligned
-            // at panel_x - 150*c, baseline box top = panel_y - 100*c. The old
-            // centred 432/847.5 with a fixed `name_top=50` was 7 px low and used
-            // the wrong anchoring (it drifts with the name length).
-            const float nscale = 0.48f;
-            const float name_y = panel_py - 100.0f * hud_c;      // 57.05
-            const float name_px = panel_px + 150.0f * hud_c;     // 392.4
-            const float name_ex = panel_ex - 150.0f * hud_c;     // 887.6
-            const float pw = app.measure_text_px(vs_player_name_, nscale);
-            const float ew = app.measure_text_px(vs_enemy_name_, nscale);
-            app.draw_text_with_font(*nf, nt, name_px + 1.5f, name_y + 1.5f, vs_player_name_,
-                                    nscale, 0.0f, 0.0f, 0.0f, 0.55f);
-            app.draw_text_with_font(*nf, nt, name_px, name_y, vs_player_name_, nscale, 1.0f,
-                                    0.90f, 0.62f, 1.0f);
-            app.draw_text_with_font(*nf, nt, name_ex - ew + 1.5f, name_y + 1.5f,
-                                    vs_enemy_name_, nscale, 0.0f, 0.0f, 0.0f, 0.55f);
-            app.draw_text_with_font(*nf, nt, name_ex - ew, name_y, vs_enemy_name_, nscale,
-                                    1.0f, 0.90f, 0.62f, 1.0f);
-        }
-    }
-
-    // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
-    // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.
-    // JS `Sf.iPa` (sf2.502f0946.js @1048646), VERBATIM:
-    //   `this.NF=this.xU/60|0; this.NF!=this.fma&&(this.fma=this.NF,
-    //    this.Kp.V(K.T((this.NF<10?"0":null)+Math.max(0,this.NF))),...)`
-    // The seconds are zero-padded to two digits while below 10 ("09", "00").
-    // JS `Sf.iPa` only runs while the round is live; the port drew the timer
-    // in every phase, so the end-of-round banner had the digits behind it.
-    const bool timer_live = fight_->phase() == 2;  // fight_phase::fight
-    const int timer = timer_live ? std::max(0, fight_->round().time_nf) : -1;
-    const std::string tstr = (timer < 10 ? "0" : "") + std::to_string(timer);
-    if (timer_live) {
-        const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
-        unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
-        if (fnt != nullptr && tex != 0) {
-            // JS `Kp.Ia(128)`, `Kp.ua(120*c)` (Sf.layout L2037): fontSize =
-            // 120*c; digits eF=90 -> native scale = 120*c/90.
-            const float scale = (fnt == app.digits_font()) ? (86.0f * hud_c / 90.0f)
-                                                           : (120.0f * hud_c / 100.0f);
-            // shadow (black) slightly offset, then white foreground
-            // JS `Sf.layout` (L2037): `this.Kp.C(b/2); this.Kp.D(...)` — the
-            // timer is screen-top-centre. Oracle: "99" centred at (640,45).
-            const float ty = 8.0f;
-            app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
-                                   0.0f);
-            app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.95f, 0.75f);
-        } else {
-            // fallback quads (should not happen)
-            float tx = kViewW * 0.5f - tstr.size() * 20.0f;
-            for (char ch : tstr) {
-                float verts[12] = {tx, 18.0f, tx + 18.0f, 18.0f, tx, 46.0f,
-                                   tx + 18.0f, 18.0f, tx + 18.0f, 46.0f, tx, 46.0f};
-                ren.draw_triangles(verts, 6, 1.0f, 1.0f, 1.0f, 0.95f);
-                tx += 22.0f;
-                (void)ch;
-            }
-        }
-    }
-
     // Rounds — the `lk` SECOND row: the name-frame base (`lk.Sh = Fr`,
     // whose `Qp = Mx` L2088 draws `background = R.$(E.get(1294), y.UU)`
     // `uL(165)`) plus the round pips.
@@ -15703,6 +15592,118 @@ void FightScreen::render_impl(App& app) {
         draw_pip(e_done ? "Round_Done" : "HealthBar_Empty", pip_anchor_enemy + off, e_done,
                  +kPipTan25);
     }
+
+    draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
+                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false);
+    // The oracle's two bars are the SAME orange art (FIDELITY_MATRIX
+    // fight_stance: "bars orange/blue vs oracle both orange"); mirror the
+    // enemy fill to the inner (left) end.
+    draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
+                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true);
+
+    // Fighter portraits + names (JS `lk.obb` L2029 `Sh = Fr`; `lk.gbb` L2030
+    // two `ea` name labels `ua(70)`). The oracle anchors: portrait centres
+    // (307,122)/(973,122), ring diameter ~180. Both portraits are the
+    // `oe`/`Hf` user-image art drawn at its natural 512 px canvas, whose
+    // circular frame is BAKED IN at ~300/512 = 0.586 of the canvas, so a
+    // 307 px canvas renders the capture's 180 px ring (canvas-centred: the
+    // oracle's ring centre == the canvas centre). Names sit at the bar's
+    // shoulder: player centred 432 (capture bbox x395..469), enemy 847.5
+    // (x811..884); the capture's ink rows are 59..80.
+    {
+        // `oe(Hf)` natural canvas (the old 165 px canvas shrank the art 1.9x).
+        // The canvas is the alpha-fit that reproduces the oracle ring (the
+        // 512-canvas art's opaque ring is 307/512 wide; a 300 px canvas puts
+        // it at the captured 176-180 px).
+        const float port_d = 300.0f;
+        // JS `Sf.layout` (L84773): panel centre = (J+N)/2 ∓ 520*c*e with the
+        // 1280x720 clamp (c = 0.58667, e = 1.1) -> 304.43 / 975.57, panel_y
+        // 115.72. The old 307/973/116.5 was hand-tuned and 2.6 px off on both
+        // sides, which pushed the enemy portrait over its HP bar.
+        const float hud_c = 0.58667f;
+        const float panel_px = 304.43f, panel_ex = 975.57f;
+        const float panel_py = 115.72f;
+        const float port_px = panel_px, port_ex = panel_ex;
+        const float port_py = panel_py;
+        if (!draw_user_image(app, vs_player_image_, port_px, port_py, port_d, port_d, 1.0f,
+                             /*flip_x=*/true)) {
+            draw_user_image(app, "avatar_hero", port_px, port_py, port_d, port_d, 1.0f,
+                            /*flip_x=*/true);
+        }
+        if (!draw_user_image(app, vs_enemy_image_, port_ex, port_py, port_d, port_d, 1.0f)) {
+            draw_user_image(app, "avatar_masked", port_ex, port_py, port_d, port_d, 1.0f);
+        }
+        const sf2::data::font* nf = app.menu_font();
+        const unsigned int nt = app.font_texture();
+        if (nf != nullptr && nt != 0) {
+            // `ea.ua(70)` = font-en size 100 -> 0.70 (FONT_METRICS §2). The
+            // native menu font renders Cyrillic wider than the oracle's at a
+            // given height, so 0.48 minimises the capture ink-box error
+            // (oracle "ТЕНЬ" 75x22; native 0.63 -> 106x27, so both dims
+            // scale by ~0.48 to 81x20.6). `draw_text_centered` takes the
+            // glyph-box TOP; the capture's ink rows are 59..80.
+            // JS `lk.gbb` (L84486-84493): the name label is a 400x80 box at
+            // `C((t==0?150:-550)+c)` / `D(-100+c)` - i.e. the PLAYER name is
+            // LEFT-aligned at panel_x + 150*c and the ENEMY name RIGHT-aligned
+            // at panel_x - 150*c, baseline box top = panel_y - 100*c. The old
+            // centred 432/847.5 with a fixed `name_top=50` was 7 px low and used
+            // the wrong anchoring (it drifts with the name length).
+            const float nscale = 0.48f;
+            const float name_y = panel_py - 100.0f * hud_c;      // 57.05
+            const float name_px = panel_px + 150.0f * hud_c;     // 392.4
+            const float name_ex = panel_ex - 150.0f * hud_c;     // 887.6
+            const float pw = app.measure_text_px(vs_player_name_, nscale);
+            const float ew = app.measure_text_px(vs_enemy_name_, nscale);
+            app.draw_text_with_font(*nf, nt, name_px + 1.5f, name_y + 1.5f, vs_player_name_,
+                                    nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_with_font(*nf, nt, name_px, name_y, vs_player_name_, nscale, 1.0f,
+                                    0.90f, 0.62f, 1.0f);
+            app.draw_text_with_font(*nf, nt, name_ex - ew + 1.5f, name_y + 1.5f,
+                                    vs_enemy_name_, nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_with_font(*nf, nt, name_ex - ew, name_y, vs_enemy_name_, nscale,
+                                    1.0f, 0.90f, 0.62f, 1.0f);
+        }
+    }
+
+    // Timer — bitmap-font centered (Sf.layout: top-center). Uses fight/digits.fnt
+    // (fallback to ui/font-en). Scale tuned so ~80px glyph -> ~30px on HUD.
+    // JS `Sf.iPa` (sf2.502f0946.js @1048646), VERBATIM:
+    //   `this.NF=this.xU/60|0; this.NF!=this.fma&&(this.fma=this.NF,
+    //    this.Kp.V(K.T((this.NF<10?"0":null)+Math.max(0,this.NF))),...)`
+    // The seconds are zero-padded to two digits while below 10 ("09", "00").
+    // JS `Sf.iPa` only runs while the round is live; the port drew the timer
+    // in every phase, so the end-of-round banner had the digits behind it.
+    const bool timer_live = fight_->phase() == 2;  // fight_phase::fight
+    const int timer = timer_live ? std::max(0, fight_->round().time_nf) : -1;
+    const std::string tstr = (timer < 10 ? "0" : "") + std::to_string(timer);
+    if (timer_live) {
+        const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
+        unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
+        if (fnt != nullptr && tex != 0) {
+            // JS `Kp.Ia(128)`, `Kp.ua(120*c)` (Sf.layout L2037): fontSize =
+            // 120*c; digits eF=90 -> native scale = 120*c/90.
+            const float scale = (fnt == app.digits_font()) ? (86.0f * hud_c / 90.0f)
+                                                           : (120.0f * hud_c / 100.0f);
+            // shadow (black) slightly offset, then white foreground
+            // JS `Sf.layout` (L2037): `this.Kp.C(b/2); this.Kp.D(...)` — the
+            // timer is screen-top-centre. Oracle: "99" centred at (640,45).
+            const float ty = 8.0f;
+            app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
+                                   0.0f);
+            app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.95f, 0.75f);
+        } else {
+            // fallback quads (should not happen)
+            float tx = kViewW * 0.5f - tstr.size() * 20.0f;
+            for (char ch : tstr) {
+                float verts[12] = {tx, 18.0f, tx + 18.0f, 18.0f, tx, 46.0f,
+                                   tx + 18.0f, 18.0f, tx + 18.0f, 46.0f, tx, 46.0f};
+                ren.draw_triangles(verts, 6, 1.0f, 1.0f, 1.0f, 0.95f);
+                tx += 22.0f;
+                (void)ch;
+            }
+        }
+    }
+
 
     // --- Fight-HUD perk icons (JS `Hr`/`Ir`/`Jr`, L2041-2048) --------------
     // `lk.U0a` (L2031) appends `Hr(type==0?0:1)` to the panel; `lk.Pub` ->
