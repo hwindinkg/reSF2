@@ -66,6 +66,11 @@ extern bool g_dojo_cam_probe;
 
 namespace sf2::app {
 
+// Defined with the results screen (~L17170): JS `We.Sfa` digit grouping
+// (`1000` -> "1 000"). Declared here because the MAP reward badges (drawn
+// earlier in the file) use the same formatter.
+std::string results_spaced_text(std::int64_t value);
+
 namespace {
 
 constexpr float kViewW = 1280.0f;
@@ -11716,10 +11721,36 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
                 icon_w[n] = (map_frame_size(app, bd.icon, gw, gh) && gh > 0.0f)
                                 ? icon_h * (gw / gh)
                                 : icon_h;
-                texts[n] = std::to_string(bd.value);
+                // JS `ci` (L89204-89248) prints every reward number through
+                // `We.Sfa` (L101746): digits grouped in 3s with a SPACE
+                // ("2000" -> "2 000"). The port printed `std::to_string`, so a
+                // 2000-money badge read "2000".
+                texts[n] = results_spaced_text(bd.value);
                 txt_w[n] = mfont != nullptr
                                ? app.measure_text(*mfont, texts[n], txt_scale)
                                : icon_h;
+                if (std::getenv("SF2_TRACE_MAPBADGE") != nullptr) {
+                    // Self-check of the JS `We.Sfa` grouping (this line FAILS if
+                    // the formatter drifts): 1000 -> "1 000", 1234567 ->
+                    // "1 234 567", 999 -> "999".
+                    static bool fmt_checked = false;
+                    if (!fmt_checked) {
+                        fmt_checked = true;
+                        const std::string a = results_spaced_text(1000);
+                        const std::string b = results_spaced_text(1234567);
+                        const std::string c = results_spaced_text(999);
+                        const bool ok = a == "1 000" && b == "1 234 567" && c == "999";
+                        std::fprintf(stdout,
+                                     "[map] badge-fmt %s 1000='%s' 1234567='%s' "
+                                     "999='%s'\n",
+                                     ok ? "PASS" : "FAIL", a.c_str(), b.c_str(),
+                                     c.c_str());
+                        std::fflush(stdout);
+                    }
+                    std::fprintf(stdout, "[map] badge %s=%s\n", bd.icon,
+                                 texts[n].c_str());
+                    std::fflush(stdout);
+                }
                 ++n;
             }
             if (n > 0) {
