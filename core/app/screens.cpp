@@ -546,6 +546,23 @@ std::string loc(App& app, const std::string& key, const std::string& fallback) {
     return t;
 }
 
+// Warrior display name: the active-language table, then the EN table, then a
+// humanised key ("NAME_NINJA" -> "NINJA"). The lang table can miss a key when
+// the per-language file is not the cached one, and the raw "NAME_*" token must
+// never reach the HUD/VS (it did: the survival enemy showed "Survival" /
+// "NAME_NINJA" instead of the warrior's name).
+std::string loc_name(App& app, const std::string& key, const std::string& fallback) {
+    if (key.empty()) return fallback;
+    std::string t = loc(app, key, std::string());
+    if (!t.empty() && t != key) return t;
+    t = lang_text(app.res_root(), "en", key, std::string());
+    if (!t.empty()) return t;
+    std::string h = key;
+    if (h.compare(0, 5, "NAME_") == 0) h = h.substr(5);
+    for (char& ch : h) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    return h.empty() ? fallback : h;
+}
+
 // JS `qd(a,b)` (L3387): `a.indexOf(b)==0`.
 bool starts_with(const std::string& a, const std::string& b) {
     return a.size() >= b.size() && a.compare(0, b.size(), b) == 0;
@@ -6207,6 +6224,10 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         // kit - no weapon again.
         pugi::xml_node kit = w;
         std::vector<pugi::xml_node> kit_members;
+        // The resolved `<Group>` member (`kit`) - its `<Template>` chain carries
+        // the FirstName/Avatar for roster enemies (Survival/Duel), which the
+        // owning battle `<Warrior>` does not have.
+        pugi::xml_node kit_warrior;
         if (pugi::xml_node groups = w.child("Groups")) {
             for (const pugi::xml_node gref : groups.children("Group")) {
             const std::string gname = gref.attribute("Name").value();
@@ -6235,9 +6256,19 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
                     const std::size_t idx = static_cast<std::size_t>(
                         static_cast<double>(members.size()) * pick.jf());
                     kit = members[idx < members.size() ? idx : 0];
+                    // Only an identity-bearing member can name the enemy: the
+                    // Survival_Parameters_1 group ships bare <Warrior>
+                    // nodes (numbers only), so it must not overwrite the
+                    // Generic_1 pick that carries the Template/FirstName.
+                    if (kit.attribute("Template") || kit.attribute("FirstName")) {
+                        kit_warrior = kit;
+                    }
                     kit_members.push_back(kit);
                 }
-                break;
+                // NO break: the JS `efa` (L7360) merges EVERY `<Group>` in
+                // order, so the LAST group's member wins the identity
+                // (Survival ships `Survival_1` + `Generic_1` + parameters; the
+                // name/Avatar live on the Generic member, not on Survival_1).
             }
             }
         }
@@ -6360,6 +6391,45 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
         } else {
             const auto fn = tmpl_attrs.find("FirstName");
             if (fn != tmpl_attrs.end()) out.first_name = fn->second;
+        }
+        // Roster enemies (Survival/Duel) get their identity from the `<Group>`
+        // member, not from the owning battle `<Warrior>`: walk the member's
+        // `<Template>` chain (JS `pGa` merges the same way) and take the first
+        // `FirstName`/`Avatar` found. Without this the VS/HUD fall back to the
+        // battle name ("Survival") instead of the warrior's ("SHIN").
+        if (std::getenv("SF2_TRACE_ENEMYNAME") != nullptr) {
+            std::fprintf(stdout, "[en] battle=%s kit=%s first='%s' av=%d\n",
+                         battle_name.c_str(),
+                         kit_warrior.empty() ? "(none)" : kit_warrior.attribute("Template").value(),
+                         out.first_name.c_str(),
+                         out.attrs.find("Avatar") != out.attrs.end() ? 1 : 0);
+            std::fflush(stdout);
+        }
+        if ((out.first_name.empty() || out.attrs.find("Avatar") == out.attrs.end()) &&
+            !kit_warrior.empty()) {
+            const pugi::xml_node templates2 =
+                root.child("Warriors").child("Templates");
+            std::string tname = kit_warrior.attribute("Template").value();
+            std::set<std::string> seen;
+            while (!tname.empty() && seen.insert(tname).second) {
+                pugi::xml_node tn;
+                for (const pugi::xml_node t : templates2.children("Template")) {
+                    if (std::string(t.attribute("Name").value()) == tname) {
+                        tn = t;
+                        break;
+                    }
+                }
+                if (!tn) break;
+                if (out.first_name.empty()) {
+                    const pugi::xml_attribute fn = tn.attribute("FirstName");
+                    if (fn && fn.value()[0] != '\0') out.first_name = fn.value();
+                }
+                if (out.attrs.find("Avatar") == out.attrs.end()) {
+                    const pugi::xml_attribute av = tn.attribute("Avatar");
+                    if (av && av.value()[0] != '\0') out.attrs.emplace("Avatar", av.value());
+                }
+                tname = tn.attribute("Template").value();
+            }
         }
         out.has_not_ai = w.attribute("NotAI") != nullptr;
         out.has_not_animation = w.attribute("NotAnimation") != nullptr;
@@ -12230,7 +12300,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     battle.round_time = bw.round_time;
     // `first_name` is a lang key (`NAME_SHIN`) resolved for display (JS `ur`).
     app().pending_battle().enemy_name =
-        bw.first_name.empty() ? "Enemy" : loc(app(), bw.first_name, bw.first_name);
+        bw.first_name.empty() ? "Enemy" : loc_name(app(), bw.first_name, bw.first_name);
     // VS intro (`ik`, L2069-2071): resolve the two names + portraits the VS
     // screen and the HUD show. Player = the save Warrior (`FirstName`, a lang
     // key like "NAME_SHADOW" -> "SHADOW"; the shipped save's `Avatar` is
@@ -12249,10 +12319,17 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         // JS `ud.YXa(kc)` (L193968): the `<Name>`/`<Avatar>` rules retarget the
         // player's displayed name/portrait (SENSEI_MEMORIES -> the sensei).
         if (!pov.name.empty()) pfirst = pov.name;
-        vs_player_name_ = loc(app(), pfirst, "SHADOW");
+        vs_player_name_ = loc_name(app(), pfirst, "SHADOW");
         vs_player_image_ = pov.avatar.empty() ? "avatar_hero" : pov.avatar;
         std::string efirst = bw.first_name.empty() ? battle_name_ : bw.first_name;
-        vs_enemy_name_ = loc(app(), efirst, efirst);
+        vs_enemy_name_ = loc_name(app(), efirst, efirst);
+        if (std::getenv("SF2_TRACE_ENEMYNAME") != nullptr) {
+            std::fprintf(stdout, "[en] lang=%s key=%s loc=%s probe=%s\n",
+                         app().language().c_str(), efirst.c_str(),
+                         vs_enemy_name_.c_str(),
+                         loc(app(), "NAME_NINJA", "(miss)").c_str());
+            std::fflush(stdout);
+        }
         // The portrait is the resolved template's `Avatar` (JS `ur` -> `Hf`);
         // the `Template` stem is the legacy fallback. BOSS_LYNX Fight 1
         // resolves `Avatar="man_kunai"` (the oracle's ШИН portrait).
@@ -15225,6 +15302,9 @@ void FightScreen::render_impl(App& app) {
     assets.fight_location.set_darkness_alpha(fight_->darkness_alpha());
     assets.fight_location.render_darkness(ren);
 
+    // The round plate + scrim, UNDER the HUD (JS: `Cr` is a location child).
+    draw_fight_banner(app, *fight_);
+
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
     // Frames: fight/ui.json -> HealthBar_Empty (bg), HealthBar_Full (player
     // fill), HealthBarBlue_Full (enemy fill), HealthBar_Hit/Blue_Hit (leak),
@@ -16042,9 +16122,11 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
-    // The round plate (JS `Cr` L2021-2026): over the fight + HUD, UNDER the
-    // gamepad. Atlas art only - no text and no tween (see draw_fight_banner).
-    draw_fight_banner(app, *fight_);
+    // The round plate (JS `Cr` L2021-2026): a LOCATION-layer child (`Cr` lives
+    // in the location container, the HUD `Sf` is a separate node above it), so
+    // the plate and its 5-stop scrim must be drawn BEFORE the HUD - otherwise
+    // the scrim dims the bars/names/portraits by 24-36 % (measured on the
+    // port_matrix capture). See the call above the HUD block.
 
     // The on-screen gamepad (JS `Za` virtual controls): the joystick
     // bottom-left + the punch/kick buttons bottom-right, drawn from the
