@@ -33,3 +33,16 @@ README.md — дашборд готовности, его блок между <!
    соответствовать записанному пробелу в BUGS.md. Нельзя ставить True
    без гейта/замера.
 4. README — только готовность, по-английски, без описания проекта.
+
+## 11. ПУШИТЬ ПОСЛЕ КАЖДОГО ЗЕЛЁНОГО ЭТАПА (стоячее указание человека, 25.10)
+
+Неделя без пушей — нарушение. Порядок:
+1. python harness/gates.py --full (он сам обновляет README-статус) -> exit 0;
+2. python harness/gates.py --check-readme -> exit 0;
+3. git push origin harness/gates И git push origin harness/gates:main
+   (main — fast-forward, чтобы README-дашборд был на главной странице репозитория);
+4. только потом отчёт человеку: в отчёте указать remote-хеш.
+
+Пушить можно обычным git push: credential.helper=manager, в Windows Credential
+Manager лежит git:https://hwindinkg@github.com, пароль не спрашивается.
+Отдельного API-пути (gh, GITHUB_TOKEN, api.github.com) в проекте нет.
