@@ -110,51 +110,82 @@ def commits_per_day(days: int = 30) -> list[tuple[str, int]]:
 
 
 def history_svg(series: list[tuple[str, int]], metrics: list[tuple[str, int]]) -> str:
-    w, h = 760, 300
-    left, right, top, bottom = 56, 24, 56, 44
-    plot_w = w - left - right
-    plot_h = h - top - bottom
+    """Two separate panels: commits/day (bars) and the survival metric (line).
+
+    The first version drew both series in ONE plot area, so the bar tops, the
+    line and its value labels collided. Each panel now owns its own box, axis
+    and labels.
+    """
+    w, h = 760, 420
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
          f'viewBox="0 0 {w} {h}" font-family="Segoe UI,Ubuntu,sans-serif">',
          f'<rect width="{w}" height="{h}" rx="10" fill="{BG}"/>',
          f'<text x="24" y="30" fill="{TEXT}" font-size="18" font-weight="600">'
          f'History</text>',
          f'<text x="24" y="48" fill="{MUTED}" font-size="12">'
-         f'commits per day (bars) and the survival divergence metric (line)</text>']
-    # grid
-    for i in range(5):
-        gy = top + plot_h * i / 4
-        p.append(f'<line x1="{left}" y1="{gy:.1f}" x2="{w-right}" y2="{gy:.1f}" '
-                 f'stroke="{GRID}" stroke-width="1"/>')
+         f'commits per day (top) and the survival divergence metric (bottom)'
+         f'</text>']
+
+    def panel(y0: int, y1: int, title: str, unit_colour: str) -> None:
+        p.append(f'<rect x="64" y="{y0}" width="{w-64-24}" height="{y1-y0}" '
+                 f'fill="{PANEL}" stroke="{GRID}" rx="6"/>')
+        p.append(f'<text x="76" y="{y0+18}" fill="{unit_colour}" font-size="11" '
+                 f'font-weight="600">{esc(title)}</text>')
+
+    # ---- panel A: commits per day -----------------------------------------
+    a0, a1 = 66, 214
+    panel(a0, a1, "commits / day", BLUE)
     if series:
         vmax = max(1, max(v for _, v in series))
+        plot_x, plot_w = 76, w - 76 - 40
+        plot_y, plot_h = a0 + 28, (a1 - 10) - (a0 + 28)
         bw = plot_w / max(1, len(series))
         for i, (d, v) in enumerate(series):
             bh = plot_h * v / vmax
-            x = left + i * bw + bw * 0.15
-            p.append(f'<rect x="{x:.1f}" y="{top+plot_h-bh:.1f}" '
-                     f'width="{bw*0.7:.1f}" height="{bh:.1f}" fill="{BLUE}" '
-                     f'opacity="0.55"/>')
-        p.append(f'<text x="{left}" y="{h-16}" fill="{MUTED}" font-size="11">'
+            x = plot_x + i * bw + bw * 0.18
+            p.append(f'<rect x="{x:.1f}" y="{plot_y+plot_h-bh:.1f}" '
+                     f'width="{bw*0.64:.1f}" height="{bh:.1f}" fill="{BLUE}" '
+                     f'rx="1.5"/>')
+        p.append(f'<text x="{plot_x-6}" y="{plot_y+8}" fill="{MUTED}" '
+                 f'font-size="10" text-anchor="end">{vmax}</text>')
+        p.append(f'<text x="{plot_x-6}" y="{plot_y+plot_h}" fill="{MUTED}" '
+                 f'font-size="10" text-anchor="end">0</text>')
+        p.append(f'<text x="{plot_x}" y="{a1-4}" fill="{MUTED}" font-size="10">'
                  f'{esc(series[0][0])}</text>')
-        p.append(f'<text x="{w-right}" y="{h-16}" fill="{MUTED}" font-size="11" '
+        p.append(f'<text x="{w-40}" y="{a1-4}" fill="{MUTED}" font-size="10" '
                  f'text-anchor="end">{esc(series[-1][0])}</text>')
-        p.append(f'<text x="{left-8}" y="{top+6}" fill="{MUTED}" font-size="10" '
-                 f'text-anchor="end">{vmax}</text>')
-    if len(metrics) >= 2:
-        mmax = max(v for _, v in metrics) or 1
+
+    # ---- panel B: the survival metric -------------------------------------
+    b0, b1 = 232, 380
+    panel(b0, b1, "diff:survival (frames diverging from the oracle, lower is better)",
+          RED)
+    if metrics:
+        plot_x, plot_w = 76, w - 76 - 40
+        plot_y, plot_h = b0 + 28, (b1 - 26) - (b0 + 28)
+        mmax = max(1, max(v for _, v in metrics))
+        # y grid: 0 and max
+        for frac, val in ((0.0, 0), (1.0, mmax)):
+            gy = plot_y + plot_h * (1 - frac)
+            p.append(f'<line x1="{plot_x}" y1="{gy:.1f}" x2="{plot_x+plot_w}" '
+                     f'y2="{gy:.1f}" stroke="{GRID}" stroke-width="1"/>')
+            p.append(f'<text x="{plot_x-6}" y="{gy+4:.1f}" fill="{MUTED}" '
+                     f'font-size="10" text-anchor="end">{val}</text>')
+        n = len(metrics)
         pts = []
         for i, (d, v) in enumerate(metrics):
-            x = left + plot_w * i / (len(metrics) - 1)
-            y = top + plot_h - plot_h * v / mmax
+            x = plot_x + (plot_w * i / (n - 1) if n > 1 else plot_w / 2)
+            y = plot_y + plot_h * (1 - v / mmax)
             pts.append(f"{x:.1f},{y:.1f}")
-            p.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="{RED}"/>')
-            p.append(f'<text x="{x:.1f}" y="{y-10:.1f}" fill="{RED}" font-size="11" '
-                     f'text-anchor="middle">{v}</text>')
-        p.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="{RED}" '
-                 f'stroke-width="2"/>')
-        p.append(f'<text x="{left}" y="{top-10}" fill="{RED}" font-size="11">'
-                 f'diff:survival</text>')
+            p.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.5" fill="{RED}"/>')
+            # value above the point, label below the axis
+            p.append(f'<text x="{x:.1f}" y="{y-10:.1f}" fill="{RED}" '
+                     f'font-size="12" font-weight="600" text-anchor="middle">'
+                     f'{v}</text>')
+            p.append(f'<text x="{x:.1f}" y="{b1-8}" fill="{MUTED}" font-size="10" '
+                     f'text-anchor="middle">{esc(d)}</text>')
+        if n > 1:
+            p.append(f'<polyline points="{" ".join(pts)}" fill="none" '
+                     f'stroke="{RED}" stroke-width="2"/>')
     p.append("</svg>")
     return "\n".join(p)
 
@@ -166,12 +197,15 @@ def metric_history(g: dict) -> list[tuple[str, int]]:
     reason = surv.get("reason", "")
     # the reason records the chain, e.g. "1957 -> 863"
     import re
-    chain = re.findall(r"(\d+)\s*->", reason) + [str(surv.get("metric"))]
+    chain = [int(v) for v in re.findall(r"(\d+)\s*->", reason)]
+    cur = surv.get("metric")
+    if isinstance(cur, int):
+        chain.append(cur)
     date = surv.get("date", "")[:10]
     if len(chain) >= 2:
-        pts = [(f"step {i+1}", int(v)) for i, v in enumerate(chain) if v.isdigit()]
-        if date:
-            pts[0] = (date, pts[0][1])
+        pts = [(date or "before", chain[0]), ("now", chain[-1])]
+    elif chain:
+        pts = [(date or "now", chain[0])]
     return pts
 
 

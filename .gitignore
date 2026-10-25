@@ -212,3 +212,12 @@ build_head/
 
 # Project-local temp root (browser profiles, ad-hoc probe scratch)
 .harness/tmp/
+
+# --- not needed to COMPILE the port (kept on disk, out of the repo) ---------
+# Agent scratch / planning notes / MCP config
+.planning/
+.opencode/
+.mcp.json
+# The C# OracleShell (verification host for the browser oracle, not part of the
+# C++ port build). Rebuild it locally with dotnet build shell.
+shell/
