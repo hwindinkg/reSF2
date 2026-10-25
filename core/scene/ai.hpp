@@ -691,6 +691,11 @@ public:
         bool pcb = false;          // JS `ds.pcb(Fl)`
         bool rua = false, caa = false, nG = false;  // safe/table/cautious
         bool hcb = false;          // JS `hcb` gate
+    // The three `<UseDefense>` chance curves (`dqb` operands) and the raw
+    // `Da.jf()` roll that selects the `aqa` category - the AI's
+    // counter/dodge/block decision, printed by the `[ai]` audit line.
+    float cz = 0.0f, bda = 0.0f, tba = 0.0f;
+    float dqb_roll = 0.0f;
     int hcb_reason = 0;        // 0 = passed, 1..5 = hcb refusal
     // The wait counter (`eh`) and whether this pass got past it. `eh > 1`
     // returns BEFORE the `hcb` gate, so a large `eh` is itself the reason a

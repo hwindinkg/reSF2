@@ -7081,9 +7081,27 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // double-tap / window / key-map fixes.
         {
             PendingBattle& pb = app.pending_battle();
-            pb.battle_name = "Training";
-            pb.zone.clear();
-            pb.location = "dojo";
+            // `--replay` is the NATIVE side of a SHARED input script. It used
+            // to force the Training dojo, so a shared script could only ever
+            // drive the dojo. Honour an explicit `--battle`, `--zone`,
+            // `--fight-ordinal` and `--location` exactly like `--fight` does,
+            // so the same script can drive a real fight on both sides (the
+            // oracle reaches it through its navigation taps, the port boots it
+            // directly - the `atframe` key edges are fight-frame anchored).
+            if (!fight_battle.empty()) {
+                pb.battle_name = fight_battle;
+                pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
+                pb.location =
+                    fight_location.empty() ? std::string("arena") : fight_location;
+                if (fight_ordinal > 0) {
+                    pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                      std::to_string(fight_ordinal);
+                }
+            } else {
+                pb.battle_name = "Training";
+                pb.zone.clear();
+                pb.location = "dojo";
+            }
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;
@@ -9114,6 +9132,20 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fprintf(stderr, "[kickko] no fight screen\n");
             app.shutdown();
             return 1;
+        }
+        // [probe] `--dump-state N` arms the state trace here too, so the
+        // [dbg] AI-gate lines are available on a LIVE fight with the player
+        // actually attacking (the plain `--fight` run has no input at all,
+        // so the reaction gate never opens and the trace says nothing).
+        if (dump_state_frames > 0) {
+            std::filesystem::create_directories("reference/traces");
+            fs->enable_state_dump("reference/traces/native_state.jsonl",
+                                  dump_state_frames);
+            std::fprintf(stdout,
+                         "[dump] state trace armed: first %d fight frames -> "
+                         "reference/traces/native_state.jsonl\n",
+                         dump_state_frames);
+            std::fflush(stdout);
         }
         // Past the StartStance.
         for (int g = 0; g < 20000 && app.screens().current_id() == kScreenFight &&

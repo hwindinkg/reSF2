@@ -1,0 +1,73 @@
+# SHARED input script: TOURNAMENT fight with the PLAYER ATTACKING.
+#
+# Purpose: give the AI a real oracle reference for the case the user reports -
+# "I hit the enemy and she never fights back". Every other scenario idles the
+# player, so the Tabular AI's reaction path (de.ia gate + Gc reaction pump) is
+# never exercised on the oracle side.
+#
+# One file drives BOTH sides:
+#   oracle:  shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#              --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Tournament" ^
+#              --input-script reference/tools/state_ai_attack.txt --timeout-ms 90000
+#   native:  game.exe --replay reference/tools/state_ai_attack.txt ^
+#              --battle Tournament --zone ZONE_1 --fight-ordinal 0 --location arena ^
+#              --headless 900 --dump-state 700 --watchdog 900 ...
+#
+# Navigation = the state_tournament.txt taps (the oracle reaches the fight that
+# way; the native side boots it directly and ignores them). The `atframe` edges
+# are FIGHT-frame anchored and land identically on both sides.
+#
+# Key codes (JS `Gz`/`Af.oUa` defaults): 68 = D (Forward), 76 = L (Kick),
+# 75 = K (Punch).
+wait 8000
+tap 180 98
+wait 1500
+tap 140 250
+wait 2500
+tap 1130 580
+wait 60000
+# Close the distance first.
+atframe 150 keydown 68
+atframe 260 keyup 68
+# Kick every 24 frames: hold 3, release - the input buffer needs a release
+# between taps (a held key does not re-tap).
+atframe 300 keydown 76
+atframe 303 keyup 76
+atframe 324 keydown 76
+atframe 327 keyup 76
+atframe 348 keydown 76
+atframe 351 keyup 76
+atframe 372 keydown 76
+atframe 375 keyup 76
+atframe 396 keydown 76
+atframe 399 keyup 76
+atframe 420 keydown 76
+atframe 423 keyup 76
+atframe 444 keydown 76
+atframe 447 keyup 76
+atframe 468 keydown 76
+atframe 471 keyup 76
+atframe 492 keydown 76
+atframe 495 keyup 76
+atframe 516 keydown 76
+atframe 519 keyup 76
+atframe 540 keydown 76
+atframe 543 keyup 76
+atframe 564 keydown 76
+atframe 567 keyup 76
+atframe 588 keydown 76
+atframe 591 keyup 76
+atframe 612 keydown 76
+atframe 615 keyup 76
+atframe 636 keydown 76
+atframe 639 keyup 76
+atframe 660 keydown 76
+atframe 663 keyup 76
+atframe 684 keydown 76
+atframe 687 keyup 76
+atframe 708 keydown 76
+atframe 711 keyup 76
+atframe 732 keydown 76
+atframe 735 keyup 76
+atframe 756 keydown 76
+atframe 759 keyup 76

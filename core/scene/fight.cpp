@@ -8076,6 +8076,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          " | branch=%s fk=%d aqa=%d gate=%d ycb=%d lbb=%d"
                          " pcb=%d rua=%d caa=%d nG=%d hcb=%d ef=%d x=%d"
                          " ue=%d ae=%d wb=%d ew=%.3f xw=%d cm=%.4f bpa=%.4f"
+                         " cz=%.3f bda=%.3f tba=%.3f dqbr=%.3f"
                          " qf=%d qp=%d qi='%s'"
                          " wea{target=%.3f old=%.3f wea=%.3f dw=%.3f hd=%d"
                          " mu=%.3f my_facing=%d label='%s'"
@@ -8094,6 +8095,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                          d.enemy_attack_end, d.wb,
                          static_cast<double>(d.expected_wait), d.xw ? 1 : 0,
                          static_cast<double>(d.cm), d.bpa,
+                         static_cast<double>(d.cz),
+                         static_cast<double>(d.bda),
+                         static_cast<double>(d.tba),
+                         static_cast<double>(d.dqb_roll),
                          d.qfired, d.qpushed,
                          d.qinfo.c_str(),
                          d.target, st.my_facing * d.wea + d.mu, d.wea, d.dw,
@@ -9357,7 +9362,13 @@ void FightController::dump_state_frame() {
                      "\"mf\":%d,\"mv\":\"%s\",\"eh\":%d,\"wait\":%d,\"hcbwhy\":%d,"
                      "\"br\":\"%s\",\"ld\":%d,\"vs0\":%d,\"ng\":%d,\"xw\":%d,\"pf\":%d,"
                      "\"hits\":%zu,\"atkP\":%d,\"atkN\":%d,\"bodyP\":%d,"
-                     "\"bodyN\":%d,\"hit\":%d}\n",
+                     "\"bodyN\":%d,\"hit\":%d,"
+                     // [AI gate audit] the ResponseDelay gate operands:
+                     // `x` = cached `$x`, `ef` = the opponent's `kJ()`,
+                     // `ycb`/`lbb` = the uninterruptible/other gate terms,
+                     // `rua`/`caa` = safe/table attack flags.
+                     "\"x\":%d,\"ef\":%d,\"ycb\":%d,\"lbb\":%d,"
+                     "\"rua\":%d,\"caa\":%d}\n",
                      frame_, phase(), round_.number, round_.time_nf,
                      enemy_.ai != nullptr ? a.fk : -1, a.aqa, a.fk, a.aqa, a.wb,
                      a.gate ? 1 : 0, enemy_.last_decision.c_str(),
@@ -9378,7 +9389,9 @@ void FightController::dump_state_frame() {
                      a.eh, a.waited ? 1 : 0,
                      a.hcb_reason, a.branch, a.ld, a.vs0, a.nG ? 1 : 0, a.xw ? 1 : 0,
                      a.pf ? 1 : 0, hit_log_.size(), atkP, atkE, bodyP, bodyE,
-                     (!hit_log_.empty() && hit_log_.back().frame == frame_) ? 1 : 0);
+                     (!hit_log_.empty() && hit_log_.back().frame == frame_) ? 1 : 0,
+                     a.x, a.enemy_frame, a.ycb ? 1 : 0, a.lbb ? 1 : 0,
+                     a.rua ? 1 : 0, a.caa ? 1 : 0);
         std::fflush(stdout);
         if (std::getenv("SF2_DEBUG_SLOTS") != nullptr) {
             std::fprintf(stdout,

@@ -315,6 +315,54 @@ void AiController::init(const std::string& weapon,
         }
     }
     moves_ = moves;
+    // [probe] SF2_TRACE_TACTIC=1: the .dat tactic tables this fighter's AI got
+    // (attack/safe/throw record counts) - the Tabular decision reads them.
+    if (std::getenv("SF2_TRACE_TACTIC") != nullptr) {
+        std::size_t n0 = 0, n1 = 0, n2 = 0;
+        for (const TacticsFile& tf : tactics_) {
+            n0 += tf.set.tables[0].size();
+            n1 += tf.set.tables[1].size();
+            n2 += tf.set.tables[2].size();
+        }
+        std::fprintf(stdout,
+                     "[tactic] weapon=%s tactic=%s files=%zu records attack=%zu "
+                     "safe=%zu throw=%zu\n",
+                     weapon.c_str(), tactic_ != nullptr ? tactic_->name.c_str() : "null",
+                     tactics_.size(), n0, n1, n2);
+        if (tactic_ != nullptr) {
+            const auto& t = *tactic_;
+            std::fprintf(stdout,
+                         "[tactic] type=%d useDefense cz{base=%.3f lim=%.3f "
+                         "cf=%.3f df=%.3f hf=%.3f ff=%.4f lin=%d} "
+                         "bda{base=%.3f lim=%.3f cf=%.3f ff=%.4f} "
+                         "tba{base=%.3f lim=%.3f cf=%.3f ff=%.4f} "
+                         "usa{base=%.3f lim=%.3f} ta{base=%.3f lim=%.3f} "
+                         "cm{base=%.3f lim=%.3f}\n",
+                         t.type,
+                         static_cast<double>(t.counter_attack_chance.base),
+                         static_cast<double>(t.counter_attack_chance.limit),
+                         static_cast<double>(t.counter_attack_chance.counter_factor),
+                         static_cast<double>(t.counter_attack_chance.damage_factor),
+                         static_cast<double>(t.counter_attack_chance.hit_factor),
+                         static_cast<double>(t.counter_attack_chance.anim_frames_factor),
+                         t.counter_attack_chance.linear ? 1 : 0,
+                         static_cast<double>(t.dodge_chance.base),
+                         static_cast<double>(t.dodge_chance.limit),
+                         static_cast<double>(t.dodge_chance.counter_factor),
+                         static_cast<double>(t.dodge_chance.anim_frames_factor),
+                         static_cast<double>(t.block_chance.base),
+                         static_cast<double>(t.block_chance.limit),
+                         static_cast<double>(t.block_chance.counter_factor),
+                         static_cast<double>(t.block_chance.anim_frames_factor),
+                         static_cast<double>(t.use_safe_attack_chance.base),
+                         static_cast<double>(t.use_safe_attack_chance.limit),
+                         static_cast<double>(t.table_attack_chance.base),
+                         static_cast<double>(t.table_attack_chance.limit),
+                         static_cast<double>(t.cautious_movements_chance.base),
+                         static_cast<double>(t.cautious_movements_chance.limit));
+        }
+        std::fflush(stdout);
+    }
     // The `OO` weapon id (JS `P.dBa` L629-630): the weapon subtype, or the
     // first equivalent's subtype. The native port keeps the weapon name.
     oo_ = weapon;
@@ -468,6 +516,26 @@ int AiController::dqb(const AiFightState& st) {
     bda_f_ = bda;
     tba_f_ = tba;
     const float r = roll01();
+    dbg_.cz = cz;
+    dbg_.bda = bda;
+    dbg_.tba = tba;
+    dbg_.dqb_roll = r;
+    // [probe] SF2_TRACE_DQB=1: the raw dqb operands (features + curve result)
+    // for the AI's counter/dodge/block category roll.
+    if (std::getenv("SF2_TRACE_DQB") != nullptr) {
+        std::fprintf(stdout,
+                     "[dqb] f=%d counter=%.3f xb=%.3f tf=%.3f xY=%.3f o1=%.3f "
+                     "q1=%.3f k2=%.3f pz=%.3f lya=%.1f -> cz=%.4f bda=%.4f "
+                     "tba=%.4f r=%.4f\n",
+                     st.fight_frame, static_cast<double>(f.counter),
+                     static_cast<double>(f.xb), static_cast<double>(f.tf),
+                     static_cast<double>(f.xY), static_cast<double>(f.o1),
+                     static_cast<double>(f.q1), static_cast<double>(f.k2),
+                     static_cast<double>(f.pz), static_cast<double>(f.lya),
+                     static_cast<double>(cz), static_cast<double>(bda),
+                     static_cast<double>(tba), static_cast<double>(r));
+        std::fflush(stdout);
+    }
     if (r < cz) return 2;
     if (r < cz + bda) return 3;
     if (r < cz + bda + tba) return 4;
@@ -1771,6 +1839,37 @@ int AiController::ka(const AiFightState& st) {
 std::string AiController::gc_frame(const AiFightState& st) {
     if (moves_ == nullptr || st.my_moves == nullptr) return "";
     std::vector<const MoveDef*> best;
+    // [probe] SF2_TRACE_GC=1: what the pump's candidate build keeps/rejects.
+    static const bool trace_gc = std::getenv("SF2_TRACE_GC") != nullptr;
+    if (trace_gc) {
+        int kp = 0, pass = 0;
+        std::string names, why_all;
+        for (const MoveDef* m : *st.my_moves) {
+            if (m == nullptr || !m->has_event("KeyPressed")) continue;
+            ++kp;
+            if (m->no_animation) continue;
+            std::string why;
+            if (!v1(*m, st, &why, /*mirror_filter=*/false)) {
+                const std::size_t colon = why.find(':');
+                why_all += " ";
+                why_all += m->name;
+                why_all += "(";
+                why_all += why.substr(0, colon == std::string::npos ? why.size()
+                                                                   : colon);
+                why_all += ")";
+                continue;
+            }
+            ++pass;
+            names += m->name;
+            names += ' ';
+        }
+        std::fprintf(stdout,
+                     "[gc] f=%d playing=%d keypressed=%d passed=%d kept=[%s] "
+                     "rejected=[%s]\n",
+                     st.fight_frame, st.playing ? 1 : 0, kp, pass, names.c_str(),
+                     why_all.c_str());
+        std::fflush(stdout);
+    }
     for (const MoveDef* m : *st.my_moves) {
         if (m == nullptr || !m->has_event("KeyPressed")) continue;
         if (m->no_animation) continue;  // `Rha` -> the unused `g` group
@@ -1994,12 +2093,22 @@ int AiController::pqb(const AiFightState& st) {
     feat_.zz.clear();
     pH_ = F8_ = false;
 
-    // Probe snapshot (`--ai-probe` / the fight `[ai]` log): reset and record
-    // the operands of the JS gate (L604) so the fired branch is auditable.
-    dbg_ = AiDebug{};
+    // Probe snapshot (`--ai-probe` / the fight `[ai]` log): reset the
+    // PQB-OWNED fields only. The old whole-struct reset (`dbg_ = AiDebug{}`)
+    // also wiped the operands `update()` recorded BEFORE this pass - `hcb`
+    // (the no-decision gate), `cz`/`bda`/`tba` (the `dqb` roll), `eh` and
+    // `pf` - so every `[ai]`/`[dbg]` line reported `hcb=0 cz=0 eh=0` even on
+    // frames that DID decide. Those stale zeros sent two earlier audits after
+    // the wrong field (the "the AI never counters/dodges" reading).
+    dbg_.branch = "none";
+    dbg_.gate = dbg_.ycb = dbg_.lbb = dbg_.pcb = false;
+    dbg_.rua = dbg_.caa = dbg_.nG = false;
+    dbg_.fk = -1;
+    dbg_.wb = 0;
+    dbg_.ld = 0;
+    dbg_.vs0 = 0;
     dbg_.enemy_frame = st.enemy_kj;
     dbg_.x = x_;
-    dbg_.aqa = aqa_;
     if (st.enemy_move != nullptr) {
         dbg_.enemy_uninterrupt_end = uninterrupt_end(*st.enemy_move);
         dbg_.enemy_attack_end = attack_end(*st.enemy_move);
@@ -2544,6 +2653,9 @@ std::string AiController::update(const AiFightState& st) {
 
     // The distance category + chance draw (JS L593: `this.aqa=this.dqb(a)`).
     aqa_ = dqb(st);
+    // Record the category of THIS pass (the earlier write, before the roll,
+    // reported the previous frame's value - the "aqa=1 always" misreading).
+    dbg_.aqa = aqa_;
 
     // The core decision (JS L594).
     int cnt = pqb(st);
