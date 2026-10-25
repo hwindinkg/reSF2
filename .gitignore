@@ -43,7 +43,7 @@ build_headless/
 build_test/
 check_xml.py
 debug_out.txt
-docs/
+# docs/ holds the GitHub Pages dashboard (progress.svg, history.svg) - tracked
 download/
 dz_decoder.obj
 engine/game/_build_game_cpp.py
