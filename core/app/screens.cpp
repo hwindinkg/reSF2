@@ -22659,6 +22659,13 @@ void persist_settings_mutes(App& app) { persist_bus_mutes(app); }
 // Runs a row action; returns true when the dialog must close (`Ge(0)` L1930 /
 // L1932 RESTART `close()`).
 bool settings_run_row(App& app, SettingsRow row) {
+    // JS `un.rHa` (sf2.readable.js:80587) starts with `rb.um()` - the UI click -
+    // for EVERY row (`rb.um` L53245-53251 -> `snd_click_1`), then switches.
+    // The port played it only for music/sound/restart, so BACK, LANGUAGE and
+    // CREDITS were silent.
+    if (row != SettingsRow::kNone) {
+        sf2::audio::AudioEngine::instance().play("snd_click_1");
+    }
     switch (row) {
         case SettingsRow::kBack:
             std::fprintf(stdout, "[settings] BACK -> close dialog\n");
@@ -22673,7 +22680,6 @@ bool settings_run_row(App& app, SettingsRow row) {
             g_settings_music_off = !g_settings_music_off;
             sf2::audio::AudioEngine::instance().set_music_muted(g_settings_music_off);
             persist_settings_mutes(app);
-            sf2::audio::AudioEngine::instance().play("snd_click_1");
             std::fprintf(stdout, "[settings] music %s\n", g_settings_music_off ? "OFF" : "ON");
             std::fflush(stdout);
             return false;
@@ -22683,7 +22689,6 @@ bool settings_run_row(App& app, SettingsRow row) {
             // `cMa` -> `oBa`, the non-`tR` bus, L1240813). Row id 1 = "sound".
             g_settings_sound_off = !g_settings_sound_off;
             sf2::audio::AudioEngine::instance().set_sfx_muted(g_settings_sound_off);
-            sf2::audio::AudioEngine::instance().play("snd_click_1");
             persist_settings_mutes(app);
             std::fprintf(stdout, "[settings] sound %s\n",
                          g_settings_sound_off ? "OFF" : "ON");
@@ -22693,7 +22698,6 @@ bool settings_run_row(App& app, SettingsRow row) {
             settings_dialog_cycle_language(app);
             return false;
         case SettingsRow::kRestart:
-            sf2::audio::AudioEngine::instance().play("snd_click_1");
             // `un.rHa` case 5 (offset 995553): `this.t9&&(G.Ska(this.$u),
             // p.TJ.save(!0)),L.K.reload()`. `t9` = the displayed language
             // differs from the saved one; only then is the language committed

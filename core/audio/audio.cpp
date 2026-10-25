@@ -435,7 +435,7 @@ void AudioEngine::play(const std::string& event, bool loop) {
     // `O6a`'s `La.context==null` early-out, which sits BEFORE the `pxb` call,
     // so a dead engine neither throttles nor stamps `oFa`. `rxb` is never
     // populated by shipped content, so the window is always the default.
-    {
+    if (!loop) {  // JS O6a (1238636): if(b)c=true; - a LOOPED cue skips pxb
         const double now = std::chrono::duration<double>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count();
