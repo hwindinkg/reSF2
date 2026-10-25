@@ -1219,3 +1219,35 @@ JS `Rr` (87426-87441): `b.locked` -> панель описания; `!b.uR()` (�
 Порт считает `n.variant` (9759), но рисует обычную панель с FIGHT для всех ->
 пройденный бой можно перефармливать. Осторожно: `--tour-walk`/`ui-tour` ходят в
 один и тот же бой несколько раз, так что сначала нужно поправить сценарии.
+
+### DOJO: персонаж стоял в bind-позе (25.10) - ИСПРАВЛЕНО
+Хаб собирает `FightNone`-контроллер и звал сразу `enter_fight_none()` (переход в
+фазу 2). В фазе 2 блок стойки НАМЕРЕННО ничего не выбирает, пока не начат ни
+один мув (`post_intro_transition` - JS-окно после интро), поэтому у игрока хаба
+вообще не было мува: `[dojomove] move=(null)` на 300+ кадрах, модель в bind-позе
+(«в dojo персонаж без анимации»). В JS фабрика `m1a` прогоняет НОРМАЛЬНУЮ
+инициализацию боя (стартовая стойка) и только потом `xF(2)`.
+Фикс: `enter_fight_none()` стартует стартовую стойку каждого бойца
+(`stance_move({"StanceLeft","StanceRight"})`) до `rebuild_body`; у мешка
+(`NotAnimation`) нет Template - он пропускается (bind-поза по задумке).
+Проверка: `[dojomove] f=1 move=FistsStartStance-Left clip=2 playing=1` ->
+`FistsStartStanceIdle-Left` в цикле; снимок ui-tour совпал со стенсом оракула
+(`dojo_hub.png`). `enter_start_stance()` сделан public (нужен хабу).
+Диагностика: `SF2_TRACE_DOJO_MOVE`, `SF2_NO_GC_PUMP`.
+
+### ИИ: замеры (25.10) - где именно расходится
+- Gc-пумп (`gc_frame`) НУЖЕН: без него (`SF2_NO_GC_PUMP=1`) у Standard-врага
+  ZONE_2/Challenge ATTACK падает 1 -> 0 (гейт `enemy-move-audit` FAIL).
+- Старты атак за 600 кадров без ввода (по тактикам): Beginner/Random 8-10
+  (BOSS_LYNX, Tournament), Standard/Tabular 1-6 (ZONE_2 Challenge 1,
+  BOSS_HERMIT 3, Stranger 3, ZONE_2 Stranger 6). То есть Tabular-враги
+  атакуют в 2-10 раз реже Random - это и видит игрок («ходят и иногда атакуют»).
+- Оракул в том же сценарии ZONE_2/Challenge за 800 кадров стартует 9 мувов,
+  из них 1 атака (`SpinningPunch`) - порт там совпадает (diff:challenge = 0).
+  Значит пассивность Tabular - свойство ЭТОГО JS-набора тактик, а не только порта.
+- Первое расхождение survival (nat f=204 / ora f=346): у оракула
+  `ai_eh=-2147483648` (watch `dsb`), затем `eh=-1`, `ai_ld=0` (у `de.ia` НЕТ
+  кандидатов), и StepForward врага приходит из Gc-пумпа: `ai_slots` =
+  [[0.648,0.05,0],[0.238,0.2,0],...], зоны 1..4. У порта в этот момент враг
+  ещё в `knucklesstartstanceidle`. Т.е. чинить надо РОЗЫГРЫШ СЛОТОВ пумпа
+  (`Gc.Rwa/EZa/dxa/DK`), а не `de.ia`.
