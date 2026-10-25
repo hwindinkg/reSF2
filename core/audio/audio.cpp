@@ -61,6 +61,14 @@ constexpr float kBeepVolume = 0.4f;
 // table `rxb` (`new jd`, char 1236634) is never populated by shipped content,
 // so every non-`tR` cue falls back to this `qxb` default.
 constexpr double kSfxThrottleSeconds = 0.05;
+// JS `Ss` bus ctor: `this.Eeb = 16; this.jGa = 2;` - the `Jy` slot bitmask
+// holds 2 LOOPED slots (0..1) and 16 one-shot slots (2..17). `Ss.J7a` returns
+// -1 when the pool is full and `Ss.play` then returns -1 WITHOUT starting
+// anything (no stealing: `play` passes its third arg `c` as false for every
+// shipped caller, and the steal branch is gated on it). The port had no pool,
+// so an over-full scene restarted voices instead of dropping.
+constexpr int kJsLoopSlots = 2;
+constexpr int kJsOneShotSlots = 16;
 
 // The table-driven event list (Phase 7.1): built once from sfx_table.hpp so
 // the JS mapping stays in exactly one place. Stable after construction.
@@ -163,6 +171,16 @@ struct AudioEngine::Impl {
     // seconds (`Ss.pxb` reads/writes `b.oFa`). -1 = never played.
     std::vector<double> last_play;
     std::uint64_t suppressed_total = 0;  // JS `Ss.pxb` true results
+    // Which (event, voice) pairs were started as a LOOP (`<Sound Looped="1">`
+    // -> `Ss.play(id, true)`), so the JS pool accounting can tell the 2 loop
+    // slots from the 16 one-shot slots.
+    std::vector<std::vector<unsigned char>> loop_flags;
+    // 1 = the ma_sound was initialised. A sample that failed to load left an
+    // UNINITIALISED ma_sound in the pool; the old code then played it and
+    // uninitialised it at shutdown (undefined behaviour / a crash on a
+    // partially loaded sfx dir).
+    std::vector<std::vector<unsigned char>> loaded_flags;
+    std::uint64_t dropped_total = 0;  // JS `Ss.J7a` -1 / `Ss.Hcb` true
     // Beep fallback (only when no real sample could be loaded).
     ma_audio_buffer beep{};
     bool beep_ok = false;
@@ -212,9 +230,13 @@ bool AudioEngine::init(const std::string& res_root) {
     std::size_t loaded = 0;
     std::size_t total = 0;
     impl_->sounds.assign(events().size(), {});
+    impl_->loop_flags.assign(events().size(), {});
+    impl_->loaded_flags.assign(events().size(), {});
     for (std::size_t e = 0; e < events().size(); ++e) {
         const EventDef& ev = events()[e];
         impl_->sounds[e].resize(static_cast<std::size_t>(ev.voices));
+        impl_->loop_flags[e].assign(static_cast<std::size_t>(ev.voices), 0);
+        impl_->loaded_flags[e].assign(static_cast<std::size_t>(ev.voices), 0);
         for (int v = 0; v < ev.voices; ++v) {
             ++total;
             ma_sound& sound = impl_->sounds[e][static_cast<std::size_t>(v)];
@@ -227,6 +249,7 @@ bool AudioEngine::init(const std::string& res_root) {
                     MA_SOUND_FLAG_NO_SPATIALIZATION,
                 NULL, NULL, &sound);
             if (r == MA_SUCCESS) {
+                impl_->loaded_flags[e][static_cast<std::size_t>(v)] = 1;
                 ma_sound_set_volume(&sound,
                                     ev.volume * (sfx_muted_ ? 0.0f : 1.0f));
                 ++loaded;
@@ -277,7 +300,14 @@ bool AudioEngine::init(const std::string& res_root) {
 
 void AudioEngine::shutdown() {
     if (impl_ == nullptr) return;
-    if (impl_->engine_ok) {
+    // The counters are the ONLY observable proof of the trigger wiring on a
+    // machine without an audio device (the harness runs headless): print them
+    // unconditionally, BEFORE the device teardown. Previously the whole block
+    // sat inside `if (engine_ok)`, so a headless run printed nothing and no
+    // audio gate could read a single count.
+    // Only a run that actually did something reports (init() itself calls
+    // shutdown() first, and that empty teardown must stay silent).
+    if (impl_->engine_ok || played_total_ > 0 || impl_->music_plays > 0) {
         std::fprintf(stdout, "[audio] shutdown: total=%llu suppressed=%llu",
                      static_cast<unsigned long long>(played_total_),
                      static_cast<unsigned long long>(suppressed_total_));
@@ -285,11 +315,28 @@ void AudioEngine::shutdown() {
             std::fprintf(stdout, " %s=%llu", events()[e].name,
                          static_cast<unsigned long long>(impl_->played[e]));
         }
-        std::fprintf(stdout, " music=%llu\n",
-                     static_cast<unsigned long long>(impl_->music_plays));
+        std::fprintf(stdout, " music=%llu dropped=%llu\n",
+                     static_cast<unsigned long long>(impl_->music_plays),
+                     static_cast<unsigned long long>(impl_->dropped_total));
+        // Reported once: App::shutdown() and the singleton's destructor both
+        // call shutdown(), and a second identical line only confuses log
+        // parsers.
+        played_total_ = 0;
+        suppressed_total_ = 0;
+        dropped_total_ = 0;
+        impl_->music_plays = 0;
+        impl_->dropped_total = 0;
+        impl_->suppressed_total = 0;
+        std::fill(impl_->played.begin(), impl_->played.end(), 0);
+    }
+    if (impl_->engine_ok) {
         for (std::size_t e = 0; e < impl_->sounds.size(); ++e) {
-            for (ma_sound& s : impl_->sounds[e]) {
-                ma_sound_uninit(&s);
+            for (std::size_t v = 0; v < impl_->sounds[e].size(); ++v) {
+                if (v >= impl_->loaded_flags[e].size() ||
+                    impl_->loaded_flags[e][v] == 0) {
+                    continue;  // never initialised - nothing to uninit
+                }
+                ma_sound_uninit(&impl_->sounds[e][v]);
             }
         }
         impl_->sounds.clear();
@@ -448,6 +495,44 @@ void AudioEngine::play(const std::string& event, bool loop) {
         impl_->last_play[static_cast<std::size_t>(e)] = now;  // `b.oFa=c`
     }
 
+    // JS `Ss.J7a` (the `Ss` bus slot allocator): 2 looped slots + 16
+    // one-shot slots allocated from the `Jy` bitmask; a full pool returns -1
+    // and `Ss.play` returns -1 without starting the voice. Slots are freed in
+    // `Ss.rhb` when the output ends, so "busy" here is "the sound is still
+    // playing". A looped cue that is ALREADY playing the same id is dropped
+    // first (`Ss.O6a`: `b && this.Hcb(a)` -> -1): the loop is not restarted.
+    {
+        int loop_playing = 0;
+        int oneshot_playing = 0;
+        bool same_loop_playing = false;
+        for (std::size_t e2 = 0; e2 < impl_->sounds.size(); ++e2) {
+            const std::vector<ma_sound>& pool = impl_->sounds[e2];
+            for (std::size_t v2 = 0; v2 < pool.size(); ++v2) {
+                if (v2 >= impl_->loaded_flags[e2].size() ||
+                    impl_->loaded_flags[e2][v2] == 0) {
+                    continue;  // never initialised: not a live voice
+                }
+                if (!ma_sound_is_playing(&pool[v2])) continue;
+                const bool is_loop =
+                    v2 < impl_->loop_flags[e2].size() && impl_->loop_flags[e2][v2] != 0;
+                if (is_loop) {
+                    ++loop_playing;
+                    if (e2 == static_cast<std::size_t>(e)) same_loop_playing = true;
+                } else {
+                    ++oneshot_playing;
+                }
+            }
+        }
+        const bool over_pool =
+            loop ? (same_loop_playing || loop_playing >= kJsLoopSlots)
+                 : (oneshot_playing >= kJsOneShotSlots);
+        if (over_pool) {
+            ++dropped_total_;             // JS `Ss.play` returned -1
+            ++impl_->dropped_total;
+            return;
+        }
+    }
+
     // [audio trace] Record the STARTED voice (mirrors the JS hook's
     // `Ss.play` return != -1 filter): the name + loop flag land in the
     // per-frame buffer the fight state harness drains (drain_frame_plays).
@@ -459,8 +544,13 @@ void AudioEngine::play(const std::string& event, bool loop) {
     impl_->next_voice[static_cast<std::size_t>(e)] = (v + 1) % ev.voices;
 
     ma_sound* sound = nullptr;
-    if (static_cast<std::size_t>(v) < impl_->sounds[static_cast<std::size_t>(e)].size()) {
-        sound = &impl_->sounds[static_cast<std::size_t>(e)][static_cast<std::size_t>(v)];
+    std::vector<ma_sound>& own_pool = impl_->sounds[static_cast<std::size_t>(e)];
+    const std::vector<unsigned char>& own_loaded =
+        impl_->loaded_flags[static_cast<std::size_t>(e)];
+    if (static_cast<std::size_t>(v) < own_pool.size() &&
+        static_cast<std::size_t>(v) < own_loaded.size() &&
+        own_loaded[static_cast<std::size_t>(v)] != 0) {
+        sound = &own_pool[static_cast<std::size_t>(v)];
     } else if (impl_->beep_sound_ok) {
         sound = &impl_->beep_sound;
     }
@@ -473,6 +563,11 @@ void AudioEngine::play(const std::string& event, bool loop) {
         ma_sound_set_volume(sound, kBeepVolume * sfx_gain);
     } else {
         ma_sound_set_volume(sound, ev.volume * sfx_gain);
+    }
+
+    if (static_cast<std::size_t>(v) < impl_->loop_flags[static_cast<std::size_t>(e)].size()) {
+        impl_->loop_flags[static_cast<std::size_t>(e)][static_cast<std::size_t>(v)] =
+            loop ? 1 : 0;
     }
 
     // Restart the clip (miniaudio: stop + rewind + start; thread-safe —
@@ -533,6 +628,7 @@ void AudioEngine::stop(const std::string& event) {
         ma_sound_stop(&s);
         ma_sound_seek_to_pcm_frame(&s, 0);
     }
+    for (unsigned char& f : impl_->loop_flags[static_cast<std::size_t>(e)]) f = 0;
 }
 
 void AudioEngine::play_music(const std::string& track, bool loop) {

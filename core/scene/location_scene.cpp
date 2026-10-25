@@ -615,7 +615,8 @@ float parse_transparency(const pugi::xml_node& node, Sprite& sprite) {
 // The game's `ujb` (L477): "pixel_1" -> solid fill, else atlas sprite.
 // Returns nullptr for Image elements that are not sprite draws.
 std::shared_ptr<Sprite> make_image(const pugi::xml_node& node,
-                                   const std::unordered_map<std::string, FrameRef>& frames) {
+                                   const std::unordered_map<std::string, FrameRef>& frames,
+                                   const std::string& tex_prefix = std::string()) {
     auto sprite = std::make_shared<Sprite>();
     const char* cls = node.attribute("ClassName").value();
     sprite->texture_name = cls != nullptr ? cls : "";
@@ -655,6 +656,8 @@ std::shared_ptr<Sprite> make_image(const pugi::xml_node& node,
     }
     const FrameRef& ref = it->second;
     const sf2::data::atlas_frame& fr = ref.frame;
+    // Per-location texture key (see LocationScene::set_texture_prefix).
+    if (!tex_prefix.empty()) sprite->texture_name = tex_prefix + sprite->texture_name;
     sprite->frame_x = static_cast<float>(fr.x);
     sprite->frame_y = static_cast<float>(fr.y);
     sprite->frame_w = static_cast<float>(fr.w);
@@ -717,7 +720,8 @@ std::shared_ptr<Sprite> make_image(const pugi::xml_node& node,
 // nullptr when no frame matches (the JS would have no `Y`).
 std::shared_ptr<Sprite> make_sequention(
     const pugi::xml_node& node,
-    const std::unordered_map<std::string, FrameRef>& frames, SequenceAnim& seq) {
+    const std::unordered_map<std::string, FrameRef>& frames, SequenceAnim& seq,
+    const std::string& tex_prefix = std::string()) {
     const char* cls = node.attribute("ClassName").value();
     const std::string prefix = cls != nullptr ? cls : "";
     std::vector<std::pair<long, SequenceFrame>> ordered;
@@ -727,7 +731,7 @@ std::shared_ptr<Sprite> make_sequention(
         }
         const sf2::data::atlas_frame& fr = kv.second.frame;
         SequenceFrame f;
-        f.name = kv.first;
+        f.name = tex_prefix.empty() ? kv.first : tex_prefix + kv.first;
         f.frame_x = static_cast<float>(fr.x);
         f.frame_y = static_cast<float>(fr.y);
         f.frame_w = static_cast<float>(fr.w);
@@ -804,7 +808,8 @@ SpriteAnim* parse_simple_effect_node(
     const pugi::xml_node& node,
     const std::unordered_map<std::string, FrameRef>& frames,
     std::vector<std::unique_ptr<SpriteAnim>>& anims,
-    std::vector<std::shared_ptr<Sprite>>& out_sprites, SpriteAnim* parent) {
+    std::vector<std::shared_ptr<Sprite>>& out_sprites, SpriteAnim* parent,
+    const std::string& tex_prefix = std::string()) {
     const char* type_raw = node.attribute("Type").value();
     const std::string type = type_raw != nullptr ? type_raw : "";
     if (type != "Picture" && type != "Sequention") {
@@ -829,9 +834,9 @@ SpriteAnim* parse_simple_effect_node(
         sf2::data::xml_attr_bool(node, "ReappearChildLaunch", false);
     anim->hide_paused = sf2::data::xml_attr_bool(node, "HidePaused", false);
 
-    std::shared_ptr<Sprite> sprite = type == "Sequention"
-                                         ? make_sequention(node, frames, anim->seq)
-                                         : make_image(node, frames);
+    std::shared_ptr<Sprite> sprite =
+        type == "Sequention" ? make_sequention(node, frames, anim->seq, tex_prefix)
+                             : make_image(node, frames, tex_prefix);
     if (sprite == nullptr) {
         return nullptr;
     }
@@ -845,8 +850,8 @@ SpriteAnim* parse_simple_effect_node(
     // is appended before ours (nested `UIa` runs `c.pWa` first).
     for (const pugi::xml_node child : node.children()) {
         if (std::strcmp(child.name(), "SimpleEffect") == 0) {
-            SpriteAnim* c =
-                parse_simple_effect_node(child, frames, anims, out_sprites, anim);
+            SpriteAnim* c = parse_simple_effect_node(child, frames, anims, out_sprites,
+                                                    anim, tex_prefix);
             if (c != nullptr) {
                 anim->children.push_back(c);
             }
@@ -1014,8 +1019,28 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
             std::vector<std::shared_ptr<Sprite>> emitted;
             if (std::strcmp(child.name(), "Image") == 0) {
                 // Raw R3a placement (JS L486-487): X/Y straight through.
-                std::shared_ptr<Sprite> sprite = make_image(child, frames);
+                std::shared_ptr<Sprite> sprite = make_image(child, frames, tex_prefix_);
                 if (sprite != nullptr) {
+                    if (std::getenv("SF2_TRACE_LOCLAYERS") != nullptr) {
+                        std::fprintf(stdout,
+                                     "[loc] L%d factor=%.3f type=%d scaling=%d cls=%s "
+                                     "pos=(%.1f,%.1f) scale=(%.4f,%.4f) "
+                                     "frame=(%.0f,%.0f %.0fx%.0f) tex=%.0fx%.0f\n",
+                                     layer_index, static_cast<double>(layer->factor),
+                                     layer->type, layer->scaling ? 1 : 0,
+                                     sprite->texture_name.c_str(),
+                                     static_cast<double>(sprite->transform.x),
+                                     static_cast<double>(sprite->transform.y),
+                                     static_cast<double>(sprite->transform.scale_x),
+                                     static_cast<double>(sprite->transform.scale_y),
+                                     static_cast<double>(sprite->frame_x),
+                                     static_cast<double>(sprite->frame_y),
+                                     static_cast<double>(sprite->frame_w),
+                                     static_cast<double>(sprite->frame_h),
+                                     static_cast<double>(sprite->tex_w),
+                                     static_cast<double>(sprite->tex_h));
+                        std::fflush(stdout);
+                    }
                     emitted.push_back(std::move(sprite));
                 }
             } else if (std::strcmp(child.name(), "SimpleEffect") == 0) {
@@ -1024,7 +1049,8 @@ void LocationScene::load(const std::string& params_xml, const std::vector<std::s
                 // the effect, its nested SimpleEffect children and registers
                 // every SpriteAnim in `anims_`; sprites come back in `pWa`
                 // order.
-                parse_simple_effect_node(child, frames, anims_, emitted, nullptr);
+                parse_simple_effect_node(child, frames, anims_, emitted, nullptr,
+                                         tex_prefix_);
             } else if (kParticleEffectsEnabled &&
                        (std::strcmp(child.name(), "ParticleEffect") == 0 ||
                         std::strcmp(child.name(), "NewParticleEffect") == 0)) {
@@ -1442,7 +1468,18 @@ void LocationScene::render_layers(sf2::render::Renderer& renderer,
                                   const sf2::render::Camera& camera, std::size_t begin,
                                   std::size_t end) const {
     const std::size_t stop = std::min(end, layers_.size());
+    // [probe] SF2_LOC_ONLY=<n>: draw ONLY layer n (diagnostic isolation of a
+    // location layer's pixels). SF2_LOC_SKIP=<n,n,..>: skip those layers.
+    int only = -1;
+    if (const char* e = std::getenv("SF2_LOC_ONLY")) only = std::atoi(e);
+    std::string skip;
+    if (const char* e = std::getenv("SF2_LOC_SKIP")) skip = std::string(",") + e + ",";
     for (std::size_t i = begin; i < stop; ++i) {
+        if (only >= 0 && static_cast<int>(i) != only) continue;
+        if (!skip.empty() &&
+            skip.find("," + std::to_string(i) + ",") != std::string::npos) {
+            continue;
+        }
         render_layer(renderer, *layers_[i], camera);
     }
 }
@@ -1471,6 +1508,30 @@ void LocationScene::render_layer(sf2::render::Renderer& renderer, const Layer& l
     // Bj=1 both branches are identity (only push-in/lens-zoom moves pixels).
     const float layer_y = scaled ? 0.0f : camera.f9() * (1.0f - camera.layer_zoom);
 
+    static const bool trace_rect = std::getenv("SF2_TRACE_LOCRECT") != nullptr;
+    if (trace_rect && !layer.sprites.empty()) {
+        static int probed = 0;
+        if (probed < 24) {
+            ++probed;
+            const Sprite& sp = *layer.sprites.front();
+            const float hw = sp.transform.scale_x * sp.frame_w * 0.5f * ls;
+            const float hh = sp.transform.scale_y * sp.frame_h * 0.5f * ls;
+            const float wx = sp.transform.x * ls;
+            const float wy = sp.transform.y * ls + layer_y;
+            std::fprintf(stdout,
+                         "[locrect] cls=%s world=(%.1f,%.1f) half=(%.1f,%.1f) "
+                         "screen x=%.1f..%.1f y=%.1f..%.1f (zoom %.3f)\n",
+                         sp.texture_name.c_str(), static_cast<double>(wx),
+                         static_cast<double>(wy), static_cast<double>(hw),
+                         static_cast<double>(hh),
+                         static_cast<double>(camera.world_to_screen_x(wx - hw, layer.factor)),
+                         static_cast<double>(camera.world_to_screen_x(wx + hw, layer.factor)),
+                         static_cast<double>(camera.world_to_screen_y(wy - hh)),
+                         static_cast<double>(camera.world_to_screen_y(wy + hh)),
+                         static_cast<double>(camera.layer_zoom));
+            std::fflush(stdout);
+        }
+    }
     // Emitter-free layers keep the previous sprite-only path byte-for-byte.
     if (layer.particles.empty()) {
         for (const auto& sprite : layer.sprites) {

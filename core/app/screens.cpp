@@ -2428,6 +2428,13 @@ int load_location_atlas_pages(App& app, sf2::scene::LocationScene& scene,
     if (jsons.empty()) {
         throw std::runtime_error("location atlas: no page JSON for " + loc_name);
     }
+    // Per-location texture keys: several locations share frame names
+    // (`_0015_bg`, `_0014_mountains`, ...) and the renderer's alias map is
+    // keyed by frame name only, so a later load (the hub's dojo, prepared
+    // while the fight runs) overwrote the fight location's bindings - the
+    // moon scene sampled the DOJO atlas for every shared name.
+    const std::string tex_prefix = loc_name + "#";
+    scene.set_texture_prefix(tex_prefix);
     scene.load(params_xml, jsons, app.res_root());
     int aliased_pages = 0;
     for (const sf2::scene::AtlasPage& page : scene.atlas_pages()) {
@@ -2453,10 +2460,21 @@ int load_location_atlas_pages(App& app, sf2::scene::LocationScene& scene,
                          prefix.c_str());
             continue;
         }
+        if (const char* dump = std::getenv("SF2_DUMP_LOCATLAS")) {
+            // [probe] raw RGBA dump so the decoded atlas can be inspected
+            // outside the engine (PIL: Image.frombytes('RGBA',(w,h),data)).
+            const std::string out = std::string(dump) + "_" + prefix + ".raw";
+            if (std::FILE* f = std::fopen(out.c_str(), "wb")) {
+                std::fwrite(tex.rgba.data(), 1, tex.rgba.size(), f);
+                std::fclose(f);
+                std::fprintf(stdout, "[probe] atlas dump %s %dx%d\n", out.c_str(),
+                             tex.w, tex.h);
+            }
+        }
         const GLuint gl = app.renderer().texture_for("loc_atlas_" + prefix, tex);
         if (gl == 0) continue;
         for (const std::string& frame : page.frame_names) {
-            app.renderer().texture_alias(frame, gl);
+            app.renderer().texture_alias(tex_prefix + frame, gl);
         }
         ++aliased_pages;
         std::fprintf(stdout, "[ui] location atlas page %d %s: %dx%d, %zu frames\n", n,
@@ -15397,10 +15415,37 @@ void FightScreen::render_impl(App& app) {
     // same art flipped 180° (`Br.init` L2010 `BL(25*a)` with `a=b==0?-1:1`;
     // `lk` places the enemy `al`/`Sh` at the mirrored local x), so the fill
     // anchors on the RIGHT edge.
+    // A sheared textured quad. The JS `Br` bar sprites are all `BL(25*(type==0?-1:1))`
+    // (sf2.readable.js `Br.init`: `this.Ud.BL(25*a); this.nN.BL(25*a); this.EG.BL(25*a)`),
+    // i.e. the fill's inner cap is a PARALLELOGRAM (tan 25 deg per row), not a
+    // vertical cut. The port drew the three layers with `draw_atlas_rect`, so
+    // the HP fill ended in a straight vertical edge and read 6-7 px "longer"
+    // than the oracle at the inner end (measured on fight_stance: oracle fill
+    // right edge 566@y100 -> 563@y106, port constant 573).
+    auto draw_skew_frame = [&](const char* frame, float x, float y, float w, float h,
+                               float skew_tan) -> bool {
+        sf2::data::atlas_frame fr;
+        int tw = 0, th = 0;
+        unsigned int gl = 0;
+        if (!app.get_atlas_frame(frame, &fr, &tw, &th, &gl) || tw <= 0 || th <= 0) {
+            return false;
+        }
+        const float yc = y + h * 0.5f;
+        float xy[8] = {x, y, x + w, y, x, y + h, x + w, y + h};
+        for (int c = 0; c < 4; ++c) xy[c * 2] += skew_tan * (xy[c * 2 + 1] - yc);
+        const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
+        const float u1 = static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+        const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
+        const float v1 = static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
+        const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+        ren.draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+        return true;
+    };
     auto draw_hp_bar = [&](float x, float y, float w, float h, float ratio, float leak_ratio,
-                           const char* fill_frame, const char* leak_frame, bool mirror) {
-        // Background: HealthBar_Empty stretched to full width
-        if (!app.draw_atlas_rect("HealthBar_Empty", x, y, w, h, 1.0f)) {
+                           const char* fill_frame, const char* leak_frame, bool mirror,
+                           float skew_tan) {
+        // Background: HealthBar_Empty (`Br.Ud`), sheared like the fill.
+        if (!draw_skew_frame("HealthBar_Empty", x, y, w, h, skew_tan)) {
             // Fallback flat dark bg
             const float bg[] = {x, y, x + w, y, x, y + h, x + w, y, x + w, y + h, x, y + h};
             ren.draw_triangles(bg, 6, 0.12f, 0.12f, 0.12f, 0.92f);
@@ -15410,7 +15455,7 @@ void FightScreen::render_impl(App& app) {
         if (leak_ratio > 0.001f) {
             const float lw = w * std::clamp(leak_ratio, 0.0f, 1.0f);
             const float lx = mirror ? x + w - lw : x;
-            if (!app.draw_atlas_rect(leak_frame, lx, y, lw, h, 1.0f)) {
+            if (!draw_skew_frame(leak_frame, lx, y, lw, h, skew_tan)) {
                 const float lg[] = {lx, y, lx + lw, y, lx, y + h,
                                     lx + lw, y, lx + lw, y + h, lx, y + h};
                 ren.draw_triangles(lg, 6, 0.95f, 0.85f, 0.45f, 0.85f);
@@ -15419,7 +15464,7 @@ void FightScreen::render_impl(App& app) {
         if (ratio > 0.001f) {
             const float fw = w * ratio;
             const float fx = mirror ? x + w - fw : x;
-            if (!app.draw_atlas_rect(fill_frame, fx, y, fw, h, 1.0f)) {
+            if (!draw_skew_frame(fill_frame, fx, y, fw, h, skew_tan)) {
                 const bool is_blue = std::string(fill_frame).find("Blue") != std::string::npos;
                 const float r = is_blue ? 0.25f : 0.16f;
                 const float g = is_blue ? 0.45f : 0.82f;
@@ -15688,12 +15733,14 @@ void FightScreen::render_impl(App& app) {
     }
 
     draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
-                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false);
+                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false,
+                -kPipTan25);
     // The oracle's two bars are the SAME orange art (FIDELITY_MATRIX
     // fight_stance: "bars orange/blue vs oracle both orange"); mirror the
     // enemy fill to the inner (left) end.
     draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
-                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true);
+                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true,
+                +kPipTan25);
 
     // Fighter portraits + names (JS `lk.obb` L2029 `Sh = Fr`; `lk.gbb` L2030
     // two `ea` name labels `ua(70)`). The oracle anchors: portrait centres

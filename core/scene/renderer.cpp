@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <algorithm>
 #include <exception>
@@ -122,6 +123,25 @@ void sprite_to_quad(const sf2::scene::Sprite& s, const Camera& camera, float fac
         camera.world_to_screen_y(sy0 + ly0), camera.world_to_screen_y(sy0 + ly0),
         camera.world_to_screen_y(sy0 + ly1), camera.world_to_screen_y(sy0 + ly1)};
 
+    static const bool trace_uv = std::getenv("SF2_TRACE_UV") != nullptr;
+    if (trace_uv) {
+        static int n = 0;
+        if (n < 30) {
+            ++n;
+            std::fprintf(stdout,
+                         "[uv] %s frame=(%.0f,%.0f %.0fx%.0f) tex=%.0fx%.0f "
+                         "v0=%.5f v1=%.5f screen=(%.1f,%.1f)-(%.1f,%.1f)\n",
+                         s.texture_name.c_str(), static_cast<double>(s.frame_x),
+                         static_cast<double>(s.frame_y),
+                         static_cast<double>(s.frame_w),
+                         static_cast<double>(s.frame_h),
+                         static_cast<double>(s.tex_w), static_cast<double>(s.tex_h),
+                         static_cast<double>(v[0]), static_cast<double>(v[2]),
+                         static_cast<double>(sx[0]), static_cast<double>(sy[0]),
+                         static_cast<double>(sx[3]), static_cast<double>(sy[2]));
+            std::fflush(stdout);
+        }
+    }
     // Two triangles: (0,1,2) (2,1,3).
     quad.v[0] = {sx[0], sy[0], u[0], v[0], s.color_r, s.color_g, s.color_b, s.color_a};
     quad.v[1] = {sx[1], sy[1], u[1], v[1], s.color_r, s.color_g, s.color_b, s.color_a};

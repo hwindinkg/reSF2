@@ -333,6 +333,16 @@ public:
     void load(const std::string& params_xml, const std::vector<std::string>& atlas_jsons,
               const std::string& res_root);
 
+    // Texture-key prefix applied to every sprite / Sequention frame name built
+    // by `load` (must be set BEFORE load). Two locations share frame names
+    // (`_0015_bg`, `_0014_mountains`, ...) and `Renderer::texture_alias` is a
+    // single global name -> GL map, so loading the dojo AFTER the moon
+    // overwrote the moon's `_0014_mountains` and every non-unique moon layer
+    // sampled the DOJO atlas (the moon scene showed dojo bands). With a
+    // per-location prefix each scene keeps its own binding.
+    void set_texture_prefix(const std::string& prefix) { tex_prefix_ = prefix; }
+    const std::string& texture_prefix() const { return tex_prefix_; }
+
     // Uploads the atlas texture(s) into `renderer` and returns the layer
     // nodes in draw order (back to front).
     const std::vector<std::shared_ptr<Layer>>& layers() const { return layers_; }
@@ -514,6 +524,8 @@ private:
     // Per-page frame lists for the multi-page aliasing contract (see
     // `AtlasPage`): the caller aliases every page, not just the primary one.
     std::vector<AtlasPage> atlas_pages_;
+    // See `set_texture_prefix`: "" keeps the historical unprefixed names.
+    std::string tex_prefix_;
     // Res root passed to `load`; `render_layer` uses it to lazily load the
     // location effects atlas (`E.get(1304)`).
     std::string res_root_;

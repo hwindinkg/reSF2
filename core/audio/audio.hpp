@@ -145,6 +145,10 @@ public:
     // by shipped content (`new jd` only, char 1236634), so every non-`tR`
     // event uses the `qxb = 0.05` default window.
     std::uint64_t suppressed_total() const { return suppressed_total_; }
+    // JS `Ss.J7a`: plays dropped because the 2+16 voice pool was full, and
+    // looped cues dropped because the same loop was already running
+    // (`Ss.Hcb`). Mirrors `Ss.play` returning -1 without starting a voice.
+    std::uint64_t dropped_total() const { return dropped_total_; }
 
     // --- mechanical AUDIO trace (no behavior change) ----------------------
     // Every `play`/`stop` appends its resolved event name (+ loop flag) to a
@@ -165,6 +169,9 @@ private:
     bool music_ducked_ = false;  // JS `L.K.$f.uF(0)` — the pause `Dr` dialog (L2065).
     std::uint64_t played_total_ = 0;
     std::uint64_t suppressed_total_ = 0;  // JS `Ss.pxb` suppressed plays
+    // JS `Ss.J7a` (-1) / `Ss.O6a` (`Hcb` true): a play that found no free
+    // voice slot (2 looped + 16 one-shot) is DROPPED, never stolen.
+    std::uint64_t dropped_total_ = 0;
     // Audio-trace per-frame buffers (see drain_frame_plays).
     std::vector<std::pair<std::string, int>> frame_plays_;
     std::vector<std::string> frame_stops_;
