@@ -12308,6 +12308,13 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // `pending_battle().fight_triple` as the 1-based ordinal
     // (`zone|battle|<n>`, `hb.toString` L1416) written by `launch_battle`.
     int pending_fight_index = pending_fight_ordinal(app());
+    // The lang table must be loaded BEFORE any `loc`/`loc_name` below: the JS
+    // loads it at Preloader (`lang/<G.Rq()>.xml` -> `Words`, off 0x73586), so
+    // every screen - including a direct `--fight` boot - resolves real strings.
+    // The port loaded it lazily from the HUB/settings, i.e. AFTER the fight's
+    // VS/HUD names were resolved: a Russian save showed "SHADOW"/"NINJA"
+    // instead of "ТЕНЬ"/"НИНДЗЯ" (the oracle capture is Russian).
+    ensure_lang(app());
     BattleWarriorInfo bw =
         battle_warrior(battle_name_, app().pending_battle().zone, pending_fight_index);
     // An ordinal past the battle's `<Fight>` count (a cleared-ladder replay)
@@ -15444,6 +15451,18 @@ void FightScreen::render_impl(App& app) {
     auto draw_hp_bar = [&](float x, float y, float w, float h, float ratio, float leak_ratio,
                            const char* fill_frame, const char* leak_frame, bool mirror,
                            float skew_tan) {
+        static const bool trace_hud = std::getenv("SF2_TRACE_HUD") != nullptr;
+        static int hud_tick = 0;
+        if (trace_hud && (hud_tick++ % 2) == 0) {
+            std::fprintf(stdout,
+                         "[hudbar] %s x=%.1f y=%.1f w=%.1f h=%.1f ratio=%.3f leak=%.3f "
+                         "panel_y=%.1f\n",
+                         mirror ? "enemy" : "player", static_cast<double>(x),
+                         static_cast<double>(y), static_cast<double>(w),
+                         static_cast<double>(h), static_cast<double>(ratio),
+                         static_cast<double>(leak_ratio), static_cast<double>(panel_y));
+            std::fflush(stdout);
+        }
         // Background: HealthBar_Empty (`Br.Ud`), sheared like the fill.
         if (!draw_skew_frame("HealthBar_Empty", x, y, w, h, skew_tan)) {
             // Fallback flat dark bg
