@@ -172,6 +172,12 @@ def block() -> str:
     known = total - zero
     overall_items = [ok for _, items in SYSTEMS for _, ok in items]
     overall = round(100 * sum(overall_items) / max(1, len(overall_items)))
+    # the charts (docs/*.svg) are regenerated from the same checklist
+    try:
+        import readme_charts
+        readme_charts.main()
+    except Exception as exc:  # noqa: BLE001 - charts must not break the README
+        print(f"readme_status: charts not regenerated: {exc}")
 
     # Deliberately NO commit hash / commit count / timestamp: every one of them
     # changes when this block itself is committed, which would make
@@ -188,9 +194,12 @@ def block() -> str:
                "![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) "
                "![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)")
     out.append("")
-    out.append(f"**Readiness: {overall}%** `{bar(overall, 24)}` "
-               f"({sum(overall_items)} of {len(overall_items)} checklist items; "
-               "every FAIL is a documented gap in BUGS.md)")
+    out.append(f"### Readiness: {overall}%")
+    out.append("")
+    out.append("![progress](https://hwindinkg.github.io/reSF2/progress.svg)")
+    out.append("")
+    out.append(f"{sum(overall_items)} of {len(overall_items)} checklist items; "
+               "every gap below is documented in BUGS.md.")
     out.append("")
     out.append(f"Gates with a baseline: **{total}** ({zero} at 0 divergences, "
                f"{known} known non-zero) · reference: the shipped "
@@ -203,25 +212,25 @@ def block() -> str:
         pct = round(100 * ok / len(items))
         gaps = [label for label, v in items if not v]
         gap_txt = "; ".join(gaps) if gaps else "-"
-        out.append(f"| **{name}** | {square(pct)} | `{bar(pct, 8)}` {pct}% | "
+        out.append(f"| **{name}** | {square(pct)} | {pct}% | "
                    f"{ok}/{len(items)} | {gap_txt} |")
     out.append("")
     out.append("### Oracle divergences by scenario")
     out.append("")
-    out.append("```")
-    out.append("scenario         divergences")
-    vals = [(s, gates.get(f"diff:{s}", {}).get("metric")) for s in SCENARIOS]
-    vmax = max([v for _, v in vals if isinstance(v, int)] + [1])
-    for s, m in vals:
+    out.append("| Scenario | Divergences | Status |")
+    out.append("|---|---:|---|")
+    for sc in SCENARIOS:
+        m = gates.get(f"diff:{sc}", {}).get("metric")
         if m is None:
-            out.append(f"{s:<16} {'?':>6}")
+            out.append(f"| `{sc}` | ? | no baseline |")
             continue
-        width = 0 if m == 0 else max(1, round(40 * m / vmax))
-        mark = "OK  " if m == 0 else ("WARN" if m <= 10 else "FAIL")
-        out.append(f"{s:<16} {m:>6}  {mark} {'#' * width}")
-    out.append("```")
+        mark = "🟩 exact" if m == 0 else ("🟨 known" if m <= 10 else "🟥 open")
+        out.append(f"| `{sc}` | {m} | {mark} |")
     out.append("")
-    out.append("`0` = the whole fight state matches the original JS game frame by frame.")
+    out.append("`0` = the whole fight state matches the original JS game frame by "
+               "frame.")
+    out.append("")
+    out.append("![history](https://hwindinkg.github.io/reSF2/history.svg)")
     out.append("")
     out.append("### Code")
     out.append("")

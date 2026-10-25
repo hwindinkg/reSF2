@@ -32,17 +32,31 @@ README.md — дашборд готовности, его блок между <!
    SYSTEMS в harness/readme_status.py, где каждый False обязан
    соответствовать записанному пробелу в BUGS.md. Нельзя ставить True
    без гейта/замера.
-4. README — только готовность, по-английски, без описания проекта.
+4. README — только готовность, по-английски, без описания проекта и без
+   ASCII-графиков (####, ` `): графики — SVG из docs/
+   (progress.svg, history.svg), таблицы — markdown.
 
-## 11. ПУШИТЬ ПОСЛЕ КАЖДОГО ЗЕЛЁНОГО ЭТАПА (стоячее указание человека, 25.10)
+## 11. ПУШИТЬ В main БЕЗ ОКОН И БЕЗ ВЕТОК (стоячее указание человека, 25.10)
 
-Неделя без пушей — нарушение. Порядок:
-1. python harness/gates.py --full (он сам обновляет README-статус) -> exit 0;
+Порядок каждого этапа:
+1. python harness/gates.py --full (сам обновляет README-статус и графики) -> exit 0;
 2. python harness/gates.py --check-readme -> exit 0;
-3. git push origin harness/gates И git push origin harness/gates:main
-   (main — fast-forward, чтобы README-дашборд был на главной странице репозитория);
-4. только потом отчёт человеку: в отчёте указать remote-хеш.
+3. python harness/push.py -> пушит HEAD:main (только main, никаких рабочих веток);
+4. в отчёте указать remote-хеш.
 
-Пушить можно обычным git push: credential.helper=manager, в Windows Credential
-Manager лежит git:https://hwindinkg@github.com, пароль не спрашивается.
-Отдельного API-пути (gh, GITHUB_TOKEN, api.github.com) в проекте нет.
+**Пушить только через harness/push.py.** Обычный git push идёт через Git
+Credential Manager, а тот открывает окно выбора аккаунта. push.py берёт уже
+сохранённый OAuth-токен из Windows Credential Manager
+(git:https://hwindinkg@github.com, файл .harness/gh.token, gitignored) и
+пушит по HTTPS с GIT_TERMINAL_PROMPT=0/GCM_INTERACTIVE=never — окно не
+появляется, токен в выводе маскируется. Обновить токен:
+powershell -File .harness/get_token2.ps1.
+
+**Ветки:** в репозитории живут только main, old, symbian. Рабочие ветки не
+создавать; если ветка всё же появилась — её коммиты должны быть в main или под
+тегом archive/<имя>, и только потом git push --delete. Удалённые ветки
+2026-10-25 сохранены тегами archive/*.
+
+**GitHub Pages:** дашборд docs/ (progress.svg / history.svg + index/history.html)
+публикуется с main/docs на https://hwindinkg.github.io/reSF2/ ; генератор —
+harness/readme_charts.py, он вызывается из readme_status.py.
