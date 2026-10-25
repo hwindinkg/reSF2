@@ -91,6 +91,28 @@ namespace sf2::scene {
 
 namespace {
 
+// JS `tb.D6a` (L32256): the event NAME -> the numeric type `Gc.Ih` uses and
+// `Su.dea(type)` buckets by.
+int js_event_type(const std::string& n) {
+    if (n == "AnimationStart") return 9;
+    if (n == "AnimationEnd") return 10;
+    if (n == "AnimationInterrupted") return 11;
+    if (n == "IntervalStart") return 12;
+    if (n == "IntervalEnd") return 13;
+    if (n == "EveryFrame") return 14;
+    if (n == "Hit") return 6;
+    if (n == "Strike") return 7;
+    if (n == "KeyPressed") return 2;
+    if (n == "KeyReleased") return 3;
+    if (n == "RoundStage") return 1;
+    if (n == "RoundStart") return 4;
+    if (n == "RoundEnd") return 5;
+    if (n == "Birth") return 15;
+    if (n == "ModExpires") return 16;
+    if (n == "WallHit") return 8;
+    return 0;
+}
+
 // Forward declarations (defined further down): the shipped-res reader and
 // the nested `<outer><inner>...<Animation Name=..>` extractor.
 std::string read_res_file(const char* rel);
@@ -1839,40 +1861,93 @@ int AiController::ka(const AiFightState& st) {
 std::string AiController::gc_frame(const AiFightState& st) {
     if (moves_ == nullptr || st.my_moves == nullptr) return "";
     std::vector<const MoveDef*> best;
-    // [probe] SF2_TRACE_GC=1: what the pump's candidate build keeps/rejects.
+    // JS `Gc.Rwa`/`EZa` (L28510/L28531): the candidate buckets are built from
+    // the events in `Tu`, i.e. `Su.dea(type)` = the animations whose
+    // `<Events>` carry that TYPE. The port used the static `<KeyPressed/>`
+    // move set, which re-picked a move on EVERY frame - the JS picks only when
+    // an event fires, and letting those starts through measured as a
+    // 1776-2739 divergence explosion.
+    // The bus stores the PERK-trigger numbering (`Ac.parse`: EveryFrame=2),
+    // not the `Gc`/`tb.D6a` one (EveryFrame=14). Convert before bucketing.
+    auto gc_type = [](int slot) -> int {
+        switch (slot) {
+            case 1: return 1;   // RoundStageStart
+            case 2: return 14;  // EveryFrame
+            case 5: return 6;   // HitPreCrit -> Hit
+            case 6: return 6;   // HitPostCrit -> Hit
+            case 7: return 7;   // PostHit -> Strike
+            case 9: return 9;
+            case 10: return 10;
+            case 11: return 11;
+            case 12: return 12;
+            case 13: return 13;
+            case 14: return 16;  // ModExpires
+            default: return 0;   // Style/Combo/Area* -> not a Gc event
+        }
+    };
+    std::set<int> fired;
+    for (const int slot : st.my_event_types) {
+        const int t = gc_type(slot);
+        if (t != 0) fired.insert(t);
+    }
+    if (fired.empty()) return "";
+    // [probe] SF2_TRACE_GC=1: the fired types + what the buckets keep.
     static const bool trace_gc = std::getenv("SF2_TRACE_GC") != nullptr;
     if (trace_gc) {
         int kp = 0, pass = 0;
-        std::string names, why_all;
+        std::string names, types;
+        for (const int t : fired) {
+            types += std::to_string(t);
+            types += ' ';
+        }
         for (const MoveDef* m : *st.my_moves) {
-            if (m == nullptr || !m->has_event("KeyPressed")) continue;
+            if (m == nullptr) continue;
+            bool ev_match = false;
+            for (const std::string& ev : m->events) {
+                if (fired.count(js_event_type(ev)) != 0) {
+                    ev_match = true;
+                    break;
+                }
+            }
+            if (!ev_match) continue;
             ++kp;
             if (m->no_animation) continue;
-            std::string why;
-            if (!v1(*m, st, &why, /*mirror_filter=*/false)) {
-                const std::size_t colon = why.find(':');
-                why_all += " ";
-                why_all += m->name;
-                why_all += "(";
-                why_all += why.substr(0, colon == std::string::npos ? why.size()
-                                                                   : colon);
-                why_all += ")";
-                continue;
-            }
+            if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
             ++pass;
             names += m->name;
             names += ' ';
         }
-        std::fprintf(stdout,
-                     "[gc] f=%d playing=%d keypressed=%d passed=%d kept=[%s] "
-                     "rejected=[%s]\n",
-                     st.fight_frame, st.playing ? 1 : 0, kp, pass, names.c_str(),
-                     why_all.c_str());
+        std::fprintf(stdout, "[gc] f=%d playing=%d types=[%s] matched=%d kept=%d [%s]\n",
+                     st.fight_frame, st.playing ? 1 : 0, types.c_str(), kp, pass,
+                     names.c_str());
         std::fflush(stdout);
     }
     for (const MoveDef* m : *st.my_moves) {
-        if (m == nullptr || !m->has_event("KeyPressed")) continue;
+        if (m == nullptr) continue;
+        bool ev_match = false;
+        for (const std::string& ev : m->events) {
+            if (fired.count(js_event_type(ev)) != 0) {
+                ev_match = true;
+                break;
+            }
+        }
+        if (!ev_match) continue;
         if (m->no_animation) continue;  // `Rha` -> the unused `g` group
+        // The StartStance family is gated by `<RoundStage Value="StartStance">`
+        // in the move's MAIN conditions, which `de.V1` does not evaluate (it
+        // reads only the tactics list). The JS's `EZa` calls `f.Yz(b,null,g)`
+        // on the whole tree, so a start-stance animation is never a pump
+        // candidate during the fight; without this the pump started
+        // `FistsStartStanceIdle-Right` out of a hit reaction (the single
+        // challenge divergence).
+        // Only real MOVES/ATTACKS are pump candidates: the getup / loss / win
+        // / stance animations carry no `Type` and are reached through the
+        // HIT-reaction path (`Gc.Ih(6/7)` -> `DK`), never through the
+        // frame-event pump. Without this the pump started
+        // `StandupAfterThrowFall` (Priority 400, conditions `<RoundResult
+        // Defeat Not=1>`) out of a plain hit reaction.
+        if (m->type != "ATTACK" && m->type != "MOVE") continue;
+        if (st.full_conditions && !st.full_conditions(*m)) continue;
         if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
         if (best.empty() || m->priority > best.front()->priority) {
             best.clear();

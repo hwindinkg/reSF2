@@ -8055,6 +8055,43 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             return st.ref_pos(obj, part, p, prev, x, y);
         };
 
+        // JS `EZa`'s `f.Yz(b, null, g)`: the pump filters its candidates by the
+        // move's WHOLE `<Conditions>` tree (the `de.V1` tactics list is a
+        // different gate). Without it the pump started `StandupAfterThrowFall`
+        // and `FistsStartStanceIdle-Right` out of a hit reaction - the
+        // challenge divergence.
+        {
+            FightFighter* pm = &me;
+            FightFighter* pf = &foe;
+            st.full_conditions = [this, pm, pf](const sf2::scene::MoveDef& m) {
+                sf2::scene::FightContext c;
+                c.roll01 = [this]() { return draw01(); };
+                c.stage = static_cast<sf2::scene::round_stage>(phase_);
+                c.anims_me = anim_names_of(pm->fighter);
+                c.anims_enemy = anim_names_of(pf->fighter);
+                fill_ctx_geometry(c, *pm, *pf);
+                c.health_ratio =
+                    pm->max_hp > 0.0f ? pm->hp / pm->max_hp : 0.0f;
+                for (const std::string& n : pm->fighter.active_intervals()) {
+                    c.intervals.push_back({n, pm->fighter.interval_type(n), true});
+                }
+                for (const std::string& n : pf->fighter.active_intervals()) {
+                    c.intervals_enemy.push_back(
+                        {n, pf->fighter.interval_type(n), true});
+                }
+                c.keys_gm = false;  // the AI path bypasses the `<Keys>` gate
+                return sf2::scene::eval_move_conditions(m.conditions, c);
+            };
+        }
+        // [Gc pump] the model event TYPES raised for MY side this frame
+        // (JS `Gc.Tu` -> `Su.dea(type)`): the pump's candidate buckets.
+        st.my_event_types.clear();
+        {
+            const int my_side = me.is_player ? 0 : 1;
+            for (const auto& ev : bus_.frame_events) {
+                if (ev.second == my_side) st.my_event_types.push_back(ev.first);
+            }
+        }
         const std::string decision = me.ai->update(st);
         me.last_decision = decision;
         me.last_ai_stage = me.ai->last_stage();
@@ -8117,7 +8154,17 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         static const bool gc_pump_off = std::getenv("SF2_NO_GC_PUMP") != nullptr;
         if (me.ai != nullptr && !gc_pump_off) {
             const std::string g = me.ai->gc_frame(st);
-            if (!g.empty() && !me.fighter.playing()) {
+            // JS `wd.Bnb` (L20947): `KCa()` = "a pick is stored"
+            // (`Ml.animation != null`), NOT "the fighter is idle"; `NS`
+            // (`ai_start_move`) does the gating. The pump now only stores a
+            // pick when a real model EVENT fired (`Gc.Tu` -> `Su.dea(type)`),
+            // so starting it unconditionally is the JS cadence.
+            // `NS` refuses while the model is inside a hit reaction
+            // (`st.my_reacting`): the reaction owns the clip until it ends.
+            // Without this the pump interrupted the reaction with a stance
+            // idle (`[gc] f=151 playing=0 ... FistsStartStanceIdle-Right`),
+            // the single challenge divergence.
+            if (!g.empty() && !st.my_reacting) {
                 const auto git = moves_->find(g);
                 if (git != moves_->end()) {
                     sf2::scene::FightContext gctx;
@@ -8699,6 +8746,7 @@ void FightController::update(float dt) {
             // hardcoded 134 frames WITHOUT animating the fighters (the
             // intro was frozen) — the "too fast" + frozen intro symptom.
             // Now the fighters play the stance clip during phase 1.
+            bus_.clear_frame_events();
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
             // JS `kg` (L15772): the gate is the INTRO STANCE clip's end event,
@@ -8726,6 +8774,7 @@ void FightController::update(float dt) {
                 round_.time_nf = round_.time_xu / 60;
             }
             // Both fighters act (JS `ca.Hnb` -> each `wd.ia`).
+            bus_.clear_frame_events();
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
 

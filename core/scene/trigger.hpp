@@ -841,6 +841,11 @@ class TrigBus {
         sides_[1].side = 1;
     }
 
+    // The (event type, fired side) pairs raised since the last clear - the
+    // JS `Gc.Tu` queue in its pre-dispatch form.
+    std::vector<std::pair<int, int>> frame_events;
+    void clear_frame_events() { frame_events.clear(); }
+
     const BusSide& side(int s) const { return sides_[s & 1]; }
     BusSide& mutable_side(int s) { return sides_[s & 1]; }
 
@@ -850,6 +855,12 @@ class TrigBus {
     // caller drains them via `qh_*` (hit scope) or plain `qh()`.
     void fire(int slot, const TrigVars& vars, bool has_info, int fired_side,
               const CondCtx& ctx0, const CondCtx& ctx1, int stage, int step_frame) {
+        // [Gc pump] JS `Gc.Ih(type, model, eb)`: every model event lands in the
+        // `Tu` queue, and `Gc.Rwa`/`EZa` build the candidate buckets from the
+        // event TYPE (`Su.dea(type)`). Record the (type, side) pairs raised
+        // this frame so the AI can rebuild the same buckets; cleared by the
+        // fight at the start of every frame.
+        frame_events.emplace_back(slot, fired_side);
         const CondCtx* ctxs[2] = {&ctx0, &ctx1};
         for (int s = 0; s < 2; ++s) {
             BusSide& side = sides_[s];

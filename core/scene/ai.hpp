@@ -237,6 +237,8 @@ struct WeightCurve {
 // The fighter-state vector fed to the weight curves (JS `Ue` g="ED" +
 // `mQ` L620): counters, HP ratios, animation frames, bullet counts, ...
 // The native AI fills it from the fight state each frame.
+struct AiFightState;  // fwd
+
 struct AiFeatureState {
     float counter = 0.0f;      // `counter`
     float xb = 0.0f;           // `Xb` (damage counter)
@@ -399,6 +401,17 @@ struct AiCandidate {
 
 // The per-frame fight snapshot the AI reads (JS `Ue` + `mQ` L620).
 struct AiFightState {
+    // The model event TYPES (JS `Gc.Ih` -> `Tu`, `Su.dea(type)`) raised for MY
+    // fighter during this frame. The `Gc` pump builds its candidate buckets
+    // from exactly these (`Gc.Rwa`/`EZa`), so an event that did not fire
+    // contributes no candidates - the old port used the static
+    // `<KeyPressed/>` move set instead, which re-picked a move every frame.
+    std::vector<int> my_event_types;
+    // JS `EZa`'s `f.Yz(b, null, g)`: the Gc pump evaluates the animation's
+    // WHOLE `<Conditions>` tree (not just the tactics list `de.V1` reads), so
+    // a start-stance / getup / loss animation is never a pump candidate
+    // during the fight. Provided by the fight (it owns the context builder).
+    std::function<bool(const MoveDef&)> full_conditions;
     // My fighter (the one being controlled).
     const MoveDef* current_move = nullptr;   // `da.Ua`
     int move_frame = 0;                      // `Te.Xh` (playback frame)
