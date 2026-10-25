@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""ui_diff.py - screenshot pixel-diff gate for the UI harness (Dojo wave).
+"""ui_diff.py - region-level diff between the port and the oracle captures.
 
-Compares oracle vs port screenshots at 1280x720 (asserts size) and reports
-the % of pixels whose max channel abs-delta exceeds --threshold (default
-12/255). Writes a red-overlay diff PNG + a side-by-side PNG per pair into
---out (default reference/traces/ui/). Exit 0 always (numbers are the gate;
-MASTER_TODO holds the per-screen thresholds) unless inputs are missing.
+Both sides ship the same screenshots:
+  oracle: reference/traces/oracle_matrix/<screen>.png
+  port:   reference/traces/port_matrix/<screen>.png
+(and reference/traces/ui/{oracle,port}_*.png for the tour shots)
+
+This tool reports WHERE the two differ, not just that they do: it splits the
+image into a grid, ranks the cells by mean absolute difference, prints the worst
+ones with their pixel rects, and writes a heatmap next to the report so the
+region can be inspected by eye.
 
 Usage:
-  python reference/tools/ui_diff.py --pairs ui_dojo:dojo,ui_map:map [...]
-  python reference/tools/ui_diff.py --all   (uses the state list below)
-
-Inputs: reference/traces/ui/oracle_<name>.png + port_<name>.png.
+  python reference/tools/ui_diff.py fight_stance [--grid 16x9] [--top 12]
+  python reference/tools/ui_diff.py --a A.png --b B.png [--label name]
+Exit: 0 always (it is a report); --fail-on N returns 1 when the worst cell is
+above N (for wiring into a gate later).
 """
+
 import argparse
 import os
 import sys
@@ -20,78 +25,102 @@ import sys
 import numpy as np
 from PIL import Image
 
-STATES = ["dojo", "dojo_modal", "map", "shop", "shop_tab2", "profile",
-          "fight", "pause", "results", "settings"]
-
-W, H = 1280, 720
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ORACLE = os.path.join(ROOT, "reference", "traces", "oracle_matrix")
+PORT = os.path.join(ROOT, "reference", "traces", "port_matrix")
+UI = os.path.join(ROOT, "reference", "traces", "ui")
+OUT = os.path.join(ROOT, ".harness", "artifacts", "ui_diff")
 
 
 def load(path):
-    im = Image.open(path).convert("RGB")
-    if im.size != (W, H):
-        raise SystemExit("bad size %s: %s (want 1280x720)" % (path, im.size))
-    return np.asarray(im).astype(np.int16)
+    img = Image.open(path).convert("RGB")
+    return np.asarray(img, dtype=np.int16)
 
 
-def diff_pair(odir, name, thresh, port_name=None):
-    pname = port_name or name
-    a = load(os.path.join(odir, "oracle_%s.png" % name))
-    b = load(os.path.join(odir, "port_%s.png" % pname))
-    d = np.abs(a - b).max(axis=2)
-    mask = d > thresh
-    pct = 100.0 * mask.mean()
-    overlay = np.asarray(Image.open(
-        os.path.join(odir, "port_%s.png" % pname)).convert("RGB")).copy()
-    overlay[mask] = [255, 0, 0]
-    Image.fromarray(overlay).save(os.path.join(odir, "diff_%s.png" % name))
-    side = np.concatenate(
-        [np.asarray(Image.open(os.path.join(odir, "oracle_%s.png" % name)).convert("RGB")),
-         np.asarray(Image.open(os.path.join(odir, "port_%s.png" % pname)).convert("RGB"))],
-        axis=1)
-    Image.fromarray(side).save(os.path.join(odir, "side_%s.png" % name))
-    return pct
+def resolve(name):
+    """Find the oracle/port pair for a screen name."""
+    cands = [
+        (os.path.join(ORACLE, name + ".png"), os.path.join(PORT, name + ".png")),
+        (os.path.join(UI, "oracle_" + name + ".png"),
+         os.path.join(UI, "port_" + name + ".png")),
+        (os.path.join(UI, "oracle_" + name + ".png"),
+         os.path.join(UI, "port_" + name.lstrip("c_") + ".png")),
+    ]
+    for a, b in cands:
+        if os.path.exists(a) and os.path.exists(b):
+            return a, b
+    return None, None
 
 
-def main():
+def heatmap_png(a, b, path):
+    """Write a side-by-side image with the difference amplified."""
+    h = min(a.shape[0], b.shape[0])
+    w = min(a.shape[1], b.shape[1])
+    d = np.abs(a[:h, :w] - b[:h, :w]).astype(np.uint8)
+    # amplify x4 so small offsets are visible
+    d = np.clip(d.astype(np.int16) * 4, 0, 255).astype(np.uint8)
+    out = np.concatenate([a[:h, :w].astype(np.uint8), b[:h, :w].astype(np.uint8), d],
+                         axis=1)
+    Image.fromarray(out).save(path)
+
+
+def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="reference/traces/ui")
-    ap.add_argument("--threshold", type=int, default=12)
-    ap.add_argument("--pairs", default="")
-    ap.add_argument("--all", action="store_true")
-    ap.add_argument("--gate", action="store_true",
-                    help="gate mode: exit 1 when any pair is MISSING/ERROR or its "
-                         "pct_over_threshold exceeds --max-pct")
-    ap.add_argument("--max-pct", type=float, default=100.0,
-                    help="gate mode: fail when pct_over_threshold > this "
-                         "(default 100 = only MISSING/ERROR fail; the per-screen "
-                         "thresholds live in MASTER_TODO)")
-    args = ap.parse_args()
-    names = STATES if args.all else [p.split(":")[0] for p in args.pairs.split(",") if p]
-    pmap = {}
-    for p in args.pairs.split(","):
-        if ":" in p:
-            a, b = p.split(":", 1)
-            pmap[a] = b or a
-    if not names:
-        raise SystemExit("no states (use --all or --pairs oracle:port,...)")
-    print("screen,pct_over_threshold")
-    gate_bad = 0
-    for n in names:
-        try:
-            pct = diff_pair(args.dir, n, args.threshold, pmap.get(n))
-            print("%s,%.2f" % (n, pct))
-            if args.gate and pct > args.max_pct:
-                gate_bad += 1
-        except FileNotFoundError as e:
-            print("%s,MISSING %s" % (n, e))
-            if args.gate:
-                gate_bad += 1
-        except SystemExit as e:
-            print("%s,ERROR %s" % (n, e))
-            if args.gate:
-                gate_bad += 1
-    if args.gate and gate_bad:
+    ap.add_argument("screen", nargs="?", default="")
+    ap.add_argument("--a", default="")
+    ap.add_argument("--b", default="")
+    ap.add_argument("--label", default="")
+    ap.add_argument("--grid", default="16x9")
+    ap.add_argument("--top", type=int, default=12)
+    ap.add_argument("--fail-on", type=float, default=-1.0)
+    a = ap.parse_args()
+
+    if a.a and a.b:
+        pa, pb = a.a, a.b
+        label = a.label or "pair"
+    else:
+        if not a.screen:
+            print("give a screen name or --a/--b")
+            return 2
+        pa, pb = resolve(a.screen)
+        label = a.screen
+        if not pa:
+            print("no oracle/port pair for %r" % a.screen)
+            return 2
+
+    ia, ib = load(pa), load(pb)
+    h = min(ia.shape[0], ib.shape[0])
+    w = min(ia.shape[1], ib.shape[1])
+    ia, ib = ia[:h, :w], ib[:h, :w]
+
+    gx, gy = (int(v) for v in a.grid.lower().split("x"))
+    cw, ch = w // gx, h // gy
+    cells = []
+    for cy in range(gy):
+        for cx in range(gx):
+            sa = ia[cy * ch:(cy + 1) * ch, cx * cw:(cx + 1) * cw]
+            sb = ib[cy * ch:(cy + 1) * ch, cx * cw:(cx + 1) * cw]
+            mad = float(np.abs(sa - sb).mean())
+            cells.append((mad, cx * cw, cy * ch, cw, ch))
+    cells.sort(reverse=True)
+
+    total = float(np.abs(ia - ib).mean())
+    print("=== ui diff %s ===" % label)
+    print("oracle: %s" % os.path.relpath(pa, ROOT))
+    print("port  : %s" % os.path.relpath(pb, ROOT))
+    print("size %dx%d  grid %dx%d  mean|diff| = %.2f" % (w, h, gx, gy, total))
+    print("worst cells (mean abs diff, rect x,y,w,h):")
+    for mad, x, y, cw2, ch2 in cells[:a.top]:
+        print("  %7.2f   %4d,%4d %4dx%-4d" % (mad, x, y, cw2, ch2))
+
+    os.makedirs(OUT, exist_ok=True)
+    out = os.path.join(OUT, label.replace("/", "_") + "_heat.png")
+    heatmap_png(ia, ib, out)
+    print("heatmap (oracle | port | diff x4): %s" % os.path.relpath(out, ROOT))
+
+    if a.fail_on >= 0 and cells and cells[0][0] > a.fail_on:
         return 1
+    return 0
 
 
 if __name__ == "__main__":
