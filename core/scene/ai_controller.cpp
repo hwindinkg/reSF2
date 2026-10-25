@@ -2660,7 +2660,10 @@ std::string AiController::update(const AiFightState& st) {
     // The core decision (JS L594).
     int cnt = pqb(st);
     const int cnt_pqb = cnt;
-    dbg_.fk = fk_;
+    // `dbg_.fk` is recorded at the END of the pass (after the `dsb` watch sets
+    // `fk=-2`): recording it here showed the pre-watch value, so the `[ai]`
+    // log never displayed the `fk=-2` watch state the oracle spends 70% of
+    // its frames in - a third stale-field trap in the same log.
     dbg_.wb = cnt;
 
     // The conditional-slot additions (JS L594: `b+=this.k_a(a.da,this.u$),
@@ -2713,6 +2716,7 @@ std::string AiController::update(const AiFightState& st) {
         // port returned here before the tail, so a watch left XW latched.
         XW_ = false;
         eh_ = std::numeric_limits<int>::min();
+        dbg_.fk = fk_;
         return "";
     }
 
@@ -2731,11 +2735,14 @@ std::string AiController::update(const AiFightState& st) {
                 const std::string atk = gc_attack(st, picked);
                 if (!atk.empty()) return atk;
             }
+            dbg_.fk = fk_;
             return picked;
         }
+        dbg_.fk = fk_;
         return "";
     }
     mW_ && (XW_ = false);
+    dbg_.fk = fk_;
     return "";
 }
 
