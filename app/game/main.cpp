@@ -8138,6 +8138,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         for (int i = 0; i < 4; ++i) app.run_one_frame();  // release the stick
         // (b) the drawn punch button (right cluster, centre ~(1142.5,521.7)).
         //     The press must start the Punch move.
+        //
+        //     WAIT OUT THE INTRO STANCE FIRST. The hub now runs the JS
+        //     `m1a` init, so the player plays the ONE-SHOT
+        //     `FistsStartStance-Left` (~90 hub frames) before the looping
+        //     idle; every attack gates on `<CurrentAnimation
+        //     Name="IdleStance"/>`, so a punch tapped during the stance is
+        //     correctly refused (the buffered tap expires in 15 frames). The
+        //     old 6-frame window was written when the hub had no stance at
+        //     all (the bind-pose bug) - the gate's stale expectation.
+        for (int i = 0; i < 130; ++i) app.run_one_frame();
         const std::string m2 = ds != nullptr ? ds->dojo_player_move() : std::string();
         app.inject_click(1142.5, 521.7, 3);
         for (int i = 0; i < 6; ++i) app.run_one_frame();
