@@ -445,7 +445,17 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
     }
     // NOTE: menu draw_text has no alpha channel (opaque labels).
     (void)a;
-    (void)app.draw_text(dx, y, text, scale, r, g, b);
+    // JS `Fa` label box + `Ia(8)` = VERTICAL CENTRE: the line box (the BMF
+    // `lineHeight`, `Bg.jd`/`RQ`) is centred in the box and the baseline sits
+    // `jd + base` into it, so the INK top = box_top + (box_h - line_h)/2 +
+    // jd*scale. The port drew at the box TOP, which put every label whose box
+    // is taller than its text too high (and the short boxes too low) - the
+    // "text a bit off" reports.
+    const float line_h = (font->line_height > 0)
+                             ? static_cast<float>(font->line_height) * scale
+                             : sf2::data::measure_text_height_utf8(*font, text, scale);
+    const float ty = y + (h - line_h) * 0.5f + 2.0f * scale;  // `jd` = 2
+    (void)app.draw_text(dx, ty, text, scale, r, g, b);
 }
 
 // Draws a label through an EXPLICIT font page — the JS `ea`/`Ea` node's
