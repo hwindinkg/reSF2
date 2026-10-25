@@ -9157,6 +9157,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             glfwPollEvents();
             app.run_one_frame();
         }
+        // [probe] SF2_CAPTURE_RESULTS=1: let the results screen's 4.5 s reveal
+        // finish and write a PNG, so the results layout / HUD-hide can be
+        // compared with the oracle's `results_*` captures.
+        if (std::getenv("SF2_CAPTURE_RESULTS") != nullptr) {
+            for (int i = 0; i < 420; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            const std::string path = "reference/extracted/scene/results_probe.png";
+            app.capture_png(path);
+            std::fprintf(stdout, "[kickko] results capture %s (screen=%d)\n",
+                         path.c_str(),
+                         static_cast<int>(app.screens().current_id()));
+            std::fflush(stdout);
+        }
         const int kf1 = kick_fights();
         const bool ok = (kf1 > kf0);
         std::fprintf(stdout,

@@ -15362,6 +15362,13 @@ void FightScreen::render_impl(App& app) {
     assets.fight_location.set_darkness_alpha(fight_->darkness_alpha());
     assets.fight_location.render_darkness(ren);
 
+    // JS: once the RESULTS screen (`kk`) is on top, the fight HUD is GONE - the
+    // oracle's `results_*` captures show the dimmed scene with no bars, names,
+    // portraits or gamepad (only the results panel). The port kept drawing the
+    // HUD under the results overlay. The scene itself must stay (the results
+    // screen draws only its gradient over it), so only the HUD is skipped.
+    const bool results_covered = app.screens().current_id() == kScreenResults;
+    if (!results_covered) {
     // The round plate + scrim, UNDER the HUD (JS: `Cr` is a location child).
     draw_fight_banner(app, *fight_);
 
@@ -16234,6 +16241,7 @@ void FightScreen::render_impl(App& app) {
     // ui/controller atlas. Hidden during the round-break window
     // (`round_wait()`, JS `Ta.XF(!1)` until `FNa` shows it again).
     draw_gamepad(app);
+    }  // !results_covered (the fight HUD/gamepad)
 
     // The JS has NO between-rounds "NEXT" button (JS `Onb`/`Cr` advances
     // rounds with the `Cr.tca` timers, L2023). The native Next button was
@@ -16316,6 +16324,11 @@ ResultsScreen::ResultsScreen(ScreenManager& mgr, bool player_won,
                              std::int64_t money_reward, std::int64_t exp_reward)
     : Screen(mgr, "Results"), player_won_(player_won), money_reward_(money_reward),
       exp_reward_(exp_reward) {
+    // One line per results screen. It used to sit in `render_impl`, i.e. one
+    // `[result] WIN` per RENDERED FRAME (~420 duplicates while the reveal
+    // played), burying the real one-shot result lines.
+    std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
+    std::fflush(stdout);
     // JS `ai.B()` fight teardown (L384): `this.Da.type!="FightNone"&&lb.OS()`
     // — leaving a fight restores the MENU track (the guard was cleared at
     // fight start `ai.Ut` L2008, so this replays it; the Map/Shop/Profile
@@ -17439,7 +17452,6 @@ void ResultsScreen::render_impl(App& app) {
         draw_ui_label(app, okx - 105.0f, oky - 13.0f, 210.0f, 26.0f, ok_label, 0.85f,
                       UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
-    std::fprintf(stdout, "[result] %s\n", player_won_ ? "WIN" : "LOSS");
     // The `FirstGuardBeaten` chain (`quests.xml` L260-282) is `Place="Map"`
     // (JS `Gib` L517394): its dialogs own the MAP after the OK press
     // (`v.qxa` L1213), never the Results overlay. The old unconditional
