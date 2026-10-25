@@ -15419,9 +15419,12 @@ void FightScreen::render_impl(App& app) {
     //   `this.NF=this.xU/60|0; this.NF!=this.fma&&(this.fma=this.NF,
     //    this.Kp.V(K.T((this.NF<10?"0":null)+Math.max(0,this.NF))),...)`
     // The seconds are zero-padded to two digits while below 10 ("09", "00").
-    const int timer = std::max(0, fight_->round().time_nf);
+    // JS `Sf.iPa` only runs while the round is live; the port drew the timer
+    // in every phase, so the end-of-round banner had the digits behind it.
+    const bool timer_live = fight_->phase() == 2;  // fight_phase::fight
+    const int timer = timer_live ? std::max(0, fight_->round().time_nf) : -1;
     const std::string tstr = (timer < 10 ? "0" : "") + std::to_string(timer);
-    {
+    if (timer_live) {
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
         unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
         if (fnt != nullptr && tex != 0) {
