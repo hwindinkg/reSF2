@@ -8306,7 +8306,11 @@ void draw_dojo_gamepad(App& app, const PadInputState& pad_in,
     // Draw-size 0.9 (centers + hit radii untouched: JS fu Si(120,28)/
     // fh(-50,198) + uab 115): the 200px art at full hit-diameter left a
     // 4px gap that read as touching; 0.9 leaves a 12px gap.
-    const float btn_size = pad.btn_r * 2.0f * 0.9f;
+    // JS `fu` draws the ui/controller art at its NATURAL size (200 local px,
+    // the frame `fa`), not at the hit diameter (the `uab` radius 115 -> 230).
+    // The old 0.9 of the hit diameter made every pad 3.5 % large (measured
+    // ring 135 px vs the oracle 131); 200/230 is the exact art ratio.
+    const float btn_size = pad.btn_r * 2.0f * (200.0f / 230.0f);
     const bool grabbed = pad_in.joy_grabbed;
     try_draw_atlas_button(app,
                           grabbed ? "JoystickContainer_action"
