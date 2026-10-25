@@ -1826,6 +1826,12 @@ public:
     // Pins the controller in the fight phase: the round-end checks
     // (`Onb` -> `E3a`) never run while this is set.
     void enter_fight_none();
+    // JS `FNa` (L409): phase 1 - the fighters' start-stance move starts here
+    // via the `RoundStageStart` dispatch. Public because the hub's FightNone
+    // viewer (`m1a` factory) runs the normal fight INIT and only then `xF(2)`;
+    // going straight to `enter_fight_none()` left the viewer's model with NO
+    // move at all (the "dojo character without animation" bug).
+    void enter_start_stance();
     // Start the intro's plate clock (called by the fight screen once the `ik`
     // VS overlay is gone). Idempotent.
     void release_intro();
@@ -2630,7 +2636,6 @@ private:
     void banner_expire();         // JS `Cr.ONa` (L2026) + the `ca.vhb` (L410)
                                   // dispatch carried by `banner_action_`
     // JS `FNa` (L409) / `Rkb` (L410) / `i4a` (L409): the phase transitions.
-    void enter_start_stance();
     void enter_fight();
     void enter_end_stance();
     // JS `Onb` (L411): the round-end check (KO / timeout).

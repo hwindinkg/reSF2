@@ -3461,6 +3461,40 @@ void FightController::enter_fight_none() {
     // frame reports the held clip (the oracle's `FistsStartStance-Left` af=44
     // for the dojo). The clip-end branch already stopped the intro clip.
     if (battle_.enemy_not_animation) sample_enemy_idle();
+    // [FIX bind pose - the dojo viewer] JS `m1a` (the FightNone factory) runs
+    // the NORMAL fight init, which starts each fighter's start-stance move
+    // (`FistsStartStance-Left` / the weapon family), and only THEN `xF(2)` pins
+    // the fight phase. The port went straight to the phase-2 hand-off, where
+    // the stance block deliberately picks NOTHING (`post_intro_transition`), so
+    // the viewer's model never got a move and sat in its BIND POSE forever -
+    // the reported "in the dojo the character appears without animation".
+    for (FightFighter* f : {&player_, &enemy_}) {
+        if (f->fighter.playing() || f->fighter.current_move() != nullptr) continue;
+        const sf2::scene::MoveDef* m = f->fighter.stance_move(
+            {"StanceLeft", "StanceRight"}, f->is_player);
+        std::fprintf(stdout, "[stance] FightNone %s stance_move=%s playing=%d cur=%s\n",
+                     f->name.c_str(), m != nullptr ? m->name.c_str() : "(null)",
+                     f->fighter.playing() ? 1 : 0,
+                     f->fighter.current_move() != nullptr
+                         ? f->fighter.current_move()->name.c_str()
+                         : "(none)");
+        std::fflush(stdout);
+        if (m == nullptr) continue;  // the NotAnimation bag has no Template
+        FightFighter& other = (f == &player_) ? enemy_ : player_;
+        sf2::scene::FightContext c;
+        c.roll01 = [this]() { return draw01(); };
+        c.stage = static_cast<sf2::scene::round_stage>(phase_);
+        c.qb = f->is_player;
+        c.anims_me.push_back(f->is_player ? "StanceLeft" : "StanceRight");
+        c.anims_enemy = anim_names_of(other.fighter);
+        fill_ctx_geometry(c, *f, other);
+        c.health_ratio = f->max_hp > 0.0f ? f->hp / f->max_hp : 0.0f;
+        if (f->fighter.ai_start_move(*m, c)) {
+            std::fprintf(stdout, "[stance] FightNone %s start move=%s\n",
+                         f->name.c_str(), m->name.c_str());
+            std::fflush(stdout);
+        }
+    }
     rebuild_body(player_, enemy_);
     rebuild_body(enemy_, player_);
     // No plate: `xF(2)` skips `Am()`; the ROUND 1 plate raised by `init_locks`
@@ -8075,7 +8109,8 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // [experiment] `SF2_GC_MOD=1`: the `Gc` pump (JS `Bg.ia` -> `Bx` +
         // `Gnb`) runs EVERY frame independently of `de.ia`; its stored pick is
         // started only when the fighter is idle (`Bnb` gates on `!Pe`).
-        if (me.ai != nullptr) {
+        static const bool gc_pump_off = std::getenv("SF2_NO_GC_PUMP") != nullptr;
+        if (me.ai != nullptr && !gc_pump_off) {
             const std::string g = me.ai->gc_frame(st);
             if (!g.empty() && !me.fighter.playing()) {
                 const auto git = moves_->find(g);

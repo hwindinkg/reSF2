@@ -8029,6 +8029,8 @@ void DojoScreen::build_dojo_fight(App& app) {
         if (pw.empty()) pw = "Fists";
         dojo_fight_->set_fighter_weapons(pw, "Fists");
     }
+    // `enter_fight_none` itself starts the viewer's start-stance move (the
+    // `m1a` factory's fight init); see the bind-pose fix there.
     dojo_fight_->enter_fight_none();
     dojo_fight_ok_ = true;
     std::fprintf(stdout,
@@ -8268,6 +8270,27 @@ void DojoScreen::update_impl(float dt) {
     if (dojo_fight_ != nullptr) {
         update_pad_input(app(), dojo_fight_.get(), dojo_pad_, /*live=*/true, "dojo");
         dojo_fight_->update(dt);
+        // [probe] SF2_TRACE_DOJO_MOVE=1: the hub viewer's player move + clip
+        // frame on every change. A stance that never ends shows here (the
+        // reported "character without animation in the dojo").
+        if (std::getenv("SF2_TRACE_DOJO_MOVE") != nullptr) {
+            static std::string last_move;
+            static int last_clip = -1;
+            const sf2::scene::Fighter& pf = dojo_fight_->player().fighter;
+            const sf2::scene::MoveDef* m = pf.current_move();
+            const std::string nm = m != nullptr ? m->name : std::string("(null)");
+            const int cf = pf.move_frame();
+            const int dframe = dojo_fight_->frame();
+            if (nm != last_move || cf != last_clip || (dframe % 30) == 0) {
+                last_move = nm;
+                last_clip = cf;
+                std::fprintf(stdout,
+                             "[dojomove] f=%d move=%s clip=%d playing=%d\n",
+                             dframe, nm.c_str(), cf,
+                             pf.playing() ? 1 : 0);
+                std::fflush(stdout);
+            }
+        }
         // [dojo lesson] Publish the player fighter's animation START to the
         // quest engine (JS `Te.x3` L508 -> `Gc.Pf` L671 -> `Bo`/`Do`/`Eo`
         // L1121/L1123/L1125). This is the REAL resume condition for the
