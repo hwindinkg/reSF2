@@ -1793,6 +1793,10 @@ std::vector<CatalogItem> load_full_catalog(App& app);
 // Factory: creates a screen by id (used by Screen::push).
 std::unique_ptr<Screen> make_screen(ScreenManager& mgr, ScreenId id);
 
+// Screen-independent UI overlays (the level/XP hint bubble), drawn
+// after the screen stack so nothing covers them.
+void draw_ui_overlays(App& app);
+
 // The shared `za` nav column state is per-screen and `make_screen` resets it
 // (JS `gk` ctor `collapse(0)`). A scene REBUILD (ScreenManager::pop returning
 // to the Dojo) must carry it across: the JS `za.instance` is a SINGLETON whose

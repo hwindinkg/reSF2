@@ -1475,6 +1475,7 @@ void App::render_frame() {
         // logo + "Loading 100%" while the target scene mounts.
         draw_boot_splash(/*force_loader=*/true);
     }
+    draw_ui_overlays(*this);
     draw_debug_overlay(*this);
     renderer_->end_frame();
 }

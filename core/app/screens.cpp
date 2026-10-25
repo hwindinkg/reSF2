@@ -1940,15 +1940,50 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
     const float y0 = cy - h / 2.0f;
     const float x1 = cx + w / 2.0f;
     const float y1 = cy + h / 2.0f;
-    const float border = hovered ? 3.0f : 2.0f;
-    const float verts_border[] = {
-        x0 - border, y0 - border, x1 + border, y0 - border, x1 + border, y1 + border,
-        x0 - border, y0 - border, x1 + border, y1 + border, x0 - border, y1 + border,
-    };
-    ren.draw_triangles(verts_border, 6, 0.1f, 0.1f, 0.12f, 0.9f);
+    // NO border: the JS `Bb` plates are the ESliced atlas art (`Ec((fa.x/2|0)-2,
+    // 0,4,fa.y)`) with no drawn stroke, so the old 2-3 px black rect was a
+    // port-only "outline" that showed up on every art miss (the reported wrong
+    // quest/button outline). A miss now draws the flat fill alone.
+    (void)hovered;
     const float verts_fill[] = {x0, y0, x1, y0, x1, y1, x0, y0, x1, y1, x0, y1};
     ren.draw_triangles(verts_fill, 6, r, g, b, 0.92f);
     (void)label;
+}
+
+bool draw_sliced_plate(App& app, const std::string& frame_name, float cx, float cy,
+                       float w, float h, float l, float t, float r, float b,
+                       float alpha, bool flip_x = false);
+void draw_atlas_region(App& app, const std::string& frame_name, float fx, float fy,
+                       float fw, float fh, float tw, float th, float cx, float cy,
+                       float dw, float dh, float alpha, bool flip_x);
+
+// [XP hint] JS `wr.sdb` -> `za.Xfb` (L82726 / L82536): a TAP on the level
+// widget shows the `experienceHint` bubble ("EXPERIENCE\n{exp}/{need}") in a
+// 300x80 9-slice plate with an arrow pointing at the bar; the next tap or a
+// resize hides it. The JS has no mouse-over path - it is a click, not a hover.
+struct XpHintState {
+    bool visible = false;
+    float cx = 0.0f;   // bubble centre x
+    float bar_y = 0.0f;  // the bar's bottom edge (arrow anchor)
+    std::string text;
+};
+XpHintState& xp_hint_state() {
+    static XpHintState st;
+    return st;
+}
+
+void draw_xp_hint(App& app) {
+    XpHintState& st = xp_hint_state();
+    if (!st.visible || st.text.empty()) return;
+    // `Cx` (L82740-82766): 9-sliced `hint_base` (corner 17x17) + `hint_arrow`
+    // 46x27 above it, text `ua(35)` colour 0x323232, box 300x80, centre.
+    // Hang the bubble UNDER the widget: the 27 px arrow points up at the bar and
+    // the 80 px plate starts below it.
+    const float base_y = st.bar_y + 27.0f + 40.0f;
+    draw_sliced_plate(app, "hint_base", st.cx, base_y, 300.0f, 80.0f, 17, 17, 17, 17, 1.0f);
+    app.draw_atlas_frame("hint_arrow", st.cx, st.bar_y + 13.5f, 1.0f, 1.0f);
+    draw_ui_wrapped(app, st.cx - 150.0f, base_y - 40.0f + 5.0f, 300.0f, 80.0f, st.text,
+                    0.35f, UiAlign::Center, 0.196f, 0.196f, 0.196f, 0.6f);
 }
 
 // Tries to draw an atlas frame sized to (w,h). Returns true if drawn.
@@ -3834,6 +3869,46 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         try_draw_atlas_button(app, "level_bar_short", lvl_bar_x, cy - bar_h * 0.5f,
                               bar_w * lvl_frac, bar_h, 1.0f, /*fill=*/true, false,
                               /*top_left=*/true);
+    }
+    // [XP hint] arm/dismiss on a tap inside the level widget (`wr.Xc` = from
+    // the icon's left edge to the bar's right end, widget height).
+    {
+        XpHintState& hs = xp_hint_state();
+        const float hx0 = x;  // wr.Xc.C(this.iw.ya) = the icon left edge
+        const float hx1 = lvl_bar_x + bar_w;
+        const float hy0 = cy - lay.widget_h * 0.5f;
+        const float hy1 = cy + lay.widget_h * 0.5f;
+        const auto& pt = app.pointer();
+        if (pt.pressed) {
+            const bool inside = pt.x >= hx0 && pt.x <= hx1 && pt.y >= hy0 &&
+                                pt.y <= hy1;
+            hs.visible = inside && !hs.visible;
+            hs.cx = (hx0 + hx1) * 0.5f;
+            hs.bar_y = hy1;
+            const int need = ResultsScreen::exp_for_level(sv.level);
+            hs.text = (need > 0 && sv.experience < need)
+                          ? loc_na(app,
+                                   "experienceHint{" + std::to_string(sv.experience) +
+                                       "}{" + std::to_string(need) + "}",
+                                   "EXPERIENCE{br}" + std::to_string(sv.experience) +
+                                       "/" + std::to_string(need))
+                          : loc(app, "dlgComingSoonText", "COMING SOON");
+        }
+        // [probe] `SF2_XP_HINT=1` forces the bubble on (a screenshot hook for
+        // the UI diff; the real path is the tap above).
+        if (std::getenv("SF2_XP_HINT") != nullptr) {
+            hs.visible = true;
+            hs.cx = (hx0 + hx1) * 0.5f;
+            hs.bar_y = hy1;
+            const int need = ResultsScreen::exp_for_level(sv.level);
+            hs.text = "EXPERIENCE\n" + std::to_string(sv.experience) + "/" +
+                      std::to_string(need);
+        }
+        static float last_view_w = 0.0f;
+        if (std::fabs(static_cast<float>(kViewW) - last_view_w) > 0.5f) {
+            last_view_w = static_cast<float>(kViewW);
+            hs.visible = false;
+        }
     }
     x += lvl_w + lay.gap;
     // `xr` (energy). `icon` is a plain `R.$` (no `Ga`) -> left/top-edge.
@@ -15289,8 +15364,15 @@ void FightScreen::render_impl(App& app) {
         // 512-canvas art's opaque ring is 307/512 wide; a 300 px canvas puts
         // it at the captured 176-180 px).
         const float port_d = 300.0f;
-        const float port_px = 307.0f, port_ex = 973.0f;
-        const float port_py = 116.5f;
+        // JS `Sf.layout` (L84773): panel centre = (J+N)/2 ∓ 520*c*e with the
+        // 1280x720 clamp (c = 0.58667, e = 1.1) -> 304.43 / 975.57, panel_y
+        // 115.72. The old 307/973/116.5 was hand-tuned and 2.6 px off on both
+        // sides, which pushed the enemy portrait over its HP bar.
+        const float hud_c = 0.58667f;
+        const float panel_px = 304.43f, panel_ex = 975.57f;
+        const float panel_py = 115.72f;
+        const float port_px = panel_px, port_ex = panel_ex;
+        const float port_py = panel_py;
         if (!draw_user_image(app, vs_player_image_, port_px, port_py, port_d, port_d, 1.0f,
                              /*flip_x=*/true)) {
             draw_user_image(app, "avatar_hero", port_px, port_py, port_d, port_d, 1.0f,
@@ -15308,16 +15390,26 @@ void FightScreen::render_impl(App& app) {
             // (oracle "ТЕНЬ" 75x22; native 0.63 -> 106x27, so both dims
             // scale by ~0.48 to 81x20.6). `draw_text_centered` takes the
             // glyph-box TOP; the capture's ink rows are 59..80.
+            // JS `lk.gbb` (L84486-84493): the name label is a 400x80 box at
+            // `C((t==0?150:-550)+c)` / `D(-100+c)` - i.e. the PLAYER name is
+            // LEFT-aligned at panel_x + 150*c and the ENEMY name RIGHT-aligned
+            // at panel_x - 150*c, baseline box top = panel_y - 100*c. The old
+            // centred 432/847.5 with a fixed `name_top=50` was 7 px low and used
+            // the wrong anchoring (it drifts with the name length).
             const float nscale = 0.48f;
-            const float name_top = 50.0f;
-            app.draw_text_centered(*nf, nt, 432.0f + 1.5f, name_top + 1.5f, vs_player_name_,
-                                   nscale, 0.0f, 0.0f, 0.0f, 0.55f);
-            app.draw_text_centered(*nf, nt, 432.0f, name_top, vs_player_name_, nscale, 1.0f,
-                                   0.90f, 0.62f, 1.0f);
-            app.draw_text_centered(*nf, nt, 847.5f + 1.5f, name_top + 1.5f, vs_enemy_name_,
-                                   nscale, 0.0f, 0.0f, 0.0f, 0.55f);
-            app.draw_text_centered(*nf, nt, 847.5f, name_top, vs_enemy_name_, nscale, 1.0f,
-                                   0.90f, 0.62f, 1.0f);
+            const float name_y = panel_py - 100.0f * hud_c;      // 57.05
+            const float name_px = panel_px + 150.0f * hud_c;     // 392.4
+            const float name_ex = panel_ex - 150.0f * hud_c;     // 887.6
+            const float pw = app.measure_text_px(vs_player_name_, nscale);
+            const float ew = app.measure_text_px(vs_enemy_name_, nscale);
+            app.draw_text_with_font(*nf, nt, name_px + 1.5f, name_y + 1.5f, vs_player_name_,
+                                    nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_with_font(*nf, nt, name_px, name_y, vs_player_name_, nscale, 1.0f,
+                                    0.90f, 0.62f, 1.0f);
+            app.draw_text_with_font(*nf, nt, name_ex - ew + 1.5f, name_y + 1.5f,
+                                    vs_enemy_name_, nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            app.draw_text_with_font(*nf, nt, name_ex - ew, name_y, vs_enemy_name_, nscale,
+                                    1.0f, 0.90f, 0.62f, 1.0f);
         }
     }
 
@@ -24617,5 +24709,9 @@ std::string dialog_line_text_for_test(App& app, const std::string& raw) {
     EngineDialog d;
     return dialog_line_text(app, d, raw);
 }
+
+
+// Screen-independent overlays (the XP hint), drawn after every screen.
+void draw_ui_overlays(App& app) { draw_xp_hint(app); }
 
 } // namespace sf2::app
