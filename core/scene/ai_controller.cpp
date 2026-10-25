@@ -1938,9 +1938,44 @@ std::string AiController::gc_frame(const AiFightState& st) {
             names += m->name;
             names += ' ';
         }
-        std::fprintf(stdout, "[gc] f=%d playing=%d types=[%s] matched=%d kept=%d [%s]\n",
+        std::string why_all;
+        for (const MoveDef* m : *st.my_moves) {
+            if (m == nullptr) continue;
+            bool ev_match = false;
+            for (const std::string& ev : m->events) {
+                if (fired.count(js_event_type(ev)) != 0) {
+                    ev_match = true;
+                    break;
+                }
+            }
+            if (!ev_match) continue;
+            std::string why;
+            if (m->no_animation) {
+                why = "no_animation";
+            } else if (m->type != "ATTACK" && m->type != "MOVE") {
+                why = "type:" + m->type;
+            } else if (st.full_conditions && !st.full_conditions(*m)) {
+                why = "conditions";
+            } else if (!v1(*m, st, &why, false)) {
+                const std::size_t colon = why.find(':');
+                why = "v1:" + why.substr(0, colon == std::string::npos
+                                                ? why.size()
+                                                : colon);
+            } else {
+                why.clear();
+            }
+            if (!why.empty()) {
+                why_all += " ";
+                why_all += m->name;
+                why_all += "(";
+                why_all += why;
+                why_all += ")";
+            }
+        }
+        std::fprintf(stdout,
+                     "[gc] f=%d playing=%d types=[%s] matched=%d kept=%d [%s] rej=[%s]\n",
                      st.fight_frame, st.playing ? 1 : 0, types.c_str(), kp, pass,
-                     names.c_str());
+                     names.c_str(), why_all.c_str());
         std::fflush(stdout);
     }
     for (const MoveDef* m : *st.my_moves) {
@@ -1967,7 +2002,15 @@ std::string AiController::gc_frame(const AiFightState& st) {
         // frame-event pump. Without this the pump started
         // `StandupAfterThrowFall` (Priority 400, conditions `<RoundResult
         // Defeat Not=1>`) out of a plain hit reaction.
-        if (m->type != "ATTACK" && m->type != "MOVE") continue;
+        // MOVE/ATTACK plus the BLOCK family (the blocks carry NO `Type` attr -
+        // `MiddleBlock`/`HighBlock`/`SweepBlock`/`OverheadBlock` - and are a
+        // legitimate pump pick: that IS the JS's `fk=10` block behaviour).
+        // The getup / loss / win / stance animations are excluded: they are
+        // the HIT-reaction and `try_every_frame_move` recovery chains.
+        if (m->type != "ATTACK" && m->type != "MOVE" &&
+            m->name.find("Block") == std::string::npos) {
+            continue;
+        }
         if (st.full_conditions && !st.full_conditions(*m)) continue;
         if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
         if (best.empty() || m->priority > best.front()->priority) {
