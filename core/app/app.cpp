@@ -1032,6 +1032,15 @@ bool App::init(const std::string& res_root, const std::string& save_path,
             fight_assets_->clips.emplace(
                 e.name, sf2::data::anim_clip_parse(e.name, e.data.data(), e.data.size()));
         }
+        // [probe] SF2_TRACE_CLIPS=1: dump the animation-archive entry names
+        // (the game's animation vocabulary the AI's tactic rows reference).
+        if (std::getenv("SF2_TRACE_CLIPS") != nullptr) {
+            std::fprintf(stdout, "[clips] %zu names\n", fight_assets_->clips.size());
+            for (const auto& kv : fight_assets_->clips) {
+                std::fprintf(stdout, "[clip] %s\n", kv.first.c_str());
+            }
+            std::fflush(stdout);
+        }
 
         // Magic effect atlases (the real `magic/*.json` registry, packed in
         // the zstd archive). Registers the frames + publishes the Sequence

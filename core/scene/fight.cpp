@@ -8186,6 +8186,59 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 break;
             }
             if (chosen == nullptr && decision == "ShortAttack") {
+                // `ShortAttack` is an AI animation GROUP (it appears in
+                // `tactic_settings.xml` `<AnimationWeights Base="1000">`), not a
+                // move name. The JS resolves the group through the character's
+                // animation set, i.e. to the WEAPON's basic attack for an armed
+                // fighter. The fallback below only knew the unarmed `Punch`
+                // family, so EVERY armed enemy (Knives/Batons/...) played
+                // `ElbowStrike` - the reported "every opponent fights like Brick,
+                // elbow + a few punches" (measured on Girl_Dirk, a Knives enemy:
+                // ElbowStrike x4, ThrowForward x2, no knives at all).
+                // A basic weapon attack = the fighter's own ATTACK move tagged
+                // `Weapon` + `2key` (the shipped slashes: KnivesHeavySlash /
+                // KnivesLowSlash / KnivesUpperSlash / KnivesSpinningSlash, all
+                // Priority 120); take the max-priority group's FIRST move so the
+                // shared `Da.pg` stream is not shifted. Unarmed fighters have no
+                // such move, so the Fists branch below is byte-identical (the
+                // challenge diff, which is exact, stays untouched).
+                std::vector<const sf2::scene::MoveDef*> armed_group;
+                for (const auto& kv : *moves_) {
+                    const sf2::scene::MoveDef& m2 = kv.second;
+                    if (m2.type != "ATTACK") continue;
+                    if (m2.tactic_weapon.empty()) continue;
+                    if (m2.template_tags.count("Weapon") == 0) continue;
+                    if (m2.template_tags.count("2key") == 0) continue;
+                    if (m2.no_animation) continue;
+                    if (!own_moves.empty() && own_moves.count(m2.name) == 0) continue;
+                    // `Aua`: keep the max-priority group.
+                    if (armed_group.empty() ||
+                        m2.priority > armed_group.front()->priority) {
+                        armed_group.clear();
+                        armed_group.push_back(&m2);
+                    } else if (m2.priority == armed_group.front()->priority) {
+                        armed_group.push_back(&m2);
+                    }
+                }
+                // `uf.sja` (a `Math.random` draw, NOT the shared `Da.pg`): the
+                // same uniform pick the JS's `Gc.DK` does inside the group, so an
+                // armed enemy varies its slashes instead of replaying one.
+                if (!armed_group.empty()) {
+                    const float r = math_random01();
+                    std::size_t ai = static_cast<std::size_t>(
+                        r * static_cast<float>(armed_group.size()));
+                    if (ai >= armed_group.size()) ai = armed_group.size() - 1;
+                    const sf2::scene::FightContext c = pick_ctx();
+                    if (sf2::scene::eval_move_conditions(armed_group[ai]->tactics, c)) {
+                        chosen = armed_group[ai];
+                        std::fprintf(stdout,
+                                     "[fight] AI ShortAttack -> weapon move %s\n",
+                                     chosen->name.c_str());
+                        std::fflush(stdout);
+                    }
+                }
+            }
+            if (chosen == nullptr && decision == "ShortAttack") {
                 for (const auto& kv : *moves_) {
                     if (kv.second.template_tags.count("Punch") == 0) continue;
                     if (!own_moves.empty() && own_moves.count(kv.second.name) == 0) {
