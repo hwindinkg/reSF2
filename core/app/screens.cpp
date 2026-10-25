@@ -19615,8 +19615,12 @@ void ShopScreen::render_impl(App& app) {
             // `fi.Isb(a)` L2272: `Mb.R(a>0)` — the value label shows only when
             // `a>0`; `Mb.V(ie.Or(a))`.
             if (value > 0) {
-                draw_ui_label(app, cx0 + stat_h * 1.1f, row_cy - stat_h * 0.3f, cw0 * 0.6f,
-                              stat_h * 0.6f, shop_format_number(value), 0.9f, UiAlign::Left,
+                // The value label sits ABOVE the bar: `fi.ba` bottom-aligns the
+                // bar under the row, so the label box must end where the bar
+                // starts (0.6 of the row). The old 0.2..0.8 box overlapped the
+                // bar's 0.6..1.0 band and the fill covered the number.
+                draw_ui_label(app, cx0 + stat_h * 1.1f, row_y + stat_h * 0.05f, cw0 * 0.6f,
+                              stat_h * 0.5f, shop_format_number(value), 0.9f, UiAlign::Left,
                               0.184f, 0.145f, 0.106f);
             }
             // `fi.IXa(a)` L2272: `(+N)` in `Z.mTa` (green) when >0, `(N)` in
@@ -19627,8 +19631,8 @@ void ShopScreen::render_impl(App& app) {
                 const float dr = delta > 0 ? 0.267f : 0.608f;
                 const float dg = delta > 0 ? 0.478f : 0.110f;
                 const float db = delta > 0 ? 0.008f : 0.027f;
-                draw_ui_label(app, cx0 + cw0 * 0.6f, row_cy - stat_h * 0.2f, cw0 * 0.4f,
-                              stat_h * 0.4f, dtxt, 0.8f, UiAlign::Left, dr, dg, db);
+                draw_ui_label(app, cx0 + cw0 * 0.6f, row_y + stat_h * 0.05f, cw0 * 0.4f,
+                              stat_h * 0.5f, dtxt, 0.8f, UiAlign::Left, dr, dg, db);
             }
             // `vH` (`os`, L2268) value bar: `fi.ba` bottom-aligns it under the
             // row; `fi.Gr` (L2273) fills each layer with `fi.Z7a(value)` — the
