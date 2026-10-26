@@ -1567,3 +1567,51 @@ AngVel -> StartSize) и `EffectSystem::next01` (`av` ctor).
 `diff:survival` 1131, `diff:challenge` 352. Цепочка ОТКАЧЕНА; причина
 расхождения второго выбора — состав/порядок бакета `dea(type)` (планка
 `Aua` = `b[0].priority` и индекс `uf.sja`), это следующий шаг.
+
+### ИИ: финальный выбор пумпа — это `Pkb`/`jL` (Da.pg), а не `uf.sja` (26.10)
+
+Разобрана цепочка `Gc.DK` (L28394) + `Pkb` (L28436) для eb=false событий
+(AnimationEnd/IntervalEnd):
+1. `d` = кандидаты с `eb=false` (не-Rha);
+2. `f` = max-priority группа `Aua` (планка = `b[0].priority`);
+3. `e = f[uf.sja(f.length)]` — ОДИН розыгрыш `Math.random`;
+4. `if (d.length>0) { if (e) d.push(e); Pkb(a,d); }` — `e` ДОБАВЛЯЕТСЯ в `d`
+   (дубль), и `Pkb` крутит взвешенную рулетку `jL` (это `Da.pg`, не
+   `Math.random`);
+5. `Pkb`: `M7.Wcb` фильтр -> фильтр `<Tactics>` -> `jL` -> фильтр по
+   сигнатуре клавиш -> `Aua` + `uf.sja` -> старт.
+
+Порт в `gc_frame` делал только шаги 1-3 и стартовал `f[uf.sja]` напрямую —
+поэтому брал член max-priority группы (`DoubleSweep`), а оракул стартует
+`jL`-выбор (`StanceIdle`/`StepForward`).
+
+Сделано (откачено, см. ниже): `pkb_from(st, cands, from_key_press)` — общий
+хвост `DK`/`Pkb`, вынесенный из `update_random`; `gc_frame` собирает ВСЕ
+кандидаты, добавляет `Aua`-победителя и зовёт `pkb_from`.
+
+Замеры на полной цепочке (пересев `Math.random` + KeyPressed из `dsb` + старт
+`Bnb` в голове следующего кадра + фильтры имён `Om`/`Im` + снятый Type-фильтр
++ `pkb_from`):
+- фаза 1 чистая (без ложного `KnucklesSuperSlash`), первый пумп-мув на
+  nat f=204;
+- выбор на f=204: порт `FrontFlip` (`jL` roll=0.4402), оракул `StepForward`
+  (`jL` roll=0.1115) — то есть позиция `Da.pg` на этом кадре сдвинута на один
+  розыгрыш (порт тратит на 1 больше);
+- метрики: `diff:survival` 1131, `diff:challenge` 352 — ОТКАЧЕНО до
+  зелёной базы (863/0).
+
+Ещё два факта:
+- `v1` (de.V1-эвалюатор) ЖЁСТКО ставит `stage = fight`; на фазе 1 из-за этого
+  проходили мувы с `<RoundStage Name="Fight"/>` (порт стартовал
+  `KnucklesSuperSlash` на f=112). Для пумпа нужен `full_conditions` (реальная
+  фаза), а не `v1`.
+- `full_conditions` не привязывал `candidate_pivot_pos` (`Object="Pivot"` в
+  дереве кандидата) — добавлено, иначе `<Distance><From Object="Pivot">`
+  читает пивот ТЕКУЩЕГО мува.
+- Фолбэк `ShortAttack` -> weapon-мувы по-прежнему обязателен: без него
+  `diff:challenge` 0 -> 352, хотя в загружаемом expanded moves.xml нет
+  `<Template Name="ShortAttack">` и `ra.yz` в JS даёт пусто. Противоречие не
+  разрешено.
+
+Следующий шаг: найти лишний розыгрыш `Da.pg` в кадре пумпа (сравнить число
+`jf()`-вызовов на кадр в порте и оракуле для кадра первого пумпа).
