@@ -16,6 +16,7 @@
 #include "audio/audio.hpp"
 #include "audio/sfx_table.hpp"  // `sfx_stem_for_js` = JS `ta.WBa` (L1265-1274)
 #include "scene/fight_camera_sya.hpp"
+#include "scene/shared_rng.hpp"
 
 namespace sf2::scene {
 
@@ -1734,14 +1735,28 @@ std::string i6a_attr(const std::vector<std::pair<std::string, float>>& sz) {
 // the native mirrors that pin — same spirit as the `Da.pg` seed (the frozen
 // clock `T0`, `kBootSeed`/`kRoundClockSeed`). Process-global state: the
 // sequence is fixed per run.
-float FightController::math_random01() {
+float shared_math_random01() {
+    // JS `Math.random` pinned by the harness to `mulberry32(0xC0FFEE)`.
     static std::uint32_t a = 0xC0FFEEu;
+    static std::uint64_t n = 0;
     a += 0x6D2B79F5u;
     std::uint32_t t = a;
     t = (t ^ (t >> 15)) * (1u | t);
     t = (t + (t ^ (t >> 7)) * (61u | t)) ^ t;
-    return static_cast<float>((t ^ (t >> 14))) / 4294967296.0f;
+    const float v = static_cast<float>((t ^ (t >> 14))) / 4294967296.0f;
+    // [probe] SF2_TRACE_MR=1: the shared unseeded stream with a call counter,
+    // so its position can be lined up 1:1 with the oracle's `[mr]` log.
+    static const bool trace_mr = std::getenv("SF2_TRACE_MR") != nullptr;
+    if (trace_mr) {
+        ++n;
+        std::fprintf(stderr, "[mr] n=%llu v=%.9f\n",
+                     static_cast<unsigned long long>(n),
+                     static_cast<double>(v));
+    }
+    return v;
 }
+
+float FightController::math_random01() { return shared_math_random01(); }
 
 // JS `o1a` (L403) + `Gf` (L403-404): build one fighter. The move list is
 // the TacticWeapon-based list (`weapon_subtype`) or, when `owned` is

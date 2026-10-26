@@ -15,6 +15,7 @@
 
 #include "atlas.hpp"
 #include "scene/damage.hpp"  // FightParams::camera_max_width_delta (JS `v.LC.oGa`)
+#include "scene/shared_rng.hpp"
 #include "scene/sprite.hpp"
 #include "texture.hpp"
 #include "xml_doc.hpp"
@@ -1341,8 +1342,11 @@ float LocationScene::rand_range_(ParticleLayer& emitter, float lo, float hi) {
     if (lo == hi) {
         return lo;
     }
-    emitter.rng = 1664525u * emitter.rng + 1013904223u;
-    const float u = static_cast<float>(emitter.rng >> 8) * (1.0f / 16777216.0f);
+    // JS `Ie.Gb` -> `oa.eT` -> `Math.random`: the ambient emitters consume the
+    // SHARED unseeded stream, the same one the AI's `uf.sja` pick draws from.
+    // The old private LCG kept the pose dump reproducible but desynced every
+    // `Aua` pick (the oracle makes ~10 particle draws per spawned leaf).
+    const float u = sf2::scene::shared_math_random01();
     return lo + u * (hi - lo);
 }
 

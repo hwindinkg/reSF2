@@ -1503,3 +1503,36 @@ nat f=204 = ora f=349/350, как оракул, и держит его 40 кад
 `Aua`-планка и индекс `uf.sja` совпадали; (3) ритм «мув -> 1 кадр StanceIdle
 -> мув» через событие AnimationStart стойки; (4) поднять `--headless` в
 survival-сценарии.
+
+### ИИ: ОДИН поток `Math.random` — частицы больше не на приватном LCG (26.10)
+
+Замер (патч бандла: `Math.random` -> `[mr] n= v= st=`, стек из 4 кадров):
+
+| источник | вызовов за 420 кадров | стек |
+|---|---|---|
+| частицы локации (спавн) | 8265 | `oa.eT < Ie.Gb < jh.Nvb < jh.update` |
+| частицы локации (эмиттер) | 3204 | `oa.eT < jh.update < Qi.ia < Ut.Knb` |
+| выбор `Aua` (`uf.sja`) | 218 | `at.Nlb < at.RGa < uf.sja < Gc.DK` |
+| RandomSound (`am.ab`) | 25 | `at.Nlb < at.RGa < uf.sja < am.ab` |
+| сейв-id | 1 | `new < new < p.Qjb < p.zkb` |
+
+То есть поток `Math.random` на 97% состоит из ФОНОВЫХ ЧАСТИЦ ЛОКАЦИИ
+(`<NewParticleEffect>` в `*_params.xml`: bamboo_grove — 3 эмиттера
+`leafs`/`leafs_small`, Rate=7, Life=5, MaxParticles=250). Порт держал частицы
+локации и хит-спарки на ПРИВАТНОМ LCG, поэтому `uf.sja` (пик `Aua` и дубль в
+`Gc.DK`) никогда не совпадал с оракулом.
+
+Сделано: `core/scene/shared_rng.hpp` (`shared_math_random01()` — тот же
+pinned mulberry32), на него переведены `FightController::math_random01`,
+`LocationScene::rand_range_` (порядок розыгрышей уже совпадал: смещение
+эмиттера x/y -> ForceX/ForceY -> Life -> StartRotation -> VelocityX/Y ->
+AngVel -> StartSize) и `EffectSystem::next01` (`av` ctor).
+Замер после: порт делает 1344 розыгрыша за прогон вместо 12 (было), гейты
+без изменений (`diff:survival` 863, `diff:challenge` 0, `diff:dojo-*` 2,
+`ui-tour`/`headless-loop`/`input-tape` 0).
+
+ОСТАТОК: количество розыгрышей всё ещё не то — оракул ~11815 за 420 кадров,
+порт 1344, т.е. эмиттеры порта спавнят в ~8 раз реже. Пока счётчик не
+совпадёт, `uf.sja` не выровняется. Следующий шаг: снять `dt`/частоту вызова
+`jh.update` в оракуле (лог `a` в `update(a)`) и привести шаг частиц порта к
+нему (сейчас `fight_location.update(dt)` зовётся с шагом кадра экрана).

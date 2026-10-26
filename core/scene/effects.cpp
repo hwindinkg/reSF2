@@ -1,6 +1,7 @@
 // Hit-spark particles — see effects.hpp for the JS refs and the RNG note.
 
 #include "scene/effects.hpp"
+#include "scene/shared_rng.hpp"
 
 #include <cmath>
 
@@ -48,10 +49,10 @@ float sign_angle_deg(float ax, float ay, float bx, float by) {
 }  // namespace
 
 float EffectSystem::next01() {
-    // A 32-bit LCG (Numerical Recipes) — deterministic, private to the
-    // effect layer; never touches the fight's shared roll01.
-    lcg_ = 1664525u * lcg_ + 1013904223u;
-    return static_cast<float>(lcg_ >> 8) * (1.0f / 16777216.0f);
+    // JS `av` ctor (L833) draws `oa.eT(-40,40)` / `oa.eT(-60,20)` from
+    // `Math.random` — the SAME unseeded stream the AI's `uf.sja` pick uses.
+    // A private LCG here desynced every `Aua` pick (see shared_rng.hpp).
+    return sf2::scene::shared_math_random01();
 }
 
 void EffectSystem::spawn_hit_sparks(float x, float y, float dir_x,
