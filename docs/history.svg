@@ -4,37 +4,36 @@
 <text x="24" y="48" fill="#8b949e" font-size="12">commits per day (top) and the survival divergence metric (bottom)</text>
 <rect x="64" y="66" width="672" height="148" fill="#161b22" stroke="#30363d" rx="6"/>
 <text x="76" y="84" fill="#58a6ff" font-size="11" font-weight="600">commits / day</text>
-<rect x="80.1" y="197.9" width="14.7" height="6.1" fill="#58a6ff" rx="1.5"/>
-<rect x="103.1" y="112.3" width="14.7" height="91.7" fill="#58a6ff" rx="1.5"/>
-<rect x="126.1" y="124.6" width="14.7" height="79.4" fill="#58a6ff" rx="1.5"/>
-<rect x="149.1" y="173.4" width="14.7" height="30.6" fill="#58a6ff" rx="1.5"/>
-<rect x="172.1" y="161.2" width="14.7" height="42.8" fill="#58a6ff" rx="1.5"/>
-<rect x="195.1" y="152.1" width="14.7" height="51.9" fill="#58a6ff" rx="1.5"/>
-<rect x="218.1" y="170.4" width="14.7" height="33.6" fill="#58a6ff" rx="1.5"/>
-<rect x="241.1" y="161.2" width="14.7" height="42.8" fill="#58a6ff" rx="1.5"/>
-<rect x="264.1" y="155.1" width="14.7" height="48.9" fill="#58a6ff" rx="1.5"/>
-<rect x="287.1" y="161.2" width="14.7" height="42.8" fill="#58a6ff" rx="1.5"/>
-<rect x="310.1" y="173.4" width="14.7" height="30.6" fill="#58a6ff" rx="1.5"/>
-<rect x="333.1" y="149.0" width="14.7" height="55.0" fill="#58a6ff" rx="1.5"/>
-<rect x="356.1" y="155.1" width="14.7" height="48.9" fill="#58a6ff" rx="1.5"/>
-<rect x="379.1" y="139.8" width="14.7" height="64.2" fill="#58a6ff" rx="1.5"/>
-<rect x="402.1" y="155.1" width="14.7" height="48.9" fill="#58a6ff" rx="1.5"/>
-<rect x="425.1" y="103.2" width="14.7" height="100.8" fill="#58a6ff" rx="1.5"/>
-<rect x="448.1" y="167.3" width="14.7" height="36.7" fill="#58a6ff" rx="1.5"/>
-<rect x="471.1" y="194.8" width="14.7" height="9.2" fill="#58a6ff" rx="1.5"/>
-<rect x="494.1" y="152.1" width="14.7" height="51.9" fill="#58a6ff" rx="1.5"/>
-<rect x="517.1" y="161.2" width="14.7" height="42.8" fill="#58a6ff" rx="1.5"/>
-<rect x="540.1" y="167.3" width="14.7" height="36.7" fill="#58a6ff" rx="1.5"/>
-<rect x="563.1" y="191.8" width="14.7" height="12.2" fill="#58a6ff" rx="1.5"/>
-<rect x="586.1" y="139.8" width="14.7" height="64.2" fill="#58a6ff" rx="1.5"/>
-<rect x="609.1" y="152.1" width="14.7" height="51.9" fill="#58a6ff" rx="1.5"/>
-<rect x="632.1" y="161.2" width="14.7" height="42.8" fill="#58a6ff" rx="1.5"/>
-<rect x="655.1" y="158.2" width="14.7" height="45.8" fill="#58a6ff" rx="1.5"/>
-<rect x="678.1" y="136.8" width="14.7" height="67.2" fill="#58a6ff" rx="1.5"/>
-<rect x="701.1" y="94.0" width="14.7" height="110.0" fill="#58a6ff" rx="1.5"/>
-<text x="70" y="102" fill="#8b949e" font-size="10" text-anchor="end">36</text>
+<rect x="80.3" y="114.8" width="15.3" height="89.2" fill="#58a6ff" rx="1.5"/>
+<rect x="104.1" y="126.7" width="15.3" height="77.3" fill="#58a6ff" rx="1.5"/>
+<rect x="128.0" y="174.3" width="15.3" height="29.7" fill="#58a6ff" rx="1.5"/>
+<rect x="151.8" y="162.4" width="15.3" height="41.6" fill="#58a6ff" rx="1.5"/>
+<rect x="175.7" y="153.5" width="15.3" height="50.5" fill="#58a6ff" rx="1.5"/>
+<rect x="199.6" y="171.3" width="15.3" height="32.7" fill="#58a6ff" rx="1.5"/>
+<rect x="223.4" y="162.4" width="15.3" height="41.6" fill="#58a6ff" rx="1.5"/>
+<rect x="247.3" y="156.4" width="15.3" height="47.6" fill="#58a6ff" rx="1.5"/>
+<rect x="271.1" y="162.4" width="15.3" height="41.6" fill="#58a6ff" rx="1.5"/>
+<rect x="295.0" y="174.3" width="15.3" height="29.7" fill="#58a6ff" rx="1.5"/>
+<rect x="318.8" y="150.5" width="15.3" height="53.5" fill="#58a6ff" rx="1.5"/>
+<rect x="342.7" y="156.4" width="15.3" height="47.6" fill="#58a6ff" rx="1.5"/>
+<rect x="366.5" y="141.6" width="15.3" height="62.4" fill="#58a6ff" rx="1.5"/>
+<rect x="390.4" y="156.4" width="15.3" height="47.6" fill="#58a6ff" rx="1.5"/>
+<rect x="414.2" y="105.9" width="15.3" height="98.1" fill="#58a6ff" rx="1.5"/>
+<rect x="438.1" y="168.3" width="15.3" height="35.7" fill="#58a6ff" rx="1.5"/>
+<rect x="461.9" y="195.1" width="15.3" height="8.9" fill="#58a6ff" rx="1.5"/>
+<rect x="485.8" y="153.5" width="15.3" height="50.5" fill="#58a6ff" rx="1.5"/>
+<rect x="509.6" y="162.4" width="15.3" height="41.6" fill="#58a6ff" rx="1.5"/>
+<rect x="533.5" y="168.3" width="15.3" height="35.7" fill="#58a6ff" rx="1.5"/>
+<rect x="557.3" y="192.1" width="15.3" height="11.9" fill="#58a6ff" rx="1.5"/>
+<rect x="581.2" y="141.6" width="15.3" height="62.4" fill="#58a6ff" rx="1.5"/>
+<rect x="605.0" y="153.5" width="15.3" height="50.5" fill="#58a6ff" rx="1.5"/>
+<rect x="628.9" y="162.4" width="15.3" height="41.6" fill="#58a6ff" rx="1.5"/>
+<rect x="652.7" y="159.4" width="15.3" height="44.6" fill="#58a6ff" rx="1.5"/>
+<rect x="676.6" y="138.6" width="15.3" height="65.4" fill="#58a6ff" rx="1.5"/>
+<rect x="700.4" y="94.0" width="15.3" height="110.0" fill="#58a6ff" rx="1.5"/>
+<text x="70" y="102" fill="#8b949e" font-size="10" text-anchor="end">37</text>
 <text x="70" y="204" fill="#8b949e" font-size="10" text-anchor="end">0</text>
-<text x="76" y="210" fill="#8b949e" font-size="10">2026-09-26</text>
+<text x="76" y="210" fill="#8b949e" font-size="10">2026-09-27</text>
 <text x="720" y="210" fill="#8b949e" font-size="10" text-anchor="end">2026-10-25</text>
 <rect x="64" y="232" width="672" height="148" fill="#161b22" stroke="#30363d" rx="6"/>
 <text x="76" y="250" fill="#f85149" font-size="11" font-weight="600">diff:survival (frames diverging from the oracle, lower is better)</text>
