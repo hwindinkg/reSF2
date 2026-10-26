@@ -18,4 +18,15 @@ namespace sf2::scene {
 // JS `Math.random()` pinned to `mulberry32(0xC0FFEE)` (see `fight.cpp`).
 float shared_math_random01();
 
+// The differential harness re-pins the stream at the FIRST live fight frame
+// (`trace_oracle.js` -> `reseedMathRandomForFight`): the navigation to the
+// fight is wall-clock in the oracle and frame-stepped in the port, so the two
+// sides consume a different number of draws before the fight (measured 725 vs
+// 1176) and every AI `uf.sja` pick would be shifted by that constant. Both
+// sides re-seed ONCE per process (the same idea as `Da.pg`'s
+// `kRoundClockSeed`). Measured in-fight cadence after the re-pin: oracle
+// 2.46 draws/frame, port 2.49.
+constexpr std::uint32_t kFightMathRandomSeed = 0xC0FFEEu;
+void reseed_shared_math_random(std::uint32_t seed);
+
 }  // namespace sf2::scene

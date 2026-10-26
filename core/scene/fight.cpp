@@ -1735,10 +1735,32 @@ std::string i6a_attr(const std::vector<std::pair<std::string, float>>& sz) {
 // the native mirrors that pin — same spirit as the `Da.pg` seed (the frozen
 // clock `T0`, `kBootSeed`/`kRoundClockSeed`). Process-global state: the
 // sequence is fixed per run.
+namespace {
+// The pinned `Math.random` state (mulberry32). Shared by the fight and the
+// particle layers; re-seeded at the first live fight frame (shared_rng.hpp).
+struct MathRandomState {
+    std::uint32_t a = 0xC0FFEEu;
+    std::uint64_t n = 0;
+};
+MathRandomState& math_random_state() {
+    static MathRandomState s;
+    return s;
+}
+}  // namespace
+
+void reseed_shared_math_random(std::uint32_t seed) {
+    math_random_state().a = seed;
+    // [probe] the trace counter restarts with the stream, so `SF2_TRACE_MR`
+    // lines after the `[mr-reseed]` marker are exactly the fight's draws.
+    math_random_state().n = 0;
+    static const bool trace_mr = std::getenv("SF2_TRACE_MR") != nullptr;
+    if (trace_mr) std::fprintf(stderr, "[mr-reseed] seed=0x%x\n", seed);
+}
+
 float shared_math_random01() {
     // JS `Math.random` pinned by the harness to `mulberry32(0xC0FFEE)`.
-    static std::uint32_t a = 0xC0FFEEu;
-    static std::uint64_t n = 0;
+    std::uint32_t& a = math_random_state().a;
+    std::uint64_t& n = math_random_state().n;
     a += 0x6D2B79F5u;
     std::uint32_t t = a;
     t = (t ^ (t >> 15)) * (1u | t);
@@ -3288,6 +3310,17 @@ void FightController::round_start() {
 
 // JS `FNa` (L409): phase 1 — fighters at their spawn, no input yet.
 void FightController::enter_start_stance() {
+    // [harness parity] Re-pin the shared `Math.random` at the FIRST live fight
+    // frame - `trace_oracle.js` `reseedMathRandomForFight` does the same. The
+    // navigation to the fight is wall-clock in the oracle and frame-stepped in
+    // the port, so the pre-fight particle draws differ and every AI `uf.sja`
+    // pick would be shifted by that constant. Once per process, like the
+    // harness closure flag.
+    static bool math_reseeded = false;
+    if (!math_reseeded) {
+        math_reseeded = true;
+        sf2::scene::reseed_shared_math_random(kFightMathRandomSeed);
+    }
     // JS `FNa` (L409) starts the phase-1 clock: `frame_ == 0` coincides with
     // phase 1 so the frame-indexed fight timelines (drivers, oracle mapping)
     // stay phase-local (the plate lead-in ran at frame 0 in the idle phase).

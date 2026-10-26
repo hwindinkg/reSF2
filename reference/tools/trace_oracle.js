@@ -63,13 +63,47 @@
   window.Date = FixedDate;
 
   var mrState = MR_SEED;
+  var mrDraws = 0; /* diagnostic counter (the trace header records it) */
   Math.random = function () {
+    mrDraws++;
     mrState |= 0;
     mrState = (mrState + 0x6D2B79F5) | 0;
     var t = Math.imul(mrState ^ (mrState >>> 15), 1 | mrState);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  /* Re-pin the stream at the FIRST live fight frame (see oracleTick's caller).
+   * The navigation to a fight is wall-clock in the oracle and frame-stepped in
+   * the native port, so the two sides consume a different number of
+   * Math.random draws before the fight (measured 722 vs 1176) and every AI
+   * `uf.sja` pick (`Gc.DK`'s Aua choice) would be shifted by that constant.
+   * The port does the same in `enter_start_stance` (shared_rng.hpp
+   * `kFightMathRandomSeed`), ONCE per process like this closure flag. */
+  var mrFightReseeded = false;
+  function reseedMathRandomForFight() {
+    if (mrFightReseeded) return;
+    var f = null;
+    try { f = fightObj(); } catch (e) { return; }
+    if (!f) return;
+    /* The dojo HUB runs a `FightNone` viewer controller (the "no fight" dummy
+     * scene) from boot; re-pin only at a REAL battle, which is the frame the
+     * port's `enter_start_stance` fires on. */
+    try {
+      if (f.Da && f.Da.type === "FightNone") return;
+    } catch (e) { return; }
+    /* The controller exists during the VS-intro (`ik`) too, and the location
+     * particles keep drawing there. The port re-pins in `enter_start_stance`,
+     * i.e. at the FIRST phase-1 frame (`xF(1)`), so wait for `eu == 1`. */
+    try {
+      if (num(f.eu) !== 1) return;
+    } catch (e) { return; }
+    mrFightReseeded = true;
+    try {
+      console.log("[ORACLE] math.random reseeded for the fight: drawsBefore=" +
+                  mrDraws + " seed=0x" + MR_SEED.toString(16));
+    } catch (e) { /* ignore */ }
+    mrState = MR_SEED;
+  }
 
   window.__trace = []; /* method entry/exit events, capped */
   window.__oracleDone = false;
@@ -1714,6 +1748,12 @@
         } catch (err) {
           orFail(err);
         }
+        try {
+          /* FIRST live fight frame: re-pin Math.random BEFORE the tick runs, so
+           * the fight's own draws start from the known seed (the port does the
+           * same in enter_start_stance). */
+          reseedMathRandomForFight();
+        } catch (err) { /* ignore */ }
         var r = origAa.apply(this, arguments);
         try {
           oracleTick();
