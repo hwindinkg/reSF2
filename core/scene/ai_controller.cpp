@@ -2573,6 +2573,7 @@ std::string AiController::update(const AiFightState& st) {
         }
     }
     if (tactic_ == nullptr || moves_ == nullptr) return "";
+    sf2::scene::DaPrng::trace_frame() = st.fight_frame;
     // An injected source overrides the owned DaPrng stream (ai_demo uses
     // mt19937); otherwise ALL draws come from `prng_` in JS call order.
     roll01_fn_ = st.roll01;

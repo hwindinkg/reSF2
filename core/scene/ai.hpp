@@ -86,6 +86,12 @@ public:
     // `jf()` draw of the matching instance as `[prng] tag=.. n=.. v=..`.
     void set_tag(const char* t) { tag_ = t; }
     std::uint64_t draws() const { return draws_; }
+    // The fight frame the current draw belongs to (diagnostic only): set by
+    // the AI before its pass so `SF2_TRACE_PRNG` lines can be attributed.
+    static int& trace_frame() {
+        static int f = -1;
+        return f;
+    }
     // Xx.Olb (L2366): advance the LCG, return mf mod 2^31.
     std::uint32_t b0() {
         mf_ = mf_ * 1103515245u + 12345u;  // u32 wrap = mod 2^32
@@ -99,8 +105,9 @@ public:
         ++draws_;
         const char* tt = trace_tag();
         if (tt != nullptr && tag_ != nullptr && std::strcmp(tt, tag_) == 0) {
-            std::fprintf(stderr, "[prng] tag=%s n=%llu v=%.9f\n", tag_,
-                         static_cast<unsigned long long>(draws_), v);
+            std::fprintf(stderr, "[prng] tag=%s n=%llu f=%d v=%.9f\n", tag_,
+                         static_cast<unsigned long long>(draws_),
+                         trace_frame(), v);
         }
         return v;
     }
