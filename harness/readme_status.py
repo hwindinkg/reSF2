@@ -71,7 +71,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("`kick-ko`, `boss-hit-probe`, `disarm-ai`, `doublesweep`", True),
         ("`enemy-kit` / `equip-fight` - enemy and player weapons", True),
         ("player throw: gate correct, probe cannot hold the range", False),
-        ("mid-fight disarm: moves/sounds stay on the lost weapon instead of fists", False),
+        ("mid-fight disarm drops the weapon and rebuilds the move list (gate `disarm-ai`: 1 drop, 0 foreign starts)", True),
     ]),
     ("AI", [
         ("`enemy-move-audit` - the enemy must attack", True),
@@ -89,8 +89,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("results: `<Reward><Item>` drops are not granted", False),
         ("map: a completed battle still offers FIGHT", False),
         ("shop: solver state on the preview start", False),
-        ("energy dialog: raw variable names instead of labels, no crystal "
-        "grant, HUD energy tap and the green plus are dead", False),
+        ("dialog captions render the inline `<image>` icons (rich text)", True),
+        ("HUD energy tap fires `EnergyBarPress`; the green plus opens the "
+        "shop RUBY tab", True),
+        ("first-quest crystal grant for the energy tutorial (reported)", False),
     ]),
     ("Quests & progress", [
         ("`quest-verify`, `quest-verify-buy`", True),
@@ -116,6 +118,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("31 gates, `--full` exit 0", True),
         ("oracle runner + `compare_state` / `compare_audio` / `ui_diff`", True),
         ("`--replay` drives one script on both sides", True),
+        ("debug overlay 1-4 (AI/world/session + a perf panel with the FPS "
+        "graph, CPU and the GPU pass time) and the `[perf]` log", True),
     ]),
 ]
 
