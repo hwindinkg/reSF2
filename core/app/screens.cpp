@@ -12298,6 +12298,16 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
       location_(location),
       reward_money_(reward_money),
       reward_exp_(reward_exp) {
+    // [trace] `SF2_DUMP_POSE=N` arms the per-frame pose dump for ANY fight the
+    // app creates (the probes included - `--dump-pose` only armed the direct
+    // `--fight` boot). Pure trace, no simulation effect.
+    if (const char* dp = std::getenv("SF2_DUMP_POSE")) {
+        const int n = std::atoi(dp);
+        if (n > 0) {
+            std::filesystem::create_directories("reference/traces");
+            enable_pose_dump("reference/traces/native_pose.jsonl", n);
+        }
+    }
     // [entry audio] The Map's `start_battle` fires the battle-enter gong and
     // the battle track at the fight-ENTRY point (JS `v.Am` L1216 `rb.Wkb()`;
     // `ai.aa` case 0 L2007 `Ut()`), BEFORE the `jk` roster it draws. A direct
