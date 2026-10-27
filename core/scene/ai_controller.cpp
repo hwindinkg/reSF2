@@ -683,7 +683,7 @@ bool AiController::fca(const AiFightState& st, int variant) const {
 // JS `V1` (L601-602): a candidate move must be in `me` (the fighter's move
 // list) and its tactics conditions (`FQ(2)` = the `Ts` list) must pass.
 bool AiController::v1(const MoveDef& m, const AiFightState& st,
-                      std::string* why, bool mirror_filter) const {
+                      std::string* why, bool mirror_filter, int mode) const {
     if (why != nullptr) why->clear();
     if (moves_ == nullptr || moves_->find(m.name) == moves_->end()) {
         if (why != nullptr) *why = "not-in-table";
@@ -697,7 +697,7 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
     // gate a Knives fighter accepts Spear/Staff/Tonfa candidates whose clips
     // do not exist; `start_move_impl` then starts a clip-less move and the
     // fighter never animates (the "enemies do not react" symptom).
-    if (st.my_moves != nullptr) {
+    if (mode != 2 && st.my_moves != nullptr) {
         bool own = false;
         for (const MoveDef* om : *st.my_moves) {
             if (om != nullptr && om->name == m.name) {
@@ -799,10 +799,12 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
     // `ThrowForward`'s `<Distance Max="100">`) was never rejected and the AI
     // started/landed throws from across the arena. Keys conditions pass for
     // the AI (`ctx.keys_gm=false`, the same `gm=false` gate `NS` uses).
-    std::string ctrace;
-    if (!eval_move_conditions(m.conditions, ctx, &ctrace)) {
-        if (why != nullptr) *why = "conditions:" + ctrace;
-        return false;
+    if (mode != 2) {
+        std::string ctrace;
+        if (!eval_move_conditions(m.conditions, ctx, &ctrace)) {
+            if (why != nullptr) *why = "conditions:" + ctrace;
+            return false;
+        }
     }
 
     // JS `de.V1` (L601-602), the `$Q` SIBLING filter (the ONE confirmed AI
@@ -832,7 +834,7 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
     // re-evaluates the sibling's conditions. Applying `V1`'s stricter
     // (condition-dependent) version here wrongly dropped candidates the JS
     // keeps, so the roulette set differed.
-    if (mirror_filter) {
+    if (mode == 0 && mirror_filter) {
     for (const std::string& sib : m.mirror_exclusive) {
         auto it = moves_->find(sib);
         if (it == moves_->end()) continue;
@@ -862,10 +864,12 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
         }
     }
     }
-    std::string ttrace;
-    if (!eval_move_conditions(m.tactics, ctx, &ttrace)) {
-        if (why != nullptr) *why = "tactics:" + ttrace;
-        return false;
+    if (mode != 1) {
+        std::string ttrace;
+        if (!eval_move_conditions(m.tactics, ctx, &ttrace)) {
+            if (why != nullptr) *why = "tactics:" + ttrace;
+            return false;
+        }
     }
     return true;
 }
@@ -900,7 +904,9 @@ std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
             out.push_back(&m);
         }
     }
-    if (out.empty() && anim == "ShortAttack") {
+    static const bool keep_short_attack_fb =
+        std::getenv("SF2_SHORTATTACK_FB") != nullptr;
+    if (keep_short_attack_fb && out.empty() && anim == "ShortAttack") {
         for (const auto& kv : moves) {
             const MoveDef& m = kv.second;
             if (m.template_tags.count("Weapon") > 0) out.push_back(&m);
@@ -1881,6 +1887,25 @@ int AiController::ka(const AiFightState& st) {
 // fighter is not playing.
 std::string AiController::gc_frame(const AiFightState& st) {
     if (moves_ == nullptr || st.my_moves == nullptr) return "";
+    // JS `dsb` -> `hJa(false)` -> `Vgb` -> `Gc.Ih(2, model, true)`: the watch
+    // injected a synthetic `<KeyPressed/>`; `Gc.DK` sees `eb=true` candidates
+    // and routes them through `Pkb` (the roulette) in THIS pass.
+    static const bool no_keypress = std::getenv("SF2_NO_KEYPRESS") != nullptr;
+    // JS `Gc.Gnb` (L28336) dispatches every queued event into ONE per-model
+    // bucket and `dxa` (L28597) calls `DK` ONCE. `DK` collects the `eb=true`
+    // candidates into `d`; when that list is non-empty it hands it to `Pkb`
+    // and NEVER starts the `Aua` winner separately (the winner only becomes a
+    // duplicate inside `d`). So a KeyPressed pass owns the pick: the type-10
+    // bucket must not overwrite it.
+    bool keypress_owned = false;
+    if (key_press_next_ && !no_keypress) {
+        key_press_next_ = false;
+        const std::string p = update_random(st, /*from_key_press=*/true);
+        if (!p.empty()) {
+            gc_stored_ = p;
+            keypress_owned = true;
+        }
+    }
     std::vector<const MoveDef*> best;
     // JS `Gc.Rwa`/`EZa` (L28510/L28531): the candidate buckets are built from
     // the events in `Tu`, i.e. `Su.dea(type)` = the animations whose
@@ -1906,31 +1931,63 @@ std::string AiController::gc_frame(const AiFightState& st) {
             default: return 0;   // Style/Combo/Area* -> not a Gc event
         }
     };
-    std::set<int> fired;
-    for (const int slot : st.my_event_types) {
-        const int t = gc_type(slot);
-        if (t != 0) fired.insert(t);
+    std::vector<std::pair<int, std::string>> fired;
+    for (const auto& ev : st.my_event_types) {
+        const int t = gc_type(ev.slot);
+        if (t != 0) fired.emplace_back(t, ev.name);
     }
-    if (fired.empty()) return "";
+    // JS `EZa`'s `Qm`/`Im`/`Om` compares: a candidate matches a fired event by
+    // TYPE and, for the interval/animation events, by NAME. `Om.compare`
+    // (type 13) compares the ENDED interval name with the move's
+    // `<IntervalEnd>`; `Im.compare` (type 10) compares the ended clip's
+    // animation names with the move's `<AnimationEnd>`.
+    // JS `Gc.OGa(a.model, b, g.Ob)` (L28730) admits a condition node only for
+    // types 5, 1, 2, 3, 4 and 6 (the model-relation check). Every other type -
+    // 9 AnimationStart, 10 AnimationEnd, 11 Interrupted, 12/13 Interval*,
+    // 14 EveryFrame - returns FALSE, so `EZa` never produces a candidate for
+    // them: the `Gc` pump starts nothing on a clip end (the fighter simply
+    // returns to its stance idle through `Nnb`).
+    auto gc_type_admitted = [](int t) -> bool {
+        return t == 1 || t == 2 || t == 3 || t == 4 || t == 5 || t == 6;
+    };
+    auto event_matches = [this, &fired, &gc_type_admitted](const MoveDef& m) -> bool {
+        for (const std::string& ev : m.events) {
+            const int t = js_event_type(ev);
+            if (!gc_type_admitted(t)) continue;
+            for (const auto& fe : fired) {
+                if (fe.first != t) continue;
+                if (t == 13 && !m.interval_end_matches(fe.second, 0)) continue;
+                if (t == 10) {
+                    std::vector<std::string> ended;
+                    if (moves_ != nullptr) {
+                        const auto it = moves_->find(fe.second);
+                        if (it != moves_->end()) ended = it->second.anim_names;
+                    }
+                    if (ended.empty()) ended.push_back(fe.second);
+                    if (!m.anim_end_matches(ended)) continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    };
+    if (fired.empty()) return gc_stored_;
     // [probe] SF2_TRACE_GC=1: the fired types + what the buckets keep.
     static const bool trace_gc = std::getenv("SF2_TRACE_GC") != nullptr;
     if (trace_gc) {
         int kp = 0, pass = 0;
         std::string names, types;
-        for (const int t : fired) {
-            types += std::to_string(t);
+        for (const auto& fe : fired) {
+            types += std::to_string(fe.first);
+            if (!fe.second.empty()) {
+                types += ':';
+                types += fe.second;
+            }
             types += ' ';
         }
         for (const MoveDef* m : *st.my_moves) {
             if (m == nullptr) continue;
-            bool ev_match = false;
-            for (const std::string& ev : m->events) {
-                if (fired.count(js_event_type(ev)) != 0) {
-                    ev_match = true;
-                    break;
-                }
-            }
-            if (!ev_match) continue;
+            if (!event_matches(*m)) continue;
             ++kp;
             if (m->no_animation) continue;
             if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
@@ -1941,14 +1998,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
         std::string why_all;
         for (const MoveDef* m : *st.my_moves) {
             if (m == nullptr) continue;
-            bool ev_match = false;
-            for (const std::string& ev : m->events) {
-                if (fired.count(js_event_type(ev)) != 0) {
-                    ev_match = true;
-                    break;
-                }
-            }
-            if (!ev_match) continue;
+            if (!event_matches(*m)) continue;
             std::string why;
             if (m->no_animation) {
                 why = "no_animation";
@@ -1981,14 +2031,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
     }
     for (const MoveDef* m : *st.my_moves) {
         if (m == nullptr) continue;
-        bool ev_match = false;
-        for (const std::string& ev : m->events) {
-            if (fired.count(js_event_type(ev)) != 0) {
-                ev_match = true;
-                break;
-            }
-        }
-        if (!ev_match) continue;
+        if (!event_matches(*m)) continue;
         if (m->no_animation) continue;  // `Rha` -> the unused `g` group
         // The StartStance family is gated by `<RoundStage Value="StartStance">`
         // in the move's MAIN conditions, which `de.V1` does not evaluate (it
@@ -2008,11 +2051,14 @@ std::string AiController::gc_frame(const AiFightState& st) {
         // legitimate pump pick: that IS the JS's `fk=10` block behaviour).
         // The getup / loss / win / stance animations are excluded: they are
         // the HIT-reaction and `try_every_frame_move` recovery chains.
+        if (st.full_conditions && !st.full_conditions(*m)) continue;
+        // `EZa` admits no type-10/13 candidates (`Gc.OGa` L28730), so the
+        // idle family can never be a pump pick: only MOVE/ATTACK and the
+        // block family (which carries no `Type` attr) are candidates.
         if (m->type != "ATTACK" && m->type != "MOVE" &&
             m->name.find("Block") == std::string::npos) {
             continue;
         }
-        if (st.full_conditions && !st.full_conditions(*m)) continue;
         if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
         if (best.empty() || m->priority > best.front()->priority) {
             best.clear();
@@ -2021,7 +2067,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
             best.push_back(m);
         }
     }
-    if (!best.empty()) {
+    if (!best.empty() && !keypress_owned) {
         float r = math_roll();
         if (r < 0.0f) r = 0.0f;
         if (r >= 1.0f) r = 0.9999999f;
@@ -2029,13 +2075,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
         if (idx >= best.size()) idx = best.size() - 1;
         gc_stored_ = best[idx]->name;
     }
-    // `Bnb`: start the stored animation only when nothing is playing.
-    if (!gc_stored_.empty() && !st.playing) {
-        std::string out = gc_stored_;
-        gc_stored_.clear();
-        return out;
-    }
-    return "";
+    return gc_stored_;
 }
 
 // [experiment] JS `Ykb` -> `Okb` -> `Gc` (L20643 / L20887 / L28330): the move
@@ -2857,6 +2897,7 @@ std::string AiController::update(const AiFightState& st) {
         // port returned here before the tail, so a watch left XW latched.
         XW_ = false;
         eh_ = std::numeric_limits<int>::min();
+        key_press_next_ = true;
         dbg_.fk = fk_;
         return "";
     }
@@ -2920,18 +2961,22 @@ std::string AiController::keys_signature(const MoveDef& m) {
 // `de.V1`, already inside `v1`), the `Md.jL` `<AnimationWeights>` roulette,
 // then the tail's `jJ/ccb` mirror grouping and `DK(a,d,!0)` max-`priority`
 // uniform pick (`uf.sja` = `Math.random`).
-std::string AiController::update_random(const AiFightState& st) {
-    // The `hJa` countdown (`tG`/`wN`).
-    if (tG_ > 0) {
-        --tG_;
-        return "";
+std::string AiController::update_random(const AiFightState& st,
+                                        bool from_key_press) {
+    // The `hJa` countdown (`tG`/`wN`) belongs to the DECISION path; the
+    // synthetic `KeyPressed` (`Gc.Ih(2,...)`) reuses the pipeline without it.
+    if (!from_key_press) {
+        if (tG_ > 0) {
+            --tG_;
+            return "";
+        }
+        if (tG_ == 0) {
+            wN_ = true;
+            tG_ = -1;
+        }
+        if (!wN_) return "";
+        wN_ = false;
     }
-    if (tG_ == 0) {
-        wN_ = true;
-        tG_ = -1;
-    }
-    if (!wN_) return "";
-    wN_ = false;
 
     // `de.jL` (L598) refreshes `iN` via `mQ` before the `Md.jL` roulette; the
     // feature snapshot already ran at the top of `update()` (draw-free).
@@ -2951,8 +2996,8 @@ std::string AiController::update_random(const AiFightState& st) {
             // `M7.Wcb` (the `keep` pass below) is.
             // Tabular (`eb=false`) applies the `$Q`/`M7.Wcb` gate; the
             // Random (`Vkb`, `eb=true`) path does not.
-            if (!v1(*m, st, nullptr, /*mirror_filter=*/tactic_ != nullptr &&
-                                               tactic_->type == 2)) continue;
+            if (!v1(*m, st, nullptr, /*mirror_filter=*/false,
+                    /*mode=*/1)) continue;
             cands.push_back(m);
         }
     }
@@ -3019,6 +3064,28 @@ std::string AiController::update_random(const AiFightState& st) {
         std::fflush(stdout);
     }
 
+    return pkb_from(st, std::move(cands), from_key_press);
+}
+
+std::string AiController::pkb_from(const AiFightState& st,
+                                   std::vector<const MoveDef*> cands,
+                                   bool from_key_press) {
+    // [isolation] `SF2_NO_PKB=1`: skip the `Pkb`/`jL` roulette entirely and
+    // start the `Aua` uniform pick (the last element `update_random` pushed).
+    static const bool no_pkb = std::getenv("SF2_NO_PKB") != nullptr;
+    if (std::getenv("SF2_TRACE_PKB") != nullptr) {
+        std::fprintf(stdout, "[pkb] f=%d n=%zu:", st.fight_frame, cands.size());
+        for (const MoveDef* m : cands) std::fprintf(stdout, " %s", m->name.c_str());
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
+    if (no_pkb) {
+        (void)st;
+        (void)from_key_press;
+        return cands.empty() ? std::string() : cands.back()->name;
+    }
+    static const bool trace_random =
+        std::getenv("SF2_TRACE_RANDOM") != nullptr;
     // JS `Gc.DK` (L28394-28426) — the list handed to `Pkb`: `d` collects the
     // non-`Rha` candidates (`!(c || !h.eb || h.animation.Rha)`, `c=false`);
     // `f` is the `Aua` (L28384) max-`priority` group of the non-`Rha`
@@ -3077,6 +3144,27 @@ std::string AiController::update_random(const AiFightState& st) {
         return "";
     }
 
+    // `Pkb` (L28466-28490): drop the candidates whose `<Tactics>` list
+    // (`va.Ts`, non-empty only) rejects them. `EZa` did NOT test tactics - it
+    // only tested `<Conditions>`; the tactics gate lives here, AFTER the
+    // `M7.Wcb` mirror pass, so the `Aua` duplicate above came from the
+    // conditions-only bucket.
+    {
+        std::vector<const MoveDef*> tact;
+        tact.reserve(keep.size());
+        for (const MoveDef* m : keep) {
+            if (!v1(*m, st, nullptr, /*mirror_filter=*/false, /*mode=*/2)) {
+                continue;
+            }
+            tact.push_back(m);
+        }
+        keep.swap(tact);
+        if (keep.empty()) {
+            fk_ = -1;
+            return "";
+        }
+    }
+
     // `Md.jL` (L639-640): the weighted roulette over the surviving candidates
     // (`iCa` matches the `<AnimationWeights>` name, falling through to the
     // unnamed `<Animation Base=..>` default). Draws the `Da.pg` stream.
@@ -3111,6 +3199,17 @@ std::string AiController::update_random(const AiFightState& st) {
     for (const MoveDef* m : keep) {
         const std::string s = keys_signature(*m);
         if (sig.empty() || s.empty() || s == sig) d.push_back(m);
+    }
+    if (std::getenv("SF2_TRACE_PKBT") != nullptr) {
+        std::fprintf(stdout, "[pkbt] f=%d pick=%s sig=[%s] d=%zu:",
+                     st.fight_frame, chosen->name.c_str(), sig.c_str(),
+                     d.size());
+        for (const MoveDef* m : d) {
+            std::fprintf(stdout, " %s(p=%d,s=[%s])", m->name.c_str(),
+                         m->priority, keys_signature(*m).c_str());
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
     }
     std::vector<const MoveDef*> f;
     for (const MoveDef* m : d) {

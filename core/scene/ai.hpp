@@ -413,7 +413,11 @@ struct AiFightState {
     // from exactly these (`Gc.Rwa`/`EZa`), so an event that did not fire
     // contributes no candidates - the old port used the static
     // `<KeyPressed/>` move set instead, which re-picked a move every frame.
-    std::vector<int> my_event_types;
+    struct AiEvent {
+        int slot = 0;
+        std::string name;  // `data.name` (ended interval / animation)
+    };
+    std::vector<AiEvent> my_event_types;
     // JS `EZa`'s `f.Yz(b, null, g)`: the Gc pump evaluates the animation's
     // WHOLE `<Conditions>` tree (not just the tactics list `de.V1` reads), so
     // a start-stance / getup / loss animation is never a pump candidate
@@ -639,6 +643,8 @@ public:
     // (`Ml.animation`); the caller starts it only when the fighter is idle
     // (`Bnb` gates on `!Pe`). Returns "" when nothing is stored/ready.
     std::string gc_frame(const AiFightState& st);
+    const std::string& gc_stored() const { return gc_stored_; }
+    void gc_clear() { gc_stored_.clear(); }
     // JS `wd.ctb(!0)` (L20376-20380, reached from `swb`->`Eaa(!0)` L16637):
     // `if (this.sN = a) { this.Kl.reset(); this.Mka(0); }` — arming the `hJa`
     // countdown (`tG`) at the ROUND boundary (`Z2` L21617 first sets `tG=-1`).
@@ -971,8 +977,13 @@ private:
     // selects the `$Q` sibling gate (L25314-25324): the Tabular path
     // (`ABa` -> `V1`) applies it, the Random path (`Gc.EZa` + `Gc.Pkb`'s
     // `M7.Wcb`) does NOT (see `update_random`).
+    // `mode`: 0 = the whole `de.V1` (own move + `<Conditions>` + `$Q` +
+    // `<Tactics>`), 1 = the `Gc.EZa` bucket test (own move + `<Conditions>`
+    // ONLY - L28550 `f.Yz`), 2 = the `Gc.Pkb` tactics test (L28471
+    // `f.animation.nw(.., va.Ts, ..)`).
     bool v1(const MoveDef& m, const AiFightState& st,
-            std::string* why = nullptr, bool mirror_filter = true) const;
+            std::string* why = nullptr, bool mirror_filter = true,
+            int mode = 0) const;
     // The `fCa` body-part cautious check (JS `fCa` L599-600).
     bool fca(const AiFightState& st, int variant) const;
     // Rebuilds the QJa roll cache (JS `QJa` L594-595): five `Da.jf()`
@@ -1010,7 +1021,15 @@ private:
     // move name, or "" for no decision. `hJa`'s `tG`/`wN` countdown is
     // modelled here (`tG_`/`wN_`), reset when the fighter starts a move or
     // goes idle (`wd.x3` -> `Mka(0)`).
-    std::string update_random(const AiFightState& st);
+    std::string update_random(const AiFightState& st,
+                              bool from_key_press = false);
+    std::string pkb_from(const AiFightState& st,
+                         std::vector<const MoveDef*> cands,
+                         bool from_key_press);
+    // JS `dsb` (L600) -> `hJa(false)` -> `Vgb` -> `Gc.Ih(2, model, true)`:
+    // the watch injects a synthetic `<KeyPressed/>` that the NEXT `Gc.DK`
+    // pass sees as an `eb=true` bucket (the `Pkb` roulette).
+    bool key_press_next_ = false;
     // JS `jc.jJ` (L697) + `vm.ccb` (L749): the first `<Keys>` condition's
     // key-combo signature (`vm.xn`) of a move's condition tree, used by
     // `Pkb`'s tail to group the mirror/direction variants of the roulette

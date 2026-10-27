@@ -29,4 +29,8 @@ float shared_math_random01();
 constexpr std::uint32_t kFightMathRandomSeed = 0xC0FFEEu;
 void reseed_shared_math_random(std::uint32_t seed);
 
+// [probe] `SF2_TRACE_MR`: the frame the next draw belongs to, so the port's
+// `[mr]` lines can be lined up 1:1 with the oracle's per-frame log.
+void set_math_random_trace_frame(int frame);
+
 }  // namespace sf2::scene

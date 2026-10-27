@@ -1724,3 +1724,69 @@ tournament 0, survival 863, challenge 0, kick-ko PASS). Файл
 
 Состояние: всё откачено, база зелёная (`--fast` 0/0/0/0, kick-ko PASS,
 boss-lynx 0, tournament 0, survival 863, challenge 0).
+
+### ИИ: цепочка пумпа доведена — survival 863 -> 111, boss/tournament/challenge 0, kick-ko PASS (27.10)
+
+Полная цепочка теперь структурно верна и зелёная по всем пяти сценариям.
+Найдено четыре расхождения с JS, каждое подтверждено цитатой и замером.
+
+1. **Порядок кадра: `Gc.ia` идёт ДО `wd.ia`.** `Gc.ia` (L28299) = `Bx` + `Gnb`,
+   а `Gnb` (L28336) строит бакеты по `Tu` на СВОЁМ старте, затем раздаёт
+   события (`c.model.da.CZa(c.type)`) и только потом `dxa` вызывает `DK`.
+   Значит ИИ видит события ПРЕДЫДУЩЕГО кадра. Порт отдавал их в том же кадре,
+   из-за чего на конце клипа (`AnimationEnd`) срабатывал лишний пик.
+   Реализация: `FightController::ai_events_prev_` — снимок `bus_.frame_events`
+   в конце кадра, выдача в `AiFightState::my_event_types` на следующем.
+
+2. **`Gc.EZa` (L28550) фильтрует бакет ТОЛЬКО по `<Conditions>`**, а тактику
+   (`va.Ts`) применяет позже — в `Gc.Pkb` (L28471-28483). Порт делал наоборот:
+   `v1` (условия + тактика) на этапе бакета. Замер: бакет KeyPressed был 23
+   вместо 30 (оракул `random_pre.n=31` = 30 + дубль `Aua`). Реализация:
+   `v1(..., mode)`: 0 = полный `de.V1`, 1 = только `<Conditions>` (бакет
+   `EZa`), 2 = только `<Tactics>` (проход `Pkb`).
+
+3. **`Gnb`/`dxa` вызывают `DK` ОДИН раз по объединённому бакету.** Если список
+   `eb=true` (KeyPressed) непуст, `DK` отдаёт его в `Pkb`, а победитель `Aua`
+   попадает туда лишь ДУБЛЕМ (`d.push(e)`) — отдельного старта нет. Порт
+   сначала делал пик KeyPressed, а потом бакет type-10 перезаписывал
+   `gc_stored_` (замер: `pkb_from` вернул `StepBack`, стартовал
+   `TwoFootJumpKick`). Реализация: `keypress_owned` блокирует бакетный пик.
+
+4. **`Gc.OGa` (L28730) отсекает типы 9/10/11/12/13/14.** Он пускает только
+   `c == 5`, `1`, `2`, `3`, `4`, `6` (проверка отношения моделей), для
+   остальных возвращает `false`. Значит `EZa` НИКОГДА не даёт кандидатов на
+   `AnimationEnd`/`AnimationStart`/`IntervalEnd`/`EveryFrame`: пумп на конце
+   клипа ничего не стартует, боец просто уходит в стойку через `Nnb`. Порт
+   изобретал бакет type-10 (25 кандидатов) и стартовал оттуда удары
+   (`DoubleSweep`, `TwoFootJumpKick`). Прежняя гипотеза «`StanceIdle`
+   (priority 0) обязан быть первым кандидатом бакета type 10» — ОШИБОЧНА,
+   такого бакета в JS нет. Реализация: `gc_type_admitted(t)` в
+   `event_matches`.
+
+Замеры по шагам (5 гейтов после каждого):
+- до правок: survival 301, challenge 213, boss 182, tournament 167, kick-ko FAIL;
+- + порядок событий: survival 301 -> первое расхождение nat 327;
+- + `EZa`/`Pkb` split: бакет KeyPressed 23 -> 30 = оракул;
+- + `keypress_owned`: survival 301;
+- + `OGa`: **survival 111, challenge 0, boss-lynx 0, tournament 0, kick-ko PASS**.
+
+Изоляция флагами (env, все выключены по умолчанию):
+`SF2_NO_KEYPRESS` (watch не ставит синтетический KeyPressed; survival 1678 —
+без него нельзя), `SF2_NO_PKB` (пропустить рулетку `Pkb`),
+`SF2_SHORTATTACK_FB` (вернуть фолбэк `ShortAttack`),
+`SF2_NO_GC_START` (пики считаются, но не стартуют),
+`SF2_NO_GC_IDLE` (мёртв после п.4), `SF2_NO_GC_PUMP` (выключить пумп целиком;
+с ним всё зелёное, survival 766 — пумп и был виновником поломок боссов/турнира/
+KO).
+
+Инструменты:
+- `harness/ai_diff.py` — пофреймовое сличение решений ИИ: порт (`[gc]`,
+  `[pkb]`, `[random]`, `[head]`, `[dbg]`) против `[ORACLE]`-JSON оракула
+  (`ai_branch`, `ai_eh`, `chosen_move`, `random_pre.n`, `random.n/chosen`).
+  Автоматически выводит offset по первому кадру фазы 2.
+- `harness/mr_diff.py` — счётчик `Math.random` по кадрам (патч JS в памяти,
+  восстановление гарантировано) против `SF2_TRACE_MR`; в порте `[mr]` теперь
+  печатает кадр (`set_math_random_trace_frame`).
+
+Роли: `compare_state.py` инвертирует стороны — `native Me <-> oracle Enemy`,
+т.е. ИИ-сторона оракула это `Me` (в `[ORACLE]` так и помечено `"ai_side":"Me"`).

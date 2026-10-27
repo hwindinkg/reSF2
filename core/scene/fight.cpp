@@ -1746,6 +1746,11 @@ MathRandomState& math_random_state() {
     static MathRandomState s;
     return s;
 }
+
+int& math_random_trace_frame() {
+    static int f = -1;
+    return f;
+}
 }  // namespace
 
 void reseed_shared_math_random(std::uint32_t seed) {
@@ -1755,6 +1760,10 @@ void reseed_shared_math_random(std::uint32_t seed) {
     math_random_state().n = 0;
     static const bool trace_mr = std::getenv("SF2_TRACE_MR") != nullptr;
     if (trace_mr) std::fprintf(stderr, "[mr-reseed] seed=0x%x\n", seed);
+}
+
+void set_math_random_trace_frame(int frame) {
+    math_random_trace_frame() = frame;
 }
 
 float shared_math_random01() {
@@ -1771,7 +1780,8 @@ float shared_math_random01() {
     static const bool trace_mr = std::getenv("SF2_TRACE_MR") != nullptr;
     if (trace_mr) {
         ++n;
-        std::fprintf(stderr, "[mr] n=%llu v=%.9f\n",
+        std::fprintf(stderr, "[mr] f=%d n=%llu v=%.9f\n",
+                     math_random_trace_frame(),
                      static_cast<unsigned long long>(n),
                      static_cast<double>(v));
     }
@@ -3390,6 +3400,7 @@ void FightController::enter_start_stance() {
     // round-intro draw sequence and left the boss-lynx roulette on the wrong
     // `Da.pg` position.
     rules_begin_round(round_.number);
+    if (after_round_seed_) after_round_seed_(round_.number);
     // JS `swb` (L16634-16638): `IKa(); FNa(); Eaa(!0); v.FU()` — the round
     // boundary runs each fighter's `ctb(!0)` (L20376) which does
     // `if (this.sN = a) { this.Kl.reset(); this.Mka(0); }`, arming the
@@ -7057,6 +7068,44 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
             std::fflush(stdout);
         }
     }
+    // JS `wd.ia` HEAD: `Bnb` starts the pick stored by the previous frame's
+    // `Gc.Gnb` pass (`Ml.animation`) before the clip advance.
+    static const bool no_gc_start =
+        std::getenv("SF2_NO_GC_START") != nullptr;
+    if (me.ai != nullptr && !no_gc_start && !me.fighter.ragdoll_active()) {
+        const std::string g = me.ai->gc_stored();
+        if (!g.empty()) {
+            const auto git = moves_->find(g);
+            if (git != moves_->end()) {
+                sf2::scene::FightContext gctx;
+                gctx.roll01 = [this]() { return draw01(); };
+                gctx.stage = static_cast<sf2::scene::round_stage>(phase_);
+                gctx.anims_me = anim_names_of(me.fighter);
+                gctx.anims_enemy = anim_names_of(foe.fighter);
+                fill_ctx_geometry(gctx, me, foe);
+                gctx.health_ratio =
+                    me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
+                for (const std::string& n : me.fighter.active_intervals()) {
+                    gctx.intervals.push_back(
+                        {n, me.fighter.interval_type(n), true});
+                }
+                for (const std::string& n : foe.fighter.active_intervals()) {
+                    gctx.intervals_enemy.push_back(
+                        {n, foe.fighter.interval_type(n), true});
+                }
+                if (std::getenv("SF2_TRACE_HEAD") != nullptr) {
+                    std::fprintf(stdout, "[head] f=%d start stored '%s'\n",
+                                 frame_, g.c_str());
+                    std::fflush(stdout);
+                }
+                if (me.fighter.ai_start_move(git->second, gctx)) {
+                    ++me.moves_started;
+                    me.last_decision = "gc:" + g;
+                    me.ai->gc_clear();
+                }
+            }
+        }
+    }
     // Perk bus per-frame work (EveryFrame slot 2 + mod ia + 12/13 edges).
     tick_bus_side(&me == &player_ ? 0 : 1);
     // Perk DoTs/HoTs (JS `znb`/`Inb`, L1290/L1298): tick installed mods
@@ -8136,8 +8185,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.my_event_types.clear();
         {
             const int my_side = me.is_player ? 0 : 1;
-            for (const auto& ev : bus_.frame_events) {
-                if (ev.second == my_side) st.my_event_types.push_back(ev.first);
+            for (const auto& ev : ai_events_prev_) {
+                if (ev.side == my_side) {
+                    st.my_event_types.push_back({ev.slot, ev.name});
+                }
             }
         }
         const std::string decision = me.ai->update(st);
@@ -8201,34 +8252,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // started only when the fighter is idle (`Bnb` gates on `!Pe`).
         static const bool gc_pump_off = std::getenv("SF2_NO_GC_PUMP") != nullptr;
         if (me.ai != nullptr && !gc_pump_off) {
-            const std::string g = me.ai->gc_frame(st);
-            // JS `wd.Bnb` (L20947): `KCa()` = "a pick is stored"
-            // (`Ml.animation != null`), NOT "the fighter is idle"; `NS`
-            // (`ai_start_move`) does the gating. The pump now only stores a
-            // pick when a real model EVENT fired (`Gc.Tu` -> `Su.dea(type)`),
-            // so starting it unconditionally is the JS cadence.
-            // `NS` refuses while the model is inside a hit reaction
-            // (`st.my_reacting`): the reaction owns the clip until it ends.
-            // Without this the pump interrupted the reaction with a stance
-            // idle (`[gc] f=151 playing=0 ... FistsStartStanceIdle-Right`),
-            // the single challenge divergence.
-            if (!g.empty() && !st.my_reacting) {
-                const auto git = moves_->find(g);
-                if (git != moves_->end()) {
-                    sf2::scene::FightContext gctx;
-                    gctx.roll01 = [this]() { return draw01(); };
-                    gctx.stage = static_cast<sf2::scene::round_stage>(phase_);
-                    gctx.anims_me = anim_names_of(me.fighter);
-                    gctx.anims_enemy = anim_names_of(foe.fighter);
-                    fill_ctx_geometry(gctx, me, foe);
-                    gctx.health_ratio =
-                        me.max_hp > 0.0f ? me.hp / me.max_hp : 0.0f;
-                    if (me.fighter.ai_start_move(git->second, gctx)) {
-                        ++me.moves_started;
-                        me.last_decision = "gc:" + g;
-                    }
-                }
-            }
+            (void)me.ai->gc_frame(st);
         }
         if (!decision.empty()) {
             const sf2::scene::MoveDef* chosen = nullptr;
@@ -8644,6 +8668,7 @@ void FightController::banner_expire() {
 
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
 void FightController::update(float dt) {
+    sf2::scene::set_math_random_trace_frame(static_cast<int>(frame_));
     // The fight frame counter (JS `ca.frame`): counts the LIVE phases only.
     // The idle lead-in (the ROUND plate, before phase 1) keeps it at 0 so
     // `frame_ == 0` coincides with phase 1 (`enter_start_stance` resets it).
@@ -9232,6 +9257,9 @@ void FightController::update(float dt) {
         l.p_hp = player_.hp;
         l.e_hp = enemy_.hp;
     }
+
+    // The events raised this frame are dispatched by `Gc.ia` on the NEXT one.
+    ai_events_prev_ = bus_.frame_events;
 
     // [trace] The per-frame pose dump (a no-op unless --dump-pose armed it).
     dump_pose_frame();

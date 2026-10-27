@@ -1755,6 +1755,12 @@ public:
     // which reseeds to the same value at the round start).
     void mode_reseed_stream(int seed) { reseed_stream(seed); }
 
+    // JS `v.EQ(a.Xs)` (the VS-intro roster resolution, L50341) runs AFTER the
+    // round start's `du.qob` reseed: its draws are 0..40 of the round stream.
+    void set_after_round_seed(std::function<void(int)> fn) {
+        after_round_seed_ = std::move(fn);
+    }
+
 // Perk setup for fight init (`ZOa`/`Pma` analog, §5.4/§5.7): the parsed
 // perk catalog (res/perks.xml) + per-side equipped item→perk bindings
 // (list.xml `<Perks>`/`<Enchantments>`). Empty refs = no live triggers
@@ -2338,6 +2344,14 @@ private:
     // AI and conditions - like the game's single global `Da.pg`. Seeded with
     // the boot `L.seed` (L102533) = the frozen clock (see `kBootSeed`).
     DaPrng prng_{kBootSeed};
+    // JS `Gc.ia` (L28299) runs BEFORE the fighters' `wd.ia` in the tick and
+    // builds its buckets from `Gc.Tu` (the events raised during the PREVIOUS
+    // frame). The port therefore hands the AI the previous frame's model
+    // events, not the current one: an `AnimationEnd` raised at frame N is
+    // dispatched at N+1, where the same pass also carries the watch's
+    // synthetic `KeyPressed` (and `Pkb` wins over the type-10 bucket).
+    std::vector<sf2::scene::TrigBus::FrameEvent> ai_events_prev_;
+    std::function<void(int)> after_round_seed_;
     // The shared fight draw (JS `Da.pg.jf()`, L2352): the external override
     // when installed, else the owned `prng_` (`Rk.s4(1)` == `Rk.jf`).
     float draw01();

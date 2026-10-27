@@ -12915,6 +12915,20 @@ bool FightScreen::resolve_mode_setup(int fight_index, int wave,
         (void)sf2::scene::resolve_survival_roster(
             f, wave, mode_templates_, mode_groups_, mode_draw, roster);
         (void)used;
+        if (fight_ != nullptr) {
+            const sf2::scene::StageFight* frow = &f;
+            fight_->set_after_round_seed(
+                [this, frow, wave](int round_no) {
+                    if (round_no > 1) return;
+                    std::vector<sf2::scene::ResolvedWarrior> vs_roster;
+                    auto vs_draw = [this]() {
+                        return static_cast<double>(fight_->fight_draw01());
+                    };
+                    (void)sf2::scene::resolve_survival_roster(
+                        *frow, wave, mode_templates_, mode_groups_, vs_draw,
+                        vs_roster);
+                });
+        }
     } else {
         resolved = sf2::scene::resolve_tournament_fight(
             mode_battle_, fight_index, mode_templates_, mode_groups_, mf);

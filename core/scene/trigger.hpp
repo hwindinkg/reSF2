@@ -841,9 +841,13 @@ class TrigBus {
         sides_[1].side = 1;
     }
 
-    // The (event type, fired side) pairs raised since the last clear - the
-    // JS `Gc.Tu` queue in its pre-dispatch form.
-    std::vector<std::pair<int, int>> frame_events;
+    // One queued model event (JS `Gc.Tu`'s `Lu`: type + `data.name`).
+    struct FrameEvent {
+        int slot = 0;
+        int side = 0;
+        std::string name;  // ended interval (type 13) / animation (type 10)
+    };
+    std::vector<FrameEvent> frame_events;
     void clear_frame_events() { frame_events.clear(); }
 
     const BusSide& side(int s) const { return sides_[s & 1]; }
@@ -860,7 +864,18 @@ class TrigBus {
         // event TYPE (`Su.dea(type)`). Record the (type, side) pairs raised
         // this frame so the AI can rebuild the same buckets; cleared by the
         // fight at the start of every frame.
-        frame_events.emplace_back(slot, fired_side);
+        {
+            FrameEvent fe;
+            fe.slot = slot;
+            fe.side = fired_side;
+            const auto iit = vars.str.find("Interval");
+            if (iit != vars.str.end()) fe.name = iit->second;
+            if (fe.name.empty()) {
+                const auto ait = vars.str.find("Animation");
+                if (ait != vars.str.end()) fe.name = ait->second;
+            }
+            frame_events.push_back(std::move(fe));
+        }
         const CondCtx* ctxs[2] = {&ctx0, &ctx1};
         for (int s = 0; s < 2; ++s) {
             BusSide& side = sides_[s];
