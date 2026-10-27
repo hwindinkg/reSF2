@@ -1357,6 +1357,26 @@ void App::poll_input() {
         }
     }
 
+    // [debug overlay] The digit keys were never polled (the fight set above has
+    // no 0..9), so pressing 1..4 in a real window did nothing. Poll them and
+    // route through `inject_key`, which gives the overlay first refusal and
+    // then falls through to the screen.
+    static const int kDigitKeys[] = {
+        GLFW_KEY_0, GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4,
+        GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9,
+    };
+    for (const int glfw_key : kDigitKeys) {
+        const bool now_down = glfwGetKey(renderer_->window(), glfw_key) == GLFW_PRESS;
+        const bool was_down = fight_keys_down_.count(glfw_key) != 0;
+        if (now_down && !was_down) {
+            fight_keys_down_.insert(glfw_key);
+            inject_key(glfw_key, true);
+        } else if (!now_down && was_down) {
+            fight_keys_down_.erase(glfw_key);
+            inject_key(glfw_key, false);
+        }
+    }
+
     // --- the real gamepad (JS `rf.Y3` @1242643 -> `hu` @234244) ------------
     // Poll the first gamepad, fold its face buttons + left-stick pseudo-buttons
     // (100..103, deadzone `rf.O6` = 0.5) into the held index set, merge the
@@ -1969,6 +1989,17 @@ void App::run_one_frame() {
                 std::fprintf(stdout, "[debug] click injected at %.1f,%.1f\n",
                              cx, cy);
                 std::fflush(stdout);
+            }
+        }
+    }
+    // [debug] SF2_KEY_PROBE="1234" presses those digits once at the click
+    // frame, through the real inject_key path (overlay first).
+    if (frame_count_ == click_frame) {
+        if (const char* kp = std::getenv("SF2_KEY_PROBE")) {
+            for (const char* q = kp; *q != '\0'; ++q) {
+                if (*q >= '0' && *q <= '9') {
+                    inject_key(GLFW_KEY_0 + (*q - '0'), true);
+                }
             }
         }
     }

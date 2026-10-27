@@ -3339,6 +3339,22 @@ void za_nav_rail_center(App& app, ScreenId id, float& cx, float& cy) {
 namespace {
 
 // Hit test for the vertical nav column; -1 when outside every button.
+// [HUD taps] The `za` chrome's energy widget and the green `+` are hit-tested
+// in the UPDATE pass, not while drawing: a render-pass handler ran once per
+// screen draw (the leaving screen draws too), so one tap pushed several Shop
+// screens and re-triggered the click SFX until the app stalled. The draw pass
+// only records the rects.
+struct ZaTapRect {
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    bool valid = false;
+    bool hit(double px, double py) const {
+        return valid && px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    }
+};
+ZaTapRect g_za_energy_rect;
+ZaTapRect g_za_addmoney_rect;
+bool g_za_tap_latch = false;  // one action per pointer press
+
 int za_nav_hit(App& app, double px, double py) {
     const ZaLayout lay = za_layout(app);
     const float cx = lay.nav_x + lay.nav_w * 0.5f;  // g.C(wc.Gv/2)
@@ -3506,6 +3522,37 @@ void za_update(App& app, Screen& self, ScreenId active, float dt) {
     // column's own touch blocker, which swallows EVERY column tap (the `МЕНЮ`
     // header + the five `Le` buttons) for the whole move/punchbag/double-sweep
     // lesson; `Cm` (`YA(!0)`) hides it. Distinct from the `Sb` overlay.
+    // [HUD taps] the energy widget (`xr`) fires the `EnergyBarPress` quest
+    // event (quest_extensions/energy.xml `EnergyBar` -> the refill dialog);
+    // the green `+` (`yr.Fg`, JS `M1a` L1995) opens the shop's RUBY/iap tab.
+    // Handled HERE (update pass, once per press) - see `ZaTapRect`.
+    if (!app.pointer().down) g_za_tap_latch = false;
+    if (app.pointer().pressed && !g_za_tap_latch) {
+        if (g_za_energy_rect.hit(app.pointer().x, app.pointer().y)) {
+            g_za_tap_latch = true;
+            QuestJournal j;
+            try {
+                j.player_level = app.save().load().level;
+            } catch (const std::exception&) {
+            }
+            app.quest_engine().fire(app, "EnergyBarPress", j);
+            std::fprintf(stdout, "[za] energy bar press -> EnergyBarPress\n");
+            std::fflush(stdout);
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
+            return;
+        }
+        if (g_za_addmoney_rect.hit(app.pointer().x, app.pointer().y)) {
+            g_za_tap_latch = true;
+            std::fprintf(stdout, "[za] AddMoney -> shop RUBY tab\n");
+            std::fflush(stdout);
+            sf2::audio::AudioEngine::instance().play("snd_click_1");
+            app.screens().push(std::make_unique<ShopScreen>(app.screens()));
+            if (auto* shop = dynamic_cast<ShopScreen*>(app.screens().top())) {
+                shop->open_at("RealMoneyItem", "");
+            }
+            return;
+        }
+    }
     if (app.quest_engine().nav_locked()) return;
     // `za.zq` disciple toggle (JS L1983, `Nfb` L1981): a child of `za`, so it
     // answers taps regardless of the nav collapse. Shown only on the Dojo
@@ -4026,6 +4073,8 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // `xr.Vd = zr` extends `Uf` and passes the SAME `y.$na` base
     // (`level_bar_empty_short`, L2003-2004), so the base matches the level bar.
     const float en_x0 = x;
+    g_za_energy_rect = ZaTapRect{en_x0, cy - lay.widget_h * 0.5f,
+                                 en_x0 + en_w, cy + lay.widget_h * 0.5f, true};
     if (std::getenv("SF2_HUD_RECTS") != nullptr) {
         std::fprintf(stdout,
                      "[hudrect] energy=(%.1f,%.1f,%.1f,%.1f) addmoney=(%.1f,%.1f,%.1f,%.1f)\n",
@@ -4062,27 +4111,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                               bar_w * en_frac, bar_h, 1.0f, /*fill=*/true, false,
                               /*top_left=*/true);
     }
-    // [HUD tap] the energy widget (icon + bar) is the JS `xr` button: a tap
-    // fires the `EnergyBarPress` quest event, whose `EnergyBar` group
-    // (quest_extensions/energy.xml: EnergyBarFullEnergy / SomeEnergy /
-    // ZeroEnergy) opens the refill dialog. The port never fired it, so the
-    // energy bar was dead.
-    {
-        const auto& pt = app.pointer();
-        if (pt.pressed) {
-            const float ey0 = cy - lay.widget_h * 0.5f;
-            const float ey1 = cy + lay.widget_h * 0.5f;
-            if (pt.x >= en_x0 && pt.x <= en_x0 + en_w && pt.y >= ey0 &&
-                pt.y <= ey1) {
-                QuestJournal j;
-                j.player_level = sv.level;
-                app.quest_engine().fire(app, "EnergyBarPress", j);
-                std::fprintf(stdout, "[za] energy bar press -> EnergyBarPress\n");
-                std::fflush(stdout);
-                sf2::audio::AudioEngine::instance().play("snd_click_1");
-            }
-        }
-    }
+    // The tap itself is handled in `za_update` (see `ZaTapRect`).
     x += en_w + lay.gap;
     // `yr` (money). `Ss`/`PA` DO call `Ga()` (L1990) -> centre anchor, so the
     // JS `Ss.C(Ss.za()/2)` etc. are CENTRE positions (left edge 0).
@@ -4098,26 +4127,9 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // oracle has iap). `layout`: centre at `gemTextRight + boxPad + btnW/2 +
     // yr_gap`, `D(a/2)` (= cy), height `a` (widget_h).
     try_draw_atlas_button(app, "AddMoney", x + am_left + am_w * 0.5f, cy, am_w, am_h, 1.0f);
-    // [HUD tap] the green `+` (`yr.Fg`, JS `M1a` L1995) opens the shop on the
-    // RUBY/iap tab (`kShopTabs` index 5, `RealMoneyItem`).
-    {
-        const auto& pt = app.pointer();
-        if (pt.pressed) {
-            const float ax0 = x + am_left;
-            const float ax1 = ax0 + am_w;
-            const float ay0 = cy - am_h * 0.5f;
-            const float ay1 = cy + am_h * 0.5f;
-            if (pt.x >= ax0 && pt.x <= ax1 && pt.y >= ay0 && pt.y <= ay1) {
-                std::fprintf(stdout, "[za] AddMoney -> shop RUBY tab\n");
-                std::fflush(stdout);
-                sf2::audio::AudioEngine::instance().play("snd_click_1");
-                app.screens().push(std::make_unique<ShopScreen>(app.screens()));
-                if (auto* shop = dynamic_cast<ShopScreen*>(app.screens().top())) {
-                    shop->open_at("RealMoneyItem", "");
-                }
-            }
-        }
-    }
+    g_za_addmoney_rect = ZaTapRect{x + am_left, cy - am_h * 0.5f,
+                                   x + am_left + am_w, cy + am_h * 0.5f, true};
+    // The tap itself is handled in `za_update` (see `ZaTapRect`).
     // `za.zq` disciple toggle (JS L1983 `xub`; frame swap `FU`; visibility
     // `v.FU` L1207 = active screen Dojo AND `g$a()`). Backed by the save
     // `Disciple`/`ShowDojoDisciple` session settings (`oub`/`Y0`/`g$a` L271).
