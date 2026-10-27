@@ -1992,6 +1992,41 @@ void App::run_one_frame() {
             }
         }
     }
+    // [debug] SF2_SHOT_SCREEN="id:path.png" captures the first frame the given
+    // screen is up (robust against the uncapped present rate).
+    if (const char* ss = std::getenv("SF2_SHOT_SCREEN")) {
+        static bool done = false;
+        static int seen_at = -1;
+        int sid = -1;
+        char spath[512] = {0};
+        if (!done && std::sscanf(ss, "%d:%511s", &sid, spath) == 2 &&
+            screens_ != nullptr &&
+            static_cast<int>(screens_->current_id()) == sid) {
+            if (seen_at < 0) seen_at = frame_count_;
+            static const int delay = []() {
+                const char* d = std::getenv("SF2_SHOT_DELAY");
+                return d != nullptr ? std::atoi(d) : 40;
+            }();
+            if (frame_count_ >= seen_at + delay) {  // let it render first
+                done = true;
+                capture_png(spath);
+                std::fprintf(stdout, "[debug] shot %s (screen %d, frame %d)\n",
+                             spath, sid, frame_count_);
+                std::fflush(stdout);
+            }
+        }
+    }
+    // [debug] SF2_SHOT_AT="frame:path.png" captures one frame (the probe hook
+    // for UI screenshots at a known beat).
+    if (const char* sa = std::getenv("SF2_SHOT_AT")) {
+        int sf = -1;
+        char spath[512] = {0};
+        if (std::sscanf(sa, "%d:%511s", &sf, spath) == 2 && sf == frame_count_) {
+            capture_png(spath);
+            std::fprintf(stdout, "[debug] shot %s at frame %d\n", spath, sf);
+            std::fflush(stdout);
+        }
+    }
     // [debug] SF2_KEY_PROBE="1234" presses those digits once at the click
     // frame, through the real inject_key path (overlay first).
     if (frame_count_ == click_frame) {

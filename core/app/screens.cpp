@@ -8547,16 +8547,50 @@ void draw_dojo_gamepad(App& app, const PadInputState& pad_in,
     //     punch + kick buttons.
     // The `ig` overlay alpha is the SAME `db.aa` pulse as the menu highlight,
     // so it reads `ui_flash_alpha` (fixed 60 Hz).
+    if (std::getenv("SF2_TRACE_PAD") != nullptr) {
+        float jw = 0.0f, jh = 0.0f, hw = 0.0f, hh = 0.0f, kw = 0.0f, kh = 0.0f;
+        atlas_source_size(app, "JoystickContainer_norm", 0.0f, 0.0f, &jw, &jh);
+        atlas_source_size(app, "Highlight_Stick", 0.0f, 0.0f, &hw, &hh);
+        atlas_source_size(app, "Joystick_norm", 0.0f, 0.0f, &kw, &kh);
+        std::fprintf(stdout,
+                     "[pad] joy_r=%.1f knob_r=%.1f base_size=%.1f knob_size=%.1f "
+                     "container_src=%.1fx%.1f knob_src=%.1fx%.1f "
+                     "highlight_src=%.1fx%.1f beat=%d\n",
+                     static_cast<double>(pad.joy_r),
+                     static_cast<double>(pad.knob_r),
+                     static_cast<double>(base_size),
+                     static_cast<double>(knob_size),
+                     static_cast<double>(jw), static_cast<double>(jh),
+                     static_cast<double>(kw), static_cast<double>(kh),
+                     static_cast<double>(hw), static_cast<double>(hh),
+                     app.quest_engine().tutorial_gate_beat());
+        std::fflush(stdout);
+    }
     const int tut_beat = app.quest_engine().tutorial_gate_beat();
+    // JS `ze` (L235753) adds the hint `Pl = R.$(E.get(268), "Highlight_Stick")`
+    // as a CHILD of the joystick node at the sprite's NATURAL `fa` size, so the
+    // flashing ring is `730/466 = 1.57x` the container art. The port drew it
+    // at the container's drawn size, which is why the hint read SMALLER than
+    // the joystick it points at. Same rule for the `Kick_Highlight` overlays
+    // (`Wm` also adds at `fa`). The ratios come from the atlas, never literals.
+    auto hint_scale = [&app](const char* hint, const char* art, float fallback) {
+        float aw = 0.0f, ah = 0.0f, hw = 0.0f, hh = 0.0f;
+        atlas_source_size(app, art, 0.0f, 0.0f, &aw, &ah);
+        atlas_source_size(app, hint, 0.0f, 0.0f, &hw, &hh);
+        if (aw <= 0.0f || hw <= 0.0f) return fallback;
+        return hw / aw;
+    };
     if (tut_beat == 1) {
+        const float k = hint_scale("Highlight_Stick", "JoystickContainer_norm", 1.0f);
         try_draw_atlas_button(app, "Highlight_Stick", pad.joy_cx, pad.joy_cy,
-                              base_size, base_size, ui_flash_alpha(app));
+                              base_size * k, base_size * k, ui_flash_alpha(app));
     } else if (tut_beat == 2) {
         const float fa = ui_flash_alpha(app);
+        const float k = hint_scale("Kick_Highlight", "btn_punch_normal", 1.0f);
         try_draw_atlas_button(app, "Kick_Highlight", pad.punch_cx, pad.punch_cy,
-                              btn_size, btn_size, fa);
+                              btn_size * k, btn_size * k, fa);
         try_draw_atlas_button(app, "Kick_Highlight", pad.kick_cx, pad.kick_cy,
-                              btn_size, btn_size, fa);
+                              btn_size * k, btn_size * k, fa);
     }
 }
 
