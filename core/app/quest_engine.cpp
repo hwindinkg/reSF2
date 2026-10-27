@@ -774,9 +774,6 @@ bool QuestEngine::ensure_loaded(App& app) {
         try {
             const WarriorSave w = app.save().load();
             load_ctx_.story_step = w.story_step();
-            std::fprintf(stdout, "[quest] load step='%s' tutorial_attr='%s'\n",
-                         load_ctx_.story_step.c_str(), w.tutorial.c_str());
-            std::fflush(stdout);
             load_ctx_.level = w.level;
             load_ctx_.save = w;
             load_ctx_.save_loaded = true;
