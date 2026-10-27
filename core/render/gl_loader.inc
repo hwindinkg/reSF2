@@ -13,6 +13,7 @@
 
 // --- 1.0 / 1.1 core state + drawing ---------------------------------------
 SF2_GL_FUNC(void, glEnable, (unsigned int cap))
+SF2_GL_FUNC(const unsigned char*, glGetString, (unsigned int name))
 SF2_GL_FUNC(void, glDisable, (unsigned int cap))
 SF2_GL_FUNC(void, glClearColor, (float r, float g, float b, float a))
 SF2_GL_FUNC(void, glClear, (unsigned int mask))
@@ -70,6 +71,16 @@ SF2_GL_FUNC(void, glTexImage2D, (unsigned int target, int level, int internalfor
 SF2_GL_FUNC(void, glTexParameteri, (unsigned int target, unsigned int pname, int param))
 SF2_GL_FUNC(void, glGenerateMipmap, (unsigned int target))
 SF2_GL_FUNC(void, glActiveTexture, (unsigned int texture))
+
+// --- timer queries ([4] performance panel) ---------------------------------
+SF2_GL_FUNC(void, glGenQueries, (int n, unsigned int* ids))
+SF2_GL_FUNC(void, glDeleteQueries, (int n, const unsigned int* ids))
+SF2_GL_FUNC(void, glBeginQuery, (unsigned int target, unsigned int id))
+SF2_GL_FUNC(void, glEndQuery, (unsigned int target))
+SF2_GL_FUNC(void, glGetQueryObjectiv, (unsigned int id, unsigned int pname,
+                                       int* params))
+SF2_GL_FUNC(void, glGetQueryObjectui64v, (unsigned int id, unsigned int pname,
+                                          unsigned long long* params))
 
 // --- draw ------------------------------------------------------------------
 SF2_GL_FUNC(void, glDrawArrays, (unsigned int mode, int first, int count))

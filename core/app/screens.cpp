@@ -871,6 +871,67 @@ float measure_ui_wrapped(App& app, const std::string& text, float w, float ua_sc
     return static_cast<float>(wr.lines.size()) * wr.line_step;
 }
 
+// One CENTRED rich-text line: the JS `Y.na` output may carry inline
+// `<image>name</image>` runs (dialog buttons format `dlgStoryBtnBuyEnergyForGems`
+// as "RESTORE {0} <image>ruby</image>"). `draw_ui_label` is a plain-text
+// primitive, so the raw markup used to leak into the caption ("ВОСПОЛНИТЬ
+// <image>ruby</image>"). This measures the whole line (text + sprites) and then
+// lays it out from the centre.
+void draw_ui_rich_line_centered(App& app, float cx, float y, float h,
+                                const std::string& text, float ua_scale, float r,
+                                float g, float b) {
+    if (text.empty()) return;
+    const UiWrap wr = wrap_ui_text(app, text, 100000.0f, ua_scale);
+    if (wr.lines.empty()) return;
+    const std::string& ln = wr.lines.front();
+    const float line_step = wr.line_step;
+    const sf2::data::font* font = app.menu_font();
+    const float scale = ua_scale * ea_a1(app);
+    auto run_width = [&](const std::string& seg) -> float {
+        if (seg.empty() || font == nullptr || scale <= 0.0f) return 0.0f;
+        return app.measure_text(*font, seg, scale);
+    };
+    // measure
+    float total = 0.0f;
+    std::size_t img_m = 0;
+    for (std::size_t p = 0; p < ln.size();) {
+        const std::size_t ph = ln.find('\x01', p);
+        const std::string seg =
+            ln.substr(p, ph == std::string::npos ? std::string::npos : ph - p);
+        total += run_width(seg);
+        if (ph == std::string::npos) break;
+        if (img_m < wr.images.size()) {
+            const RichImage& ri = wr.images[img_m++];
+            total += line_step * (ri.scale > 0.0f ? ri.scale : 1.0f);
+        }
+        p = ph + 1;
+    }
+    // draw
+    float x = cx - total * 0.5f;
+    std::size_t img_i = 0;
+    for (std::size_t p = 0; p < ln.size();) {
+        const std::size_t ph = ln.find('\x01', p);
+        const std::string seg =
+            ln.substr(p, ph == std::string::npos ? std::string::npos : ph - p);
+        if (!seg.empty()) {
+            draw_ui_label(app, x, y, total, h, seg, ua_scale, UiAlign::Left, r, g,
+                          b, 1.0f, /*fit=*/false);
+            x += run_width(seg);
+        }
+        if (ph == std::string::npos) break;
+        if (img_i < wr.images.size()) {
+            const RichImage& ri = wr.images[img_i++];
+            const float size = line_step * (ri.scale > 0.0f ? ri.scale : 1.0f);
+            const float iy = y + line_step * 0.5f + ri.y * line_step;
+            try_draw_atlas_button(app, ri.name, x + size * 0.5f, iy, size, size,
+                                  1.0f, /*fill=*/false, /*flip_x=*/false,
+                                  /*top_left=*/false);
+            x += size;
+        }
+        p = ph + 1;
+    }
+}
+
 void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                      const std::string& text, float ua_scale, UiAlign align,
                      float r, float g, float b, float line_factor = 1.0f) {
@@ -3964,6 +4025,20 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // `xr` (energy). `icon` is a plain `R.$` (no `Ga`) -> left/top-edge.
     // `xr.Vd = zr` extends `Uf` and passes the SAME `y.$na` base
     // (`level_bar_empty_short`, L2003-2004), so the base matches the level bar.
+    const float en_x0 = x;
+    if (std::getenv("SF2_HUD_RECTS") != nullptr) {
+        std::fprintf(stdout,
+                     "[hudrect] energy=(%.1f,%.1f,%.1f,%.1f) addmoney=(%.1f,%.1f,%.1f,%.1f)\n",
+                     static_cast<double>(en_x0),
+                     static_cast<double>(cy - lay.widget_h * 0.5f),
+                     static_cast<double>(en_x0 + en_w),
+                     static_cast<double>(cy + lay.widget_h * 0.5f),
+                     static_cast<double>(x + am_left),
+                     static_cast<double>(cy - am_h * 0.5f),
+                     static_cast<double>(x + am_left + am_w),
+                     static_cast<double>(cy + am_h * 0.5f));
+        std::fflush(stdout);
+    }
     try_draw_atlas_button(app, "energy", x, cy - icon * 0.5f, icon_energy, icon, 1.0f, false,
                           false, /*top_left=*/true);
     // `xr.Vd = zr` extends `Uf(y.$na, y.zRa)` (L2003-2004): empty
@@ -3987,6 +4062,27 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                               bar_w * en_frac, bar_h, 1.0f, /*fill=*/true, false,
                               /*top_left=*/true);
     }
+    // [HUD tap] the energy widget (icon + bar) is the JS `xr` button: a tap
+    // fires the `EnergyBarPress` quest event, whose `EnergyBar` group
+    // (quest_extensions/energy.xml: EnergyBarFullEnergy / SomeEnergy /
+    // ZeroEnergy) opens the refill dialog. The port never fired it, so the
+    // energy bar was dead.
+    {
+        const auto& pt = app.pointer();
+        if (pt.pressed) {
+            const float ey0 = cy - lay.widget_h * 0.5f;
+            const float ey1 = cy + lay.widget_h * 0.5f;
+            if (pt.x >= en_x0 && pt.x <= en_x0 + en_w && pt.y >= ey0 &&
+                pt.y <= ey1) {
+                QuestJournal j;
+                j.player_level = sv.level;
+                app.quest_engine().fire(app, "EnergyBarPress", j);
+                std::fprintf(stdout, "[za] energy bar press -> EnergyBarPress\n");
+                std::fflush(stdout);
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
+            }
+        }
+    }
     x += en_w + lay.gap;
     // `yr` (money). `Ss`/`PA` DO call `Ga()` (L1990) -> centre anchor, so the
     // JS `Ss.C(Ss.za()/2)` etc. are CENTRE positions (left edge 0).
@@ -4002,6 +4098,26 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // oracle has iap). `layout`: centre at `gemTextRight + boxPad + btnW/2 +
     // yr_gap`, `D(a/2)` (= cy), height `a` (widget_h).
     try_draw_atlas_button(app, "AddMoney", x + am_left + am_w * 0.5f, cy, am_w, am_h, 1.0f);
+    // [HUD tap] the green `+` (`yr.Fg`, JS `M1a` L1995) opens the shop on the
+    // RUBY/iap tab (`kShopTabs` index 5, `RealMoneyItem`).
+    {
+        const auto& pt = app.pointer();
+        if (pt.pressed) {
+            const float ax0 = x + am_left;
+            const float ax1 = ax0 + am_w;
+            const float ay0 = cy - am_h * 0.5f;
+            const float ay1 = cy + am_h * 0.5f;
+            if (pt.x >= ax0 && pt.x <= ax1 && pt.y >= ay0 && pt.y <= ay1) {
+                std::fprintf(stdout, "[za] AddMoney -> shop RUBY tab\n");
+                std::fflush(stdout);
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
+                app.screens().push(std::make_unique<ShopScreen>(app.screens()));
+                if (auto* shop = dynamic_cast<ShopScreen*>(app.screens().top())) {
+                    shop->open_at("RealMoneyItem", "");
+                }
+            }
+        }
+    }
     // `za.zq` disciple toggle (JS L1983 `xub`; frame swap `FU`; visibility
     // `v.FU` L1207 = active screen Dojo AND `g$a()`). Backed by the save
     // `Disciple`/`ShowDojoDisciple` session settings (`oub`/`Y0`/`g$a` L271).
@@ -8847,8 +8963,8 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
           draw_bb_plate(app, quest_button_frame(color, primary), cx, cy, w, h, 1.0f, false))) {
         draw_flat_button(app, "", cx, cy, w, h, 0.6f, 0.5f, 0.3f, false);
     }
-    draw_ui_label(app, cx - w * 0.5f, cy - 14.0f, w, 28.0f, loc(app, text, text), 0.9f,
-                  UiAlign::Center, 1.0f, 1.0f, 1.0f);
+    draw_ui_rich_line_centered(app, cx, cy - 14.0f, 28.0f, loc(app, text, text),
+                               0.9f, 1.0f, 1.0f, 1.0f);
 }
 
 // One plate of the dialog's button row. `slot` is the `He.dhb` L1061 index

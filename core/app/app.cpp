@@ -1466,7 +1466,213 @@ void App::update_fixed(float dt) {
     if (quest_engine_) quest_engine_->tick(*this);
 }
 
+
+// ===========================================================================
+// [perf] Frame-time / CPU / GPU monitor (the [4] overlay panel + the [perf]
+// log). Everything is sampled from the real present loop, so a micro-freeze
+// shows up as a spike in `dt_ms` together with the screen it happened on.
+// ===========================================================================
+namespace {
+
+struct PerfRing {
+    static constexpr int kN = 600;  // ~10 s at 60 fps
+    float ms[kN] = {};
+    int head = 0;
+    int count = 0;
+    void push(float v) {
+        ms[head] = v;
+        head = (head + 1) % kN;
+        if (count < kN) ++count;
+    }
+    float at(int i) const {  // 0 = oldest of the live window
+        return ms[(head - count + i + kN) % kN];
+    }
+};
+
+struct PerfState {
+    PerfRing ring;
+    double dt_ms = 16.7;      // last presented frame
+    double avg_ms = 16.7;     // mean over the window
+    double low01_ms = 16.7;   // 0.1% low (mean of the slowest 0.1%)
+    double update_ms = 0.0;   // CPU: the fixed-step block
+    double render_ms = 0.0;   // CPU: submit + overlays
+    double gpu_ms = -1.0;     // GPU: GL_TIME_ELAPSED of the previous pass
+    int steps = 0;            // fixed steps run this frame
+    double cpu = 0.0;         // system CPU load 0..1
+    double proc = 0.0;        // this process, 0..1 of the whole machine
+    unsigned long long frames = 0;
+    std::string stage = "-";
+    // rolling window for the once-a-second log line
+    double log_acc = 0.0;
+    int log_frames = 0;
+    double log_ms = 0.0;
+    // CPU counters
+    unsigned long long prev_idle = 0, prev_kern = 0, prev_user = 0;
+    unsigned long long prev_pk = 0, prev_pu = 0;
+    double prev_wall = 0.0;
+    bool have_sys = false;
+};
+
+PerfState g_perf;
+
+// GPU pass timing (GL_TIME_ELAPSED, read one frame late).
+GLuint g_gpu_q[2] = {0, 0};
+int g_gpu_qi = 0;
+bool g_gpu_init = false;
+bool g_gpu_ok = true;
+
+void perf_gpu_begin() {
+    if (!g_gpu_ok) return;
+    if (!g_gpu_init) {
+        if (sf2::render::gl::glGenQueries == nullptr ||
+            sf2::render::gl::glBeginQuery == nullptr) {
+            g_gpu_ok = false;
+            return;
+        }
+        sf2::render::gl::glGenQueries(2, g_gpu_q);
+        g_gpu_init = true;
+        if (sf2::render::gl::glGetString != nullptr) {
+            const unsigned char* rend =
+                sf2::render::gl::glGetString(0x1F01);  // GL_RENDERER
+            const unsigned char* ver =
+                sf2::render::gl::glGetString(0x1F02);  // GL_VERSION
+            std::fprintf(stdout, "[perf] gl renderer=%s version=%s\n",
+                         rend != nullptr ? reinterpret_cast<const char*>(rend)
+                                         : "?",
+                         ver != nullptr ? reinterpret_cast<const char*>(ver)
+                                        : "?");
+            std::fflush(stdout);
+        }
+    }
+    const int prev = g_gpu_qi ^ 1;
+    GLint avail = 0;
+    sf2::render::gl::glGetQueryObjectiv(g_gpu_q[prev], GL_QUERY_RESULT_AVAILABLE,
+                                        &avail);
+    if (avail != 0) {
+        unsigned long long ns = 0;
+        sf2::render::gl::glGetQueryObjectui64v(g_gpu_q[prev], GL_QUERY_RESULT,
+                                               &ns);
+        g_perf.gpu_ms = static_cast<double>(ns) / 1.0e6;
+    }
+    sf2::render::gl::glBeginQuery(GL_TIME_ELAPSED, g_gpu_q[g_gpu_qi]);
+}
+
+void perf_gpu_end() {
+    if (!g_gpu_ok || !g_gpu_init) return;
+    sf2::render::gl::glEndQuery(GL_TIME_ELAPSED);
+    g_gpu_qi ^= 1;
+}
+
+// System + process CPU load (delta of the kernel counters, once per second).
+void perf_cpu_sample(double now) {
+    if (!g_perf.have_sys || now - g_perf.prev_wall >= 1.0) {
+        FILETIME idle, kern, user, pk, pu, dummy;
+        if (GetSystemTimes(&idle, &kern, &user) &&
+            GetProcessTimes(GetCurrentProcess(), &dummy, &dummy, &pk, &pu)) {
+            auto q = [](const FILETIME& f) {
+                return (static_cast<unsigned long long>(f.dwHighDateTime) << 32) |
+                       f.dwLowDateTime;
+            };
+            const unsigned long long i2 = q(idle), k2 = q(kern), u2 = q(user);
+            const unsigned long long pk2 = q(pk), pu2 = q(pu);
+            if (g_perf.have_sys) {
+                const double dk = static_cast<double>(k2 - g_perf.prev_kern);
+                const double du = static_cast<double>(u2 - g_perf.prev_user);
+                const double di = static_cast<double>(i2 - g_perf.prev_idle);
+                const double total = dk + du;
+                if (total > 0.0) {
+                    g_perf.cpu = (total - di) / total;
+                    if (g_perf.cpu < 0.0) g_perf.cpu = 0.0;
+                    if (g_perf.cpu > 1.0) g_perf.cpu = 1.0;
+                    g_perf.proc =
+                        (static_cast<double>(pk2 - g_perf.prev_pk) +
+                         static_cast<double>(pu2 - g_perf.prev_pu)) /
+                        total;
+                }
+            }
+            g_perf.prev_idle = i2;
+            g_perf.prev_kern = k2;
+            g_perf.prev_user = u2;
+            g_perf.prev_pk = pk2;
+            g_perf.prev_pu = pu2;
+            g_perf.have_sys = true;
+            g_perf.prev_wall = now;
+        }
+    }
+}
+
+// The 0.1% low: the mean of the slowest 0.1% frames of the window.
+void perf_recompute() {
+    const int n = g_perf.ring.count;
+    if (n <= 0) return;
+    double sum = 0.0;
+    for (int i = 0; i < n; ++i) sum += g_perf.ring.at(i);
+    g_perf.avg_ms = sum / n;
+    int worst = static_cast<int>(static_cast<double>(n) * 0.001);
+    if (worst < 1) worst = 1;
+    std::vector<float> v;
+    v.reserve(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) v.push_back(g_perf.ring.at(i));
+    std::sort(v.begin(), v.end(), std::greater<float>());
+    double wsum = 0.0;
+    for (int i = 0; i < worst && i < n; ++i) wsum += v[static_cast<std::size_t>(i)];
+    g_perf.low01_ms = wsum / worst;
+}
+
+// Called once per presented frame.
+void perf_commit(double dt_s, double update_ms, double render_ms, int steps,
+                 const std::string& stage, bool log_on) {
+    const double ms = dt_s * 1000.0;
+    if (ms > 0.0 && ms < 5000.0) g_perf.ring.push(static_cast<float>(ms));
+    g_perf.dt_ms = ms;
+    g_perf.update_ms = update_ms;
+    g_perf.render_ms = render_ms;
+    g_perf.steps = steps;
+    g_perf.stage = stage;
+    ++g_perf.frames;
+    if ((g_perf.frames & 15ull) == 0ull) perf_recompute();
+
+    // once-a-second summary
+    g_perf.log_acc += dt_s;
+    g_perf.log_ms += ms;
+    ++g_perf.log_frames;
+    if (g_perf.log_acc >= 1.0) {
+        const double avg = g_perf.log_ms / (g_perf.log_frames > 0 ? g_perf.log_frames : 1);
+        std::fprintf(stdout,
+                     "[perf] fps=%.1f avg=%.1f low0.1=%.1f frame=%.2fms "
+                     "update=%.2f render=%.2f gpu=%.2fms cpu=%.0f%% proc=%.0f%% "
+                     "steps=%d stage=%s\n",
+                     ms > 0.0 ? 1000.0 / ms : 0.0,
+                     avg > 0.0 ? 1000.0 / avg : 0.0,
+                     g_perf.low01_ms > 0.0 ? 1000.0 / g_perf.low01_ms : 0.0,
+                     ms, update_ms, render_ms, g_perf.gpu_ms, g_perf.cpu * 100.0,
+                     g_perf.proc * 100.0, steps, stage.c_str());
+        std::fflush(stdout);
+        g_perf.log_acc = 0.0;
+        g_perf.log_frames = 0;
+        g_perf.log_ms = 0.0;
+    }
+    // a spike: anything well over the frame budget, at most 4 lines a second
+    if (log_on && ms > 25.0) {
+        std::fprintf(stdout,
+                     "[perf] SPIKE frame=%.2fms fps=%.1f update=%.2f "
+                     "render=%.2f gpu=%.2fms stage=%s\n",
+                     ms, ms > 0.0 ? 1000.0 / ms : 0.0, update_ms, render_ms,
+                     g_perf.gpu_ms, stage.c_str());
+        std::fflush(stdout);
+    }
+}
+
+// The screen a frame was spent on (the [perf] log's "what was running").
+std::string perf_stage_name(sf2::app::ScreenManager* screens) {
+    if (screens == nullptr) return "boot";
+    return "screen=" + std::to_string(static_cast<int>(screens->current_id()));
+}
+
+}  // namespace
+
 void App::render_frame() {
+    perf_gpu_begin();
     sf2::render::Camera camera;
     camera.view_w = static_cast<float>(view_w_);
     camera.view_h = static_cast<float>(view_h_);
@@ -1487,6 +1693,7 @@ void App::render_frame() {
     draw_ui_overlays(*this);
     draw_debug_overlay(*this);
     renderer_->end_frame();
+    perf_gpu_end();
 }
 
 void App::begin_scene_loader() {
@@ -1748,6 +1955,23 @@ void App::run_one_frame() {
     // click was a silent no-op. Stage 0: click the FIGHT button on the
     // boot screen (the Dojo home — its FIGHT button starts the training
     // fight). Stage 1 (after the map is up): click the Training node.
+    // [debug] `SF2_CLICK_AT="x,y"` injects one tap at frame 90 (after the
+    // shell is up) - the probe hook for HUD hit tests.
+    static const int click_frame = []() {
+        const char* f = std::getenv("SF2_CLICK_FRAME");
+        return f != nullptr ? std::atoi(f) : 90;
+    }();
+    if (frame_count_ == click_frame) {
+        if (const char* ca = std::getenv("SF2_CLICK_AT")) {
+            double cx = 0.0, cy = 0.0;
+            if (std::sscanf(ca, "%lf,%lf", &cx, &cy) == 2) {
+                inject_click(cx, cy);
+                std::fprintf(stdout, "[debug] click injected at %.1f,%.1f\n",
+                             cx, cy);
+                std::fflush(stdout);
+            }
+        }
+    }
     if (auto_click_) {
         if (auto_click_stage_ == 0 && frame_count_ == 30) {
             inject_click(view_w_ * 0.28, view_h_ * 0.72);
@@ -1784,7 +2008,10 @@ void App::run_one_frame() {
         if (pointer_.pressed && acc_ < kFixedDt) acc_ = kFixedDt;
     }
 
+    const double t_upd0 = glfwGetTime();
+    int steps_now = 0;
     while (acc_ >= kFixedDt) {
+        ++steps_now;
         update_fixed(static_cast<float>(kFixedDt));
         if (injected_click_pending_ && --injected_click_steps_ <= 0) {
             injected_click_pending_ = false;
@@ -1794,7 +2021,13 @@ void App::run_one_frame() {
         acc_ -= kFixedDt;
         ++fixed_steps_;
     }
+    const double t_upd1 = glfwGetTime();
     render_frame();
+    const double t_rend1 = glfwGetTime();
+    perf_cpu_sample(t_rend1);
+    perf_commit(dt, (t_upd1 - t_upd0) * 1000.0, (t_rend1 - t_upd1) * 1000.0,
+                steps_now, perf_stage_name(screens_.get()),
+                headless_frames_ == 0);
     ++frame_count_;
 }
 
@@ -2076,9 +2309,28 @@ bool DebugOverlay::handle_key(int glfw_key) {
     const int digit = glfw_key - 48;
     if (digit == 0) {
         clear();
+        group.fill(false);
+    } else if (digit >= 1 && digit <= 4) {
+        // The oracle's nine panels folded into four groups (header comment).
+        static const int kGroups[5][4] = {
+            {0, 0, 0, 0},  // unused
+            {1, 5, 6, 0},  // 1 = AI + damage + fight timing
+            {2, 3, 4, 0},  // 2 = quest + collision + physics
+            {7, 8, 0, 0},  // 3 = save + screens
+            {9, 0, 0, 0},  // 4 = performance
+        };
+        group[static_cast<std::size_t>(digit)] =
+            !group[static_cast<std::size_t>(digit)];
+        on.fill(false);
+        for (int g = 1; g <= 4; ++g) {
+            if (!group[static_cast<std::size_t>(g)]) continue;
+            for (int k = 0; k < 4; ++k) {
+                const int panel = kGroups[g][k];
+                if (panel != 0) on[static_cast<std::size_t>(panel)] = true;
+            }
+        }
     } else {
-        on[static_cast<std::size_t>(digit)] =
-            !on[static_cast<std::size_t>(digit)];
+        return false;  // 5..9 are folded into the groups above
     }
     std::fprintf(stdout, "[dbg] %s\n", debug_overlay_status());
     std::fflush(stdout);
@@ -2089,10 +2341,10 @@ const char* debug_overlay_status() {
     static char buf[64];
     const DebugOverlay& d = DebugOverlay::get();
     char* p = buf;
-    *p++ = '1' + 0 * 0;
-    p = buf;
-    for (int i = 1; i < 10; ++i) {
-        *p++ = d.on[static_cast<std::size_t>(i)] ? static_cast<char>('0' + i) : '.';
+    for (int i = 1; i <= 4; ++i) {
+        *p++ = d.group[static_cast<std::size_t>(i)]
+                   ? static_cast<char>('0' + i)
+                   : '.';
     }
     *p = '\0';
     return buf;
@@ -2235,7 +2487,7 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[3]) {
-        coll.title(app, "[3] Collision", 1.0f, 0.70f, 0.40f);
+        coll.title(app, "[2] Collision", 1.0f, 0.70f, 0.40f);
         if (f.valid) {
             coll.add(app, fmt("P iv=[%s] block=%d", f.iv_player.c_str(), f.block_p),
                      1.0f, 0.85f, 0.70f);
@@ -2251,7 +2503,7 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[4]) {
-        phys.title(app, "[4] Physics", 0.60f, 0.90f, 1.0f);
+        phys.title(app, "[2] Physics", 0.60f, 0.90f, 1.0f);
         if (f.valid) {
             phys.add(app, fmt("rag=%d ragf=%d", f.rag ? 1 : 0, f.ragf),
                      0.70f, 0.95f, 1.0f);
@@ -2264,7 +2516,7 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[5]) {
-        dmg.title(app, "[5] Damage", 1.0f, 0.50f, 0.50f);
+        dmg.title(app, "[1] Damage", 1.0f, 0.50f, 0.50f);
         if (f.valid) {
             dmg.add(app, fmt("P hp=%.0f/%.0f dealt=%.0f",
                              static_cast<double>(f.hp_p),
@@ -2287,7 +2539,7 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[6]) {
-        fight.title(app, "[6] Fight", 0.70f, 1.0f, 0.70f);
+        fight.title(app, "[1] Fight", 0.70f, 1.0f, 0.70f);
         if (f.valid) {
             fight.add(app, fmt("frame=%d phase=%d round=%d timer=%d", f.frame,
                                f.phase, f.round, f.timer), 0.80f, 1.0f, 0.80f);
@@ -2304,7 +2556,7 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[7]) {
-        save.title(app, "[7] Save", 1.0f, 0.90f, 0.50f);
+        save.title(app, "[3] Save", 1.0f, 0.90f, 0.50f);
         try {
             const sf2::app::WarriorSave w = app.save().load();
             save.add(app, fmt("money=%lld level=%d",
@@ -2317,7 +2569,7 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[8]) {
-        screens.title(app, "[8] Screens", 0.85f, 0.85f, 1.0f);
+        screens.title(app, "[3] Screens", 0.85f, 0.85f, 1.0f);
         screens.add(app, fmt("id=%d depth=%zu",
                              static_cast<int>(app.screens().current_id()),
                              app.screens().stack().size()),
@@ -2334,17 +2586,30 @@ void draw_debug_overlay(App& app) {
     }
 
     if (d.on[9]) {
-        static double ema_ms = 16.0;
-        static auto prev = std::chrono::steady_clock::now();
-        const auto now = std::chrono::steady_clock::now();
-        const double ms =
-            std::chrono::duration<double, std::milli>(now - prev).count();
-        prev = now;
-        if (ms > 0.0 && ms < 1000.0) ema_ms = ema_ms * 0.9 + ms * 0.1;
-        perf.title(app, "[9] Frame", 0.90f, 0.90f, 1.0f);
-        perf.add(app, fmt("%.2f ms  %.0f fps", ema_ms,
-                          ema_ms > 0.0 ? 1000.0 / ema_ms : 0.0),
-                 0.90f, 0.90f, 1.0f);
+        const double dt = g_perf.dt_ms;
+        const double fps = dt > 0.0 ? 1000.0 / dt : 0.0;
+        const double avg_fps = g_perf.avg_ms > 0.0 ? 1000.0 / g_perf.avg_ms : 0.0;
+        const double low_fps =
+            g_perf.low01_ms > 0.0 ? 1000.0 / g_perf.low01_ms : 0.0;
+        const double gpu = g_perf.gpu_ms;
+        perf.title(app, "[4] Performance", 0.90f, 0.90f, 1.0f);
+        perf.add(app, fmt("fps=%.1f  avg=%.1f  low0.1=%.1f", fps, avg_fps,
+                          low_fps), 0.90f, 0.95f, 1.0f);
+        perf.add(app, fmt("frame=%.2fms  update=%.2f  render=%.2f  steps=%d",
+                          dt, g_perf.update_ms, g_perf.render_ms, g_perf.steps),
+                 0.85f, 0.90f, 1.0f);
+        perf.add(app, fmt("cpu=%.0f%%  proc=%.0f%%  gpu=%s", g_perf.cpu * 100.0,
+                          g_perf.proc * 100.0,
+                          gpu >= 0.0 ? fmt("%.2fms/%.0f%%", gpu,
+                                           gpu / 16.667 * 100.0).c_str()
+                                     : "n/a"),
+                 0.85f, 0.90f, 1.0f);
+        perf.add(app, fmt("frames=%llu  stage=%s", g_perf.frames,
+                          g_perf.stage.c_str()), 0.80f, 0.85f, 0.95f);
+        // three blank rows reserve the graph area (drawn after the layout)
+        perf.add(app, "", 0.0f, 0.0f, 0.0f);
+        perf.add(app, "", 0.0f, 0.0f, 0.0f);
+        perf.add(app, "", 0.0f, 0.0f, 0.0f);
     }
 
     // ---- layout -----------------------------------------------------------
@@ -2384,9 +2649,11 @@ void draw_debug_overlay(App& app) {
         if (r.y < kDbgEdge) r.y = kDbgEdge;
         return r;
     };
+    DbgRect perf_rect;
     auto place = [&](const DbgPanel& p, const DbgRect& r) {
         dbg_panel(app, p, r.x, r.y);
         placed.push_back(r);
+        if (&p == &perf) perf_rect = r;
     };
 
     // Panel 1 is anchored ABOVE THE OPPONENT (the user's "действие ИИ над
@@ -2437,6 +2704,44 @@ void draw_debug_overlay(App& app) {
     }
     flow({&coll, &phys}, false);
     flow({&dmg, &fight, &save, &perf}, true);
+
+    // The frame-time graph inside the reserved rows of the [4] panel: one bar
+    // per frame (green < 16.7 ms, amber < 33 ms, red above), plus the 60 fps
+    // budget line. The window is the last 120 frames.
+    if (d.on[9] && perf_rect.w > 0.0f) {
+        const float gx = perf_rect.x + kDbgPad;
+        const float gw = perf_rect.w - kDbgPad * 2.0f;
+        const float gh = 3.0f * kDbgLineH;
+        const float gy1 = perf_rect.y + perf_rect.h - kDbgPad;
+        const float gy0 = gy1 - gh;
+        const float bg[12] = {gx, gy0, gx + gw, gy0, gx, gy1,
+                              gx + gw, gy0, gx + gw, gy1, gx, gy1};
+        app.renderer().draw_triangles(bg, 6, 0.05f, 0.06f, 0.08f, 0.85f);
+        const int n = g_perf.ring.count;
+        const int shown = n < 120 ? n : 120;
+        if (shown > 0) {
+            const float bw = gw / 120.0f;
+            for (int i = 0; i < shown; ++i) {
+                const float ms = g_perf.ring.at(n - shown + i);
+                float hh = ms / 33.34f;
+                if (hh > 1.0f) hh = 1.0f;
+                const float x = gx + static_cast<float>(i) * bw;
+                const float y = gy1 - hh * gh;
+                const float r = hh < 0.5f ? 0.35f : (hh < 0.9f ? 0.95f : 1.0f);
+                const float g = hh < 0.5f ? 0.95f : (hh < 0.9f ? 0.80f : 0.30f);
+                const float b = hh < 0.5f ? 0.45f : 0.20f;
+                const float v[12] = {x, y, x + bw * 0.85f, y, x, gy1,
+                                     x + bw * 0.85f, y, x + bw * 0.85f, gy1,
+                                     x, gy1};
+                app.renderer().draw_triangles(v, 6, r, g, b, 0.95f);
+            }
+        }
+        // the 16.7 ms budget line
+        const float by = gy1 - (16.7f / 33.34f) * gh;
+        const float bl[12] = {gx, by, gx + gw, by, gx, by + 1.0f,
+                              gx + gw, by, gx + gw, by + 1.0f, gx, by + 1.0f};
+        app.renderer().draw_triangles(bl, 6, 0.55f, 0.75f, 1.0f, 0.55f);
+    }
 
     auto bottom = [&](const DbgPanel& p, bool right) {
         if (p.rows.empty()) return;

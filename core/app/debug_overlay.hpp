@@ -2,21 +2,20 @@
 
 // In-game debug overlay (port side of the oracle-comparison kit).
 //
-// The user asked for a debug system where every subsystem can be shown in BOTH
-// the native port and the JS oracle, toggled by digit keys:
-//   1 = AI (branch/tactic/zone/candidates/chosen)
-//   2 = Quests (story step, zone, hanging dialogs, modal depth)
-//   3 = Collision (per-side intervals, block state, hit counters)
-//   4 = Physics (ragdoll state, COM, worst stretched cloth edge)
-//   5 = Damage (HP of both sides + damage dealt, for the final stats)
-//   6 = Fight timing (frame/phase/round/timer/input taps)
-//   7 = Save/profile (money/level/weapon)
-//   8 = Screens (top screen id + stack depth)
-//   9 = Frame time (ms + fps)
+// The oracle has nine panels (keys 1..9 there). The port folds them into FOUR
+// keys so nothing overlaps and the hand never leaves 1..4:
+//   1 = fight & AI   -> AI (branch/tactic/zone/chosen) + Damage + Fight timing
+//   2 = world        -> Quest + Collision (intervals/capsules) + Physics
+//   3 = session      -> Save/profile + Screens (id + stack)
+//   4 = performance  -> FPS (current / average / 0.1% low), frame-time graph,
+//                       CPU + GPU load, fixed steps, and the [perf] log lines
 //   0 = clear all
-// The same fields are emitted by the oracle tracer (`trace_oracle.js`, keys
-// 1..9 there too), so a divergence can be read on both sides and diffed from
-// the logs (`reference/tools/compare_debug.py`).
+// The panels are laid out in anchored flows and never share pixels. Every
+// panel also owns a translucent plate + 1px border.
+//
+// The same per-panel fields are emitted by the oracle tracer
+// (`trace_oracle.js`, keys 1..9), so a divergence can be read on both sides
+// and diffed from the logs (`reference/tools/compare_debug.py`).
 
 #include <array>
 
@@ -25,8 +24,11 @@ namespace sf2::app {
 class App;
 
 struct DebugOverlay {
-    // Panel state, index 1..9 (0 unused).
+    // Panel state, index 1..9 (0 unused) - derived from `group` when a digit
+    // key toggles a group.
     std::array<bool, 10> on{};
+    // The four toggle groups (see the header comment).
+    std::array<bool, 5> group{};
 
     static DebugOverlay& get();
 

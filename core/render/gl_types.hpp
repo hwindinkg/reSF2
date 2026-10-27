@@ -18,6 +18,11 @@ using GLsizeiptr = std::intptr_t;
 using GLenum = unsigned int;
 
 // clear bits
+// --- timer queries (the [4] performance panel) ---------------------------
+#define GL_QUERY_RESULT           0x8866
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#define GL_TIME_ELAPSED           0x88BF
+
 #define GL_COLOR_BUFFER_BIT 0x4000
 #define GL_DEPTH_BUFFER_BIT 0x100
 
