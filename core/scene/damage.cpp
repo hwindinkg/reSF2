@@ -104,6 +104,18 @@ float balance_multiplier(const FighterParams& attacker,
     // -FLT_MAX and `l5a` = 2^(-FLT_MAX/BP) = 0 — i.e. the hit deals no
     // damage. Deliberately NOT special-cased to 1.
 
+    if (std::getenv("SF2_TRACE_DMG") != nullptr) {
+        std::fprintf(stdout,
+                     "[dmg] def='%s' attrs=%zu rows=%zu t=%.3f g=%.6f "
+                     "e=%.3f k=%.3f x0=%d aiy=%zu diy=%zu\n",
+                     defense_attr.c_str(), interval.attack_attrs.size(),
+                     x.size(), static_cast<double>(t),
+                     static_cast<double>(std::pow(2.0f, t / fp.damage_doubling_range)),
+                     static_cast<double>(e), static_cast<double>(k),
+                     x.empty() ? -1 : x.front().eclipse_op,
+                     attacker.iy.size(), defender.iy.size());
+        std::fflush(stdout);
+    }
     // `iea` (L1205-1206): retry once when t > 10, then `l5a` = 2^(t/BP).
     return std::pow(2.0f, t / fp.damage_doubling_range);
 }

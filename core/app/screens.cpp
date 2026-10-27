@@ -6313,7 +6313,17 @@ BattleWarriorInfo battle_warrior(const std::string& battle_name,
             // chain analysis in modes.hpp `stage_warrior_align`.
             const pugi::xml_node templates =
                 root.child("Warriors").child("Templates");
-            out.align = sf2::scene::modes_detail::stage_warrior_align(w, templates);
+            // JS `efa` (L7360) merges the `<Groups>` members into the owner
+            // (`ur(g.node, l)`: member first, owner on top), so the align rows
+            // come from the RESOLVED member's `<Template>` chain. A survival
+            // `<Warrior Number="10" Tactic="Standard">` has no `Template` of
+            // its own, so reading the rows off it left `IY` EMPTY: `pAa`'s
+            // kept-row loop never ran, `t` stayed -FLT_MAX and every enemy hit
+            // dealt ZERO damage (measured: the player's HP stayed 1.0 for 2368
+            // frames while the oracle's fell to 0.798).
+            const pugi::xml_node align_src = kit_warrior ? kit_warrior : w;
+            out.align = sf2::scene::modes_detail::stage_warrior_align(
+                align_src, templates);
             out.player_align = sf2::scene::modes_detail::default_align(templates);
         }
         for (const pugi::xml_attribute a : w.attributes()) {

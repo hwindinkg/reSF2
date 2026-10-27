@@ -1821,3 +1821,41 @@ KO).
 разрешает будущие регрессии вплоть до 863 — стоит опустить планку до 0:
 `python harness/gates.py --update-baseline --only diff:survival --reason "..." --yes`.
 По правилу проекта baseline двигается только с явного «ок» человека.
+
+### КОМБАТ: враг вообще не наносил урон — пустые `<AttributesAlign>` у roster-врага (27.10)
+
+Найдено длинным прогоном survival (2368 кадров вместо 368 в гейте): у порта
+HP игрока НЕ менялось вообще за весь бой (`Me.hp = 1.0` на всех кадрах), у
+оракула падало до 0.798. То есть все удары врага уходили в никуда.
+
+Замер (`SF2_TRACE_DMG`):
+    [dmg] def='BodyDefense' attrs=2 rows=0 t=-3.4e38 g=0.000 aiy=0 diy=7
+    [hit] F399 ЭНИНДЗЯ->Player dmg=0.00 BLOCK FIRST
+
+`rows=0` — у АТАКУЮЩЕГО (врага) пуст `iy` (строки `<AttributesAlign>`), поэтому
+цикл `pAa` (`balance_multiplier`) не выполнялся, `t` остался `-FLT_MAX`,
+`l5a = 2^(t/BP) = 0` — нулевой множитель баланса и, значит, нулевой урон.
+
+Причина: `battle_warrior` строил `out.align` от самого узла `<Warrior>`, а у
+survival-врага он без `Template`:
+`<Warrior Number="10" Tactic="Standard"><Groups>…</Groups></Warrior>`.
+Идентичность (и цепочка `<Template>` → `Default` с 7 строками) живёт на
+РАЗРЕШЁННОМ члене группы (`kit_warrior`), который уже вычислялся выше для
+имени/аватара. JS `efa` (L7360) сливает члены групп в владельца
+(`ur(g.node, l)`: член, сверху владелец), поэтому строки выравнивания берутся
+из члена.
+
+Фикс: `const pugi::xml_node align_src = kit_warrior ? kit_warrior : w;`
+и `stage_warrior_align(align_src, templates)`.
+
+Проверка: `rows=7`, `t=-5.750`, `g=0.671`, удар даёт `dmg=0.01`, HP игрока
+`1.0 -> 0.989` на F399 — ровно как у оракула (ora f=545, 0.989).
+
+После фикса длинный прогон: первое расхождение уехало с nat 399 на nat 449
+(`fighters.sep_x`, ~1 единица дистанции на старте `StanceIdle`), затем nat 495
+(движение врага). Все пять ИИ-гейтов остались зелёными (survival 0, challenge 0,
+boss-lynx 0, tournament 0, kick-ko PASS).
+
+Инструмент: `SF2_TRACE_DMG=1` печатает по каждому расчёту урона
+`def/attrs/rows/t/g/e/k/x0/aiy/diy`; `SF2_TRACE_LD=1` печатает список
+кандидатов рулетки `ld` с порядком.
