@@ -12303,10 +12303,7 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
     // `--fight` boot). Pure trace, no simulation effect.
     if (const char* dp = std::getenv("SF2_DUMP_POSE")) {
         const int n = std::atoi(dp);
-        if (n > 0) {
-            std::filesystem::create_directories("reference/traces");
-            enable_pose_dump("reference/traces/native_pose.jsonl", n);
-        }
+        if (n > 0) pending_pose_dump_ = n;  // armed on the first live update
     }
     // [entry audio] The Map's `start_battle` fires the battle-enter gong and
     // the battle track at the fight-ENTRY point (JS `v.Am` L1216 `rb.Wkb()`;
@@ -14683,6 +14680,11 @@ void draw_global_achievement_toast(App& app) {
 // void FightScreen::tick_infight_achievements() { ... }
 
 void FightScreen::update_impl(float dt) {
+    if (pending_pose_dump_ > 0 && fight_ != nullptr) {
+        std::filesystem::create_directories("reference/traces");
+        enable_pose_dump("reference/traces/native_pose.jsonl", pending_pose_dump_);
+        pending_pose_dump_ = 0;
+    }
     // JS `Ut.kyb` (`kyb` L825): `$O` advances once per 60 Hz frame; the
     // uncapped present loop must not step it (see DojoScreen::update_impl).
     {

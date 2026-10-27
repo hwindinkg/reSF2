@@ -672,6 +672,11 @@ public:
                 std::int64_t reward_exp,
                 const std::vector<sf2::scene::OwnedItem>& owned);
 
+    // [trace] `SF2_DUMP_POSE=N`: armed from the environment. The controller
+    // does not exist yet in the ctor, so the request is applied on the first
+    // update where `fight_` is live.
+    int pending_pose_dump_ = 0;
+
     // JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: the pause `Dr` dialog lives for the
     // screen's lifetime, so destroying the screen restores the MUSIC bus (the
     // port's `paused_` mirrors the dialog's existence — see `set_paused`).

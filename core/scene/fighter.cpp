@@ -3532,7 +3532,41 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             if (preview_mode_) render_offset_y_ = world_y_ - py[anchor_u];
             render_offset_valid_ = true;
         }
+        if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
+            static std::map<const void*, float> trace_prev;
+            const float wx_now = px[anchor_u] + render_offset_ + j8_x_;
+            const auto tp = trace_prev.find(this);
+            const bool trace_init = tp != trace_prev.end();
+            const float trace_prev_wx = trace_init ? tp->second : 0.0f;
+            if (trace_init && std::fabs(wx_now - trace_prev_wx) > 20.0f) {
+                std::fprintf(stdout,
+                             "[anchor-jump] move=%s px=%.2f off=%.2f wx=%.2f prev=%.2f "
+                             "mirror=%d anchor_u=%d align_u=%d solver=%d "
+                             "off_valid=%d\n",
+                             current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                             static_cast<double>(px[anchor_u]),
+                             static_cast<double>(render_offset_),
+                             static_cast<double>(wx_now),
+                             static_cast<double>(trace_prev_wx), clip_mirror_,
+                             anchor_u, align_pivot_u_,
+                             solver_world_ ? 1 : 0, render_offset_valid_ ? 1 : 0);
+                std::fflush(stdout);
+            }
+            trace_prev[this] = wx_now;
+        }
         world_x_ = px[anchor_u] + render_offset_ + j8_x_;
+        if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
+            std::fprintf(stdout,
+                         "[anchor] move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
+                         "off_valid=%d align_u=%d anchor_u=%d solver=%d\n",
+                         current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                         static_cast<double>(px[anchor_u]),
+                         static_cast<double>(render_offset_),
+                         static_cast<double>(j8_x_), static_cast<double>(world_x_),
+                         render_offset_valid_ ? 1 : 0, align_pivot_u_, anchor_u,
+                         solver_world_ ? 1 : 0);
+            std::fflush(stdout);
+        }
         x = world_x_;  // `pos_` below is built from the recomputed anchor
         // [B1 FIX vertical anchor] The SAME drive on y. JS `Te.eda` (L556)
         // writes `ma = fq[mo] + j8` for every clip bone, so NPivot's y rides
