@@ -15152,6 +15152,14 @@ void FightScreen::render_impl(App& app) {
     // renderer folds into every layer (renderer.hpp `camera_offset_x`). At
     // the fight-start focus 831.5 -> Io = 148.5.
     camera.arena_center_x = arena_half - cam.center_x;
+    // JS `ql.d3a` (L363) writes the camera-NODE judder `Byb(x,y)` in screen px
+    // while a hit effect is live (crit / head hit / shock). The port computed
+    // the offset (`FightCamera::shake_x_`) but never applied it, so the screen
+    // never shook. `center_*` is in world units, so divide by the zoom.
+    if (cam.zoom > 0.0001f) {
+        camera.center_x -= cam.shake_x() / cam.zoom;
+        camera.center_y -= cam.shake_y() / cam.zoom;
+    }
     ren.begin_frame(camera);
     // [M2 — scene/camera visibility gate] JS `XF` (L370) ->
     // `this.ia.visible(a)`: `Ut.visible` (L826) runs

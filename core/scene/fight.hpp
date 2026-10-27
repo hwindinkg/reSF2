@@ -1445,6 +1445,11 @@ struct FightCamera {
     // The peak |offset| reached during the live judder (report only).
     float shake_peak_x_ = 0.0f;
     float shake_peak_y_ = 0.0f;
+    // The live camera-node judder offset in SCREEN px (JS `Byb(x,y)`). The
+    // renderer subtracts it from the view origin: the port computed it but
+    // never applied it, so crits / head hits / shock had no screen shake.
+    float shake_x() const { return shake_active_ ? shake_x_ : 0.0f; }
+    float shake_y() const { return shake_active_ ? shake_y_ : 0.0f; }
     // JS `ql.DL(a)` (L370): latch the hit effect + arm the pause/judder.
     void apply_hit_effect(const sf2::scene::HitEffect& e);
     // JS `ql.Fnb()` (L364) + `ql.d3a()` (L363), once per camera update.
