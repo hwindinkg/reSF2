@@ -2,7 +2,7 @@
 <rect width="760" height="494" rx="10" fill="#0d1117"/>
 <text x="24" y="34" fill="#e6edf3" font-size="20" font-weight="600">Readiness by system</text>
 <text x="24" y="58" fill="#8b949e" font-size="12">generated from the gate baseline + the checklist in harness/readme_status.py</text>
-<text x="736" y="40" fill="#d29922" font-size="26" font-weight="700" text-anchor="end">77%</text>
+<text x="736" y="40" fill="#d29922" font-size="26" font-weight="700" text-anchor="end">72%</text>
 <text x="24" y="110" fill="#e6edf3" font-size="13">Assets &amp; archives</text>
 <rect x="250" y="99" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
 <rect x="250" y="99" width="390" height="14" rx="7" fill="#3fb950"/>
@@ -13,24 +13,24 @@
 <text x="652" y="144" fill="#d29922" font-size="13" font-weight="600">75%</text>
 <text x="24" y="178" fill="#e6edf3" font-size="13">Animation &amp; physics</text>
 <rect x="250" y="167" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="167" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="178" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<rect x="250" y="167" width="292" height="14" rx="7" fill="#d29922"/>
+<text x="652" y="178" fill="#d29922" font-size="13" font-weight="600">75%</text>
 <text x="24" y="212" fill="#e6edf3" font-size="13">Combat</text>
 <rect x="250" y="201" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="201" width="312" height="14" rx="7" fill="#d29922"/>
-<text x="652" y="212" fill="#d29922" font-size="13" font-weight="600">80%</text>
+<rect x="250" y="201" width="261" height="14" rx="7" fill="#f85149"/>
+<text x="652" y="212" fill="#f85149" font-size="13" font-weight="600">67%</text>
 <text x="24" y="246" fill="#e6edf3" font-size="13">AI</text>
 <rect x="250" y="235" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="235" width="195" height="14" rx="7" fill="#f85149"/>
-<text x="652" y="246" fill="#f85149" font-size="13" font-weight="600">50%</text>
+<rect x="250" y="235" width="261" height="14" rx="7" fill="#f85149"/>
+<text x="652" y="246" fill="#f85149" font-size="13" font-weight="600">67%</text>
 <text x="24" y="280" fill="#e6edf3" font-size="13">UI &amp; screens</text>
 <rect x="250" y="269" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="269" width="168" height="14" rx="7" fill="#f85149"/>
-<text x="652" y="280" fill="#f85149" font-size="13" font-weight="600">43%</text>
+<rect x="250" y="269" width="148" height="14" rx="7" fill="#f85149"/>
+<text x="652" y="280" fill="#f85149" font-size="13" font-weight="600">38%</text>
 <text x="24" y="314" fill="#e6edf3" font-size="13">Quests &amp; progress</text>
 <rect x="250" y="303" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="303" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="314" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<rect x="250" y="303" width="292" height="14" rx="7" fill="#d29922"/>
+<text x="652" y="314" fill="#d29922" font-size="13" font-weight="600">75%</text>
 <text x="24" y="348" fill="#e6edf3" font-size="13">Audio</text>
 <rect x="250" y="337" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
 <rect x="250" y="337" width="261" height="14" rx="7" fill="#f85149"/>

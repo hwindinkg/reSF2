@@ -63,6 +63,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
+        ("gravity / impulses point UP instead of down (reported)", False),
     ]),
     ("Combat", [
         ("intervals, hit capsules, damage, block, shock", True),
@@ -70,14 +71,15 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("`kick-ko`, `boss-hit-probe`, `disarm-ai`, `doublesweep`", True),
         ("`enemy-kit` / `equip-fight` - enemy and player weapons", True),
         ("player throw: gate correct, probe cannot hold the range", False),
+        ("mid-fight disarm: moves/sounds stay on the lost weapon instead of fists", False),
     ]),
     ("AI", [
         ("`enemy-move-audit` - the enemy must attack", True),
         ("Random tactic: `diff:challenge` / `boss-lynx` / `tournament` = 0", True),
         ("Gc pump driven by fired events (`Gc.Tu` -> `Su.dea` -> `DK`)", True),
-        ("Tabular/Survival: 863 divergences against the oracle", False),
+        ("Tabular/Survival: 0 divergences against the oracle", True),
         ("`fk=9` (dodge) and `fk=10` (block) never fire in a live fight", False),
-        ("in Survival one clean hit kills the enemy (Eclipse x4000)", False),
+        ("in Survival one clean hit kills the enemy (Eclipse x4000) - unverified after the align fix", False),
     ]),
     ("UI & screens", [
         ("fight HUD: bars, portraits, names, style meter", True),
@@ -87,11 +89,15 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("results: `<Reward><Item>` drops are not granted", False),
         ("map: a completed battle still offers FIGHT", False),
         ("shop: solver state on the preview start", False),
+        ("energy dialog: raw variable names instead of labels, no crystal "
+        "grant, HUD energy tap and the green plus are dead", False),
     ]),
     ("Quests & progress", [
         ("`quest-verify`, `quest-verify-buy`", True),
         ("`tutorial-chain-verify` (training -> shop -> map)", True),
         ("`tutorial-real-verify`, `dialog-verify`", True),
+        ("quests stall after buying the knives until a restart (reported)",
+         False),
     ]),
     ("Audio", [
         ("bus, voice pool (2 loops + 16 one-shots), de-dup", True),
@@ -107,7 +113,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("RU/EN, fighter names and the VS intro", True),
     ]),
     ("Harness & verification", [
-        ("30 gates, `--full` exit 0", True),
+        ("31 gates, `--full` exit 0", True),
         ("oracle runner + `compare_state` / `compare_audio` / `ui_diff`", True),
         ("`--replay` drives one script on both sides", True),
     ]),
