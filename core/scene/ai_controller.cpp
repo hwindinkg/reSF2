@@ -893,6 +893,25 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
 // Batons fighter BatonsSlash/…. Without this the base-slot list is empty and
 // every Tabular decision falls through to `<CautiousMovements>` (`Step`),
 // i.e. the reported "non-boss AI just walks and never attacks".
+// The SAME membership test as `resolve_candidate`, but the result keeps the
+// fighter's OWN move-list order (`ra.xC` group children are registered in
+// moves.xml order). The alphabetical `std::map` order changed the roulette
+// order: `ld` came out [StepBack, StepForward] where the JS has
+// [StepForward, StepBack], so the same `Da.pg` roll picked a different move.
+std::vector<const MoveDef*> resolve_candidate_ordered(
+    const std::string& anim, const std::vector<const MoveDef*>& own) {
+    std::vector<const MoveDef*> out;
+    for (const MoveDef* m : own) {
+        if (m == nullptr) continue;
+        if (m->name == anim || m->template_tags.count(anim) > 0 ||
+            std::find(m->anim_names.begin(), m->anim_names.end(), anim) !=
+                m->anim_names.end()) {
+            out.push_back(m);
+        }
+    }
+    return out;
+}
+
 std::vector<const MoveDef*> resolve_candidate(const std::string& anim,
                                               const std::map<std::string, MoveDef>& moves) {
     std::vector<const MoveDef*> out;
@@ -2552,8 +2571,12 @@ int AiController::pqb(const AiFightState& st) {
             // and returns the watch state (`oC=3,pH=!0`).
             wb_.clear();
             if (moves_ != nullptr) {
+                const std::vector<const MoveDef*> own =
+                    st.my_moves != nullptr ? *st.my_moves
+                                           : std::vector<const MoveDef*>();
                 for (const std::string& grp : tactic_->cautious_movements) {
-                    for (const MoveDef* m : resolve_candidate(grp, *moves_)) {
+                    for (const MoveDef* m :
+                         resolve_candidate_ordered(grp, own)) {
                         wb_.push_back({m->name, vba_full(*m, strict_end(*m))});
                     }
                 }
@@ -2908,6 +2931,16 @@ std::string AiController::update(const AiFightState& st) {
         filter_by_v1(wb_, st);
         h2a();
         // The weighted roulette (JS jL L598).
+        if (std::getenv("SF2_TRACE_LD") != nullptr) {
+            std::fprintf(stdout, "[ld] f=%d n=%zu:", st.fight_frame,
+                         ld_.size());
+            for (const auto& c : ld_) {
+                std::fprintf(stdout, " %s(wait=%d)", c.animation.c_str(),
+                             c.wait);
+            }
+            std::fprintf(stdout, "\n");
+            std::fflush(stdout);
+        }
         const int idx = pick(ld_);
         if (idx >= 0) {
             eh_ = std::max(1, vs_[static_cast<std::size_t>(idx)]);

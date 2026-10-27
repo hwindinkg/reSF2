@@ -1790,3 +1790,34 @@ KO).
 
 Роли: `compare_state.py` инвертирует стороны — `native Me <-> oracle Enemy`,
 т.е. ИИ-сторона оракула это `Me` (в `[ORACLE]` так и помечено `"ai_side":"Me"`).
+
+### ИИ: порядок кандидатов в рулетке — survival 111 -> 0 (27.10)
+
+Последняя точка расхождения survival (nat f=335 / ora 475-481) закрыта.
+
+Замер: порт стартовал `StepBack`, оракул — `StepForward`, при том что список
+кандидатов совпадал по составу. Причина — ПОРЯДОК. Отладочный трейс
+(`SF2_TRACE_LD`) показал:
+
+    порт:   [ld] f=334 n=2: StepBack(wait=0) StepForward(wait=0)
+    оракул: ai_ld_names = ['StepForward', 'StepBack']
+
+`resolve_candidate` (порт) перебирал `std::map<std::string, MoveDef>`, т.е.
+АЛФАВИТНЫЙ порядок, а JS `ra.xC` хранит детей группы в порядке регистрации из
+`moves.xml` (`Fa.amb`/`Fa.kxb`). Рулетка `Md.jL` кумулятивная, поэтому тот же
+ролл `Da.pg` попадал в другого кандидата (см. `pick(ld_)` — `roll*sum` по
+порядку списка).
+
+Реализация: `resolve_candidate_ordered(anim, own)` — та же проверка
+принадлежности (имя / `<Template>` / `xl`), но перебор по СОБСТВЕННОМУ списку
+бойца (`st.my_moves`), который идёт в порядке `moves.xml`. Применено в
+переливе `<CautiousMovements>` (`wb_`), откуда `h2a()` собирает `ld`.
+
+Результат: `diff:survival` **111 -> 0** (все 368 кадров), `diff:challenge` 0,
+`kick-ko` PASS.
+
+Замечание про baseline: `harness/gates.baseline.json` хранит survival = 863
+(старое значение). Гейт проходит и так (улучшение не регресс), но 863
+разрешает будущие регрессии вплоть до 863 — стоит опустить планку до 0:
+`python harness/gates.py --update-baseline --only diff:survival --reason "..." --yes`.
+По правилу проекта baseline двигается только с явного «ок» человека.
