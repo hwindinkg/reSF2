@@ -7037,6 +7037,41 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
 }
 
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
+    // JS `kwb` (L522) + `Wqb` (L394): a disarmed fighter loosens the weapon
+    // for `MFa` frames (`Wx`), then the weapon is DROPPED and the fighter
+    // fights with `Ub.Au` (the config `<Weapon Name="Fists">`). The port only
+    // armed the latch, so a disarmed fighter kept the lost weapon's moves and
+    // swing sounds. At `Wx == 0` swap the Weapon slot to Fists and rebuild the
+    // move list, which is what selects the attack clips + SFX.
+    if (me.shock.weapon_wx > 0) {
+        --me.shock.weapon_wx;
+    } else if (me.shock.weapon_wx == 0) {
+        me.shock.weapon_wx = -1;
+        const std::string fists = "Fists";
+        me.weapon = fists;
+        std::vector<Fighter::OwnedItem> items = me.owned_items;
+        bool had_weapon = false;
+        for (Fighter::OwnedItem& o : items) {
+            if (o.type != "Weapon") continue;
+            o.subtype = fists;
+            o.name = fists;
+            had_weapon = true;
+        }
+        if (!had_weapon) items.push_back({"Weapon", fists, fists});
+        me.owned_items = items;
+        if (moves_ != nullptr) {
+            me.fighter.build_move_list_locks(*moves_, items,
+                                             /*include_universal=*/true, fists);
+        }
+        std::fprintf(stdout, "[disarm] F%d %s DROP -> Fists (moves=%zu)\n",
+                     frame_, me.name.c_str(), me.fighter.hb().size());
+        std::fflush(stdout);
+        if (std::getenv("SF2_TRACE_MOVELIST") != nullptr) {
+            std::fprintf(stdout, "[movelist] F%d %s after drop: moves=%zu\n",
+                         frame_, me.name.c_str(), me.fighter.hb().size());
+            std::fflush(stdout);
+        }
+    }
     // The per-fighter update: the AI (or input) picks a move, the fighter
     // executes it, the physics body is rebuilt. Mirrors the JS `wd.ia` +
     // `de.ia` path (see core/scene/README.md).
