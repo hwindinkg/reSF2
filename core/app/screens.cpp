@@ -7737,6 +7737,17 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
             assets.moves, assets.clips, player_weapon_token(app));
         const auto it = idle_name.empty() ? assets.clips.end()
                                           : assets.clips.find(idle_name);
+        if (std::getenv("SF2_TRACE_PI") != nullptr) {
+            for (const char* cn : {"stance_1", "stance_2", "knives_stance"}) {
+                const auto ci = assets.clips.find(cn);
+                std::fprintf(stdout, "[pi-clip] %s frames=%zu\n", cn,
+                             ci == assets.clips.end() ? 0 : ci->second.frames.size());
+            }
+            std::fprintf(stdout, "[pi-clip] chosen=%s frames=%zu\n",
+                         idle_name.c_str(),
+                         it == assets.clips.end() ? 0 : it->second.frames.size());
+            std::fflush(stdout);
+        }
         if (!assets.merged.bones.empty() && it != assets.clips.end() &&
             !it->second.frames.empty()) {
             // The idle MoveDef drives the `Te.ia` subframe pacing (MidFrames /
@@ -7765,6 +7776,10 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
                         }
                     }
                     if (move_loop != nullptr) idle_loop = &il->second;
+                    if (std::getenv("SF2_PI_NO_LOOP") != nullptr) {
+                        move_loop = nullptr;
+                        idle_loop = nullptr;
+                    }
                 }
                 fighter = std::make_unique<sf2::scene::Fighter>();
                 fighter->set_model(assets.merged);
