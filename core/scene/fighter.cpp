@@ -1695,7 +1695,20 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             //   world_x = px[anchor] + (prev_world(Part) - sol_ma_[Part])
             // using the PRE-sample `sol_ma_`, not the first interpolated
             // sample (the buffer's slot-2 reference is the raw clip frame).
+            const float off_old = render_offset_;
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
+                std::fprintf(stdout,
+                             "[off-cap] move=%s old=%.2f new=%.2f wx=%.2f "
+                             "sol_au=%.2f sol_pu=%.2f prev_wx=%.2f\n",
+                             move.name.c_str(), static_cast<double>(off_old),
+                             static_cast<double>(render_offset_),
+                             static_cast<double>(world_x_),
+                             static_cast<double>(sol_ma_[au * 3]),
+                             static_cast<double>(sol_ma_[pu * 3]),
+                             static_cast<double>(prev_align_pivot_world_x_));
+                std::fflush(stdout);
+            }
             // [FIX cloth Y-space across a clip switch — JS `Te.Gla` L559 +
             // `Dl.oL` L293874] `render_offset_y_` is the clip->world PLACEMENT
             // (the JS `oL` origin = `world_y - sol[anchor].y`), a UNIFORM
