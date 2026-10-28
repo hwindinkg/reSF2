@@ -8818,6 +8818,35 @@ std::string dialog_line_text(App& app, const EngineDialog& d, const std::string&
     rep(text, "<image>energy</image>", "<image y=0.2>energy</image>");
     rep(text, "<image>ruby</image>", "<image s=0.8>ruby</image>");
     rep(text, "<image>gold</image>", "<image s=0.8>gold</image>");
+    // A resolved query result carries the `yxa` private-use glyphs for the
+    // markup chars (`$`, `.`, `:`, ...): `aa.yxa` (`n0a` L1217655) collapses
+    // each `@X` pair into `String.fromCodePoint(10240+g)` with `g` the index
+    // in `aa.z6`/`aa.pM` (`kMarkupZ6` + "?.$,:;" in quest_engine.cpp). The JS
+    // `Y.na` renderer maps them back to the literal char; the port's label
+    // primitive has no such glyph, so `$19.99` drew as "1999". Decode here.
+    {
+        static const std::string kPm = std::string("+-*^(){}|/&#%=! ") + "?.$,:;";
+        if (text.find("\xE2\xA0") != std::string::npos) {
+            std::string dec;
+            dec.reserve(text.size());
+            for (std::size_t p = 0; p < text.size();) {
+                const unsigned char c0 = static_cast<unsigned char>(text[p]);
+                if (c0 == 0xE2 && p + 2 < text.size() &&
+                    static_cast<unsigned char>(text[p + 1]) == 0xA0) {
+                    const unsigned char c2 = static_cast<unsigned char>(text[p + 2]);
+                    if (c2 >= 0x80 &&
+                        static_cast<std::size_t>(c2 - 0x80) < kPm.size()) {
+                        dec.push_back(kPm[static_cast<std::size_t>(c2 - 0x80)]);
+                        p += 3;
+                        continue;
+                    }
+                }
+                dec.push_back(text[p]);
+                ++p;
+            }
+            text = std::move(dec);
+        }
+    }
     return text;
 }
 
@@ -9239,6 +9268,12 @@ void draw_dialog_buttons(App& app, const EngineDialog& d, const DialogAnim& anim
         const QuestDialogPlate& p = row.plates[i];
         std::string caption = p.slot == 1 ? app.quest_engine().dialog_button_text() : p.text;
         if (caption.empty()) caption = p.text;
+        // JS `He.S` L1050-1051 runs `F.text=ba.cg(a,F.text); F.text=ba.Fz(F.text,a)`
+        // on the BUTTON plate's text node too, not just on `<Line>` rows. The
+        // energy dialog's real-money button is
+        // `Text="Empty1Param{?Item[Unlimited_Energy].RealPrice}"` (`Empty1Param`
+        // = "{0}"), so without this the caption showed the raw key + query.
+        if (!caption.empty()) caption = dialog_line_text(app, d, caption);
         draw_dialog_plate(app, caption, p.color, p.primary, p.cx, p.cy, p.w, p.h);
     }
 }
