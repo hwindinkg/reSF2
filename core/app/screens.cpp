@@ -12821,7 +12821,20 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         if (pnames.size() > 1) player_weapon_model = pnames[1];
         if (!pnames.empty() && !pnames[0].empty()) {  // skeleton slot present
             player_model_storage = assets.merge_names(pnames);
-            if (!player_model_storage.bones.empty()) player_model = &player_model_storage;
+            // A gear merge that resolves NO triangles draws nothing (the duel
+            // showed an INVISIBLE player: 67 bones / 0 tris from the save's
+            // default Skeleton/Fists/Body/Head set). Fall back to the base body
+            // so the fighter is visible.
+            if (!player_model_storage.bones.empty() &&
+                !player_model_storage.resolved_tris.empty()) {
+                player_model = &player_model_storage;
+            } else {
+                std::fprintf(stdout,
+                             "[fight] player gear model has %zu bones / %zu tris -> base body\n",
+                             player_model_storage.bones.size(),
+                             player_model_storage.resolved_tris.size());
+                std::fflush(stdout);
+            }
         }
         if (battle.enemy_not_animation && !assets.merged_bag.bones.empty()) {
             // The NotAnimation Punchbag dummy keeps its own model (its <Items>
