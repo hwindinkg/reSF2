@@ -2027,6 +2027,22 @@ void App::run_one_frame() {
             std::fflush(stdout);
         }
     }
+    // [debug] SF2_CLICK_AT2="x,y" + SF2_CLICK_FRAME2=N: a second injected tap
+    // (e.g. expand the nav, then press SHOP).
+    if (const char* ca2 = std::getenv("SF2_CLICK_AT2")) {
+        static const int f2 = []() {
+            const char* v = std::getenv("SF2_CLICK_FRAME2");
+            return v != nullptr ? std::atoi(v) : 200;
+        }();
+        if (frame_count_ == f2) {
+            double cx = 0.0, cy = 0.0;
+            if (std::sscanf(ca2, "%lf,%lf", &cx, &cy) == 2) {
+                inject_click(cx, cy);
+                std::fprintf(stdout, "[debug] click2 injected at %.1f,%.1f\n", cx, cy);
+                std::fflush(stdout);
+            }
+        }
+    }
     // [debug] SF2_KEY_PROBE="1234" presses those digits once at the click
     // frame, through the real inject_key path (overlay first).
     if (frame_count_ == click_frame) {
