@@ -269,6 +269,20 @@ struct HeadlessLoopDriver {
         if (probe_hold_ > 0 && cur == kScreenResults) {
             if (probe_ticks_++ < probe_hold_) return;
         }
+        // PROBE (temporary, `SF2_SHOP_PROBE=N`): hold the Shop screen for N
+        // present frames - the late-capture hook for the preview pose (the
+        // tour otherwise leaves the shop before the stance clip settles).
+        {
+            static int shop_hold = -1;
+            static int shop_ticks = 0;
+            if (shop_hold == -1) {
+                const char* env = std::getenv("SF2_SHOP_PROBE");
+                shop_hold = env != nullptr ? std::atoi(env) : 0;
+            }
+            if (shop_hold > 0 && cur == kScreenShop && shop_ticks++ < shop_hold) {
+                return;
+            }
+        }
 
         // Between-rounds NEXT: while the top screen is the FightScreen
         // waiting for the player (round_wait — a round ended; the next one
