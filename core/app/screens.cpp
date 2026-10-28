@@ -2876,7 +2876,11 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // .65*ea.b1 and both lines fit the 150-tall label box. Was: the default
     // 1.0 factor, whose line advance pushed line 2 past the box clip — the
     // reported truncated walk phrase.
-    draw_ui_wrapped(app, tx, ly(50.0f), (620.0f - image_w) * c, 170.0f * c, joined_lines,
+    // The label box is Fa(600-image.w+20, 150) design starting at D(50); the
+    // bar is 250 tall, so the available height is 250-50 = 200 (the old 170
+    // clipped the third wrapped line of the RU 	utorial_move
+    // "Сначала покажи,{br}как ты двигаешься!" at this font).
+    draw_ui_wrapped(app, tx, ly(50.0f), (620.0f - image_w) * c, 200.0f * c, joined_lines,
                     0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
     // gate (L1910) - only when the notification carries a button. `Bb` draws
@@ -9006,8 +9010,13 @@ bool notification_blocks_raycast(const EngineDialog& d) { return d.block_raycast
 // notification carries a button caption (`b=!(b==null||b=="")`). `Ib.RP` is
 // `He.DisableNotificationsButtons` (L1045 `Ib.RP=this.qUa`).
 bool notification_show_ok(const EngineDialog& d) {
-    return !d.disable_notifications_buttons && !d.button_actions.empty() &&
-           !d.button_text.empty();
+    // JS `Ib.RP` (He.DisableNotificationsButtons L1045) + `hab()` L1060: the
+    // Notification OK plate exists whenever the dialog HAS a `Right` slot
+    // (`He.Rib` L1057 creates `rh` even with no nested actions; the tutorial
+    // notifications are `<Button Type="Right" Color="White" Text="OK"/>`
+    // with no children). The old `!button_actions.empty()` gate dropped the
+    // plate on every such notification (the reported missing OK).
+    return !d.disable_notifications_buttons && d.has_right_button;
 }
 
 void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
