@@ -660,6 +660,10 @@ struct FightDebugSnapshot {
     int taps = 0;
 };
 
+// The save's energy cap (`internal_settings.xml` `<Power Max>`, JS `v.$Ca()`
+// = 5). Used by the quest engine when an `Energy` consumable is received.
+int energy_max_value();
+
 class FightScreen : public Screen {
 public:
     // `battle_name`/`location` = the stages.xml battle; `reward_money`/

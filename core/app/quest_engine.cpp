@@ -5380,6 +5380,23 @@ void QuestEngine::apply_effects(App& app, const QuestSideEffects& fx) {
         for (const QuestGiveItem& gi : fx.give_items) {
             if (gi.name.empty()) continue;
             const CatalogItem* cat = catalog_find(app, gi.name);
+            // `Energy` consumables (`list.xml` `Type="Energy"`,
+            // `SpendAfterUse="1"`) are USED on receipt: the JS raises the
+            // player's `Power` (the HUD energy) instead of keeping a stack. The
+            // energy dialog's "refill for 5 rubies" button does exactly this -
+            // without it the purchase charged the rubies and nothing happened.
+            if (cat != nullptr && cat->type == "Energy") {
+                const int cap = energy_max_value();
+                const int add = gi.quantity > 0 ? gi.quantity : 1;
+                const int before = w.power;
+                w.power = std::min(cap, w.power + add);
+                dirty = true;
+                std::fprintf(stdout,
+                             "[quest] Energy item %s consumed: power %d -> %d (cap %d)\n",
+                             gi.name.c_str(), before, w.power, cap);
+                std::fflush(stdout);
+                continue;
+            }
             WarriorSave::OwnedItem* owned = nullptr;
             for (WarriorSave::OwnedItem& it : w.items) {
                 if (it.name == gi.name) {

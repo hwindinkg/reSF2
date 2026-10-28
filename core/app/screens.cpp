@@ -12313,6 +12313,8 @@ void MapScreen::render_impl(App& app) {
 // FightScreen
 // ---------------------------------------------------------------------------
 
+int energy_max_value() { return energy_max(); }
+
 FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                          const std::string& location, std::int64_t reward_money,
                          std::int64_t reward_exp,
