@@ -2043,6 +2043,16 @@ void App::run_one_frame() {
             }
         }
     }
+    // [debug] `SF2_KEY_AT="<glfw_key>:<frame>"`: one injected key PRESS at the
+    // given frame through the real `inject_key` path (Esc 256 pauses a fight).
+    if (const char* ka = std::getenv("SF2_KEY_AT")) {
+        int kk = -1, kf = -1;
+        if (std::sscanf(ka, "%d:%d", &kk, &kf) == 2 && frame_count_ == kf) {
+            inject_key(kk, true);
+            std::fprintf(stdout, "[debug] key %d injected at frame %d\n", kk, kf);
+            std::fflush(stdout);
+        }
+    }
     // [debug] `SF2_CLICK_AT3="x,y"` + `SF2_CLICK_FRAME3=N`: a third injected tap
     // (nav -> screen -> in-screen tab, e.g. the profile tabs).
     if (const char* ca3 = std::getenv("SF2_CLICK_AT3")) {
