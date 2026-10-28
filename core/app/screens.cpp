@@ -22693,7 +22693,14 @@ void EquipmentScreen::render_impl(App& app) {
             const float by2 = rp.W - 70.0f;
             // `$r.Op.Wm(null, y.qB)` (L2234) with `y.qB` = "highlightButton"
             // (L2470) - the sliced atlas name, not the `Bb` class key.
-            if (!try_draw_atlas_button(app, "highlightButton", bx2, by2, bw2, bh2, 1.0f)) {
+            // `highlightButton` is a 9-SLICE frame of the `sliced` atlas (the
+            // same container the dialog plates use), not a plain atlas frame:
+            // the old `try_draw_atlas_button` lookup missed it and fell back
+            // to a flat box (the oracle `moves.png` shows the beige notched
+            // plate). Draw it through the sliced path first.
+            if (!(load_sliced_atlas(app) &&
+                  draw_bb_plate(app, "highlightButton", bx2, by2, bw2, bh2, 1.0f,
+                                false))) {
                 draw_flat_button(app, "VIEW", bx2, by2, bw2, bh2, 0.85f, 0.78f, 0.55f,
                                  false);
             }
@@ -22887,18 +22894,40 @@ void EquipmentScreen::render_impl(App& app) {
                               40.0f, loc(app, ar.name, ar.name), 0.95f, UiAlign::Left,
                               0.184f, 0.145f, 0.106f);
                 const std::string dk = ar.description.empty() ? ar.name : ar.description;
+                // JS `as.ba` L2210: the description label is `Fa(a, b*0.4)` with
+                // `ua(a*0.13)` and `Kc(0.7)`. The old fixed 0.52 drew ~1.2x the
+                // oracle's cap height (measured 18 px vs 15 px on
+                // `profile_tab2`), so it wrapped one word earlier
+                // ("Победы" / "безупречно в 1" instead of "Победы безупречно").
                 draw_ui_wrapped(app, rp.J + pad, rp.P + 78.0f, rp.width() - 2.0f * pad,
                                 rp.height() - 156.0f, loc_template(app, dk, ar.name),
-                                0.52f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                                0.35f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
                 if (ar.money_prize > 0 || ar.bonus_prize > 0) {
-                    char rb[64];
-                    // The RU `achievementReward` value already carries its
-                    // trailing colon ("НАГРАДА:"), so join with a space.
-                    std::snprintf(rb, sizeof(rb), "%s %d",
-                                  loc(app, "achievementReward", "REWARD:").c_str(),
-                                  ar.money_prize + ar.bonus_prize);
-                    draw_ui_label(app, rp.J + pad, rp.W - 58.0f, rp.width() - 2.0f * pad,
-                                  30.0f, rb, 0.7f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                    // JS `as.refresh` L2210: `b + " <image>" + icon + "</image> " + a`
+                    // with the icon `p.o.Vf` (money) or `Z.Ur` (ruby). The port
+                    // drew the bare number (the oracle `profile_tab2` shows the
+                    // ruby glyph between "НАГРАДА:" and the count).
+                    const std::string rlabel =
+                        loc(app, "achievementReward", "REWARD:");
+                    const int ramount = ar.money_prize + ar.bonus_prize;
+                    const float rscale = 0.40f;
+                    const sf2::data::font* rf = app.menu_font();
+                    const float rw = rf != nullptr
+                                         ? app.measure_text(*rf, rlabel, rscale * ea_a1(app))
+                                         : 0.0f;
+                    const float rx = rp.J + pad;
+                    const float ry = rp.W - 58.0f;
+                    draw_ui_label(app, rx, ry, rp.width() - 2.0f * pad, 30.0f, rlabel,
+                                  rscale, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                    const char* ricon = ar.money_prize > 0 ? "gold" : "ruby";
+                    const float isz = 26.0f;
+                    (void)try_draw_atlas_button(app, ricon, rx + rw + isz * 0.6f,
+                                                ry + 12.0f, isz, isz, 1.0f);
+                    char rb[32];
+                    std::snprintf(rb, sizeof(rb), "%d", ramount);
+                    draw_ui_label(app, rx + rw + isz * 1.2f + 4.0f, ry,
+                                  rp.width() - 2.0f * pad, 30.0f, rb, rscale,
+                                  UiAlign::Left, 0.184f, 0.145f, 0.106f);
                 }
             }
         }
