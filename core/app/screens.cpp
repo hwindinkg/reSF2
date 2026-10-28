@@ -9360,7 +9360,17 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         // `sqb` L1953: one text node per `<Line>`, `b += f.ew() + e.offsetY`,
         // all inside the scroll container `this.yO`.
         float y = L.body_y;
+        // JS `uj` keeps the lines inside the SCROLL container `this.yO`
+        // (`Fa`-sized), so a body longer than the frame scrolls/clips instead
+        // of running under the plate row. The port drew every line at its
+        // measured height with no cap: the shop-assistant `restoreMessage2`
+        // dialog (6 wrapped lines) put its last row UNDER the СПАСИБО plate.
+        // The scroll frame ends ABOVE the plate row (`Cd` sits at
+        // `a + Cd.qa/2`), so the body must not run under the buttons.
+        const float body_bottom =
+            std::min(L.body_y + L.body_h, L.btn_cy - L.btn_h * 0.5f - 8.0f);
         for (std::size_t i = 0; i < d.lines.size(); ++i) {
+            if (y >= body_bottom) break;
             const std::string text = dialog_line_text(app, d, d.lines[i]);
             const float h = measure_ui_wrapped(
                 app, text, kOdBodyW * c,
@@ -9368,7 +9378,8 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
                 kOdBodyKc);
             float rr = 0.12f, gg = 0.09f, bb = 0.06f;
             dialog_row_color(d, i, rr, gg, bb);
-            draw_ui_wrapped(app, L.body_x, y, L.body_w, h, text,
+            const float draw_h = std::min(h, body_bottom - y);
+            draw_ui_wrapped(app, L.body_x, y, L.body_w, draw_h, text,
                             dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
                             UiAlign::Left, rr, gg, bb, kOdBodyKc);
             y += h;
@@ -19805,6 +19816,17 @@ void ShopScreen::update_impl(float dt) {
             } else {
                 purchase_price_plate(app(), pit);
             }
+            // JS `Ao.Qg` (L574833): the `M8`/`pVa` price plate press ends with
+            // `Sb.F().kk(!1)` + `this.sa()`, which resumes the parked
+            // `StoryTutorialBuyItem` tail (step -> MAP + the buy dialog + the
+            // Map guidance). The tutorial's `OpenShop` highlight leads the
+            // player to THIS unarmed plate (`buy_armed_` stays -1), so the
+            // same completion must run here. Without it the knives were bought
+            // but the chain stayed parked and the `ShopBuy` highlight stayed on
+            // every price plate until a restart (the reported "bought the
+            // knives, nothing happens, the highlight stays").
+            app().quest_engine().complete_guided("ShopBuy");
+            app().quest_engine().resume_buy_item(app());
         }
     }
     // Shared `za` nav column (JS `ma.D1` L1831): `D1` destroys the live `za`
