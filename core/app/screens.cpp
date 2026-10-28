@@ -22210,6 +22210,15 @@ void EquipmentScreen::render_impl(App& app) {
             // `profileNoSkills` — the min perk tier is 2.
             if (pr.state == 0 && w.level >= pr.tier) any_avail = true;
         }
+        if (std::getenv("SF2_TRACE_PROFILE")) {
+            std::fprintf(stdout, "[profile] rows=%zu learned=%d avail=%d left=%.0f,%.0f %.0fx%.0f\n",
+                         perk_rows_.size(), any_learned ? 1 : 0, any_avail ? 1 : 0,
+                         static_cast<double>(pl.left_slot.J),
+                         static_cast<double>(pl.left_slot.P),
+                         static_cast<double>(pl.left_slot.width()),
+                         static_cast<double>(pl.left_slot.height()));
+            std::fflush(stdout);
+        }
         if (!any_learned) {
             // `ei.zs` wraps (`ea.rd(!0)`, L2206) into the panel: oracle shows
             // "У вас нет / изученных / умений" (3 centred lines).
@@ -22218,6 +22227,56 @@ void EquipmentScreen::render_impl(App& app) {
                             pl.left_slot.width() - 28.0f, 100.0f,
                             loc(app, "ProfileNoPerks", "You have no learned skills"),
                             0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        } else {
+            // JS `XB=ei` learned grid (`Gk`): the learned perks as icon cells
+            // (`Ye.wza(perk.image)` -> the atlas frame). The port drew NOTHING
+            // when the player had learned perks, so the left parchment panel
+            // was blank (the oracle fills it with the learned list / the
+            // `ProfileNoPerks` text when empty).
+            struct LearnedCell {
+                std::string image;  // perks.xml `Image` (the `Ed.Fs` icon)
+                std::string name;
+            };
+            std::vector<LearnedCell> cells;
+            for (const PerkRow& pr : perk_rows_) {
+                if (pr.learned_level <= 0) continue;
+                cells.push_back({pr.image, pr.name});
+            }
+            if (std::getenv("SF2_TRACE_PROFILE")) {
+                std::fprintf(stdout, "[profile] learned cells=%zu first='%s' img='%s'\n",
+                             cells.size(),
+                             cells.empty() ? "" : cells.front().name.c_str(),
+                             cells.empty() ? "" : cells.front().image.c_str());
+                std::fflush(stdout);
+            }
+            if (!cells.empty()) {
+                const float panel_w = pl.left_slot.width() - 28.0f;
+                const float cell = std::min(panel_w * 0.25f, 74.0f);
+                const float gap = 8.0f;
+                const float x0 = pl.left_slot.J + 14.0f + cell * 0.5f;
+                const float y0 = pl.left_slot.P + 22.0f + cell * 0.5f;
+                const float bottom = pl.left_slot.P + pl.left_slot.height() - 14.0f;
+                std::size_t i = 0;
+                for (const LearnedCell& c : cells) {
+                    const float cx = x0 + static_cast<float>(i % 4) * (cell + gap);
+                    const float cy = y0 + static_cast<float>(i / 4) * (cell + gap);
+                    if (cy + cell * 0.5f > bottom) break;
+                    // The SAME icon path the perk-tree cell uses (`Ed.Fs`
+                    // -> the perks.xml `Image` on the skills atlas).
+                    bool drew = draw_cell_icon(app, c.image, cx, cy,
+                                               cell * 0.92f, cell * 0.92f, 1.0f);
+                    if (!drew) {
+                        // The perk-icon atlas frame is missing in this build:
+                        // fall back to the localized name so the panel is
+                        // never blank (the oracle lists every learned perk).
+                        draw_ui_wrapped(app, cx - cell * 0.5f,
+                                        cy - cell * 0.5f, cell, cell,
+                                        loc(app, c.name, c.name), 0.42f,
+                                        UiAlign::Center, 0.184f, 0.145f, 0.106f);
+                    }
+                    ++i;
+                }
+            }
         }
         if (!any_avail) {
             draw_ui_wrapped(app, pl.right_slot.J + 14.0f,
@@ -22225,6 +22284,32 @@ void EquipmentScreen::render_impl(App& app) {
                             pl.right_slot.width() - 28.0f, 72.0f,
                             loc(app, "profileNoSkills", "No available skills"), 0.5f,
                             UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        } else {
+            // `zr=Yr` available list (the mirror of the learned grid): the
+            // perks the player can learn now (`ds.MCa`: `Be == 0` and the
+            // player's level >= the tier). The port drew nothing when the
+            // list was non-empty, so the right parchment panel was blank.
+            std::vector<std::string> avail;
+            for (const PerkRow& pr : perk_rows_) {
+                if (pr.state == 0 && w.level >= pr.tier) avail.push_back(pr.image);
+            }
+            if (!avail.empty()) {
+                const float panel_w = pl.right_slot.width() - 28.0f;
+                const float cell = std::min(panel_w * 0.25f, 74.0f);
+                const float gap = 8.0f;
+                const float x0 = pl.right_slot.J + 14.0f + cell * 0.5f;
+                const float y0 = pl.right_slot.P + 22.0f + cell * 0.5f;
+                const float bottom = pl.right_slot.P + pl.right_slot.height() - 14.0f;
+                std::size_t i = 0;
+                for (const std::string& img : avail) {
+                    const float cx = x0 + static_cast<float>(i % 4) * (cell + gap);
+                    const float cy = y0 + static_cast<float>(i / 4) * (cell + gap);
+                    if (cy + cell * 0.5f > bottom) break;
+                    draw_cell_icon(app, img, cx, cy, cell * 0.92f, cell * 0.92f,
+                                   1.0f);
+                    ++i;
+                }
+            }
         }
     }
     if (!perk_rows_.empty()) {

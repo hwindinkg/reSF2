@@ -1715,15 +1715,30 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             const float off_old = render_offset_;
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
             if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
+                float raw_d = sol_ma_[pu * 3];
+                if (current_clip_ != nullptr && !current_clip_->frames.empty()) {
+                    const std::size_t f0 = static_cast<std::size_t>(
+                        std::max(0, std::min(move_base_,
+                                             static_cast<int>(current_clip_->frames.size()) - 1)));
+                    const auto& fb = current_clip_->frames[f0].bones;
+                    if (pv >= 0 && static_cast<std::size_t>(pv) < fb.size()) {
+                        raw_d = (clip_mirror_ < 0 ? -1.0f : 1.0f) *
+                                fb[static_cast<std::size_t>(pv)].x;
+                    }
+                }
                 std::fprintf(stdout,
                              "[off-cap] move=%s old=%.2f new=%.2f wx=%.2f "
-                             "sol_au=%.2f sol_pu=%.2f prev_wx=%.2f\n",
+                             "sol_au=%.2f sol_pu=%.2f prev_wx=%.2f raw=%.2f "
+                             "mirror=%d swap=%d\n",
                              move.name.c_str(), static_cast<double>(off_old),
                              static_cast<double>(render_offset_),
                              static_cast<double>(world_x_),
                              static_cast<double>(sol_ma_[au * 3]),
                              static_cast<double>(sol_ma_[pu * 3]),
-                             static_cast<double>(prev_align_pivot_world_x_));
+                             static_cast<double>(prev_align_pivot_world_x_),
+                             static_cast<double>(raw_d),
+                             static_cast<int>(clip_mirror_),
+                             mirror_swap_ ? 1 : 0);
                 std::fflush(stdout);
             }
             // [FIX cloth Y-space across a clip switch — JS `Te.Gla` L559 +
