@@ -8873,7 +8873,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         int victim_frames = 0;
         for (int f = 0; f < 90; ++f) {
-            if (f < 40) ctl.debug_place_fighters(690.0f, 750.0f);
+            // NO per-frame re-park: the throw's own `<Align>` moves the victim,
+            // and forcing the roots every frame fights it (the old probe
+            // measured a bogus 121 -> 950 "jump" that was the teleport).
             ctl.update(1.0f / 60.0f);
             const sf2::scene::MoveDef* pm = ctl.player().fighter.current_move();
             const sf2::scene::MoveDef* em = ctl.enemy().fighter.current_move();
