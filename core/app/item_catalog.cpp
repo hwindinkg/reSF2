@@ -428,6 +428,14 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         // L175260: `a.Yb != "Offer" ? a.Yb == "DailyOffer" : true` — i.e. the
         // `SubType` is "Offer" or "DailyOffer" (both carry `Type="RealMoneyItem"`,
         // `I.wk` L1272054).
+        // JS item ctor (L164): the RealPrice attribute is captured for EVERY
+        // item (xr/Hp), not only for offers. The energy dialog's real-money
+        // button reads ?Item[Unlimited_Energy].RealPrice and that item is a
+        // plain RealMoneyItem (SubType=UnlimitedEnergy) - without this the
+        // price resolved to "" and the caption showed the raw query tail.
+        if (item.attribute("RealPrice")) {
+            ci.offer_real_price = item.attribute("RealPrice").value();
+        }
         ci.is_offer = ci.subtype == "Offer" || ci.subtype == "DailyOffer";
         if (ci.is_offer) {
             ci.offer_kind = ci.subtype;

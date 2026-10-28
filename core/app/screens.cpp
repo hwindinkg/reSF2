@@ -872,63 +872,85 @@ float measure_ui_wrapped(App& app, const std::string& text, float w, float ua_sc
 }
 
 // One CENTRED rich-text line: the JS `Y.na` output may carry inline
-// `<image>name</image>` runs (dialog buttons format `dlgStoryBtnBuyEnergyForGems`
-// as "RESTORE {0} <image>ruby</image>"). `draw_ui_label` is a plain-text
-// primitive, so the raw markup used to leak into the caption ("ВОСПОЛНИТЬ
-// <image>ruby</image>"). This measures the whole line (text + sprites) and then
-// lays it out from the centre.
-void draw_ui_rich_line_centered(App& app, float cx, float y, float h,
+// `<image>name</image>` runs (dialog buttons format
+// `dlgStoryBtnBuyEnergyForGems` as "RESTORE {0} <image>ruby</image>").
+// `draw_ui_label` is a plain-text primitive, so the raw markup used to leak into
+// the caption. This measures the whole line (text + sprites) and fits it into
+// the SAME box `draw_ui_label(fit=true)` would use - without the fit the caption
+// overflowed its plate (reported after the first version).
+void draw_ui_rich_line_centered(App& app, float cx, float w, float y, float h,
                                 const std::string& text, float ua_scale, float r,
                                 float g, float b) {
-    if (text.empty()) return;
+    if (text.empty() || w <= 0.0f) return;
+    const sf2::data::font* font = app.menu_font();
+    if (font == nullptr) return;
     const UiWrap wr = wrap_ui_text(app, text, 100000.0f, ua_scale);
     if (wr.lines.empty()) return;
     const std::string& ln = wr.lines.front();
-    const float line_step = wr.line_step;
-    const sf2::data::font* font = app.menu_font();
-    const float scale = ua_scale * ea_a1(app);
-    auto run_width = [&](const std::string& seg) -> float {
-        if (seg.empty() || font == nullptr || scale <= 0.0f) return 0.0f;
-        return app.measure_text(*font, seg, scale);
+    // split into runs (text / image index) once
+    struct Run {
+        std::string text;
+        int image = -1;
     };
-    // measure
-    float total = 0.0f;
-    std::size_t img_m = 0;
-    for (std::size_t p = 0; p < ln.size();) {
+    std::vector<Run> runs;
+    for (std::size_t p = 0, img = 0; p < ln.size();) {
         const std::size_t ph = ln.find('\x01', p);
         const std::string seg =
             ln.substr(p, ph == std::string::npos ? std::string::npos : ph - p);
-        total += run_width(seg);
+        if (!seg.empty()) runs.push_back({seg, -1});
         if (ph == std::string::npos) break;
-        if (img_m < wr.images.size()) {
-            const RichImage& ri = wr.images[img_m++];
-            total += line_step * (ri.scale > 0.0f ? ri.scale : 1.0f);
-        }
+        runs.push_back({"", static_cast<int>(img)});
+        ++img;
         p = ph + 1;
     }
-    // draw
-    float x = cx - total * 0.5f;
-    std::size_t img_i = 0;
-    for (std::size_t p = 0; p < ln.size();) {
-        const std::size_t ph = ln.find('\x01', p);
-        const std::string seg =
-            ln.substr(p, ph == std::string::npos ? std::string::npos : ph - p);
-        if (!seg.empty()) {
-            draw_ui_label(app, x, y, total, h, seg, ua_scale, UiAlign::Left, r, g,
-                          b, 1.0f, /*fit=*/false);
-            x += run_width(seg);
+    // `Sk`-style fit: shrink until the whole line fits `w` (and `h`).
+    float eff = ua_scale;
+    for (int pass = 0; pass < 4 && eff > 0.0f; ++pass) {
+        const float scale = eff * ea_a1(app);
+        const float line_step = scale * static_cast<float>(font->line_height) *
+                                app.ui_text_spacing_scale();
+        float total = 0.0f;
+        for (const Run& rn : runs) {
+            if (rn.image >= 0) {
+                const float sz = line_step * (wr.images[static_cast<std::size_t>(rn.image)].scale > 0.0f
+                                                  ? wr.images[static_cast<std::size_t>(rn.image)].scale
+                                                  : 1.0f);
+                total += sz;
+            } else {
+                total += app.measure_text(*font, rn.text, scale);
+            }
         }
-        if (ph == std::string::npos) break;
-        if (img_i < wr.images.size()) {
-            const RichImage& ri = wr.images[img_i++];
+        if (total <= w && line_step <= h) break;
+        if (total > w) eff *= w / total;
+        if (line_step > h) eff *= h / line_step;
+    }
+    const float scale = eff * ea_a1(app);
+    const float line_step = scale * static_cast<float>(font->line_height) *
+                            app.ui_text_spacing_scale();
+    float total = 0.0f;
+    for (const Run& rn : runs) {
+        if (rn.image >= 0) {
+            const float rs = wr.images[static_cast<std::size_t>(rn.image)].scale;
+            total += line_step * (rs > 0.0f ? rs : 1.0f);
+        } else {
+            total += app.measure_text(*font, rn.text, scale);
+        }
+    }
+    float x = cx - total * 0.5f;
+    for (const Run& rn : runs) {
+        if (rn.image >= 0) {
+            const RichImage& ri = wr.images[static_cast<std::size_t>(rn.image)];
             const float size = line_step * (ri.scale > 0.0f ? ri.scale : 1.0f);
             const float iy = y + line_step * 0.5f + ri.y * line_step;
             try_draw_atlas_button(app, ri.name, x + size * 0.5f, iy, size, size,
                                   1.0f, /*fill=*/false, /*flip_x=*/false,
                                   /*top_left=*/false);
             x += size;
+        } else {
+            draw_ui_label(app, x, y, total, h, rn.text, eff, UiAlign::Left, r, g,
+                          b, 1.0f, /*fit=*/false);
+            x += app.measure_text(*font, rn.text, scale);
         }
-        p = ph + 1;
     }
 }
 
@@ -9024,8 +9046,10 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
           draw_bb_plate(app, quest_button_frame(color, primary), cx, cy, w, h, 1.0f, false))) {
         draw_flat_button(app, "", cx, cy, w, h, 0.6f, 0.5f, 0.3f, false);
     }
-    draw_ui_rich_line_centered(app, cx, cy - 14.0f, 28.0f, loc(app, text, text),
-                               0.9f, 1.0f, 1.0f, 1.0f);
+    // The JS od/Bb caption uses the dialog's own dark ink (the oracle's
+    // dojo_sensei "В БОЙ" plate), not white: white washed the caption out.
+    draw_ui_rich_line_centered(app, cx, w, cy - 14.0f, 28.0f,
+                               loc(app, text, text), 0.9f, 0.12f, 0.09f, 0.06f);
 }
 
 // One plate of the dialog's button row. `slot` is the `He.dhb` L1061 index
@@ -15184,8 +15208,17 @@ void FightScreen::render_impl(App& app) {
     // the offset (`FightCamera::shake_x_`) but never applied it, so the screen
     // never shook. `center_*` is in world units, so divide by the zoom.
     if (cam.zoom > 0.0001f) {
-        camera.center_x -= cam.shake_x() / cam.zoom;
-        camera.center_y -= cam.shake_y() / cam.zoom;
+        // The JS writes the offset into the camera NODE's local 	ranslate;
+        // the node sits inside the scaled scene graph, so one unit is NOT one
+        // screen pixel. The port applies it in screen px, which read as too
+        // violent (12 oscillations of +-4.5 px on a crit). 0.5 is the
+        // presentation tune; SF2_SHAKE_SCALE overrides it.
+        static const float shake_scale = []() {
+            const char* v = std::getenv("SF2_SHAKE_SCALE");
+            return v != nullptr ? static_cast<float>(std::atof(v)) : 0.5f;
+        }();
+        camera.center_x -= cam.shake_x() * shake_scale / cam.zoom;
+        camera.center_y -= cam.shake_y() * shake_scale / cam.zoom;
     }
     ren.begin_frame(camera);
     // [M2 — scene/camera visibility gate] JS `XF` (L370) ->

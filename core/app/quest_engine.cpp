@@ -781,6 +781,13 @@ bool QuestEngine::ensure_loaded(App& app) {
         }
         load_quest_file(app, "quests.xml");
         loaded_ = true;
+        if (const char* q = std::getenv("SF2_QUEST_Q")) {
+            std::string qv;
+            const bool ok = resolve_query(app, q, load_ctx_, qv);
+            std::fprintf(stdout, "[quest-q] '%s' -> ok=%d '%s'\n", q,
+                         ok ? 1 : 0, qv.c_str());
+            std::fflush(stdout);
+        }
         std::fprintf(stdout,
                      "[quest] engine loaded: %zu quests from %zu files, %zu battle zones, "
                      "%zu unanswerable queries\n",

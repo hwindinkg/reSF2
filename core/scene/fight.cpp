@@ -3041,7 +3041,18 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     std::vector<std::string> enemy_own_perks;
     append_perk_names(setup.enemy.perks, enemy_own_perks);
     append_perk_names(setup.enemy.item_refs, enemy_own_perks);
-    enemy_ = make_fighter(enemy_.name, false, ex, ey, emax, "Fists",
+    // The move list follows the enemy's OWN weapon subtype (its Weapon item),
+    // not a hard-coded Fists: after a disarm the next round restored the weapon
+    // MODEL while the list stayed fists (reported "the weapon is back but he
+    // punches"). owned carries the resolved kit.
+    std::string enemy_subtype = "Fists";
+    for (const sf2::scene::OwnedItem& o : setup.enemy.owned) {
+        if (o.type == "Weapon" && !o.subtype.empty()) {
+            enemy_subtype = o.subtype;
+            break;
+        }
+    }
+    enemy_ = make_fighter(enemy_.name, false, ex, ey, emax, enemy_subtype,
                           setup.enemy.owned, battle_.enemy_not_ai,
                           battle_.enemy_not_animation, mode_model, enemy_own_perks,
                           merged_perk_names(perk_setup_.learned_refs,
