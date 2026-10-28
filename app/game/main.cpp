@@ -2040,6 +2040,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // union fix on a shipped two-interval pair (default FansSuperSlash).
     bool area_probe = false;  // --area-probe: RandomArea/Darkness rule probe
     bool d3_probe = false;
+    // [probe] `--throw-probe`: force a throw on the player against a live AI
+    // opponent and log whether the VICTIM animation starts on the enemy.
+    bool throw_probe = false;
     // [probe, authorised] `--wall-probe`: force the `<Position Object="Wall">`
     // moves (WallJump_100 / HunterFly_150 / WaspFly_150) and a throw near the
     // right wall, dumping the rendered root x + pose x-extent per frame — the
@@ -2687,6 +2690,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             force_loss = true;
         } else if (arg == "--area-probe") {
             area_probe = true;
+        } else if (arg == "--throw-probe") {
+            throw_probe = true;
         } else if (arg == "--d3-probe") {
             d3_probe = true;
         } else if (arg == "--wall-probe") {
@@ -8767,6 +8772,127 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const bool hit = ctl.debug_d3_probe(d3_probe_frame);
         app.shutdown();
         return hit ? 0 : 1;
+    } else if (throw_probe) {
+        // ------------------------------------------------------------------
+        // `--throw-probe`: force `ThrowThroughTheBack` on the player against
+        // a live AI opponent parked 60 units away and log, per frame, the
+        // player's and the enemy's current move. The throw's authored
+        // `<PlayAnimation Player="Enemy" Animation="ThrowThroughTheBackV"
+        // Frame="3"/>` must start the VICTIM move on the enemy; a missing
+        // victim is the reported "cannot throw the opponent".
+        // ------------------------------------------------------------------
+        if (!app.has_fight_assets()) {
+            std::fprintf(stderr, "[throwprobe] fight assets not loaded\n");
+            app.shutdown();
+            return 1;
+        }
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::BattleParams battle;
+        battle.name = "Training";
+        battle.location = "dojo";
+        battle.rounds = 2;
+        battle.round_time = 99;
+        battle.max_hp = 100;
+        battle.player_spawn_x = 690.0f;
+        battle.player_spawn_y = -93.0f;
+        battle.enemy_spawn_x = 750.0f;
+        battle.enemy_spawn_y = -93.0f;
+        const std::vector<sf2::scene::OwnedItem> owned =
+            loadout_owned(loadout.empty() ? std::string("Fists") : loadout);
+        sf2::scene::Model player_model_storage;
+        const sf2::scene::Model* player_model = nullptr;
+        {
+            std::vector<sf2::scene::Model> parts;
+            parts.push_back(fa.skeleton);
+            if (!fa.body.bones.empty()) parts.push_back(fa.body);
+            if (!fa.head.bones.empty()) parts.push_back(fa.head);
+            player_model_storage = sf2::scene::build_fighter_model(parts);
+            if (!player_model_storage.bones.empty()) {
+                player_model = &player_model_storage;
+            }
+        }
+        sf2::scene::FightController ctl;
+        std::mt19937 rng(0x5F2);
+        auto roll01 = [&rng]() {
+            return static_cast<float>(rng()) / static_cast<float>(rng.max());
+        };
+        const sf2::scene::TacticDef* tactic = nullptr;
+        const auto tit = fa.tactic_defs.find("Standard");
+        if (tit != fa.tactic_defs.end()) tactic = &tit->second;
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips,
+                       fa.select_tactics("Fists", battle.enemy_weapon_subtype),
+                       tactic, "Player", "Enemy", battle.player_spawn_x,
+                       battle.player_spawn_y, battle.enemy_spawn_x,
+                       battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
+                       roll01, owned, sf2::scene::PerkSetup(), nullptr,
+                       player_model);
+        ctl.release_intro();
+        {
+            int pguard = 0;
+            while (pguard < 20000 && ctl.phase() != 2) {
+                ctl.update(1.0f / 60.0f);
+                ++pguard;
+            }
+            std::fprintf(stdout, "[throwprobe] phase=%d (guard %d)\n",
+                         ctl.phase(), pguard);
+            std::fflush(stdout);
+        }
+        ctl.debug_place_fighters(690.0f, 750.0f);
+        for (int i = 0; i < 4; ++i) ctl.update(1.0f / 60.0f);
+        ctl.debug_place_fighters(690.0f, 750.0f);
+        // Drive the REAL input path: hold Back (the keyboard move path emits
+        // `back` tap -> the buffered `back/hold` after the age tick), then tap
+        // Punch. This is exactly what `FightScreen::on_key` feeds.
+        const char* mode = std::getenv("SF2_THROW_FORCE");
+        const bool force = mode != nullptr && std::atoi(mode) != 0;
+        bool started = false;
+        if (force) {
+            started = ctl.debug_force_player_move("ThrowThroughTheBack");
+        } else {
+            ctl.player_input(sf2::scene::key_type::back,
+                             sf2::scene::press_type::tap);
+            // Keep the AI far away during the hold so it cannot throw first,
+            // then step in only for the Punch tap (the throw's Distance gate).
+            for (int i = 0; i < 8; ++i) {
+                ctl.debug_place_fighters(690.0f, 1100.0f);
+                ctl.update(1.0f / 60.0f);
+            }
+            std::fprintf(stdout, "[throwprobe] after Back hold: move=%s\n",
+                         ctl.player().fighter.current_move() != nullptr
+                             ? ctl.player().fighter.current_move()->name.c_str()
+                             : "-");
+            ctl.debug_place_fighters(690.0f, 750.0f);
+            ctl.update(1.0f / 60.0f);
+            ctl.debug_place_fighters(690.0f, 750.0f);
+            ctl.player_input(sf2::scene::key_type::punch,
+                             sf2::scene::press_type::tap);
+            started = true;
+        }
+        std::fprintf(stdout, "[throwprobe] %s ThrowThroughTheBack -> %s\n",
+                     force ? "force" : "input", started ? "sent" : "refused");
+        std::fflush(stdout);
+        int victim_frames = 0;
+        for (int f = 0; f < 90; ++f) {
+            if (f < 40) ctl.debug_place_fighters(690.0f, 750.0f);
+            ctl.update(1.0f / 60.0f);
+            const sf2::scene::MoveDef* pm = ctl.player().fighter.current_move();
+            const sf2::scene::MoveDef* em = ctl.enemy().fighter.current_move();
+            const std::string pn = pm != nullptr ? pm->name : std::string("-");
+            const std::string en = em != nullptr ? em->name : std::string("-");
+            if (en == "ThrowThroughTheBackV") ++victim_frames;
+            std::fprintf(stdout,
+                         "[throwprobe] f=%d player=%s@%d enemy=%s@%d x=%.1f/%.1f\n",
+                         f, pn.c_str(), ctl.player().fighter.move_frame(),
+                         en.c_str(), ctl.enemy().fighter.move_frame(),
+                         static_cast<double>(ctl.player().fighter.world_x()),
+                         static_cast<double>(ctl.enemy().fighter.world_x()));
+            std::fflush(stdout);
+        }
+        std::fprintf(stdout, "[throwprobe] victim frames=%d -> %s\n",
+                     victim_frames, victim_frames > 0 ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        app.shutdown();
+        return victim_frames > 0 ? 0 : 1;
     } else if (wave_probe) {
         // [probe] `--wave-probe`: boot a MULTI-WAVE boss fight (default
         // BOSS_LYNX/ZONE_1 Fight 6: Rounds=3, 3 warriors 195/198/200) and KO

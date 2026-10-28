@@ -1445,6 +1445,23 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // move's FIRST-frame actions fire (`Te.Lwa` L563-564).
     last_action_frame_ = -1;
     ended_move_ = nullptr;
+    // [DIAGNOSTIC] SF2_TRACE_ACT=1: dump a throw move's authored actions at
+    // start (frame triggers only) so a missing PlayAnimation (the throw
+    // victim) is distinguishable from a dispatch bug.
+    {
+        static const bool trace_act = std::getenv("SF2_TRACE_ACT") != nullptr;
+        if (trace_act && move.name.rfind("Throw", 0) == 0) {
+            std::fprintf(stdout, "[act] start %s actions=%zu:",
+                         move.name.c_str(), move.actions.size());
+            for (const sf2::scene::MoveAction& a : move.actions) {
+                std::fprintf(stdout, " %s(frame=%d,trig=%d,ev=%s)",
+                             a.kind.c_str(), a.frame, a.frame_trigger ? 1 : 0,
+                             a.event.c_str());
+            }
+            std::fprintf(stdout, "\n");
+            std::fflush(stdout);
+        }
+    }
     // [FIX Phase 4a — pacing / slow-mo] Subframes per clip-frame (JS
     // `Te.Gka` L23485: `Tx = model.model.HD()`, `rpa.initialize((Ua.XJ+1)*Tx)`).
     // `Tx` = the SlowModel `KT` scale (the finishing-blow slow-mo = `v.on()`

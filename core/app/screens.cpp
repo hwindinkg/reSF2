@@ -39,6 +39,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <random>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -6162,6 +6163,39 @@ PlayerRuleOverride battle_player_override(const std::string& battle_name,
                 const std::string nm = r.attribute("Name").value();
                 if (!nm.empty()) out.items.push_back(nm);
                 out.has = true;
+            } else if (tag == "RandomRule") {
+                // JS `pn` (RandomRule, L879) -> `M4()`: collect the ACTIVE
+                // `<EquipItem>` children and pick ONE with
+                // `b = (len * Da.pg.jf()) | 0` (the fight's random stream).
+                // The picked `hn` (EquipItem) rule is then applied like a
+                // direct child, i.e. to the PLAYER by default. The Duel battle
+                // ships three `Refresh="EachFight"` groups (weapons, helmets,
+                // armor), so the player is dealt a random kit every duel —
+                // the reported "the duel should give random armor and weapon".
+                // Without this the port only read DIRECT `<EquipItem>` rows and
+                // the duel player fell back to the save's bare Skeleton/Fists/
+                // Body/Head set (an invisible model).
+                std::vector<std::string> picks;
+                for (const pugi::xml_node c : r.children()) {
+                    if (std::string(c.name()) != "EquipItem") continue;
+                    if (std::string(c.attribute("ApplyTo").value()) == "Bot") continue;
+                    const std::string nm = c.attribute("Name").value();
+                    if (!nm.empty()) picks.push_back(nm);
+                }
+                if (!picks.empty()) {
+                    // `Da.pg.jf()` = Math.random; one shared process stream.
+                    static std::mt19937 rng{std::random_device{}()};
+                    std::uniform_int_distribution<std::size_t> pick(0,
+                                                                    picks.size() - 1);
+                    const std::string& nm = picks[pick(rng)];
+                    out.items.push_back(nm);
+                    out.has = true;
+                    std::fprintf(stdout,
+                                 "[rules] RandomRule %s: %zu candidates -> %s\n",
+                                 r.attribute("Refresh").value(), picks.size(),
+                                 nm.c_str());
+                    std::fflush(stdout);
+                }
             }
         }
     } catch (const std::exception&) {
