@@ -17405,6 +17405,17 @@ constexpr float kRevealCountStar = 1.0f;  // `Pr.aa` `this.ed(1)`
 constexpr float kRevealSettle = kRevealDelay + kRevealSlide * 6.0f + kRevealCountStar;
 } // namespace
 
+// JS `Lr.Kub(ca.Ka())` (L86344): the results STORE plate gate —
+// `a.Da.type == "FightSurvival" || p.o.zi.VQ()` -> hidden, else
+// `!this.Hi.zd()`. The port knows the battle NAME (Survival) and has no
+// story-fight flag, so a Survival fight hides it and every other battle shows
+// it (the oracle `results_win` МАГАЗИН plate).
+static bool results_store_visible(App& app) {
+    const PendingBattle& pb = app.pending_battle();
+    if (pb.battle_name == "Survival") return false;
+    return true;
+}
+
 void ResultsScreen::update_impl(float dt) {
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
     // JS `Lr`/`Or` reveal clock (L2057-2081): the `kk` results container
@@ -17468,6 +17479,16 @@ void ResultsScreen::update_impl(float dt) {
         reveal_done_ = true;
         std::fprintf(stdout, "[result] click -> fast-forward reveal (Efb/Nda)\n");
         std::fflush(stdout);
+    } else if (p.pressed &&
+               results_store_visible(app()) &&
+               std::abs(static_cast<float>(p.x) - (kViewW * 0.5f + 132.0f)) <= 115.0f &&
+               std::abs(static_cast<float>(p.y) - 645.0f) <= 26.0f) {
+        // JS `Il.pa.addListener(...)` -> `kk.aab` = `QUEST_EVENT_SHOP_BUTTON_PRESS`
+        // (L86344/L86357). The port opens the Shop over the results; the
+        // results stay underneath so OK still returns to the Map.
+        std::fprintf(stdout, "[result] STORE -> Shop\n");
+        std::fflush(stdout);
+        manager().push(make_screen(manager(), kScreenShop));
     } else if (p.pressed) {
         std::fprintf(stdout, "[result] OK -> back to Map\n");
         std::fflush(stdout);
@@ -17666,6 +17687,18 @@ void ResultsScreen::render_impl(App& app) {
         // counter beside the star, the total money beside the gold.
         {"", "", exp_reward_, 0, false, true},
     };
+    if (std::getenv("SF2_TRACE_RESULTS")) {
+        std::fprintf(stdout,
+                     "[results] reveal_t=%.3f t=%.3f settle=%.2f exp=%lld money=%lld "
+                     "rows_shown_gate=%d\n",
+                     static_cast<double>(reveal_t_),
+                     static_cast<double>(reveal_t_ - kRevealDelay),
+                     static_cast<double>(kRevealSettle),
+                     static_cast<long long>(exp_reward_),
+                     static_cast<long long>(money_reward_),
+                     reveal_done_ ? 1 : 0);
+        std::fflush(stdout);
+    }
     constexpr float kKkRowX = 420.0f;    // label left edge
     constexpr float kKkCoinX = 822.0f;   // gold coin centre
     constexpr float kKkValX = 838.0f;    // value left edge (cyan)
@@ -17801,8 +17834,17 @@ void ResultsScreen::render_impl(App& app) {
     // once the last row lands (`Lr.XMa` L2071-2072) — the port gates it on
     // `reveal_done_`.
     if (reveal_done_) {
-        const float okx = kViewW * 0.5f;
+        // JS `Lr` ctor (L86329-86357): the OK plate (`$g`, EButtonWhite) plus
+        // an optional RETRY (`Hl`, ctor arg `c`) and STORE (`Il`, EButtonGreen,
+        // `dlgStoryBtnStore`) plate. `bza()` shows all three. The STORE gate is
+        // `Kub(ca.Ka())` (L86344): hidden for a Survival fight and while a
+        // quest blocks the shop, shown otherwise. The port drew only OK, so
+        // the oracle's `results_win` МАГАЗИН plate was missing.
+        const bool store_visible = results_store_visible(app);
+        const float cx = kViewW * 0.5f;
         const float oky = 645.0f;
+        const float half = store_visible ? 132.0f : 0.0f;
+        const float okx = cx - half;
         // `$g.V(Y.na("OK"))` (L2075): the plate caption is the localized `OK`
         // key, not a literal.
         const std::string ok_label = loc(app, "OK", "OK");
@@ -17812,6 +17854,16 @@ void ResultsScreen::render_impl(App& app) {
         }
         draw_ui_label(app, okx - 105.0f, oky - 13.0f, 210.0f, 26.0f, ok_label, 0.85f,
                       UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        if (store_visible) {
+            const float stx = cx + half;
+            const std::string st_label = loc(app, "dlgStoryBtnStore", "SHOP");
+            if (!draw_bb_plate(app, "btnGreen", stx, oky, 230.0f, 52.0f, 1.0f)) {
+                draw_flat_button(app, st_label, stx, oky, 210.0f, 48.0f, 0.35f, 0.6f,
+                                 0.25f, false);
+            }
+            draw_ui_label(app, stx - 105.0f, oky - 13.0f, 210.0f, 26.0f, st_label,
+                          0.85f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        }
     }
     // The `FirstGuardBeaten` chain (`quests.xml` L260-282) is `Place="Map"`
     // (JS `Gib` L517394): its dialogs own the MAP after the OK press
