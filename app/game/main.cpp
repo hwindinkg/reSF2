@@ -8882,12 +8882,39 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             const std::string pn = pm != nullptr ? pm->name : std::string("-");
             const std::string en = em != nullptr ? em->name : std::string("-");
             if (en == "ThrowThroughTheBackV") ++victim_frames;
+            // [jerk probe] the max per-bone movement between consecutive
+            // frames: a 1-frame whole-model stretch shows up as a spike that
+            // is far above the clip's normal per-frame motion.
+            float pd = 0.0f, ed = 0.0f;
+            {
+                const std::vector<float>& p1 = ctl.player().fighter.positions();
+                const std::vector<float>& p2 = ctl.enemy().fighter.positions();
+                auto delta = [](const std::vector<float>& a,
+                                const std::vector<float>& b) -> float {
+                    if (a.size() != b.size() || a.empty()) return 0.0f;
+                    float m = 0.0f;
+                    for (std::size_t k = 0; k + 1 < a.size(); k += 2) {
+                        const float dx = a[k] - b[k];
+                        const float dy = a[k + 1] - b[k + 1];
+                        const float d = std::sqrt(dx * dx + dy * dy);
+                        if (d > m) m = d;
+                    }
+                    return m;
+                };
+                static std::vector<float> prev_p, prev_e;
+                pd = delta(p1, prev_p);
+                ed = delta(p2, prev_e);
+                prev_p = p1;
+                prev_e = p2;
+            }
             std::fprintf(stdout,
-                         "[throwprobe] f=%d player=%s@%d enemy=%s@%d x=%.1f/%.1f\n",
+                         "[throwprobe] f=%d player=%s@%d enemy=%s@%d x=%.1f/%.1f "
+                         "dmax=%.2f/%.2f\n",
                          f, pn.c_str(), ctl.player().fighter.move_frame(),
                          en.c_str(), ctl.enemy().fighter.move_frame(),
                          static_cast<double>(ctl.player().fighter.world_x()),
-                         static_cast<double>(ctl.enemy().fighter.world_x()));
+                         static_cast<double>(ctl.enemy().fighter.world_x()),
+                         static_cast<double>(pd), static_cast<double>(ed));
             std::fflush(stdout);
         }
         std::fprintf(stdout, "[throwprobe] victim frames=%d -> %s\n",

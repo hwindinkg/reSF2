@@ -3262,7 +3262,14 @@ void Fighter::wall_repulsion_step() {
     else if (fx > hi) shift = fx - hi;
     wall_rep_last_ = shift;  // `this.Hla = f`
     if (shift == 0.0f) return;
-    for (int s = c; s < size; ++s) {
+    // JS `Iub` shifts ONLY the two control points that follow the current
+    // playhead: `a=c; for(c=this.jc.size<c+2?this.jc.size:c+2; a<c;) ... x-=f`
+    // (L285930). The port shifted EVERY remaining slot, so the first bounce
+    // re-placed the whole tail of the buffer at once and the current Bezier
+    // span (its P2 is slot `c`) snapped for one frame - the reported 1-frame
+    // stretch on the first wall bounce.
+    const int end = std::min(size, c + 2);
+    for (int s = c; s < end; ++s) {
         wall_shift_[static_cast<std::size_t>(s)] += shift;  // `x -= f`
     }
 }
