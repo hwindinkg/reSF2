@@ -2084,6 +2084,30 @@ FightFighter FightController::make_fighter(
                                        subtype);
         f.owned_items = owned;  // the `ra.Hza` item set (disarm rebuild)
     }
+    // [probe, authorised] SF2_MODEL_PROBE: the weapon/chain bones of the
+    // merged model (the kusarigama rope measurement).
+    if (std::getenv("SF2_MODEL_PROBE") != nullptr) {
+        int shown = 0;
+        for (const sf2::scene::Bone& b : f.fighter.model().bones) {
+            const bool interesting =
+                b.name.find("Kusarigama") != std::string::npos ||
+                b.name.find("Chain") != std::string::npos ||
+                b.name.find("Rope") != std::string::npos ||
+                b.name.find("Weapon") != std::string::npos ||
+                b.name.find("Blade") != std::string::npos;
+            if (!interesting) continue;
+            std::fprintf(stdout,
+                         "[model] %s bone=%s cloth=%d fixed=%d macro=%d shock=%d weak=%d mass=%.4f bind=%.1f,%.1f\n",
+                         f.name.c_str(), b.name.c_str(), b.cloth ? 1 : 0,
+                         b.fixed ? 1 : 0, b.is_macro ? 1 : 0, b.shock ? 1 : 0,
+                         b.weak ? 1 : 0, static_cast<double>(b.mass),
+                         static_cast<double>(b.x), static_cast<double>(b.y));
+            ++shown;
+        }
+        std::fprintf(stdout, "[model] %s weapon-ish bones=%d total=%zu\n",
+                     f.name.c_str(), shown, f.fighter.model().bones.size());
+        std::fflush(stdout);
+    }
     // [probe, authorised] `SF2_TRACE_MOVELIST=1`: what the fighter's own list
     // actually holds (the `de.V1` `my_moves` set the AI filters against).
     if (std::getenv("SF2_TRACE_MOVELIST") != nullptr) {
