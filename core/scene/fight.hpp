@@ -1665,7 +1665,12 @@ struct ChildModel {
     int clip_frame = 0;      // frame cursor (60 Hz)
     float x = 0.0f;          // world anchor (`prb`/`TT` inherit the spawner)
     float y = 0.0f;
-    int facing = 1;          // spawner's `da.hd()` sign
+    int facing = 1;          // spawner's `facing()` (the model mirror sign)
+    int mirror = 1;          // spawner's `da.hd()` (the CLIP mirror; flight dir)
+    // The child's collision body (JS `ih.Nl`): the missile's own capsule set,
+    // built from its posed model so `Cl.ia` (hit_test) can test its
+    // `<AttackingParts>` edges against the target.
+    sf2::scene::BodyState body;
 };
 
 // One HUD callout signal (`Gr`/`Hx`, g="40E"/"40D", L2048-2052). JS producers:
@@ -2859,8 +2864,13 @@ public:
     // from the spawner's merged body. The models.dat cache lives in the app
     // layer, so the app supplies the resolved child model here (nullptr = keep
     // the spawner's shared `model_`, the previous behaviour).
+    // `owner_items` = the SPAWNER's live owned items: JS `parameters.Fd(type,
+    // subtype)` resolves a `<Item CopyParentType>` against the spawner's SLOT
+    // map, which for a multi-wave boss is the CURRENT wave's kit (the app's
+    // captured first-warrior list is stale from round 2 on).
     using ChildModelProvider = std::function<const sf2::scene::Model*(
-        const sf2::scene::MoveAction&, bool /*is_player*/)>;
+        const sf2::scene::MoveAction&, bool /*is_player*/,
+        const std::vector<sf2::scene::OwnedItem>& /*owner_items*/)>;
     void set_child_model_provider(ChildModelProvider f) {
         child_model_provider_ = std::move(f);
     }

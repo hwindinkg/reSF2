@@ -1068,7 +1068,8 @@ void FightController::spawn_child(FightFighter& owner,
         // here; without a provider the spawner's `model_` is kept.
         const sf2::scene::Model* child_model = nullptr;
         if (child_model_provider_) {
-            child_model = child_model_provider_(act, owner.is_player);
+            child_model = child_model_provider_(act, owner.is_player,
+                                                owner.owned_items);
         }
         c->fighter.set_model(child_model != nullptr ? *child_model : model_);
         std::fprintf(stdout,
@@ -1164,15 +1165,18 @@ void FightController::spawn_child(FightFighter& owner,
     c->x = owner.fighter.world_x();
     c->y = owner.fighter.world_y();
     c->facing = owner.fighter.facing();
+    c->mirror = owner.fighter.clip_mirror();
     c->clip = nullptr;
     c->clip_name.clear();
     c->clip_frame = 0;
     // `a.zWa(e)` — `vd.push(e)`.
     std::fprintf(stdout,
-                 "[child] F%d %s CreatePlayer name=%s key=%s at=%.0f,%.0f\n",
+                 "[child] F%d %s CreatePlayer name=%s key=%s at=%.0f,%.0f facing=%d foe_x=%.0f foe_facing=%d\n",
                  frame_, owner.name.c_str(), act.create_name.c_str(),
                  act.create_cache_key.c_str(), static_cast<double>(c->x),
-                 static_cast<double>(c->y));
+                 static_cast<double>(c->y), c->facing,
+                 static_cast<double>(owner.fighter.enemy_x()),
+                 owner.is_player ? enemy_.fighter.facing() : player_.fighter.facing());
     std::fflush(stdout);
     // JS `Gc.Fw` (L28325-28329) -> `Gnb`/`Rwa`/`EZa` (L28531-28570): the
     // newborn's `<Birth>` event pick. `RangedKunaiWeapon` / `RangedBlasterModel`
@@ -1432,7 +1436,11 @@ void FightController::advance_child(std::size_t i) {
     // the bow's arrow stayed on the bow (`не вылетает стрела`) and the blaster
     // bolt never left the muzzle. Y is authored up-negative in the XML.
     if (c.move != nullptr && c.move->velocity.has_velocity) {
-        c.x += c.move->velocity.x * static_cast<float>(c.facing >= 0 ? 1 : -1);
+        // JS Ja L20892-20926: .x *= b with  = the CLIP MIRROR
+        // (da.hd()), NOT the acing() sign — the two are opposite in this
+        // port (clip_mirror_ = sign(enemy_x - world_x), measured: the enemy
+        // at x=159 with the player at 607 has facing=-1 / clip_mirror=+1).
+        c.x += c.move->velocity.x * static_cast<float>(c.mirror >= 0 ? 1 : -1);
         c.y -= c.move->velocity.y;
     }
     // [safety, documented] JS retires a missed missile with its own
@@ -1454,6 +1462,171 @@ void FightController::advance_child(std::size_t i) {
         std::fflush(stdout);
     }
     c.fighter.sample(*c.clip, c.clip_frame, c.x, c.y, c.facing);
+    // JS `wd.HZa` (L20684-20702): a child runs its OWN Attack interval
+    // (`a.da.yD(4)`) against the opposing model (`Cl.ia` capsule SAT) and
+    // `Kwb` (L21034-21043) applies the strike with the child as the attacker.
+    // Without this the arrow/bolt flew through the target with no damage and
+    // never reached its `<Delete Player="Me" Event="Strike"/>`.
+    if (c.move != nullptr) {
+        FightFighter& victim = c.is_player ? enemy_ : player_;
+        FightFighter atk;  // the `ih extends wd` view `hit_test` needs
+        atk.name = c.name.empty() ? std::string("Child") : c.name;
+        atk.fighter = c.fighter;
+        atk.params = c.is_player ? player_.params : enemy_.params;
+        atk.is_player = c.is_player;
+        atk.owned_items = (c.is_player ? player_ : enemy_).owned_items;
+        // NO foe-bone fallback (nullptr): the child's body must carry only its
+        // OWN capsules. With the fallback, y_name("RANGED-Edge1") resolved
+        // the VICTIM's capsule and the edge-based test degenerated into a
+        // self-test (measured: no hit).
+        c.body.build(c.fighter.model(), c.fighter.positions(), wall_min_,
+                     wall_max_, nullptr, nullptr);
+        atk.body = c.body;
+        // The interval window comes from the CHILD's clip length: the child's
+        // Fighter never runs a move (move_end_frame_ == 0), so
+        // interval_last would clamp a no-End interval to frame 2 and the
+        // missile would only test its first two frames (measured: the
+        // shuriken passed the player at frame ~5 with no hit).
+        const sf2::scene::Interval* pick = nullptr;
+        if (std::getenv("SF2_CHILD_TICK") != nullptr && c.clip_frame == 3) {
+            std::fprintf(stdout, "[child-tick]   move=%s intervals=%zu bodycaps=%zu\n",
+                         c.move->name.c_str(), c.move->intervals.size(),
+                         c.body.capsules.size());
+            for (const auto& cap : c.body.capsules) {
+                std::fprintf(stdout, "[child-tick]     cap %s coll=%d\n",
+                             cap.name.c_str(), cap.collidable ? 1 : 0);
+            }
+            std::fprintf(stdout, "[child-tick]   OLD-HEADER move=%s intervals=%zu bodycaps=%zu\n",
+                         c.move->name.c_str(), c.move->intervals.size(),
+                         c.body.capsules.size());
+            for (const auto& iv : c.move->intervals) {
+                std::fprintf(stdout, "[child-tick]     iv type=%d start=%d end=%d def=%d\n",
+                             iv.type, iv.start, iv.end, iv.end_default ? 1 : 0);
+            }
+            std::fflush(stdout);
+        }
+        for (const sf2::scene::Interval& iv : c.move->intervals) {
+            if (iv.type != 4) continue;
+            const int st = std::max(iv.start, c.move->first_frame);
+            const int en = iv.end_default ? static_cast<int>(n) + 2 : iv.end;
+            const int lim = std::min(en, static_cast<int>(n) - 1);
+            if (st <= c.clip_frame && c.clip_frame <= lim) {
+                pick = &iv;
+                break;
+            }
+        }
+        if (pick != nullptr) {
+            sf2::scene::HitCapsule hit_cap;
+            sf2::scene::CapsuleHit ch;
+            const sf2::scene::Interval* hit_iv = nullptr;
+            const sf2::scene::HitCapsule* atk_cap = nullptr;
+            bool hit = false;
+            // Do the move's <AttackingParts> edges resolve in the CHILD's
+            // body? The missile model's capsule names are its own (the merged
+            // mdl_skeleton_missile + ranged part gives 8 capsules, none
+            // named RANGED-Edge1), so the edge-based Cl.ia cannot connect
+            // and the geometric fallback below is the only option.
+            bool edges_resolvable = false;
+            for (const std::string& part : pick->attacking_parts) {
+                if (c.body.by_name(part) != nullptr) {
+                    edges_resolvable = true;
+                    break;
+                }
+            }
+            if (edges_resolvable) {
+                hit = hit_test(atk, victim, *c.move, c.clip_frame, hit_cap, ch,
+                               hit_iv, atk_cap);
+                if (std::getenv("SF2_CHILD_TICK") != nullptr) {
+                    const sf2::scene::HitCapsule* ac =
+                        c.body.by_name("RANGED-Edge1");
+                    float best = 1e9f;
+                    std::string bn = "-";
+                    for (const auto& tgt : victim.body.capsules) {
+                        if (!tgt.collidable) continue;
+                        const float dx = (tgt.p1.x + tgt.p2.x) * 0.5f - c.x;
+                        const float dy = (tgt.p1.y + tgt.p2.y) * 0.5f - c.y;
+                        const float d = std::sqrt(dx * dx + dy * dy);
+                        if (d < best) { best = d; bn = tgt.name; }
+                    }
+                    std::fprintf(stdout,
+                                 "[child-tick]   edge f=%d hit=%d acap=%d at=%.0f,%.0f nearest=%s %.1f vcaps=%zu\n",
+                                 c.clip_frame, hit ? 1 : 0, ac != nullptr ? 1 : 0,
+                                 static_cast<double>(c.x), static_cast<double>(c.y),
+                                 bn.c_str(), static_cast<double>(best),
+                                 victim.body.capsules.size());
+                    std::fflush(stdout);
+                }
+            } else {
+                // [documented approximation] The projectile's OWN model
+                // (`mdl_skeleton_missile` + the copied ranged part) carries no
+                // capsule geometry in this build (`capsules=0`), so the
+                // JS edge-based `Cl.ia` (`<AttackingParts><Edge
+                // Name="RANGED-Edge1"/>`) has nothing to resolve. Test the
+                // missile's POSITION against the target's capsules instead;
+                // the damage/impulse still come from the move's own
+                // `<Interval Type="Attack">` via `apply_hit`.
+                sf2::scene::HitCapsule self;
+                self.name = "Missile";
+                // A short SEGMENT along the flight direction, not a point:
+                // capsule_capsule_overlap guards degenerate (p1==p2)
+                // segments ($z = |a-b|<1e-10), and the swept segment also
+                // matches the JS frame-delta test better.
+                self.p1 = sf2::scene::Vec3{c.x - 8.0f, c.y, 0.0f};
+                self.p2 = sf2::scene::Vec3{c.x + 8.0f, c.y, 0.0f};
+                self.r1 = self.p1;
+                self.r2 = self.p2;
+                self.radius = 14.0f;
+                self.collidable = true;
+                if (std::getenv("SF2_CHILD_TICK") != nullptr) {
+                    float best = 1e9f;
+                    for (const auto& tgt : victim.body.capsules) {
+                        if (!tgt.collidable) continue;
+                        const float dx = (tgt.p1.x + tgt.p2.x) * 0.5f - c.x;
+                        const float dy = (tgt.p1.y + tgt.p2.y) * 0.5f - c.y;
+                        const float d = std::sqrt(dx * dx + dy * dy) - tgt.radius;
+                        if (d < best) best = d;
+                    }
+                    std::fprintf(stdout,
+                                 "[child-tick]   test f=%d at=%.0f,%.0f caps=%zu nearest=%.1f\n",
+                                 c.clip_frame, static_cast<double>(c.x),
+                                 static_cast<double>(c.y),
+                                 victim.body.capsules.size(),
+                                 static_cast<double>(best));
+                    std::fflush(stdout);
+                }
+                for (const sf2::scene::HitCapsule& tgt : victim.body.capsules) {
+                    if (!tgt.collidable) continue;
+                    sf2::scene::CapsuleHit och;
+                    if (!sf2::scene::capsule_capsule_overlap(self, tgt, och)) {
+                        continue;
+                    }
+                    hit_cap = tgt;
+                    ch = och;
+                    hit = true;
+                    break;
+                }
+                hit_iv = pick;
+            }
+            if (hit && hit_iv != nullptr) {
+                std::fprintf(stdout,
+                             "[child] F%d child '%s' HIT %s cap=%s dmg=%.3f\n",
+                             frame_, c.name.c_str(), victim.name.c_str(),
+                             hit_cap.name.c_str(),
+                             static_cast<double>(hit_iv->damage));
+                std::fflush(stdout);
+                apply_hit(atk, victim, *c.move, *hit_iv, hit_cap, ch,
+                          c.clip_frame, atk_cap);
+                // JS `<Delete Player="Me" Event="Strike"/>` on the missile.
+                for (const sf2::scene::MoveAction& a : c.move->actions) {
+                    if (a.frame_trigger || a.event != "Strike") continue;
+                    if (a.kind == "Delete" && a.player == 1) {
+                        remove_child(i);
+                        return;
+                    }
+                }
+            }
+        }
+    }
     if (static_cast<std::size_t>(c.clip_frame) + 1 < n) {
         ++c.clip_frame;
         return;
@@ -2104,8 +2277,9 @@ FightFighter FightController::make_fighter(
                          static_cast<double>(b.x), static_cast<double>(b.y));
             ++shown;
         }
-        std::fprintf(stdout, "[model] %s weapon-ish bones=%d total=%zu\n",
-                     f.name.c_str(), shown, f.fighter.model().bones.size());
+        std::fprintf(stdout, "[model] %s weapon-ish bones=%d total=%zu capsules=%zu\n",
+                     f.name.c_str(), shown, f.fighter.model().bones.size(),
+                     f.fighter.model().capsules.size());
         std::fflush(stdout);
     }
     // [probe, authorised] `SF2_TRACE_MOVELIST=1`: what the fighter's own list

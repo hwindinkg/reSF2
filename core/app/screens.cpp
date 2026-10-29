@@ -6934,6 +6934,12 @@ std::string child_item_model(const std::vector<CatalogItem>& catalog,
     };
     const CatalogItem* ci = find(item.name);
     if (ci == nullptr && !item.copy_type.empty()) {
+        // JS parameters.Fd(type, subtype) reads the SLOT map: xc.hk
+        // overwrites the slot in <Items> order, so the LAST item of that
+        // type wins. The first-match loop picked the NoRanged placeholder
+        // over the real RANGED_SHURIKENS, so a missile child got a
+        // skeleton-only model (ones=4 tris=0 capsules=0) and its
+        // <AttackingParts> edges could never hit (measured).
         for (const std::string& sn : spawner_items) {
             const CatalogItem* s = find(sn);
             if (s == nullptr || s->type != item.copy_type) continue;
@@ -6941,7 +6947,6 @@ std::string child_item_model(const std::vector<CatalogItem>& catalog,
                 continue;
             }
             ci = s;
-            break;
         }
     }
     return ci != nullptr ? ci->model : std::string();
@@ -6955,16 +6960,26 @@ const sf2::scene::Model* child_model_for(
     FightAssets& assets, const std::vector<CatalogItem>& catalog,
     const sf2::scene::MoveAction& act, bool is_player,
     const std::vector<std::string>& spawner_items) {
-    const std::string key =
-        std::string(is_player ? "P:" : "E:") + act.create_cache_key;
-    const auto it = assets.child_models.find(key);
-    if (it != assets.child_models.end()) {
-        return it->second.bones.empty() ? nullptr : &it->second;
-    }
+    // The parts are resolved BEFORE the cache lookup so the key carries them:
+    // the same `<CreatePlayer>` action spawns with a different copied weapon
+    // in a later wave (Lynx round 2 carries RANGED_SHURIKENS), and the cached
+    // skeleton-only model must not be reused.
     std::vector<std::string> parts;
     for (const sf2::scene::MoveAction::ChildItem& item : act.child_items) {
         const std::string m = child_item_model(catalog, item, spawner_items);
         if (!m.empty()) parts.push_back(m);
+    }
+    std::string key = std::string(is_player ? "P:" : "E:") + act.create_cache_key;
+    for (const std::string& pn : parts) key += "|" + pn;
+    const auto it = assets.child_models.find(key);
+    if (it != assets.child_models.end()) {
+        return it->second.bones.empty() ? nullptr : &it->second;
+    }
+    if (std::getenv("SF2_MODEL_PROBE") != nullptr) {
+        std::fprintf(stdout, "[child-model] %s parts=%zu:", key.c_str(), parts.size());
+        for (const std::string& pn : parts) std::fprintf(stdout, " %s", pn.c_str());
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
     }
     sf2::scene::Model built =
         parts.empty() ? sf2::scene::Model{} : assets.merge_names(parts);
@@ -13095,11 +13110,18 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
         App* app_ptr = &app();
         fight_->set_child_model_provider(
             [app_ptr, child_catalog, p_items, e_items](
-                const sf2::scene::MoveAction& act, bool is_player)
+                const sf2::scene::MoveAction& act, bool is_player,
+                const std::vector<sf2::scene::OwnedItem>& owner_items)
                 -> const sf2::scene::Model* {
+                // The spawner's LIVE kit (the current wave), names in slot
+                // order; fall back to the captured first-warrior list.
+                std::vector<std::string> names;
+                for (const sf2::scene::OwnedItem& oi : owner_items) {
+                    if (!oi.name.empty()) names.push_back(oi.name);
+                }
+                if (names.empty()) names = is_player ? p_items : e_items;
                 return child_model_for(app_ptr->fight_assets(), child_catalog,
-                                       act, is_player,
-                                       is_player ? p_items : e_items);
+                                       act, is_player, names);
             });
     }
     const std::string& enemy_name = app().pending_battle().enemy_name;
