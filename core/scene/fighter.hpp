@@ -502,6 +502,11 @@ public:
     // JS `Pi.job` L444: re-seat the preview anchor at `Pi.J9` (called every
     // update, so the clip's root motion never accumulates).
     void reseat_preview_anchor(float node_x, float node_y);
+    // [FIX shop preview cloth] JS `Pi.ia` (L18401) keeps the model in place by
+    // setting the NODE x each frame (`this.C(0)`), i.e. a RIGID node transform,
+    // NOT a solver re-seat. Shifting the solver every frame yanks the cloth
+    // (the headband) with the body. This shifts only the DRAWN positions.
+    void preview_render_shift(float node_x, float node_y);
     void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                             float node_x = 0.0f, float node_y = -93.0f,
                             bool reseat = true);
