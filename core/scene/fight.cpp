@@ -3180,6 +3180,9 @@ void FightController::spawn_next_enemy_wave() {
     if (!wv.tactic.empty() && enemy_.ai != nullptr && tactic_defs_ != nullptr) {
         const auto it = tactic_defs_->find(wv.tactic);
         if (it != tactic_defs_->end()) enemy_.ai->set_tactic(&it->second);
+        std::fprintf(stdout, "[ai] wave tactic '%s' -> %s\n", wv.tactic.c_str(),
+                     it != tactic_defs_->end() ? "applied" : "NOT FOUND");
+        std::fflush(stdout);
     }
     // `Wk` (L811) enemy perk refs: warrior `<Perks>` then item `Oa` — the
     // combined list `equipped_perks` built (AK-before-Oa order preserved).

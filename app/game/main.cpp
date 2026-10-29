@@ -8992,6 +8992,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // Tactic (e.g. `Lynx_Ranged`) and perks can be observed.
             if (const char* hold_env = std::getenv("SF2_WAVE_HOLD")) {
                 const int hold = std::atoi(hold_env);
+                // SF2_WAVE_HOLD_ROUND=N (1-based): hold only that round.
+                const char* hr_env = std::getenv("SF2_WAVE_HOLD_ROUND");
+                const int hold_round = hr_env != nullptr ? std::atoi(hr_env) : 0;
+                if (hold_round != 0 && hold_round != round + 1) {
+                    // not the observed round: KO immediately
+                } else
                 for (int hf = 0; hf < hold && !fs->battle_over(); ++hf) {
                     glfwPollEvents();
                     app.run_one_frame();

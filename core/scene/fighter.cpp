@@ -215,20 +215,21 @@ void Fighter::build_move_list_locks(
         // PERK_RAT_WAVE + Skeleton, Priority 110 - it won the Up key and
         // played `rats_wave`). `weapon_subtype` empty keeps the legacy
         // Locks-only behaviour for the display/probe callers.
-        if (!weapon_subtype.empty() && !m.tactic_weapon.empty()) {
-            bool allows = false;
-            if (!m.qx.empty()) {
-                for (const std::string& w : m.qx) {
-                    if (w == weapon_subtype) {
-                        allows = true;
-                        break;
-                    }
-                }
-            } else {
-                allows = m.tactic_weapon == weapon_subtype;
-            }
-            if (!allows) continue;
-        }
+        // JS `ra.Hza` (L28883-28913) tests ONLY the move's `<Locks>` against
+        // the fighter's item/perk set:
+        //   `b=f.va.locks; if(f.nw(d,b)){ if(!(a.parameters.eK!=null &&
+        //    f.jZ(a.parameters.eK))) a.me.push(f) }`
+        // `jZ` (L29535) is the `<Rule Type="ERuleNoAnimation">` exclusion
+        // (`eK` is filled by `du.zva` L37999 from the rule's TacticWeapon tags
+        // — no shipped stage carries such a rule). The port instead required
+        // `TacticWeapon == the equipped WEAPON slot's subtype`, which dropped
+        // EVERY ranged/magic move for a melee fighter: the Lynx (Claws +
+        // RANGED_SHURIKENS, Tactic="Lynx_Ranged") never got
+        // `RangedShurikenPlayer` in `hb_` (measured: its pick list had only
+        // melee moves), so it never threw a shuriken or cast magic. The
+        // TacticWeapon attribute is a TACTIC/weight label (`Gsb` -> `QX`), not
+        // a move-list gate.
+        (void)weapon_subtype;
         if (m.locks.empty()) {
             // No locks -> universal (JS: every move's Skeleton lock passes).
             if (include_universal) hb_.push_back(&m);
