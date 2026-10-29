@@ -1657,6 +1657,11 @@ struct ChildModel {
     std::vector<const sf2::scene::MoveDef*> hb;   // JS `me` (copied items)
     const sf2::data::anim_clip* clip = nullptr;   // the playing clip (`Ua`)
     std::string clip_name;   // current animation name
+    // The move whose clip is playing (`Gc.Nsb` resolved it): its `<Velocity>`
+    // is applied every frame and its `<Events>` drive the clip-end pick
+    // (`Gc.Gnb` -> `Rwa`/`EZa`), which is how a missile chains
+    // `...ArrowStart` -> `...ArrowMiddle` (the flight clip).
+    const sf2::scene::MoveDef* move = nullptr;
     int clip_frame = 0;      // frame cursor (60 Hz)
     float x = 0.0f;          // world anchor (`prb`/`TT` inherit the spawner)
     float y = 0.0f;

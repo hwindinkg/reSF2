@@ -37,6 +37,7 @@
 #include <GLFW/glfw3.h>
 
 #include "app/app.hpp"
+#include "app/dev_flags.hpp"
 #include "app/quest_engine.hpp"
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
@@ -8959,6 +8960,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 pb.zone + "|" + pb.battle_name + "|" + std::to_string(ord);
         }
         app.screens().push(make_screen(app.screens(), kScreenFight));
+        // [probe, authorised] SF2_IMMORTAL=1: the tester dev flag
+        // (dev_flags().immortal_player) so a probe can watch a long round
+        // without the enemy ending it.
+        if (std::getenv("SF2_IMMORTAL") != nullptr) {
+            sf2::app::dev_flags().immortal_player = true;
+        }
         app.set_headless_frames(1);  // uncapped deterministic stepping
         auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
         std::fprintf(stdout, "[waveprobe] boot battle=%s zone=%s ordinal=%d\n",
