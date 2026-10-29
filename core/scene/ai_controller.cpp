@@ -351,6 +351,25 @@ void AiController::init(const std::string& weapon,
                      "safe=%zu throw=%zu\n",
                      weapon.c_str(), tactic_ != nullptr ? tactic_->name.c_str() : "null",
                      tactics_.size(), n0, n1, n2);
+        {
+            // The distinct table animation names (the AI's candidate pool) —
+            // the boss-ability (InvisibilityCloakPlayer, HermitStorm...)
+            // check.
+            std::map<std::string, int> names;
+            for (const TacticsFile& tf : tactics_) {
+                for (const auto& tab : tf.set.tables) {
+                    for (const TacticRecord& rec : tab) {
+                        ++names[rec.anim];
+                    }
+                }
+            }
+            std::fprintf(stdout, "[tactic] %zu distinct animations:", names.size());
+            for (const auto& kv : names) {
+                std::fprintf(stdout, " %s(%d)", kv.first.c_str(), kv.second);
+            }
+            std::fprintf(stdout, "\n");
+            std::fflush(stdout);
+        }
         if (tactic_ != nullptr) {
             const auto& t = *tactic_;
             std::fprintf(stdout,
