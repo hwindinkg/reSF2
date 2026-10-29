@@ -2952,13 +2952,6 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     sub_frac_ = 0.0f;  // [FIX slow-mo] JS-exact start sample (frac 0)
     last_action_frame_ = -1;  // the `cX` sentinel (first `vp` sees a change)
     ended_move_ = nullptr;
-    // [FIX shop idle loop seam] JS `Skb` runs `qrb` (the prepend) before the
-    // first `eda`, blending the clip's first frames FROM the current pose. The
-    // preview never built it, so a loop restart jumped straight to the clip's
-    // first frame - the measured 2.35-unit 1-frame jerk at every idle seam
-    // (`SF2_PV_PROBE`). With the prepend the seam blends over the first two
-    // subframes, exactly like the fight's move start.
-    build_prepend(move);
     // [FIX Pi preview placement — JS `Pi.J9` L439 + `Pi.job` L444 -> `wd.oL`
     // L577 -> `Dl.oL` L293874] The `Pi` model node sits at J9=(0,-93); `oL`
     // shifts EVERY solver body so the render anchor (`Dl.Fe()` = NPivot) lands
