@@ -3049,11 +3049,22 @@ void FightController::apply_mode_setup(const ModeSetup& setup) {
     // punches"). owned carries the resolved kit.
     std::string enemy_subtype = "Fists";
     for (const sf2::scene::OwnedItem& o : setup.enemy.owned) {
-        if (o.type == "Weapon" && !o.subtype.empty()) {
+        if (o.type != "Weapon") continue;
+        // Same fallback the PLAYER's path uses (`o.subtype.empty() ? o.name`):
+        // a catalog row without a `SubType` still names the weapon, and the
+        // move list keys on the item name in that case. The old `!subtype`
+        // test left such a warrior on Fists while his MODEL carried the weapon
+        // (the reported "weapon visible, but he punches").
+        if (!o.subtype.empty()) {
             enemy_subtype = o.subtype;
-            break;
+        } else if (!o.name.empty()) {
+            enemy_subtype = o.name;
         }
+        break;
     }
+    std::fprintf(stdout, "[fight] enemy rebuild subtype='%s' owned=%zu\n",
+                 enemy_subtype.c_str(), setup.enemy.owned.size());
+    std::fflush(stdout);
     enemy_ = make_fighter(enemy_.name, false, ex, ey, emax, enemy_subtype,
                           setup.enemy.owned, battle_.enemy_not_ai,
                           battle_.enemy_not_animation, mode_model, enemy_own_perks,
@@ -3381,6 +3392,33 @@ void FightController::enter_start_stance() {
     // skip the dummy here (unlike the phase-2 hand-off below, which is a
     // port-only idle fix, not a JS reset).
     enemy_.fighter.clear_move();
+    // [FIX disarm across rounds] The shock/disarm swaps the wielded item to
+    // Fists and REBUILDS the move list (`[disarm] DROP -> Fists`). The round
+    // reset restored the MODEL but kept that list, so the enemy came back
+    // holding the weapon while attacking with fists (reported). JS re-reads
+    // `Zb.Hd` (the gear's Weapon slot) at the round start; restore the
+    // resolved stage kit here and rebuild the list from it.
+    if (moves_ != nullptr && !battle_.enemy_owned.empty()) {
+        std::string sub = "Fists";
+        std::string wname = "Fists";
+        for (const sf2::scene::OwnedItem& o : battle_.enemy_owned) {
+            if (o.type != "Weapon") continue;
+            sub = !o.subtype.empty() ? o.subtype : o.name;
+            wname = o.name.empty() ? sub : o.name;
+            break;
+        }
+        if (sub != "Fists") {
+            enemy_.owned_items = battle_.enemy_owned;
+            enemy_.weapon = wname;
+            enemy_.fighter.build_move_list_locks(*moves_, enemy_.owned_items,
+                                                /*include_universal=*/true, sub);
+            std::fprintf(stdout,
+                         "[fight] round reset: enemy kit restored subtype=%s "
+                         "weapon=%s moves=%zu\n",
+                         sub.c_str(), wname.c_str(), enemy_.fighter.hb().size());
+            std::fflush(stdout);
+        }
+    }
     player_.fighter.teleport(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.teleport(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
     // [FIX phase-1 f=0 = bind — JS `FNa` L409 does NOT sample] `FNa` is
@@ -6361,6 +6399,21 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     if (def.shock.weapon_ws) {
         rec.final_damage = 0.0f;  // `Zi = 0`
         rec.hp_after = def.hp;    // `aM(model, -0)` leaves HP untouched
+    }
+    // [dev panel, key 5] forced outcomes for testing: immortality (the player
+    // keeps its HP) and one-hit kill (a player hit takes the enemy to 0).
+    {
+        const sf2::app::DevFlags& df = sf2::app::dev_flags();
+        if (df.immortal_player && def.is_player) {
+            rec.final_damage = 0.0f;
+            rec.hp_after = def.hp;
+            rec.lethal = false;
+        } else if (df.one_hit_enemy && atk.is_player && !def.is_player &&
+                   def.hp > 0.0f) {
+            rec.final_damage = def.hp;
+            rec.hp_after = 0.0f;
+            rec.lethal = true;
+        }
     }
     def.hp = rec.hp_after;
     // [debug overlay] Keep the last hits for panel 5 (damage / final stats).

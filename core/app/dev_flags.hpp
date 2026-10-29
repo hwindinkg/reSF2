@@ -8,8 +8,10 @@
 namespace sf2::app {
 
 struct DevFlags {
-    bool shock_player = false;  // every enemy hit shocks the PLAYER
-    bool shock_enemy = false;   // every player hit shocks the ENEMY
+    bool shock_player = false;   // every enemy hit shocks the PLAYER
+    bool shock_enemy = false;    // every player hit shocks the ENEMY
+    bool immortal_player = false;  // the player takes no HP damage
+    bool one_hit_enemy = false;    // every player hit kills the enemy
 };
 
 inline DevFlags& dev_flags() {

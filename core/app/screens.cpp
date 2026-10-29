@@ -23866,6 +23866,24 @@ void dev_shock_enemy(App& app) {
     std::fflush(stdout);
 }
 
+void dev_immortal_player(App& app) {
+    (void)app;
+    sf2::app::DevFlags& f = sf2::app::dev_flags();
+    f.immortal_player = !f.immortal_player;
+    std::fprintf(stdout, "[dev] immortal player %s\n",
+                 f.immortal_player ? "ON" : "OFF");
+    std::fflush(stdout);
+}
+
+void dev_one_hit_enemy(App& app) {
+    (void)app;
+    sf2::app::DevFlags& f = sf2::app::dev_flags();
+    f.one_hit_enemy = !f.one_hit_enemy;
+    std::fprintf(stdout, "[dev] one-hit enemy %s\n",
+                 f.one_hit_enemy ? "ON" : "OFF");
+    std::fflush(stdout);
+}
+
 // Grants one enchantment perk on the EQUIPPED weapon (`<Item><Enchantments>`).
 void dev_grant_enchant(App& app) {
     try {
@@ -23931,9 +23949,30 @@ void dev_reset_progress(App& app) {
         w.set_story_step("NotStarted");
         w.variables.clear();
         w.battle_records.clear();
+        // The bought gear AND the beaten opponents are part of the progress:
+        // leaving them made the tutorial chain pick a LATER fight (reported:
+        // the story asks for Shino but sends you to Igla, whom you cannot beat
+        // yet). Back to the bare starting kit and no fight history.
+        w.fights.clear();
+        w.show_upgrades = false;
+        w.items.clear();
+        w.skeleton = "Skeleton";
+        w.weapon = "Fists";
+        w.armor = "Body";
+        w.helm = "Head";
+        w.ranged = "NoRanged";
+        w.magic = "NoMagic";
+        for (const char* nm : {"Skeleton", "Fists", "Body", "Head"}) {
+            WarriorSave::OwnedItem oi;
+            oi.name = nm;
+            oi.count = 1;
+            w.items.push_back(oi);
+        }
         app.save().save(w);
         app.quest_engine().clear_dialogs();
-        std::fprintf(stdout, "[dev] progress reset (level 1, battles cleared)\n");
+        std::fprintf(stdout,
+                     "[dev] progress reset: level 1, gear = defaults, battles and "
+                     "fight records cleared\n");
         std::fflush(stdout);
     } catch (const std::exception&) {
     }
@@ -23953,6 +23992,8 @@ const DevRow kDevRows[] = {
     {"Закрыть все бои", dev_lock_battles},
     {"Шок игрока: вкл/выкл", dev_shock_player},
     {"Шок врага: вкл/выкл", dev_shock_enemy},
+    {"Бессмертие игрока: вкл/выкл", dev_immortal_player},
+    {"Враг умирает с 1 удара", dev_one_hit_enemy},
     {"Зачарование на оружие", dev_grant_enchant},
     {"Сброс туториала/квестов", dev_reset_tutorial},
     {"Сброс прогресса", dev_reset_progress},
@@ -24017,6 +24058,10 @@ void dev_panel_draw(App& app, sf2::render::Renderer& ren) {
             label += f.shock_player ? "  [ВКЛ]" : "  [выкл]";
         } else if (kDevRows[i].run == dev_shock_enemy) {
             label += f.shock_enemy ? "  [ВКЛ]" : "  [выкл]";
+        } else if (kDevRows[i].run == dev_immortal_player) {
+            label += f.immortal_player ? "  [ВКЛ]" : "  [выкл]";
+        } else if (kDevRows[i].run == dev_one_hit_enemy) {
+            label += f.one_hit_enemy ? "  [ВКЛ]" : "  [выкл]";
         }
         if (!(load_sliced_atlas(app) &&
               draw_bb_plate(app, hov ? "btnBeige" : "btnDark", kDevX + kDevW * 0.5f,
