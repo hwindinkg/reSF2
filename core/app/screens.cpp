@@ -11922,7 +11922,11 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         node->type == "FINAL_BATTLE_TITAN") {
         --pips;  // `Xr` ctor L2134
     }
-    if (pips > 0) {
+    // [user request] A PERIODIC battle (the Duel) has no per-fight progress to
+    // show: its single pip rendered as a bare black square (the shipped
+    // `indicator*` art is missing in this build, the same squares the oracle
+    // map shows). Skip the row for PERIODIC.
+    if (pips > 0 && node->type != "PERIODIC") {
         // `H0a` (L2135) label, VERBATIM: boss families -> `Y.na("bodyguards")`;
         // the six challenge families -> `Y.na("stage{N}{M}")` (N = beaten+1,
         // M = total; the `Y.na` nested-`{...}` form -> the `stage` table row
