@@ -1243,6 +1243,20 @@ bool Fighter::move_conditions_pass(const MoveDef& move, FightContext& ctx,
     for (const std::string& n : intervals_at(move_frame_)) {
         ctx.intervals.push_back({n, interval_type(n), true});
     }
+    // `<CurrentInterval Player="Enemy">` reads the OPPONENT's live intervals
+    // (JS `tm.he` + `Nd.ol`). The input re-check at move start runs on the
+    // queue ctx, which carries no enemy list, so every throw was refused here
+    // AFTER being picked: the punch fallback was already suppressed, so the
+    // player's Back+Punch did NOTHING (the reported "I cannot throw, and no
+    // punch either"). The Throw template's `<CurrentInterval Player="Enemy"
+    // Name="Throwable"/>` (moves.xml) is exactly this gate.
+    ctx.intervals_enemy.clear();
+    if (opponent_ != nullptr) {
+        for (const std::string& n : opponent_->active_intervals()) {
+            ctx.intervals_enemy.push_back(
+                {n, opponent_->interval_type(n), true});
+        }
+    }
     return eval_move_conditions(move.conditions, ctx, trace);
 }
 

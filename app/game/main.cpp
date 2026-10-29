@@ -8849,24 +8849,39 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         if (force) {
             started = ctl.debug_force_player_move("ThrowThroughTheBack");
         } else {
-            ctl.player_input(sf2::scene::key_type::back,
-                             sf2::scene::press_type::tap);
-            // Keep the AI far away during the hold so it cannot throw first,
-            // then step in only for the Punch tap (the throw's Distance gate).
-            for (int i = 0; i < 8; ++i) {
-                ctl.debug_place_fighters(690.0f, 1100.0f);
-                ctl.update(1.0f / 60.0f);
+            // [reach sweep] the throw's `<Distance Max="100" Axis="X">` is a
+            // BONE distance (Me `<Align><Pivot Part>` heel -> Enemy NPivot), so
+            // the usable ROOT gap is much smaller than 100. Measure it: for
+            // each gap, hold Back then tap Punch and report whether a Throw*
+            // started (the punch is the fallback when the throw gate fails).
+            const float gaps[] = {20.0f, 40.0f, 60.0f, 80.0f, 100.0f, 120.0f};
+            for (const float gap : gaps) {
+                ctl.player_input(sf2::scene::key_type::back,
+                                 sf2::scene::press_type::release);
+                ctl.debug_reset_player_move();
+                ctl.debug_place_fighters(690.0f, 690.0f + gap);
+                for (int i = 0; i < 3; ++i) ctl.update(1.0f / 60.0f);
+                ctl.debug_place_fighters(690.0f, 690.0f + gap);
+                ctl.player_input(sf2::scene::key_type::back,
+                                 sf2::scene::press_type::tap);
+                for (int i = 0; i < 4; ++i) {
+                    ctl.debug_place_fighters(690.0f, 690.0f + gap);
+                    ctl.update(1.0f / 60.0f);
+                }
+                ctl.debug_place_fighters(690.0f, 690.0f + gap);
+                ctl.player_input(sf2::scene::key_type::punch,
+                                 sf2::scene::press_type::tap);
+                for (int i = 0; i < 3; ++i) ctl.update(1.0f / 60.0f);
+                const sf2::scene::MoveDef* m = ctl.player().fighter.current_move();
+                const std::string mn = m != nullptr ? m->name : std::string("-");
+                const bool is_throw = mn.rfind("Throw", 0) == 0;
+                std::fprintf(stdout,
+                             "[throwprobe] reach gap=%.0f -> %s (%s)\n",
+                             static_cast<double>(gap), mn.c_str(),
+                             is_throw ? "THROW" : "no throw");
+                std::fflush(stdout);
+                if (is_throw) started = true;
             }
-            std::fprintf(stdout, "[throwprobe] after Back hold: move=%s\n",
-                         ctl.player().fighter.current_move() != nullptr
-                             ? ctl.player().fighter.current_move()->name.c_str()
-                             : "-");
-            ctl.debug_place_fighters(690.0f, 750.0f);
-            ctl.update(1.0f / 60.0f);
-            ctl.debug_place_fighters(690.0f, 750.0f);
-            ctl.player_input(sf2::scene::key_type::punch,
-                             sf2::scene::press_type::tap);
-            started = true;
         }
         std::fprintf(stdout, "[throwprobe] %s ThrowThroughTheBack -> %s\n",
                      force ? "force" : "input", started ? "sent" : "refused");
