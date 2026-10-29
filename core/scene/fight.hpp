@@ -2381,6 +2381,10 @@ private:
     // screen each frame (`take_callouts`). JS pushes into `Gr.Gu` directly.
     std::vector<CalloutSignal> callouts_;
 
+    // The PLAYER's setup-time kit (the save's six slots), kept pristine because
+    // the disarm swaps the Weapon row to Fists in `player_.owned_items` and the
+    // round reset must rebuild the original moveset.
+    std::vector<sf2::scene::OwnedItem> player_kit_;
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     std::deque<HitLogEntry> hit_log_;  // last 8 hits (debug overlay)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)

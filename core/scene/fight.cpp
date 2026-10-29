@@ -475,6 +475,10 @@ void FightController::init_locks(
     std::fprintf(stdout, "[fight] player equip subtype='%s' owned=%zu\n",
                  player_subtype.c_str(), player_owned.size());
     std::fflush(stdout);
+    // The pristine kit: the disarm replaces the Weapon row with Fists in
+    // `player_.owned_items`, so the round reset needs the ORIGINAL list to
+    // rebuild the moveset (JS `Zb.Hd` is re-read from the gear each round).
+    player_kit_ = player_owned;
     player_ = make_fighter(player_name, true, player_x, player_y, player_max_hp,
                            player_subtype, player_owned, false, false, player_model,
                            merged_perk_names(perks.learned_refs, perks.player_refs),
@@ -3160,6 +3164,10 @@ void FightController::spawn_next_enemy_wave() {
     // Per-wave `xc.IY`/`xc.voice` are read by `make_fighter` off `battle_`.
     battle_.enemy_align = wv.align;
     battle_.enemy_voice = wv.voice;
+    // The round reset restores `battle_.enemy_owned`; after a wave advance that
+    // must be THIS wave's kit, not round 1's.
+    battle_.enemy_owned = wv.owned;
+    battle_.enemy_weapon_subtype = wv.weapon_subtype;
     const float ex = battle_.enemy_spawn_x;  // JS `position=location.B_`
     const float ey = battle_.enemy_spawn_y;
     const int emax = battle_.max_hp > 0 ? battle_.max_hp : 100;
@@ -3419,6 +3427,27 @@ void FightController::enter_start_stance() {
     // holding the weapon while attacking with fists (reported). JS re-reads
     // `Zb.Hd` (the gear's Weapon slot) at the round start; restore the
     // resolved stage kit here and rebuild the list from it.
+    // The PLAYER's kit: the same restore. `player_kit_` is the setup-time list
+    // (the save's six slots), untouched by the disarm's Fists swap.
+    if (moves_ != nullptr && !player_kit_.empty()) {
+        std::string sub = "Fists";
+        std::string wname = "Fists";
+        for (const sf2::scene::OwnedItem& o : player_kit_) {
+            if (o.type != "Weapon") continue;
+            sub = !o.subtype.empty() ? o.subtype : o.name;
+            wname = o.name.empty() ? sub : o.name;
+            break;
+        }
+        player_.owned_items = player_kit_;
+        player_.weapon = wname;
+        player_.fighter.build_move_list_locks(*moves_, player_.owned_items,
+                                             /*include_universal=*/true, sub);
+        std::fprintf(stdout,
+                     "[fight] round reset: player kit restored subtype=%s "
+                     "weapon=%s moves=%zu\n",
+                     sub.c_str(), wname.c_str(), player_.fighter.hb().size());
+        std::fflush(stdout);
+    }
     if (moves_ != nullptr && !battle_.enemy_owned.empty()) {
         std::string sub = "Fists";
         std::string wname = "Fists";
