@@ -6095,6 +6095,54 @@ std::vector<sf2::scene::StageRule> battle_fight_rules(const std::string& battle_
     return out;
 }
 
+// `<Fight ReplayInterval>` (JS `IIa` L7938 `a.Nn`): the periodic-battle
+// cooldown. `0` = not periodic. Resolved like `battle_fight_rules` (the
+// current zone's direct `<Battle>` child, else the legacy first match).
+int fight_replay_interval(const std::string& battle_name, const std::string& zone_name) {
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/stages.xml", std::ios::binary);
+        if (!in) return 0;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return 0;
+        const pugi::xml_node zones = root.child("Zones");
+        pugi::xml_node battle;
+        if (!zone_name.empty()) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                if (std::string(z.attribute("Name").value()) != zone_name) continue;
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (!battle) {
+            for (const pugi::xml_node z : zones.children("Zone")) {
+                for (const pugi::xml_node b : z.children("Battle")) {
+                    if (std::string(b.attribute("Name").value()) == battle_name) {
+                        battle = b;
+                        break;
+                    }
+                }
+                if (battle) break;
+            }
+        }
+        if (!battle) return 0;
+        const pugi::xml_node fight = battle.child("Fight");
+        if (!fight) return 0;
+        const pugi::xml_attribute ri = fight.attribute("ReplayInterval");
+        return ri ? ri.as_int(0) : 0;
+    } catch (const std::exception&) {
+        return 0;
+    }
+}
+
 // JS `bb.M3` (L452786): the stage `<Fight><Rules>` tags that retarget the
 // PLAYER's identity. `bb.M3` maps `EquipItem`->`hn`, `Avatar`->`Ym`,
 // `Name`->`kn`; `du.OK` (L463103) files the Avatar/Name rules into `x7`/`L9`
@@ -17346,6 +17394,28 @@ bool apply_fight_reward(App& app) {
             std::fprintf(stdout,
                          "[result] fight record: %s losses=%d level=%d\n",
                          ids.c_str(), fr->losses, fr->level);
+        }
+    }
+    // JS `il.Cla(now)` + `fE(Nn)` (L11345-11414): a PERIODIC fight records its
+    // start time so `Qe = now - TimeLeft` and the node is replayable only once
+    // `Qe >= ReplayInterval`. The port never wrote it, so the Duel could be
+    // replayed immediately (reported: "after a win/loss it must close for 4
+    // hours"). The map's `expired` check reads the battle record's EndTime, so
+    // store `now + interval` there.
+    {
+        const int interval = fight_replay_interval(pb.battle_name, pb.zone);
+        if (interval > 0) {
+            if (WarriorSave::BattleRecord* rec =
+                    w.battle_record(pb.zone, pb.battle_name)) {
+                rec->has_end_time = true;
+                rec->end_time =
+                    static_cast<int>(WarriorSave::live_clock()) + interval;
+                std::fprintf(stdout,
+                             "[result] periodic lock %s|%s EndTime=%d (+%ds)\n",
+                             pb.zone.c_str(), pb.battle_name.c_str(), rec->end_time,
+                             interval);
+                std::fflush(stdout);
+            }
         }
     }
     // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds. Runs on
