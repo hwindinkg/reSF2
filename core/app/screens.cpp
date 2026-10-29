@@ -5817,6 +5817,49 @@ static std::int64_t reward_field(const pugi::xml_node& node, int level,
 // `p.o.Yh` (profile `EclipseMode`, ctor L125469) is not modelled by the
 // port, so the NormalModeReward branch is always taken (the 2 shipped
 // `<EclipseModeReward>` nodes are EMPTY, so this is inert).
+// JS `IIa` L7942-7943 (`a.location = b.Location ?? d`): the ladder's CURRENT
+// `<Fight Location>` overrides the battle's. Returns "" when the fight has no
+// override (the caller keeps the battle's location).
+std::string battle_fight_location(const std::string& battle_name,
+                                  const std::string& zone_name, int fight_index) {
+    try {
+        sf2::data::xml_doc doc;
+        const std::string path = "reference/extracted/xml/res/stages.xml";
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return std::string();
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return std::string();
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return std::string();
+        pugi::xml_node battle;
+        for (const pugi::xml_node z : zones.children("Zone")) {
+            if (!zone_name.empty() &&
+                std::string(z.attribute("Name").value()) != zone_name) {
+                continue;
+            }
+            for (const pugi::xml_node b : z.children("Battle")) {
+                if (std::string(b.attribute("Name").value()) == battle_name) {
+                    battle = b;
+                    break;
+                }
+            }
+            if (battle) break;
+        }
+        if (!battle) return std::string();
+        int i = 0;
+        for (const pugi::xml_node f : battle.children("Fight")) {
+            if (i++ != fight_index) continue;
+            if (f.attribute("Location")) return f.attribute("Location").value();
+            return std::string();
+        }
+    } catch (const std::exception&) {
+    }
+    return std::string();
+}
+
 void battle_rewards(const std::string& battle_name, const std::string& zone_name,
                     int fight_index, int level, std::int64_t& out_money,
                     std::int64_t& out_exp, std::int64_t& out_bonus,
@@ -10370,7 +10413,11 @@ void MapScreen::launch_battle(const Node& n) {
     pb.fight_triple =
         n.zone + "|" + n.name + "|" + std::to_string(fight_index + 1);
     pb.zone = n.zone;  // stages.xml Zone (`hp` scope for the <Rules> feeder)
-    pb.location = n.location.empty() ? "dojo" : n.location;
+    // JS `IIa` L7942: the FIGHT's Location overrides the battle's (the ladder's
+    // current `<Fight Location="skyport">` on C3_BOSS_TITAN fights 1-5).
+    const std::string fight_loc = battle_fight_location(n.name, n.zone, fight_index);
+    pb.location = !fight_loc.empty() ? fight_loc
+                                     : (n.location.empty() ? "dojo" : n.location);
     pb.has_result = false;
     // The node's fight -> reward (JS `dl.$L` L730889: the LAST <Reward> of
     // THIS zone's Nth <Fight>). The Training fight has Money=0.

@@ -141,6 +141,11 @@ struct StageFight {
     // `?Fight[...].TimeLeft` (`f9a` L727530) counts it down.
     int replay_interval = 0;
     double health_recovery = 1.0;  // `qDa` (default 1)
+    // JS `IIa` (L7942-7945): a `<Fight>` may override the battle's
+    // `Location`/`Music` (`a.location = Fight@Location ?? battleLocation`).
+    // The port ignored the override, so every `C3_BOSS_TITAN` fight used the
+    // battle's `neural_network` even though fights 1-5 author `skyport`.
+    std::string location, music;
     std::vector<StageReward> rewards;
     std::vector<StageWarrior> warriors;
     std::vector<StageRule> rules;
@@ -519,6 +524,12 @@ inline bool parse_stages(const std::string& xml_text, std::vector<StageBattle>& 
                     fight.replays = xml_int(f, "Replays", 1);
                     fight.replay_interval = xml_int(f, "ReplayInterval", 0);
                     fight.health_recovery = xml_num(f, "HealthRecovery", 1.0);
+                    if (f.attribute("Location")) {
+                        fight.location = f.attribute("Location").value();
+                    }
+                    if (f.attribute("Music")) {
+                        fight.music = f.attribute("Music").value();
+                    }
                     const pugi::xml_node rewards = f.child("Rewards");
                     if (rewards) {
                         for (const pugi::xml_node r : rewards.children("Reward")) {
@@ -919,8 +930,10 @@ inline bool resolve_tournament_fight(const StageBattle& battle, int fight_index,
     out.round_time = f.round_time;
     out.health_recovery = f.health_recovery;
     out.rules = f.rules;
-    out.location = battle.location;
-    out.music = battle.music;
+    // JS `IIa` L7942-7945: the FIGHT's own Location/Music win, else the
+    // battle's (`g ?? d`).
+    out.location = f.location.empty() ? battle.location : f.location;
+    out.music = f.music.empty() ? battle.music : f.music;
     if (!f.rewards.empty()) {
         // JS `D0(i)` (L728050) row select for a single-warrior `<Fight>`: the
         // series cursor `PU` (`Da.PU` = `Rk`, the warrior/wave index) is 0
