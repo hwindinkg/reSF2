@@ -28,6 +28,7 @@
 #include "app/lang_table.hpp"
 #include "app/quest_engine.hpp"
 #include "app/quest_panel.hpp"
+#include "app/dev_flags.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -20828,13 +20829,18 @@ struct ProfileBadges {
 // arrows/`uk` compare art is the OPEN part). Shared by render + hit-test so
 // both agree on the rect.
 ShopRect profile_improve_rect() {
+    // JS `Zr.ba(a,b)` (L2218-2222): the IMPROVE plate belongs to the `zr=Yr`
+    // RIGHT panel - `Yk.kf(a)` (width = the panel width), `C(a/2)` (centred)
+    // and `D(b - Yk.qa()*1.5)` (near the bottom). The port anchored it on the
+    // CENTRE viewer, which is the reported "the learn button is in the wrong
+    // place".
     const ProfileLayout pl = profile_layout();
-    const ShopRect& v = pl.viewer;
+    const ShopRect& rp = pl.right_slot;
     ShopRect r;
     constexpr float kBtnH = 44.0f;
-    r.J = v.J + 6.0f;
-    r.N = v.N - 6.0f;
-    r.W = v.W - 8.0f;
+    r.J = rp.J + 6.0f;
+    r.N = rp.N - 6.0f;
+    r.W = rp.W - 10.0f;
     r.P = r.W - kBtnH;
     return r;
 }
@@ -22341,8 +22347,8 @@ void EquipmentScreen::render_impl(App& app) {
             // `ei.zs` wraps (`ea.rd(!0)`, L2206) into the panel: oracle shows
             // "У вас нет / изученных / умений" (3 centred lines).
             draw_ui_wrapped(app, pl.left_slot.J + 14.0f,
-                            pl.left_slot.P + pl.left_slot.height() * 0.5f - 50.0f,
-                            pl.left_slot.width() - 28.0f, 100.0f,
+                            pl.left_slot.P + pl.left_slot.height() * 0.5f - 70.0f,
+                            pl.left_slot.width() - 28.0f, 160.0f,
                             loc(app, "ProfileNoPerks", "You have no learned skills"),
                             0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
         } else {
@@ -22356,8 +22362,13 @@ void EquipmentScreen::render_impl(App& app) {
                 std::string name;
             };
             std::vector<LearnedCell> cells;
+            // `perk_rows_` has one row per TREE NODE (a perk repeats across
+            // tiers/upgrade rows), so the same learned perk appeared many times
+            // (the reported "Кобра shown 9 times"). One cell per perk NAME.
+            std::set<std::string> seen_names;
             for (const PerkRow& pr : perk_rows_) {
                 if (pr.learned_level <= 0) continue;
+                if (!seen_names.insert(pr.name).second) continue;
                 cells.push_back({pr.image, pr.name});
             }
             if (std::getenv("SF2_TRACE_PROFILE")) {
@@ -22396,10 +22407,42 @@ void EquipmentScreen::render_impl(App& app) {
                 }
             }
         }
-        if (!any_avail) {
+        if (perk_sel_ >= 0 &&
+                   static_cast<std::size_t>(perk_sel_) < perk_rows_.size()) {
+            // JS `Zr` (`zr=Yr`, L2218-2222): the right panel shows the
+            // SELECTED perk's description (`this.le`, `ua(a*.12)`, `Kc(.75)`)
+            // above the IMPROVE plate. The port never drew it, so clicking a
+            // node showed nothing (reported).
+            const PerkRow& sel = perk_rows_[static_cast<std::size_t>(perk_sel_)];
+            const float pad = pl.right_slot.width() * 0.06f;
+            const std::string pname = loc(app, sel.name, sel.name);
+            const std::string pdesc =
+                sel.description.empty() ? std::string() : loc(app, sel.description, sel.description);
+            draw_ui_wrapped(app, pl.right_slot.J + pad, pl.right_slot.P + 20.0f,
+                            pl.right_slot.width() - 2.0f * pad, 60.0f, pname, 0.6f,
+                            UiAlign::Left, 0.184f, 0.145f, 0.106f);
+            if (!pdesc.empty()) {
+                draw_ui_wrapped(app, pl.right_slot.J + pad,
+                                pl.right_slot.P + 84.0f,
+                                pl.right_slot.width() - 2.0f * pad,
+                                pl.right_slot.height() - 190.0f, pdesc, 0.42f,
+                                UiAlign::Left, 0.184f, 0.145f, 0.106f);
+            }
+            if (sel.state == 2) {
+                // `this.PB` (`profile_LblImprove`, `X(Be==2)` L2218).
+                draw_ui_label(app, pl.right_slot.J + pad,
+                              pl.right_slot.P + pl.right_slot.height() - 118.0f,
+                              pl.right_slot.width() - 2.0f * pad, 26.0f,
+                              loc(app, "profile_LblImprove", "Improve"), 0.5f,
+                              UiAlign::Center, 0.184f, 0.145f, 0.106f);
+            }
+        } else if (!any_avail) {
+            // `profileNoSkills` (L2190 `vb.hla` case 0). The old box was 72
+            // tall at scale .5, so the RU 2-line text lost its second line
+            // ("Нет доступных" instead of "Нет доступных умений").
             draw_ui_wrapped(app, pl.right_slot.J + 14.0f,
-                            pl.right_slot.P + pl.right_slot.height() * 0.5f - 36.0f,
-                            pl.right_slot.width() - 28.0f, 72.0f,
+                            pl.right_slot.P + pl.right_slot.height() * 0.5f - 60.0f,
+                            pl.right_slot.width() - 28.0f, 140.0f,
                             loc(app, "profileNoSkills", "No available skills"), 0.5f,
                             UiAlign::Center, 0.184f, 0.145f, 0.106f);
         } else {
@@ -23586,6 +23629,328 @@ void za_nav_capture(ScreenId id) {
 void za_nav_restore(ScreenId id) {
     if (g_za_nav_saved_valid && id == g_za_nav_saved_id) {
         za_nav_state(id) = g_za_nav_saved;
+    }
+}
+
+
+// ===========================================================================
+// [dev panel] `5` — the tester's cheat panel.
+//
+// A plain list of actions over the LIVE save: money / rubies / level / energy,
+// battle unlock-lock, forced shock per side (read by the fight via
+// `app/dev_flags.hpp`), a granted weapon enchantment, and the
+// tutorial/quest reset. Everything writes through `SaveSystem` so the normal
+// load path (Map/Dojo/Shop) sees it immediately.
+// ===========================================================================
+namespace {
+
+struct DevPanelState {
+    bool open = false;
+    int hover = -1;
+};
+DevPanelState& dev_state() {
+    // `SF2_DEV_PANEL=1` opens it at boot (headless captures / the harness);
+    // the digit key `5` toggles it at runtime.
+    static DevPanelState s = []() {
+        DevPanelState d;
+        const char* e = std::getenv("SF2_DEV_PANEL");
+        if (e != nullptr && std::atoi(e) != 0) d.open = true;
+        return d;
+    }();
+    return s;
+}
+
+void dev_add_money(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        w.money += 100000;
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] money -> %lld\n", static_cast<long long>(w.money));
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_add_gems(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        w.bonus += 100;
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] rubies -> %d\n", w.bonus);
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_add_level(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        ++w.level;
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] level -> %d\n", w.level);
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_fill_energy(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        w.power = energy_max_value();
+        w.power_sync_time = -1;
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] energy -> %d/%d\n", w.power, energy_max_value());
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+// Every `<Zone><Battle>` of stages.xml gets a save record (the Map only draws
+// nodes whose record exists and is not Hidden).
+std::vector<std::pair<std::string, std::string>> dev_all_battles() {
+    std::vector<std::pair<std::string, std::string>> out;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/stages.xml", std::ios::binary);
+        if (!in) return out;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return out;
+        for (const pugi::xml_node z : root.child("Zones").children("Zone")) {
+            const std::string zn = z.attribute("Name").value();
+            for (const pugi::xml_node b : z.children("Battle")) {
+                const std::string bn = b.attribute("Name").value();
+                if (!zn.empty() && !bn.empty()) out.emplace_back(zn, bn);
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
+void dev_unlock_battles(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        const auto all = dev_all_battles();
+        std::size_t added = 0;
+        for (const auto& zb : all) {
+            WarriorSave::BattleRecord* hit = nullptr;
+            for (WarriorSave::BattleRecord& r : w.battle_records) {
+                if (r.name != zb.second) continue;
+                if (r.zone == zb.first || r.zone.empty()) {
+                    hit = &r;
+                    break;
+                }
+            }
+            if (hit == nullptr) {
+                WarriorSave::BattleRecord r;
+                r.zone = zb.first;
+                r.name = zb.second;
+                w.battle_records.push_back(r);
+                hit = &w.battle_records.back();
+                ++added;
+            }
+            hit->locked = false;
+            hit->hidden = false;
+        }
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] battles unlocked (%zu total, %zu added)\n",
+                     all.size(), added);
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_lock_battles(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        for (WarriorSave::BattleRecord& r : w.battle_records) r.locked = true;
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] battles locked (%zu)\n", w.battle_records.size());
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_shock_player(App& app) {
+    (void)app;
+    sf2::app::DevFlags& f = sf2::app::dev_flags();
+    f.shock_player = !f.shock_player;
+    std::fprintf(stdout, "[dev] shock player %s\n", f.shock_player ? "ON" : "OFF");
+    std::fflush(stdout);
+}
+
+void dev_shock_enemy(App& app) {
+    (void)app;
+    sf2::app::DevFlags& f = sf2::app::dev_flags();
+    f.shock_enemy = !f.shock_enemy;
+    std::fprintf(stdout, "[dev] shock enemy %s\n", f.shock_enemy ? "ON" : "OFF");
+    std::fflush(stdout);
+}
+
+// Grants one enchantment perk on the EQUIPPED weapon (`<Item><Enchantments>`).
+void dev_grant_enchant(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        const std::string target = w.weapon;
+        WarriorSave::OwnedItem* it = nullptr;
+        for (WarriorSave::OwnedItem& o : w.items) {
+            if (o.name == target) {
+                it = &o;
+                break;
+            }
+        }
+        if (it == nullptr) {
+            std::fprintf(stdout, "[dev] enchant: equipped '%s' not in the inventory\n",
+                         target.c_str());
+            std::fflush(stdout);
+            return;
+        }
+        static const char* kEnch[] = {"PERK_ITEM_SPECIAL_BLEEDING",
+                                      "PERK_ITEM_SPECIAL_POISON",
+                                      "PERK_ITEM_SPECIAL_LIFESTEAL"};
+        static int pick = 0;
+        const std::string name = kEnch[pick % 3];
+        ++pick;
+        bool have = false;
+        for (const WarriorSave::ItemEnchantment& e : it->enchantments) {
+            if (e.name == name) have = true;
+        }
+        if (!have) {
+            WarriorSave::ItemEnchantment e;
+            e.name = name;
+            it->enchantments.push_back(e);
+        }
+        app.save().save(w);
+        std::fprintf(stdout, "[dev] enchant %s -> %s\n", name.c_str(), target.c_str());
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_reset_tutorial(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        w.set_story_step("NotStarted");
+        w.variables.clear();
+        app.save().save(w);
+        app.quest_engine().clear_dialogs();
+        std::fprintf(stdout, "[dev] tutorial/quests reset -> NotStarted\n");
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+void dev_reset_progress(App& app) {
+    try {
+        WarriorSave w = app.save().load();
+        w.level = 1;
+        w.experience = 0;
+        w.strength = 1;
+        w.stamina = 1;
+        w.money = 1000;
+        w.bonus = 0;
+        w.set_story_step("NotStarted");
+        w.variables.clear();
+        w.battle_records.clear();
+        app.save().save(w);
+        app.quest_engine().clear_dialogs();
+        std::fprintf(stdout, "[dev] progress reset (level 1, battles cleared)\n");
+        std::fflush(stdout);
+    } catch (const std::exception&) {
+    }
+}
+
+struct DevRow {
+    const char* label;
+    void (*run)(App&);
+};
+
+const DevRow kDevRows[] = {
+    {"+100 000 монет", dev_add_money},
+    {"+100 рубинов", dev_add_gems},
+    {"Уровень +1", dev_add_level},
+    {"Энергия полная", dev_fill_energy},
+    {"Открыть все бои", dev_unlock_battles},
+    {"Закрыть все бои", dev_lock_battles},
+    {"Шок игрока: вкл/выкл", dev_shock_player},
+    {"Шок врага: вкл/выкл", dev_shock_enemy},
+    {"Зачарование на оружие", dev_grant_enchant},
+    {"Сброс туториала/квестов", dev_reset_tutorial},
+    {"Сброс прогресса", dev_reset_progress},
+};
+constexpr int kDevRowCount = static_cast<int>(sizeof(kDevRows) / sizeof(kDevRows[0]));
+
+constexpr float kDevX = 24.0f;
+constexpr float kDevY = 118.0f;
+constexpr float kDevW = 430.0f;
+constexpr float kDevRowH = 34.0f;
+constexpr float kDevGap = 6.0f;
+
+}  // namespace
+
+bool dev_panel_is_open() { return dev_state().open; }
+
+void dev_panel_toggle() {
+    DevPanelState& st = dev_state();
+    st.open = !st.open;
+    st.hover = -1;
+    std::fprintf(stdout, "[dev] panel %s\n", st.open ? "open" : "closed");
+    std::fflush(stdout);
+}
+
+bool dev_panel_consume(App& app) {
+    DevPanelState& st = dev_state();
+    if (!st.open) return false;
+    const App::PointerState& p = app.pointer();
+    st.hover = -1;
+    for (int i = 0; i < kDevRowCount; ++i) {
+        const float y = kDevY + static_cast<float>(i) * (kDevRowH + kDevGap);
+        if (p.x >= kDevX && p.x <= kDevX + kDevW && p.y >= y && p.y <= y + kDevRowH) {
+            st.hover = i;
+            if (p.pressed) {
+                sf2::audio::AudioEngine::instance().play("snd_click_1");
+                kDevRows[i].run(app);
+            }
+            break;
+        }
+    }
+    // A press anywhere while open is swallowed (the panel is modal).
+    return true;
+}
+
+void dev_panel_draw(App& app, sf2::render::Renderer& ren) {
+    DevPanelState& st = dev_state();
+    if (!st.open) return;
+    // Backdrop.
+    const float q[] = {0.0f, 0.0f, kViewW, 0.0f, kViewW, kViewH,
+                       0.0f, 0.0f, kViewW, kViewH, 0.0f, kViewH};
+    ren.draw_triangles(q, 6, 0.0f, 0.0f, 0.0f, 0.35f);
+    // Title.
+    draw_ui_label(app, kDevX, kDevY - 46.0f, kDevW, 34.0f,
+                  "DEV PANEL (5 - закрыть)", 0.62f, UiAlign::Left, 1.0f, 0.86f, 0.4f);
+    const sf2::app::DevFlags& f = sf2::app::dev_flags();
+    for (int i = 0; i < kDevRowCount; ++i) {
+        const float y = kDevY + static_cast<float>(i) * (kDevRowH + kDevGap);
+        const bool hov = st.hover == i;
+        std::string label = kDevRows[i].label;
+        // Show the live state on the toggle rows.
+        if (kDevRows[i].run == dev_shock_player) {
+            label += f.shock_player ? "  [ВКЛ]" : "  [выкл]";
+        } else if (kDevRows[i].run == dev_shock_enemy) {
+            label += f.shock_enemy ? "  [ВКЛ]" : "  [выкл]";
+        }
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, hov ? "btnBeige" : "btnDark", kDevX + kDevW * 0.5f,
+                            y + kDevRowH * 0.5f, kDevW, kDevRowH, 1.0f, false))) {
+            draw_flat_button(app, label, kDevX + kDevW * 0.5f, y + kDevRowH * 0.5f,
+                             kDevW, kDevRowH, hov ? 0.42f : 0.24f, 0.24f, 0.18f, hov);
+        }
+        draw_ui_label(app, kDevX + 14.0f, y + kDevRowH * 0.5f - 9.0f, kDevW - 28.0f,
+                      20.0f, label, 0.46f, UiAlign::Left,
+                      hov ? 1.0f : 0.9f, hov ? 0.95f : 0.85f, hov ? 0.7f : 0.62f);
     }
 }
 

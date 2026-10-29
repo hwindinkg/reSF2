@@ -97,6 +97,17 @@ void route_gamepad_input(Screen& top, int index, bool down);
 
 // Routes a JS `fb` debug/cheat key edge (the `Gz` code + Ctrl) to the screen
 // that decodes it (the fight). No-op elsewhere. Defined in screens.cpp.
+// --- [dev panel] key `5`: the tester's cheat panel -------------------------
+// Toggled by the digit key 5 (any screen). While open it consumes the pointer
+// and draws over everything: save edits (money/rubies/level/energy), battle
+// unlock/lock, forced shock per side, a granted enchantment and the
+// tutorial/quest reset. Declared here because the drawing uses the shell's
+// label/plate primitives.
+bool dev_panel_is_open();
+void dev_panel_toggle();
+bool dev_panel_consume(App& app);
+void dev_panel_draw(App& app, sf2::render::Renderer& ren);
+
 void route_debug_key(Screen& top, int js_code, bool ctrl, bool down);
 
 // The dojo — the home screen (native Dojo screen 3, JS `Tf`). The screen

@@ -1301,6 +1301,12 @@ void App::poll_input() {
         std::fprintf(stdout, "[input] injected click at (%.0f, %.0f) steps left=%d\n", pointer_.x,
                      pointer_.y, injected_click_steps_);
         std::fflush(stdout);
+        // [dev panel] the injected path returns before the real-pointer
+        // section, so it must feed the modal here as well (harness captures).
+        if (dev_panel_is_open()) {
+            (void)dev_panel_consume(*this);
+            pointer_.pressed = false;
+        }
         return;
     }
     // The real pointer comes from GLFW callbacks in the platform layer; for
@@ -1320,6 +1326,13 @@ void App::poll_input() {
         std::fflush(stdout);
     }
     pointer_.down = down;
+    // [dev panel] while open it owns the pointer: consume the press so no
+    // screen behind it reacts, then stop (the keyboard stays live so `5`
+    // can close it).
+    if (dev_panel_is_open()) {
+        (void)dev_panel_consume(*this);
+        pointer_.pressed = false;
+    }
 
     // Keyboard: poll the fight keys and route edge transitions to the top
     // screen (JS `Ik` keydown/keyup -> the fight input path). Each physical
@@ -1444,8 +1457,13 @@ void App::poll_input() {
         for (int di = 0; di < 35; ++di) {
             const bool now_down =
                 glfwGetKey(renderer_->window(), kDebugKeys[di]) == GLFW_PRESS;
-            if (now_down && debug_keys_down_[di] == 0 && screens_ != nullptr &&
-                screens_->top() != nullptr) {
+            if (now_down && debug_keys_down_[di] == 0 &&
+                kDebugKeys[di] == GLFW_KEY_5) {
+                // [dev panel] the tester's cheat panel (the fight overlay owns
+                // 1..4; 5 is free everywhere).
+                dev_panel_toggle();
+            } else if (now_down && debug_keys_down_[di] == 0 &&
+                screens_ != nullptr && screens_->top() != nullptr) {
                 route_debug_key(*screens_->top(),
                                 sf2::app::FightScreen::js_code_for_glfw(kDebugKeys[di]),
                                 ctrl, true);
@@ -1712,6 +1730,8 @@ void App::render_frame() {
     }
     draw_ui_overlays(*this);
     draw_debug_overlay(*this);
+    // [dev panel] key `5`: modal over everything (its own backdrop).
+    dev_panel_draw(*this, *renderer_);
     renderer_->end_frame();
     perf_gpu_end();
 }

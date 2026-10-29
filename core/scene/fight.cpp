@@ -4,6 +4,8 @@
 
 #include "scene/fight.hpp"
 
+#include "app/dev_flags.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -6234,9 +6236,19 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
             if (critical) crit_roll = math_random01();
             if (rec.head_hit && !blocked) head_roll = math_random01();
         }
-        const bool ub = sf2::scene::r8a_decide(
+        bool ub = sf2::scene::r8a_decide(
             ecb, target_vc, b, pain_c, crit_term, critical, crit_roll,
             head_term, rec.head_hit, blocked, head_roll).raw;
+        // [dev panel, key 5] forced shock for testing: the tester toggles
+        // "100% shock" per side, so a hit from the matching attacker always
+        // shocks (the latch still vetoes a re-shock on the next hit).
+        if (!ub) {
+            const sf2::app::DevFlags& df = sf2::app::dev_flags();
+            if ((df.shock_player && def.is_player && !atk.is_player) ||
+                (df.shock_enemy && atk.is_player && !def.is_player)) {
+                ub = true;
+            }
+        }
         rec.shock = ub;
         // JS `Cgb` shock apply (L394): `Ub&&(vc?Ub=false:vc=true)`.
         if (ub) {
