@@ -7945,13 +7945,11 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         // reported "the models stand frozen and creep sideways": each state
         // re-entry re-seated the anchor and the clip never played).
         fighter->advance(dt);
-        // JS `Pi.ia` (L18401): the per-frame keep-in-place is the NODE x
-        // (`this.C(0)`), a rigid transform - NOT `Pi.job`'s solver re-seat
-        // (that runs once per state entry, `L4`). The port called
-        // `reseat_preview_anchor` twice per frame, shifting the whole SOLVER
-        // (cloth included): the headband was dragged with the body (reported
-        // "the headband flies up/forward"). Shift the DRAWN positions instead.
-        fighter->preview_render_shift(0.0f, -93.0f);
+        // The per-frame anchor re-seat is REQUIRED: without it the solver's y
+        // drifts with the clip and the model floats above the floor (measured
+        // regression when it was replaced by a draw-only shift). The old code
+        // called it TWICE per frame; once is the JS `Pi.job`/`oL` seat.
+        fighter->reseat_preview_anchor(0.0f, -93.0f);
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: the Pi model's
         // `<Sound>` frame actions (the stance draw's knife/sword swishes) fire
         // from the SAME dispatch the fight uses. The old port never dispatched
@@ -19941,9 +19939,7 @@ void ShopScreen::update_impl(float dt) {
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
         preview_fighter_->advance(dt);
-        // `Pi.ia` node-x keep-in-place (rigid), not a solver re-seat: see
-        // `advance_destination_model`.
-        preview_fighter_->preview_render_shift(0.0f, -93.0f);
+        preview_fighter_->reseat_preview_anchor(0.0f, -93.0f);  // `Pi.job`
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
         // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
         // the actions collected by the advance() just run.
