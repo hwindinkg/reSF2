@@ -7945,11 +7945,51 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         // reported "the models stand frozen and creep sideways": each state
         // re-entry re-seated the anchor and the clip never played).
         fighter->advance(dt);
-        // The per-frame anchor re-seat is REQUIRED: without it the solver's y
-        // drifts with the clip and the model floats above the floor (measured
-        // regression when it was replaced by a draw-only shift). The old code
-        // called it TWICE per frame; once is the JS `Pi.job`/`oL` seat.
-        fighter->reseat_preview_anchor(0.0f, -93.0f);
+        // [FIX shop bandage flies up / jitter] The per-frame anchor re-seat is
+        // a PORT-ONLY invention and it is WRONG: `reseat_preview_anchor` shifts
+        // the whole SOLVER by `-93 - sol_ma_[anchor]` every frame. The clip
+        // re-poses its own bones each sample, so that delta lands ONLY on the
+        // non-clip bodies (the cloth): measured with `SF2_PV_FRAME`, the head
+        // cloth sits 8..28 units HIGHER than its solved position (the bandage
+        // "flies up") and is yanked back by its edge constraint every frame
+        // (the "jitter"). The body placement never needed it: `pos_` pins the
+        // anchor at `world_y_` = clip anchor + a constant offset, so the drawn
+        // pivot/feet are IDENTICAL with and without the seat (measured).
+        // JS does the solver seat ONCE per state entry (`Pi.job`/`oL` from
+        // `L4`), and per frame only moves the node transform (`Pi.ia` L18401
+        // `this.C(0)`), which `sample`'s constant offset already reproduces.
+        // [probe, authorised] SF2_PV_FRAME: the preview pose drift per frame
+        // (pivot / head cloth / extreme bones), the shop "jerk and bandage up"
+        // measurement.
+        if (std::getenv("SF2_PV_FRAME") != nullptr) {
+            static int pv_n = 0;
+            const sf2::scene::Model& m = fighter->model();
+            const std::vector<float>& pp = fighter->positions();
+            float top = 1e9f, bot = -1e9f, npiv = 0.0f, hb = 0.0f;
+            std::string topn = "-", botn = "-";
+            for (std::size_t i = 0; i < m.bones.size() && i * 2 + 1 < pp.size(); ++i) {
+                if (m.bones[i].is_macro) continue;
+                if (pp[i * 2 + 1] < top) { top = pp[i * 2 + 1]; topn = m.bones[i].name; }
+                if (pp[i * 2 + 1] > bot) { bot = pp[i * 2 + 1]; botn = m.bones[i].name; }
+            }
+            const int ia = m.bone_by_name("NPivot");
+            const int ih = m.bone_by_name("HEAD-Node118");
+            if (ia >= 0 && static_cast<std::size_t>(ia) * 2 + 1 < pp.size())
+                npiv = pp[static_cast<std::size_t>(ia) * 2 + 1];
+            if (ih >= 0 && static_cast<std::size_t>(ih) * 2 + 1 < pp.size())
+                hb = pp[static_cast<std::size_t>(ih) * 2 + 1];
+            if (++pv_n % 20 == 0) {
+                std::fprintf(stdout,
+                             "[pvframe] n=%d pivot=%.2f head118=%.2f sol118=%.2f "
+                             "top=%.2f(%s) bot=%.2f(%s)\n",
+                             pv_n, static_cast<double>(npiv),
+                             static_cast<double>(hb),
+                             static_cast<double>(ih >= 0 ? fighter->solver_ma_y(ih) : 0.0f),
+                             static_cast<double>(top), topn.c_str(),
+                             static_cast<double>(bot), botn.c_str());
+                std::fflush(stdout);
+            }
+        }
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: the Pi model's
         // `<Sound>` frame actions (the stance draw's knife/sword swishes) fire
         // from the SAME dispatch the fight uses. The old port never dispatched
@@ -18617,31 +18657,53 @@ std::string shop_format_number(int a) {
     return c;
 }
 
-// The item the save has EQUIPPED in `it`'s slot. JS `Ne.refresh` L2247-2248
-// feeds `ms.refresh(Aa, $e.Qi, qC&&gW&&$e.Qi!=null)` where `$e` is the owned
-// inventory entry for the selected item and `$e.Qi` (`zf.uu` L1253) is that
-// entry's CURRENT version (the upgrade compare). The port has no upgrade-recipe
-// table (`ib.zz()`/`vu`), so the compare source is the equipped slot item —
-// `$e.Qi`'s observable analogue. Returns {} when the slot is empty or holds
-// `it` itself.
-std::map<std::string, int> shop_equipped_attrs(App& app, const CatalogItem& it) {
+// JS `zf.uu`/`fw`/`Qi` (L52513, L52725-52735) + `Ne.refresh` (L93198/93228):
+// `this.Aa = $e.fw()` — for an OWNED item the detail panel shows the CURRENT
+// tier clone (`OH ?? ib`), and the compare `a = $e.Qi` is the NEXT tier clone,
+// drawn only when `qC` (ShowUpgrades) && `gW` (owned + delivered). The port
+// showed the raw catalog row as the value and the equipped slot as the
+// compare, so an upgrade never changed a number (the reported "при улучшении
+// не увеличиваются показатели предмета").
+// Defined below (load_upgrade_templates, the <UpgradeList> loader).
+const std::vector<UpgradeTemplate>& load_upgrade_templates(App& app);
+
+struct ShopTierAttrs {
+    std::map<std::string, int> current;  // `Aa` = `$e.fw()` (base + tier row)
+    std::map<std::string, int> next;     // `$e.Qi` (base + next tier row)
+    bool owned = false;                  // `gW`
+    bool has_next = false;               // `Qi != null`
+};
+
+ShopTierAttrs shop_tier_attrs(App& app, const CatalogItem& it) {
+    ShopTierAttrs out;
+    out.current = it.attributes;
     WarriorSave w;
     try {
         w = app.save().load();
     } catch (const std::exception&) {
-        return {};
+        return out;
     }
-    std::string slot;
-    if (it.type == "Weapon") slot = w.weapon;
-    else if (it.type == "Armor") slot = w.armor;
-    else if (it.type == "Helm") slot = w.helm;
-    else if (it.type == "Ranged") slot = w.ranged;
-    else if (it.type == "Magic") slot = w.magic;
-    if (slot.empty() || slot == it.name) return {};
-    for (const CatalogItem& ci : load_full_catalog(app)) {
-        if (ci.name == slot) return ci.attributes;
+    int tier = -1;  // `zf.Ce` (absent -> -1)
+    for (const WarriorSave::OwnedItem& oi : w.items) {
+        if (oi.name == it.name) {
+            tier = oi.upgrade_level;
+            break;
+        }
     }
-    return {};
+    if (tier < 0) return out;  // `$e == null` -> no tier, no compare
+    out.owned = true;
+    if (tier <= 0) tier = it.upgrade_level;  // `zf.Jr` L52474 `Np(ib.Tg)`
+    const ItemUpgradeState st =
+        resolve_item_upgrade(it, load_upgrade_templates(app), tier, w.level);
+    if (st.has_current) {  // `Xv(f)` -> `tZa`: the row REPLACES those attrs
+        for (const auto& kv : st.current.attributes) out.current[kv.first] = kv.second;
+    }
+    if (st.has_next) {  // `Xv(g/h)` -> `$e.Qi`
+        out.next = it.attributes;
+        for (const auto& kv : st.next.attributes) out.next[kv.first] = kv.second;
+        out.has_next = true;
+    }
+    return out;
 }
 
 // `Pa.Wz` (L1234) / `Pa.Bv` (L1211) fire the quest event; print the fired set
@@ -19954,8 +20016,9 @@ void ShopScreen::update_impl(float dt) {
                                   backdrop_idle_loop_, backdrop_move_loop_, dt);
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
-        preview_fighter_->advance(dt);
-        preview_fighter_->reseat_preview_anchor(0.0f, -93.0f);  // `Pi.job`
+            preview_fighter_->advance(dt);
+        // No per-frame solver re-seat (see `advance_destination_model`): the
+        // one-time `Pi.job` seat lives in `start_preview_clip`.
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
         // `<Actions>` (the TryOn attack sounds). `take_frame_actions()` returns
         // the actions collected by the advance() just run.
@@ -20316,8 +20379,14 @@ void ShopScreen::render_impl(App& app) {
         // `(±(compare-value))` delta. The old native hard-picked ONE stat.
         const float stat_h = cw0 * 0.22f;   // `lH.ba(a, a*.22)` L2248
         const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f;
-        const std::map<std::string, int> equipped_attrs =
-            shop_equipped_attrs(app, *sel_it);  // JS `$e.Qi`
+        // JS `Ne.refresh` L93198: for an OWNED item `Aa` becomes `$e.fw()`
+        // (the current tier clone), so the VALUE is the tier's stat. The
+        // compare `$e.Qi` (next tier) is drawn only under `qC && gW`.
+        const ShopTierAttrs tier_attrs = shop_tier_attrs(app, *sel_it);
+        const std::map<std::string, int>& value_attrs =
+            tier_attrs.owned ? tier_attrs.current : sel_it->attributes;
+        const bool show_compare =
+            tier_attrs.owned && show_upgrades_ && tier_attrs.has_next;
         // `os` value bar (`vH`, L2268): the 3-layer compare overlay. `os.Gr`
         // (L2269) fills ONE `Sn` layer to the LEFT `amount` fraction
         // (`wl(vc.ho(Jc.io,a))` = EFilled/EHorizontal, the same left-fraction
@@ -20349,12 +20418,25 @@ void ShopScreen::render_impl(App& app) {
         float row_y = stat_y;
         for (const ShopAttributeDef& def : shop_attribute_defs()) {
             if (def.hidden) continue;  // `!h.hidden` L2274
-            const auto vit = sel_it->attributes.find(def.name);
-            if (vit == sel_it->attributes.end()) continue;  // `a.attributes.get` L2275
+            const auto vit = value_attrs.find(def.name);
+            if (vit == value_attrs.end()) continue;  // `a.attributes.get` L2275
             const int value = vit->second;
             int compare = value;  // `e.G=d.G` L2275
-            const auto cit = equipped_attrs.find(def.name);
-            if (cit != equipped_attrs.end()) compare = cit->second;  // `b.attributes.get`
+            if (show_compare) {
+                const auto cit = tier_attrs.next.find(def.name);
+                if (cit != tier_attrs.next.end()) compare = cit->second;
+            }
+            // [probe, authorised] SF2_SHOP_STATS: the detail row's value/compare
+            // (the upgrade-tier display measurement).
+            if (std::getenv("SF2_SHOP_STATS") != nullptr) {
+                std::fprintf(stdout,
+                             "[shop-detail] %s %s value=%d compare=%d delta=%d "
+                             "owned=%d show_compare=%d has_next=%d\n",
+                             sel_it->name.c_str(), def.name.c_str(), value, compare,
+                             compare - value, tier_attrs.owned ? 1 : 0,
+                             show_compare ? 1 : 0, tier_attrs.has_next ? 1 : 0);
+                std::fflush(stdout);
+            }
             const int delta = compare - value;  // `IXa(b-a)` L2272
             const float row_cy = row_y + stat_h * 0.5f;
             // `fi.init`: `"attributes/" + Icon` in atlas 248 (fallback 266).

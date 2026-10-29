@@ -3280,6 +3280,24 @@ void FightController::round_start() {
             }
         }
     }
+    // JS `Z2` L409 `this.Ta.ia.fB()` -> `Pi.ia` (L35217) -> `Xm.fB` (L35427) ->
+    // `cv.fB` (L35533) `while(Ef.length>0) MNa(Ef[0],0)` -> `tl.fB` (L35736)
+    // `Gq.fB(); Hq.fB();` — the round reset DRAINS every running magic effect.
+    // The port never did, so a Looped effect spawned by a move that was cut
+    // short by the round end was never stopped (its `StopEffect` at a later
+    // frame never dispatches): the Titan's `SuperSlashShield` stayed on screen
+    // and each new round stacked another one (reported).
+    {
+        const std::size_t live_fx = magic_fx_.live().size();
+        if (live_fx > 0) {
+            std::fprintf(
+                stdout,
+                "[fx] round reset: drained %zu running effect(s) (JS Z2 -> fB)\n",
+                live_fx);
+            std::fflush(stdout);
+        }
+    }
+    magic_fx_.stop_all();
     // Per-round magic reset (`yKa`: bh=0 + InitialCharge; raid persists).
     init_magic();
     // Per-round bus re-register (JS tb.Yka L401/402/405: cKa + Gf both

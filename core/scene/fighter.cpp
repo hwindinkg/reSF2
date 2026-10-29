@@ -2905,20 +2905,6 @@ void Fighter::reseat_preview_anchor(float node_x, float node_y) {
     world_y_ = node_y;
 }
 
-void Fighter::preview_render_shift(float node_x, float node_y) {
-    const int a = model_.bone_by_name(fighter_pivot_bone());
-    if (a < 0 || pos_.size() < 2) return;
-    const std::size_t u = static_cast<std::size_t>(a) * 2;
-    if (u + 1 >= pos_.size()) return;
-    const float dx = node_x - pos_[u];
-    const float dy = node_y - pos_[u + 1];
-    for (std::size_t i = 0; i + 1 < pos_.size(); i += 2) {
-        pos_[i] += dx;
-        pos_[i + 1] += dy;
-    }
-    world_x_ = node_x;
-    world_y_ = node_y;
-}
 
 void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                                  float node_x, float node_y, bool reseat) {

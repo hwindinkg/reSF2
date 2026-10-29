@@ -8987,6 +8987,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          fs->enemy_wave_count(), fs->enemy_rounds_won(),
                          fs->player_rounds_won());
             std::fflush(stdout);
+            // [probe, authorised] SF2_WAVE_HOLD=N: let the round PLAY for N
+            // frames before the scripted KO, so the round-2/3 warrior's own
+            // Tactic (e.g. `Lynx_Ranged`) and perks can be observed.
+            if (const char* hold_env = std::getenv("SF2_WAVE_HOLD")) {
+                const int hold = std::atoi(hold_env);
+                for (int hf = 0; hf < hold && !fs->battle_over(); ++hf) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                }
+                std::fprintf(stdout, "[waveprobe] held %d frames in round %d\n",
+                             hold, round + 1);
+                std::fflush(stdout);
+            }
             const int before = fs->enemy_wave_index();
             fs->probe_set_hp(1.0f, 0.0f);  // KO the enemy -> the player wins
             guard = 0;
