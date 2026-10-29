@@ -19440,6 +19440,12 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
 
 void ShopScreen::update_impl(float dt) {
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // `p.o.qC` (`ShowUpgrades`) is a LIVE save flag: the quest action
+    // `ShowUpgrades` unlocks the upgrade plates (`Ne.Wub` L2255) WHILE the
+    // shop is open. The ctor cached it once, so the unlock never showed until
+    // the shop was reopened (the reported "after unlocking the upgrade the
+    // button does not appear").
+    show_upgrades_ = shop_show_upgrades(app());
     // Sensei dialog modal gate (quest engine `He` records). The tutorial
     // lands here: `StoryTutorialBuyItem` fires on SceneTo==Shop
     // (tutorial_quests.xml L98-118) and queues the `tutorial_buy_knives`
