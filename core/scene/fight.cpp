@@ -2277,6 +2277,19 @@ FightFighter FightController::make_fighter(
                          static_cast<double>(b.x), static_cast<double>(b.y));
             ++shown;
         }
+        {
+            int cloth_n = 0;
+            for (const sf2::scene::Bone& b : f.fighter.model().bones) {
+                if (!b.cloth) continue;
+                ++cloth_n;
+                if (cloth_n <= 40) {
+                    std::fprintf(stdout, "[model]   cloth bone=%s mass=%.4f fixed=%d macro=%d\n",
+                                 b.name.c_str(), static_cast<double>(b.mass),
+                                 b.fixed ? 1 : 0, b.is_macro ? 1 : 0);
+                }
+            }
+            std::fprintf(stdout, "[model] %s cloth bones=%d\n", f.name.c_str(), cloth_n);
+        }
         std::fprintf(stdout, "[model] %s weapon-ish bones=%d total=%zu capsules=%zu\n",
                      f.name.c_str(), shown, f.fighter.model().bones.size(),
                      f.fighter.model().capsules.size());
