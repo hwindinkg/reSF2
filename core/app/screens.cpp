@@ -19428,6 +19428,22 @@ ShopScreen::ShopScreen(ScreenManager& mgr) : Screen(mgr, "Shop") {
             std::fprintf(stdout, "[shop] Ao focus WEAPON_KNIVES (tab Weapons, row %d)\n",
                          hover_);
             std::fflush(stdout);
+        } else {
+            // JS `Oa` ctor opens on the EQUIPPED item of the tab, not the first
+            // row (reported: "the shop opens the first item instead of the
+            // equipped one"). `Oa.f5`'s auto-select (`usb`) then keeps it.
+            const std::vector<std::size_t> rows = shop_tab_rows(items_, 0);
+            for (std::size_t r = 0; r < rows.size(); ++r) {
+                if (items_[rows[r]].name == w.weapon) {
+                    hover_ = static_cast<int>(r);
+                    sel_ = static_cast<int>(r);
+                    std::fprintf(stdout,
+                                 "[shop] initial selection = equipped '%s' (row %zu)\n",
+                                 w.weapon.c_str(), r);
+                    std::fflush(stdout);
+                    break;
+                }
+            }
         }
     } catch (const std::exception&) {
     }
