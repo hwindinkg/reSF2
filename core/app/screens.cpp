@@ -5983,6 +5983,63 @@ void battle_rewards(const std::string& battle_name, const std::string& zone_name
     }
 }
 
+// JS `hj.jt(true)` / `Lr` ctor L86368: the `<Reward><Item Name=...>` drops of
+// the GRANT row (the LAST `<Reward>` of the fight, the same row
+// `battle_rewards` reads). `jt(a)` returns the row's item list; the results
+// screen shows their icon page first (`gvb`, L86403-86422).
+std::vector<std::string> battle_reward_items(const std::string& battle_name,
+                                             const std::string& zone_name,
+                                             int fight_index) {
+    std::vector<std::string> out;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/stages.xml", std::ios::binary);
+        if (!in) return out;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return out;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return out;
+        pugi::xml_node battle;
+        for (const pugi::xml_node z : zones.children("Zone")) {
+            if (!zone_name.empty() &&
+                std::string(z.attribute("Name").value()) != zone_name) {
+                continue;
+            }
+            for (const pugi::xml_node b : z.children("Battle")) {
+                if (std::string(b.attribute("Name").value()) == battle_name) {
+                    battle = b;
+                    break;
+                }
+            }
+            if (battle) break;
+        }
+        if (!battle) return out;
+        pugi::xml_node fight;
+        int i = 0;
+        for (const pugi::xml_node f : battle.children("Fight")) {
+            if (i++ == fight_index) {
+                fight = f;
+                break;
+            }
+        }
+        if (!fight) return out;
+        const pugi::xml_node rewards = fight.child("Rewards");
+        if (!rewards) return out;
+        pugi::xml_node last;
+        for (const pugi::xml_node r : rewards.children("Reward")) last = r;
+        if (!last) return out;
+        for (const pugi::xml_node it : last.children("Item")) {
+            const std::string nm = it.attribute("Name").value();
+            if (!nm.empty()) out.push_back(nm);
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
 // JS `dl` `<Fight>` ctor (offset ~98696): `a.d4=u.I(b.attributes.get("Power"),1)`
 // — the fight's energy cost, default 1 (`u.I(x,1)` -> 1 for an absent/NaN
 // attr). `v.Am` (L623868) spends it on entry (`v.qZa(-a.d4)`). The battle/fight
@@ -18316,6 +18373,44 @@ bool apply_fight_reward(App& app) {
                      static_cast<long long>(w.bonus));
     }
     if (player_won) {
+        // JS `v.kD` -> `dmb` -> `Pa.…` grants the row's ITEMS too; `hj.jt(true)`
+        // returns them for the results page (`Lr.ne`). The fight ordinal comes
+        // from the pending triple (`zone|battle|n`, 1-based).
+        {
+            int fi = 0;
+            const std::size_t p1 = pb.fight_triple.find('|');
+            if (p1 != std::string::npos) {
+                const std::size_t p2 = pb.fight_triple.find('|', p1 + 1);
+                if (p2 != std::string::npos) {
+                    fi = std::atoi(pb.fight_triple.c_str() + p2 + 1) - 1;
+                }
+            }
+            if (fi < 0) fi = 0;
+            pb.reward_items = battle_reward_items(pb.battle_name, pb.zone, fi);
+            for (const std::string& nm : pb.reward_items) {
+                bool have = false;
+                for (const WarriorSave::OwnedItem& it : w.items) {
+                    if (it.name == nm) {
+                        have = true;
+                        break;
+                    }
+                }
+                if (!have) {
+                    WarriorSave::OwnedItem oi;
+                    oi.name = nm;
+                    oi.count = 1;
+                    w.items.push_back(std::move(oi));
+                }
+            }
+            if (!pb.reward_items.empty()) {
+                std::fprintf(stdout, "[result] reward items:");
+                for (const std::string& nm : pb.reward_items) {
+                    std::fprintf(stdout, " %s", nm.c_str());
+                }
+                std::fprintf(stdout, "\n");
+                std::fflush(stdout);
+            }
+        }
         // JS battle record (`iF` via `hl`/`lWa`, FLOW_STATIC section 3.2).
         {
             w.battle_unlock(pb.zone, pb.battle_name);
@@ -18485,6 +18580,20 @@ void ResultsScreen::update_impl(float dt) {
     // the star row (`Pr`) never slides and counts over `ed(1)`, so the list
     // settles at 4.5 s and the OK plate appears only then
     // (`Lr.XMa`/`bza`).
+    // JS `Lr.gvb` L86412-86421: on the ITEM page the OK plate is already up and
+    // the stat table has not been built yet — pressing it runs `AHa`
+    // (L86468-86472): destroy the item page, then `ZMa()` (the table + its
+    // reveal clock).
+    if (item_page_) {
+        if (app().pointer().pressed) {
+            item_page_ = false;
+            reveal_t_ = 0.0f;
+            reveal_done_ = false;
+            std::fprintf(stdout, "[result] item page OK -> stat table\n");
+            std::fflush(stdout);
+        }
+        return;
+    }
     if (!reveal_done_) {
         reveal_t_ += dt;
         if (reveal_t_ >= kRevealSettle) {
@@ -18523,6 +18632,9 @@ void ResultsScreen::update_impl(float dt) {
         prize_style_level_ = pb.prize_style_level;
         prize_shock_coins_ = pb.prize_shock_coins;
         prize_ruby_ = pb.prize_gems;
+        reward_items_ = pb.reward_items;
+        // `Lr` ctor L86373: `else if (this.ne.length > 0) this.gvb();`
+        item_page_ = !reward_items_.empty();
     }
     // Idempotent fallback: a Results screen reached without the fight-end
     // handoff still grants (JS `v.kD` runs once per fight).
@@ -18722,6 +18834,46 @@ void ResultsScreen::render_impl(App& app) {
                       player_won_ ? "VICTORY" : "DEFEAT", 1.6f, UiAlign::Center,
                       player_won_ ? 1.0f : 0.8f, player_won_ ? 0.85f : 0.3f,
                       player_won_ ? 0.3f : 0.3f);
+    }
+    // JS `Lr.gvb` (L86403-86422): the GRANTED-ITEM page. Only the FIRST item's
+    // icon (`CN.nL(ne[0]); setScale(1); C(375); D(350)`) and the OK plate
+    // (`$g.D(700 - $g.qa()*1.5)`, i.e. the same place as the table's OK) are
+    // shown; the stat table appears on the next press (`AHa` -> `ZMa`).
+    if (item_page_ && !reward_items_.empty()) {
+        const float icx = kkb_j + 375.0f * kk_scale;
+        const float icy = kkb_p + 350.0f * kk_scale;
+        const float isz = 220.0f * kk_scale;  // `setScale(1)` = natural art
+        bool drawn = false;
+        try {
+            for (const CatalogItem& ci : load_full_catalog(app)) {
+                if (ci.name != reward_items_.front()) continue;
+                drawn = draw_item_image(app, ci.image, icx, icy, isz, isz, 1.0f);
+                break;
+            }
+        } catch (const std::exception&) {
+        }
+        if (!drawn) {
+            draw_flat_button(app, reward_items_.front(), icx, icy, isz * 0.5f,
+                             isz * 0.5f, 0.85f, 0.78f, 0.55f, false);
+        }
+        const std::string ok_label = loc(app, "OK", "OK");
+        const float oky2 = 645.0f;  // the table's OK y (design ~622)
+        if (!draw_bb_plate(app, "btnWhite", kViewW * 0.5f, oky2, 230.0f, 52.0f, 1.0f)) {
+            draw_flat_button(app, ok_label, kViewW * 0.5f, oky2, 210.0f, 48.0f, 0.85f,
+                             0.78f, 0.55f, false);
+        }
+        draw_ui_label(app, kViewW * 0.5f - 105.0f, oky2 - 13.0f, 210.0f, 26.0f, ok_label,
+                      0.85f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        if (std::getenv("SF2_TRACE_RESULTS") != nullptr) {
+            static bool logged_item = false;
+            if (!logged_item) {
+                logged_item = true;
+                std::fprintf(stdout, "[results] item page: %s (%zu granted)\n",
+                             reward_items_.front().c_str(), reward_items_.size());
+                std::fflush(stdout);
+            }
+        }
+        return;
     }
     // Prize breakdown (JS `Fh`/`Lr` inner list; `v.kD`/`bzb` factor lines,
     // FLOW_STATIC §4.3: Perfect $Ia=5, FirstStrike ep=2, Combo Ui=1/combo,

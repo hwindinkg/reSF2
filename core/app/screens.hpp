@@ -1174,6 +1174,12 @@ public:
 
 private:
     bool player_won_ = false;
+    // JS `Lr` ctor L86368-86377: `ne = this.Hi.hj.jt(true)` = the GRANTED
+    // items. When non-empty the first page is `gvb()` — only the first item's
+    // icon + the OK plate; pressing OK (`AHa` L86468-86472) shows the stat
+    // table (`ZMa`).
+    std::vector<std::string> reward_items_;
+    bool item_page_ = false;
     std::int64_t money_reward_ = 0;
     std::int64_t exp_reward_ = 0;
     bool applied_ = false;

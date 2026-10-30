@@ -38,6 +38,10 @@
 
 #include "app/app.hpp"
 #include "app/dev_flags.hpp"
+namespace sf2::app {
+// Defined in core/app/screens.cpp (the fight-end grant).
+bool apply_fight_reward(App& app);
+}
 #include "app/quest_engine.hpp"
 #include "app/save_system.hpp"
 #include "app/screens.hpp"
@@ -1889,6 +1893,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --map-drag-probe: drive the `Vr.aa` zone-strip drag (press, 24 held
     // moves, release) with injected pointers and log the pan/zone switch.
     bool map_drag_probe = false;
+    // --results-item-probe: grant a fight whose last <Reward> carries an
+    // `<Item>` (BOSS_LYNX fight 6 -> `drop_name_blueseal`) and show the results
+    // item page (JS `hj.jt(true)` / `Lr.gvb`).
+    bool results_item_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2171,6 +2179,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             map_button_probe = true;
         } else if (arg == "--map-drag-probe") {
             map_drag_probe = true;
+        } else if (arg == "--results-item-probe") {
+            results_item_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5291,6 +5301,65 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (results_item_probe) {
+        // --- `--results-item-probe`: the item-reward path ------------------
+        // `hj.jt(true)` = the `<Reward><Item>` drops of the grant row; the
+        // results screen then shows `gvb` (the item icon + OK) before the stat
+        // table (`AHa` -> `ZMa`).
+        glfwHideWindow(app.renderer().window());
+        sf2::app::PendingBattle& pb = app.pending_battle();
+        pb.battle_name = "BOSS_LYNX";
+        pb.zone = "ZONE_1";
+        pb.fight_triple = "ZONE_1|BOSS_LYNX|6";
+        pb.player_won = true;
+        pb.has_result = true;
+        pb.reward_money = 0;
+        pb.reward_exp = 0;
+        pb.reward_bonus = 0;
+        pb.reward_applied = false;
+        const bool granted = sf2::app::apply_fight_reward(app);
+        (void)granted;
+        std::fprintf(stdout, "[itemprobe] reward_items=%zu:", pb.reward_items.size());
+        for (const std::string& nm : pb.reward_items) {
+            std::fprintf(stdout, " %s", nm.c_str());
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+        // The save must now own the item.
+        try {
+            const sf2::app::WarriorSave w = app.save().load();
+            bool owned = false;
+            for (const sf2::app::WarriorSave::OwnedItem& it : w.items) {
+                if (!pb.reward_items.empty() && it.name == pb.reward_items.front()) {
+                    owned = true;
+                    break;
+                }
+            }
+            std::fprintf(stdout, "[itemprobe] save owns '%s' = %d\n",
+                         pb.reward_items.empty() ? "-" : pb.reward_items.front().c_str(),
+                         owned ? 1 : 0);
+        } catch (const std::exception&) {
+        }
+        std::fflush(stdout);
+        app.screens().push(make_screen(app.screens(), kScreenResults));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 20; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[itemprobe] shot %s\n", shot);
+        }
+        // Press OK -> the stat table (JS `AHa`).
+        app.inject_click(640.0, 645.0, 3);
+        for (int i = 0; i < 12; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[itemprobe] done\n");
+        std::fflush(stdout);
+        return 0;
     } else if (map_drag_probe) {
         // --- `--map-drag-probe`: the `Vr.aa` zone-strip drag (L88008-88128) --
         // Hidden window, no OS input: the pointer is injected (press at

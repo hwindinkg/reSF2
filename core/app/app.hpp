@@ -103,6 +103,9 @@ struct PendingBattle {
     // The COUNTS (`Fh.d6`/`c6`) the results rows print as `×{0}`.
     int prize_perfect_count = 0;
     int prize_first_count = 0;
+    // JS `hj.jt(true)`: the `<Reward><Item Name=...>` drops this fight granted
+    // (`Lr.ne`); the results screen shows their icon page first.
+    std::vector<std::string> reward_items;
     // Per-category bonus COINS (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`, L2054-2056): the
     // Results rows show these values; `prize_combo`/`prize_shocks` above are
     // the counts (`jU`/`e6`) that label them (`PERFECT ×{0}`).
