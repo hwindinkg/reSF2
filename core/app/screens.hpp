@@ -63,6 +63,9 @@ class LocationScene;
 
 namespace sf2::app {
 
+// Defined in app/quest_engine.hpp; only the pointer is stored in this header.
+struct EngineDialog;
+
 // The on-screen gamepad's per-screen interaction state (JS `ze` joystick +
 // `fu` attack buttons). ONE instance per screen that shows the pad; the
 // shared `update_pad_input` in screens.cpp turns pointer events into
@@ -1016,6 +1019,20 @@ private:
     // toggle is a desktop-only alias (NOT in `Af.oUa`), live whenever the
     // desktop key map is on (the default).
     bool paused_ = false;
+    // JS `Dr.home` -> `xhb` -> `Xc.Zhb` L16765-16767 ->
+    // `Wb.openDialog(40, lv("dlgExitFightTitle", "dlgExitFightMessage", false, cb))`:
+    // the QUIT plate opens a confirm dialog (`sn extends od`); only its primary
+    // plate (`O3a` L79850-79863) runs the callback and leaves.
+    bool exit_confirm_ = false;
+public:
+    // [probe] the exit-confirm dialog's plate centres (`quest_dialog_row`), so
+    // `--pause-probe` can press them without guessing the od layout.
+    bool exit_confirm_plates(App& app, float& ok_x, float& ok_y, float& cancel_x,
+                             float& cancel_y) const;
+private:
+    // `EngineDialog` is only forward-declared here (line ~1969); a shared_ptr
+    // keeps the header light and the ctor in screens.cpp sees the full type.
+    std::shared_ptr<EngineDialog> exit_dlg_;
     bool music_off_ = false;  // `Dr.PauseMusic_on/off` toggle state
     // The desktop key aliases (arrows/Space/Esc). DEFAULT ON: the default
     // desktop key map is the JS `Af.oUa` ten keys PLUS the arrows/Space/Esc

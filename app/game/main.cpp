@@ -742,9 +742,14 @@ static const UiTourStep kFidelitySteps[] = {
     //    tutorial completes when the fight starts (screens.cpp
     //    start_tutorial_fight).
     {0.0f, 0.0f, "tut fight pause (Esc)", 6, 10, -1, 30, nullptr, 256, false},
-    // 6: the pause dialog home ("QUIT") pops the fight -> the clean Dojo hub.
-    //    `Dr` home button centre (L2066/L2068 layout: row y=396, x=403.75).
-    {403.75f, 396.0f, "tut fight quit->dojo", 6, 10, 3, 0, nullptr},
+    // 6: the pause dialog home ("QUIT") opens the exit-confirm dialog
+    //    (`Xc.Zhb` L16765-16767 -> `Wb.openDialog(40, lv(...))`), so the
+    //    screen STAYS on the fight. `Dr` home button centre (row y=396,
+    //    x=403.75).
+    {403.75f, 396.0f, "tut fight quit (exit-confirm)", 6, 10, 6, 0, nullptr},
+    // 6b: the confirm dialog's primary plate (`dlgExitButton`, `sn.O3a`
+    //    L79850-79863) runs the callback (`Vwb`) and pops the fight -> Dojo.
+    {899.0f, 531.0f, "tut fight quit confirm->dojo", 6, 10, 3, 0, nullptr},
     // 7: the clean Dojo hub (tutorial done; no banner).
     {0.0f, 0.0f, "dojo hub", 3, 20, -1, 80, "dojo_hub.png", 0, true},
     // 8: expand the collapsed `za` nav column (the header tap).
@@ -1897,6 +1902,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // `<Item>` (BOSS_LYNX fight 6 -> `drop_name_blueseal`) and show the results
     // item page (JS `hj.jt(true)` / `Lr.gvb`).
     bool results_item_probe = false;
+    // --pause-probe: the pause plates' `Pause_selected` frame + the QUIT
+    // exit-confirm dialog (JS `Mr.Xw` L86084-86086 / `Xc.Zhb` L16765-16767).
+    bool pause_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2181,6 +2189,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             map_drag_probe = true;
         } else if (arg == "--results-item-probe") {
             results_item_probe = true;
+        } else if (arg == "--pause-probe") {
+            pause_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5301,6 +5311,104 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (pause_probe) {
+        // --- `--pause-probe`: the pause plates + the QUIT confirm ----------
+        glfwHideWindow(app.renderer().window());
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "BOSS_LYNX";
+            pb.zone = "ZONE_1";
+            pb.location = "dojo";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned(std::string("Fists"));
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[pauseprobe] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        for (int i = 0; i < 150; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        // Esc -> the `Dr` pause dialog (`ha.Aia`).
+        app.inject_key(GLFW_KEY_ESCAPE, true);
+        glfwPollEvents();
+        app.run_one_frame();
+        app.inject_key(GLFW_KEY_ESCAPE, false);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        // Hold the MUSIC plate -> `Pause_selected` at 0.5 alpha.
+        double hold_x = 561.25;
+        if (const char* hx = std::getenv("SF2_PAUSE_HOLD")) hold_x = std::atof(hx);
+        app.inject_click(hold_x, 396.0, 12);
+        for (int i = 0; i < 3; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        if (const char* s1 = std::getenv("SF2_PAUSE_SHOT1")) {
+            app.capture_png(s1);
+            std::fprintf(stdout, "[pauseprobe] selected shot %s\n", s1);
+        }
+        for (int i = 0; i < 14; ++i) {  // release
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        // QUIT -> the exit-confirm dialog.
+        app.inject_click(403.75, 396.0, 3);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        float okx = 0.0f, oky = 0.0f, ccx = 0.0f, ccy = 0.0f;
+        const bool plates = fs->exit_confirm_plates(app, okx, oky, ccx, ccy);
+        std::fprintf(stdout,
+                     "[pauseprobe] confirm dialog plates=%d ok=%.0f,%.0f "
+                     "cancel=%.0f,%.0f\n",
+                     plates ? 1 : 0, static_cast<double>(okx),
+                     static_cast<double>(oky), static_cast<double>(ccx),
+                     static_cast<double>(ccy));
+        std::fflush(stdout);
+        if (const char* s2 = std::getenv("SF2_PAUSE_SHOT2")) {
+            app.capture_png(s2);
+            std::fprintf(stdout, "[pauseprobe] confirm shot %s\n", s2);
+        }
+        if (!plates) {
+            app.shutdown();
+            return 1;
+        }
+        // CANCEL first: the dialog closes, the pause stays.
+        app.inject_click(ccx, ccy, 3);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        float okx2 = 0.0f, oky2 = 0.0f, ccx2 = 0.0f, ccy2 = 0.0f;
+        const bool still = fs->exit_confirm_plates(app, okx2, oky2, ccx2, ccy2);
+        std::fprintf(stdout, "[pauseprobe] after CANCEL dialog=%d screen=%d\n",
+                     still ? 1 : 0, static_cast<int>(app.screens().current_id()));
+        // Re-open and confirm.
+        app.inject_click(403.75, 396.0, 3);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        app.inject_click(okx, oky, 3);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[pauseprobe] after OK screen=%d (fight=6)\n",
+                     static_cast<int>(app.screens().current_id()));
+        std::fflush(stdout);
+        return 0;
     } else if (results_item_probe) {
         // --- `--results-item-probe`: the item-reward path ------------------
         // `hj.jt(true)` = the `<Reward><Item>` drops of the grant row; the

@@ -15459,6 +15459,22 @@ void FightScreen::verify_fight() const {
     std::fflush(stdout);
 }
 // --- Pause dialog `Dr` layout (JS L2065-2068; PAUSE_STATIC §3) -------------
+bool FightScreen::exit_confirm_plates(App& app, float& ok_x, float& ok_y,
+                                      float& cancel_x, float& cancel_y) const {
+    if (!exit_confirm_ || exit_dlg_ == nullptr) return false;
+    const QuestDialogRow row = quest_dialog_row(app, *exit_dlg_);
+    for (int i = 0; i < row.count; ++i) {
+        if (row.plates[i].slot == 1) {
+            ok_x = row.plates[i].cx;
+            ok_y = row.plates[i].cy;
+        } else if (row.plates[i].slot == 0) {
+            cancel_x = row.plates[i].cx;
+            cancel_y = row.plates[i].cy;
+        }
+    }
+    return row.count > 0;
+}
+
 // The HUD pause widget (`Sf.Jn`, L2034) / Esc opens `ha.Aia`'s `Dr` dialog.
 // `Dr.layout` (L2068): `content` is scaled `(b.N-b.J)/900` with
 // `b = ma.Kq.fn(1.125)`; the 4 `Mr` buttons are 150x150 at design y=440,
@@ -15858,6 +15874,43 @@ void FightScreen::update_impl(float dt) {
         // Frozen sim (UI-layer pause): dialog clicks only; everything below
         // (log, Next, results) is skipped by the early return.
         const App::PointerState& p = app().pointer();
+        // JS `sn` (the exit-confirm dialog, `Wb.openDialog(40, lv)` from
+        // `Xc.Zhb` L16765-16767) is ON TOP of the pause dialog and owns the
+        // input: its primary plate (`O3a` L79850-79863) runs the callback
+        // (`Vwb` L16777-16780) and leaves, the secondary cancels.
+        if (exit_confirm_) {
+            if (p.pressed) {
+                // The PLATE hit-test (`Od.rI` rects), not the row-text one.
+                const int slot = quest_dialog_button_hit_index(
+                    app(), exit_dlg_ != nullptr ? *exit_dlg_ : EngineDialog{}, p.x,
+                    p.y);
+                std::fprintf(
+                    stdout, "[fight] exit-confirm press at %.0f,%.0f -> slot %d\n",
+                    static_cast<double>(p.x), static_cast<double>(p.y), slot);
+                std::fflush(stdout);
+                std::fflush(stdout);
+                if (slot == 1) {  // Right = the primary (`Rb`, `O3a`)
+                    sf2::audio::AudioEngine::instance().play("snd_click_1");
+                    std::fprintf(stdout,
+                                 "[fight] exit-confirm OK -> leave the fight\n");
+                    std::fflush(stdout);
+                    exit_confirm_ = false;
+                    set_paused(false);
+                    // JS `ai.B()` teardown (L384): leaving the fight restores
+                    // the MENU track (`lb.OS()`).
+                    sf2::audio::AudioEngine::instance().play_music_once("menu");
+                    manager().pop();
+                    return;
+                }
+                if (slot == 0) {  // Left = the cancel
+                    sf2::audio::AudioEngine::instance().play("snd_click_1");
+                    std::fprintf(stdout, "[fight] exit-confirm CANCEL\n");
+                    std::fflush(stdout);
+                    exit_confirm_ = false;
+                }
+            }
+            return;  // the confirm dialog swallows the pause plates
+        }
         if (p.pressed) {
             if (pause_hit(kPauseDlgPlayX, kPauseDlgRowY, kPauseDlgToggleS,
                           kPauseDlgToggleS)) {
@@ -15897,18 +15950,39 @@ void FightScreen::update_impl(float dt) {
                 std::fflush(stdout);
             } else if (pause_hit(kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
                                  kPauseDlgToggleS)) {
-                // `home` = quit (JS `Xc.Zhb` exit-confirm -> `O3a`; the confirm
-                // dialog is not ported — direct pop, OPEN).
+                // JS `Dr.home` -> `xhb` -> `Xc.Zhb` (L16765-16767): the QUIT
+                // plate opens the `lv("dlgExitFightTitle","dlgExitFightMessage")`
+                // confirm dialog; only its primary plate (`sn.O3a`
+                // L79850-79863) runs the callback (`Vwb` L16777-16780) and
+                // leaves. The port popped immediately.
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
-                std::fprintf(stdout, "[fight] pause QUIT (Dr.home -> caller)\n");
+                exit_confirm_ = true;
+                exit_dlg_ = std::make_shared<EngineDialog>();
+                exit_dlg_->type = "Regular";
+                exit_dlg_->title = loc(app(), "dlgExitFightTitle", "QUIT");
+                exit_dlg_->lines.push_back(loc(app(), "dlgExitFightMessage",
+                                               "Are you sure you want to quit?"));
+                exit_dlg_->line_buttons.push_back(std::string());
+                // The plate row needs a ROW (`line_actions`) and slot actions
+                // (`quest_dialog_row_buttons` returns early on an empty row and
+                // `quest_dialog_row` only builds a plate for a non-empty slot).
+                QuestAction noop;
+                noop.tag = "NoOp";
+                exit_dlg_->line_actions.push_back({});
+                exit_dlg_->button_actions.push_back(noop);   // Right (primary)
+                exit_dlg_->left_.actions.push_back(noop);    // Left (cancel)
+                // `sn.$i` L79830-79833: `fm(title, "dlgExitButton", "CANCEL", 3)`
+                // — the secondary plate is the cancel, the primary confirms.
+                // `sn.$i` L79830-79833 `fm(title, "dlgExitButton", "CANCEL", 3)`:
+                // the CONFIRM plate carries `dlgExitButton` ("ВЫЙТИ"), the
+                // secondary is the cancel (`CANCEL` lang key).
+                exit_dlg_->left_.text = loc(app(), "CANCEL", "CANCEL");
+                exit_dlg_->left_.color = "Dark";
+                exit_dlg_->button_text = loc(app(), "dlgExitButton", "EXIT");
+                exit_dlg_->button_color = "White";
+                exit_dlg_->has_right_button = true;
+                std::fprintf(stdout, "[fight] pause QUIT -> exit-confirm dialog\n");
                 std::fflush(stdout);
-                set_paused(false);
-                // JS `ai.B()` teardown (L384): leaving the fight restores the
-                // MENU track (`lb.OS()`). Popping here reveals the already-built
-                // Map, whose ctor `play_music_once("menu")` never re-runs, so
-                // the battle track would otherwise keep playing in the menu.
-                sf2::audio::AudioEngine::instance().play_music_once("menu");
-                manager().pop();
                 return;
             }
         }
@@ -17744,6 +17818,30 @@ void FightScreen::render_impl(App& app) {
               kPauseDlgToggleS, "RESUME");
         frame("home", kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "QUIT");
+        // JS `Mr` (L86073-86086): `fill = R.$(1302, "Pause_selected", node)`
+        // with `wa(0.5)`, hidden until `Xw(true)` on a press-down
+        // (`db` L77263/77275). Draw it over the plate that is held.
+        const App::PointerState& pp = app.pointer();
+        if (pp.down) {
+            const struct { float cx, cy; } plates[4] = {
+                {kPauseDlgHomeX, kPauseDlgRowY}, {kPauseDlgMusicX, kPauseDlgRowY},
+                {kPauseDlgSoundX, kPauseDlgRowY}, {kPauseDlgPlayX, kPauseDlgRowY}};
+            for (const auto& pl : plates) {
+                if (pp.x < pl.cx - kPauseDlgToggleS * 0.5f ||
+                    pp.x > pl.cx + kPauseDlgToggleS * 0.5f ||
+                    pp.y < pl.cy - kPauseDlgToggleS * 0.5f ||
+                    pp.y > pl.cy + kPauseDlgToggleS * 0.5f) {
+                    continue;
+                }
+                (void)try_draw_atlas_button(app, "Pause_selected", pl.cx, pl.cy,
+                                            kPauseDlgToggleS, kPauseDlgToggleS, 0.5f);
+                break;
+            }
+        }
+        // JS `Wb.openDialog(40, lv(..))` -> the `sn` confirm dialog on top.
+        if (exit_confirm_ && exit_dlg_ != nullptr) {
+            draw_od280_dialog(app, ren, *exit_dlg_, DialogAnim{});
+        }
     }
     // Sensei dialog modal overlay (`He`): drawn last so it covers the fight
     // HUD and the pause dialog (the other screens draw it the same way).
