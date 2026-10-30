@@ -1551,6 +1551,10 @@ public:
         // (`ls.ymb` L2238 label), `rank` = `v4` (the `es.uZ` L2239 order).
         std::string image;
         std::string keys;
+        // JS `ls.nca` (L92872-92887): the move's `<Keys>` entries as
+        // (key type id 1..14, press 1=Tap/2=Hold/3=Release) — the `Ck` icon
+        // list the row draws (`Vf.Ij`/`Vf.X8a`, `ls.ba` L92826-92835).
+        std::vector<std::pair<int, int>> key_spec;
         int rank = 0;
         // `ra.Ul` (L712) document order - the STABLE tie-break of the
         // `es.uZ` (L2239) `pb(a.v4,b.v4)` sort when `Rank` values are equal.

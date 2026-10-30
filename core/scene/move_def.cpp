@@ -26,6 +26,7 @@
 // The native parser reproduces the same data (conditions/intervals merged
 // from own + inherited templates), enough for the condition evaluator.
 
+#include <functional>
 #include "scene/move_def.hpp"
 
 #include <algorithm>
@@ -1165,6 +1166,34 @@ bool parse_moves(const std::string& xml_text, std::map<std::string, MoveDef>& ou
             // pattern, so only the FIRST '.' is replaced.
             const std::size_t dot = def.profile_image.find('.');
             if (dot != std::string::npos) def.profile_image[dot] = '/';
+        }
+        // JS `vm` (L31618-31641) parses the move's `<Keys>` children into
+        // `xn.Fh` (Hold) / `xn.sh` (Tap) / `xn.released`; `ls.nca`
+        // (L92872-92887) turns `Fh` + a `+` + `sh` into the profile key icons.
+        // `jJ()` returns the move's `Keys` condition, so search `<Conditions>`
+        // depth-first for the first `<Keys>` (an `<Operator>` may wrap it).
+        if (pugi::xml_node conds = move.child("Conditions")) {
+            std::function<pugi::xml_node(pugi::xml_node)> find_keys =
+                [&](pugi::xml_node n) -> pugi::xml_node {
+                for (pugi::xml_node c : n.children()) {
+                    if (std::string(c.name()) == "Keys") return c;
+                    pugi::xml_node r = find_keys(c);
+                    if (r) return r;
+                }
+                return pugi::xml_node();
+            };
+            const pugi::xml_node keys = find_keys(conds);
+            if (keys) {
+                for (pugi::xml_node k : keys.children("Key")) {
+                    const std::string ts =
+                        k.attribute("Type") ? k.attribute("Type").value() : "";
+                    const std::string ps =
+                        k.attribute("PressType") ? k.attribute("PressType").value() : "";
+                    const int t = key_type_id(ts);
+                    if (t == 0) continue;  // JS `Vf.X8a` returns null -> skipped
+                    def.profile_key_spec.emplace_back(t, press_type_id(ps));
+                }
+            }
         }
 
         // Resolve Template inheritance.

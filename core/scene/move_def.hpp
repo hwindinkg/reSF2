@@ -669,6 +669,13 @@ struct MoveDef {
     int profile_rank = 0;             // `u.I(Profile/@Rank)` (`v4`)
     std::string profile_image;        // `Ye.qI(Profile/@Icon)` -> atlas 246 frame
     std::string profile_keys;         // `Profile/@KeysDescription` (`fFa`)
+    // JS `vm` (the `Keys` condition, `jc.jJ()`): the move's own
+    // `<Conditions><Keys><Key Type= PressType=/>` children as
+    // (key type id 1..14 from `sa.$h`, press 1=Tap/2=Hold/3=Release). The
+    // profile Moves rows draw one `ComboButtons/icon_*` sprite per entry
+    // (`Vf.Ij`/`Vf.X8a` L90788-90824, `ls.ba` L92826-92835): the HOLD list, a
+    // `icon_plus` separator, then the TAP list (`ls.nca` L92872-92887).
+    std::vector<std::pair<int, int>> profile_key_spec;
     // Document (`<Moves><Move>`) index. JS `ra.Ul` (the `Ru` catalog that
     // `v.uQ()` L1218 returns) is filled by `Fa.Ueb` (L712) while it walks
     // `<Move>` in file order, so `ra.Ul` is in document order; `es.uZ`

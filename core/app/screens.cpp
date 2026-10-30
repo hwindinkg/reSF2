@@ -2208,6 +2208,82 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
     return true;
 }
 
+// JS `Vf.X8a` (L90799-90824): key type -> (atlas frame, rotation). `1`=Up,
+// `5`=Down, `9`=Punch, `10`=Kick use their own frame at 0 degrees; the eight
+// directional variants reuse `ComboButtons/icon_left` rotated by `-angle`
+// (`Vf.Us` L90792-90798 `c.Wg(-b)`). Types 11..14 (Ranged/Magic/RaidCharge/
+// Super) are NOT in the profile table — `X8a` returns null for them.
+bool key_icon_for(int type, const char** frame, float* rot) {
+    switch (type) {
+        case 1: *frame = "ComboButtons/icon_up"; *rot = 0.0f; return true;
+        case 2: *frame = "ComboButtons/icon_left"; *rot = -225.0f; return true;
+        case 3: *frame = "ComboButtons/icon_left"; *rot = -180.0f; return true;
+        case 4: *frame = "ComboButtons/icon_left"; *rot = -135.0f; return true;
+        case 5: *frame = "ComboButtons/icon_down"; *rot = 0.0f; return true;
+        case 6: *frame = "ComboButtons/icon_left"; *rot = -45.0f; return true;
+        case 7: *frame = "ComboButtons/icon_left"; *rot = 0.0f; return true;
+        case 8: *frame = "ComboButtons/icon_left"; *rot = -315.0f; return true;
+        case 9: *frame = "ComboButtons/icon_punch"; *rot = 0.0f; return true;
+        case 10: *frame = "ComboButtons/icon_kick"; *rot = 0.0f; return true;
+        default: return false;
+    }
+}
+
+// One atlas frame drawn ROTATED about its centre at a fixed HEIGHT (`zf(a)` =
+// `la(a / boundsHeight)`), the primitive the profile key icons need (`Vf.Us`
+// sets `Wg(-angle)`; `ls.ba` sets `zf(b*0.4)`). Returns the drawn WIDTH (the
+// layout advance `fa.x * Eb`); 0 when the frame is missing.
+float draw_atlas_icon_rot(App& app, const std::string& frame_name, float cx,
+                          float cy, float height, float rot_deg, float alpha) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) {
+        static std::set<std::string> logged;
+        if (logged.insert(frame_name).second) {
+            std::fprintf(stdout, "[ui] atlas frame missing: %s\n",
+                         frame_name.c_str());
+            std::fflush(stdout);
+        }
+        return 0.0f;
+    }
+    const float nat_w =
+        fr.source_w > 0 ? static_cast<float>(fr.source_w) : static_cast<float>(fr.w);
+    const float nat_h =
+        fr.source_h > 0 ? static_cast<float>(fr.source_h) : static_cast<float>(fr.h);
+    if (nat_w <= 0.0f || nat_h <= 0.0f) return 0.0f;
+    const float sc = height / nat_h;
+    sf2::scene::Sprite s;
+    s.texture_name = frame_name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_a = alpha;
+    s.rotated = fr.rotated;
+    s.transform.set_pos(cx, cy);
+    s.source_w = nat_w;
+    s.source_h = nat_h;
+    s.trim_x = static_cast<float>(fr.offset_x);
+    s.trim_y = static_cast<float>(fr.offset_y);
+    s.transform.set_scale(sc, sc);
+    s.transform.rotation = rot_deg;
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = 640.0f;
+    ui_cam.center_y = 360.0f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = 1280.0f;
+    ui_cam.view_h = 720.0f;
+    ui_cam.arena_h = 720.0f;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = 640.0f;
+    app.renderer().draw_sprite(s, ui_cam);
+    return nat_w * sc;
+}
+
 // Reads a frame's UNTRIMMED `sourceSize` (JS `.fa`) from the atlas cache,
 // falling back to the shipped size when the frame is not registered. The JS
 // sizes every cap/backdrop/icon sprite from `fa` (e.g. `Zh.ba` L1872
@@ -22963,6 +23039,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
             r.priority = m->priority;
             r.image = m->profile_image;   // `Ru.image` (L1253) -> atlas 246
             r.keys = m->profile_keys;     // `Ru.fFa` (L1253) -> `ls.ymb` label
+            r.key_spec = m->profile_key_spec;  // `vm` `<Keys>` -> `ls.Ck`
             r.rank = m->profile_rank;     // `v4` (`es.uZ` sort key, L2239)
             r.order = m->profile_order;   // `ra.Ul` document order (L712)
             move_rows_.push_back(r);
@@ -24293,24 +24370,86 @@ void EquipmentScreen::render_impl(App& app) {
             // `this.icon.C(this.icon.za()/2 + e)` / `D(d)` - the icon CENTRE
             // is `0.5*icon + 0.1*cellH` from the cell's left edge and
             // vertically centred in the cell.
+            // `zf(b*.8)` sets the icon's HEIGHT (`la(a / boundsHeight)`); its
+            // WIDTH is `fa.x * Eb`, i.e. the frame's own aspect. `ls.ba` then
+            // uses `icon.za()` (that width) for the centre (`za()/2 + b*.1`),
+            // the label x (`+ za()/2*1.2`) and the key-icon start
+            // (`Zh.ya + za()*.25`), so a square box drifts all three left.
             const float icon_h = cell_h * 0.8f;                    // `zf(b*.8)`
-            const float icon_cx = cell_l + icon_h * 0.5f + cell_h * 0.1f;
+            float icon_w = icon_h;
+            if (!r.image.empty()) {
+                std::string iframe = r.image;
+                std::replace(iframe.begin(), iframe.end(), '.', '/');
+                float nw = icon_h, nh = icon_h;
+                atlas_source_size(app, iframe, icon_h, icon_h, &nw, &nh);
+                if (nh > 0.0f && nw > 0.0f) icon_w = icon_h * (nw / nh);
+            }
+            const float icon_cx = cell_l + icon_w * 0.5f + cell_h * 0.1f;
             const float icon_cy = ry + cell_h * 0.5f;              // `D(b/2)`
             if (!r.image.empty()) {
                 // `Ed.ZL` (L2203): `this.Fs.Cb(this.sO)` draws the `skills`
                 // (atlas 246) frame `Ye.qI(Profile/@Icon)` (L1863).
-                draw_cell_icon(app, r.image, icon_cx, icon_cy, icon_h, icon_h, 1.0f);
+                // Box = (icon_w, icon_h): the aspect-fit scale then equals
+                // `zf`'s height-based scale exactly.
+                draw_cell_icon(app, r.image, icon_cx, icon_cy, icon_w, icon_h, 1.0f);
             }
             // `ls.ymb` (L2238): `this.Zh.V(Y.na(this.Tp.fFa))`, hidden when
             // `fFa` is null/empty; `Zh.C(this.icon.ya + this.icon.za()/2*1.2)`
             // and `Zh.ua(b*.3)`, `D(0)` for a move with no requirement list
             // (`Ck.length == 0` -> the `else` branch of `ls.ba`).
             if (!r.keys.empty()) {
-                const float label_l = icon_cx + icon_h * 0.6f;  // `+za()/2*1.2`
+                const float label_l = icon_cx + icon_w * 0.6f;  // `+za()/2*1.2`
                 const float label_w = cell_l + cell_w - label_l;
                 draw_ui_label(app, label_l, ry, label_w, cell_h,
                               loc(app, r.keys, r.keys), ui_ua_scale(app, cell_h * 0.3f),
                               UiAlign::Left, 0.184f, 0.145f, 0.106f);
+            }
+            // JS `ls.ba` L92826-92835: every `Ck` sprite is `zf(b*0.4)` tall,
+            // centred on the row (`D(d)`, `d = b/2`), laid out from
+            // `Zh.ya + icon.za()*0.25` advancing by `fa.x * Eb` (the drawn
+            // width). `ls.nca` L92872-92887 puts the HOLD list (`Fh`) first,
+            // then `ComboButtons/icon_plus` when it is non-empty, then the TAP
+            // list (`sh`). Release keys are not drawn.
+            if (!r.key_spec.empty()) {
+                const float k_h = cell_h * 0.4f;              // `zf(b*.4)`
+                const float k_cy = ry + cell_h * 0.5f;        // `D(b/2)`
+                float kx = icon_cx + icon_w * 0.6f + icon_w * 0.25f;
+                if (std::getenv("SF2_TRACE_PROFILE") != nullptr) {
+                    static int logged_rows = 0;
+                    if (logged_rows < 4) {
+                        ++logged_rows;
+                        std::fprintf(stdout,
+                                     "[profile] row %zu image='%s' icon_w=%.1f "
+                                     "icon_h=%.1f kx=%.1f keys=%zu\n",
+                                     i, r.image.c_str(), static_cast<double>(icon_w),
+                                     static_cast<double>(icon_h), static_cast<double>(kx),
+                                     r.key_spec.size());
+                        std::fflush(stdout);
+                    }
+                }  // `Zh.ya + za*.25`
+                const auto draw_one = [&](int type) {
+                    const char* frame = nullptr;
+                    float rot = 0.0f;
+                    if (!key_icon_for(type, &frame, &rot)) return;
+                    const float w =
+                        draw_atlas_icon_rot(app, frame, kx, k_cy, k_h, rot, 1.0f);
+                    if (w > 0.0f) kx += w;  // `a += g.fa.x * g.Eb`
+                };
+                bool any_hold = false;
+                for (const auto& kv : r.key_spec) {
+                    if (kv.second != 2) continue;
+                    draw_one(kv.first);
+                    any_hold = true;
+                }
+                if (any_hold) {
+                    const float w = draw_atlas_icon_rot(app, "ComboButtons/icon_plus",
+                                                        kx, k_cy, k_h, 0.0f, 1.0f);
+                    if (w > 0.0f) kx += w;
+                }
+                for (const auto& kv : r.key_spec) {
+                    if (kv.second == 2) continue;
+                    draw_one(kv.first);
+                }
             }
         }
         // `zr=Yr` right panel: the selected move name + the `$r.Op`
