@@ -785,6 +785,12 @@ public:
     // with `button_name` in the journal and returns the fired quest names.
     std::vector<std::string> press_map_button(App& app, const std::string& name);
 
+    // JS `kk.aab` (L85817-85819): `static aab(){ ha.F().Sf(
+    // "QUEST_EVENT_SHOP_BUTTON_PRESS") }` — the Results STORE plate ONLY fires
+    // this event; it never navigates. `quests.xml` has no listener for it, so
+    // the shipped build does nothing on the press. Returns the fired quests.
+    std::vector<std::string> press_shop_button(App& app);
+
     // Sensei-modal queue (He records): display + advance live in screens.
     bool has_dialog() const { return !dialogs_.empty(); }
     const EngineDialog& dialog() const { return dialogs_.front(); }

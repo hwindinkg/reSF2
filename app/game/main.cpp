@@ -1908,6 +1908,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --settings-lang-probe: the settings language row's IMMEDIATE `ea.a1/.b1`
     // switch (JS `un.rHa` case 4 L80610-80620), before RESTART.
     bool settings_lang_probe = false;
+    // --profile-tab-probe: the profile reopens on the last-used sub-tab
+    // (`vb.init` L91016 / `vb.hla` L90913-90915).
+    bool profile_tab_probe = false;
+    // --results-store-probe: the Results STORE plate only fires
+    // `QUEST_EVENT_SHOP_BUTTON_PRESS` (`kk.aab` L85817-85819).
+    bool results_store_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2196,6 +2202,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             pause_probe = true;
         } else if (arg == "--settings-lang-probe") {
             settings_lang_probe = true;
+        } else if (arg == "--profile-tab-probe") {
+            profile_tab_probe = true;
+        } else if (arg == "--results-store-probe") {
+            results_store_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5316,6 +5326,42 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (profile_tab_probe) {
+        // --- `--profile-tab-probe`: `vb.init` L91016 -----------------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenProfile));
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* p1 = static_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        const int first = p1 != nullptr ? p1->tab_index() : -1;
+        // A tab press persists `b.DI` (`vb.hla` L90913-90915).
+        sf2::app::set_profile_tab_for_test(2);
+        app.screens().pop();
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenProfile));
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* p2 = static_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        const int reopened = p2 != nullptr ? p2->tab_index() : -1;
+        std::fprintf(stdout,
+                     "[tabprobe] first=%d persisted=%d reopened=%d -> %s\n", first,
+                     sf2::app::profile_tab_persist(), reopened,
+                     (first == 0 && reopened == 2) ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return (first == 0 && reopened == 2) ? 0 : 1;
     } else if (settings_lang_probe) {
         // --- `--settings-lang-probe`: `ea.a1/.b1` on the language tap --------
         // JS `un.rHa` case 4 (L80610-80620): ja/ko/ru -> `ea.a1=.8, ea.b1=1.2`
@@ -5464,6 +5510,41 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      static_cast<int>(app.screens().current_id()));
         std::fflush(stdout);
         return 0;
+    } else if (results_store_probe) {
+        // --- `--results-store-probe`: `kk.aab` L85817-85819 -----------------
+        glfwHideWindow(app.renderer().window());
+        {
+            sf2::app::PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "BOSS_LYNX";
+            pb.zone = "ZONE_1";
+            pb.player_won = false;   // STORE exists only on a LOSS (`Lr.Kub`)
+            pb.has_result = true;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.reward_applied = true;
+        }
+        app.screens().push(make_screen(app.screens(), kScreenResults));
+        app.set_headless_frames(1);
+        // The reveal runs 4.5 s (kRevealSettle) before the plates appear; a
+        // press during it only fast-forwards (Lr.Nda), so settle first.
+        for (int i = 0; i < 500; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[storeprobe] before screen=%d\n",
+                     static_cast<int>(app.screens().current_id()));
+        app.inject_click(640.0 + 132.0, 645.0, 3);
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const int after = static_cast<int>(app.screens().current_id());
+        std::fprintf(stdout,
+                     "[storeprobe] after screen=%d -> %s (the JS only fires the "
+                     "event)\n",
+                     after, after == 10 ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return after == 10 ? 0 : 1;
     } else if (results_item_probe) {
         // --- `--results-item-probe`: the item-reward path ------------------
         // `hj.jt(true)` = the `<Reward><Item>` drops of the grant row; the

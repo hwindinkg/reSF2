@@ -18859,12 +18859,13 @@ void ResultsScreen::update_impl(float dt) {
                results_store_visible(app()) &&
                std::abs(static_cast<float>(p.x) - (kViewW * 0.5f + 132.0f)) <= 115.0f &&
                std::abs(static_cast<float>(p.y) - 645.0f) <= 26.0f) {
-        // JS `Il.pa.addListener(...)` -> `kk.aab` = `QUEST_EVENT_SHOP_BUTTON_PRESS`
-        // (L86344/L86357). The port opens the Shop over the results; the
-        // results stay underneath so OK still returns to the Map.
-        std::fprintf(stdout, "[result] STORE -> Shop\n");
+        // JS `kk.aab` (L85817-85819): `static aab(){ ha.F().Sf(
+        // "QUEST_EVENT_SHOP_BUTTON_PRESS") }` — the STORE plate ONLY fires the
+        // event. The shipped `quests.xml` has no `ShopButtonPress` listener, so
+        // nothing happens. The port navigated to the Shop (an invention).
+        std::fprintf(stdout, "[result] STORE -> ShopButtonPress event\n");
         std::fflush(stdout);
-        manager().push(make_screen(manager(), kScreenShop));
+        app().quest_engine().press_shop_button(app());
     } else if (p.pressed) {
         std::fprintf(stdout, "[result] OK -> back to Map\n");
         std::fflush(stdout);
@@ -22828,7 +22829,19 @@ ProfileBadges profile_badges(const WarriorSave& w, int new_moves,
 // EquipmentScreen
 // ---------------------------------------------------------------------------
 
+// JS `vb.init` (L91016): `this.hla(b != null && b.EJa != 5 ? b.EJa : 0)` — the
+// profile reopens on the LAST-USED sub-tab (`hla` L90913-90915 writes
+// `b.DI = uh.getName(To.kOa(a))` into the save). `EJa == 5` is the "no tab"
+// sentinel. The port rebuilt the screen on tab 0 every time.
+int g_profile_tab = 0;
+
+int profile_tab_persist() { return g_profile_tab; }
+void set_profile_tab_for_test(int t) {
+    if (t >= 0 && t < 4) g_profile_tab = t;
+}
+
 EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") {
+    if (g_profile_tab >= 0 && g_profile_tab < 4) tab_ = g_profile_tab;
     // Ported SEALS tab (`gs.uZ`, L2231): JS filters `p.o.xa.hJ(I.Vr)` then
     // keeps count>0. Native uses the full catalog (`<Item Type="Seal">`, 7 on
     // disk) + the save inventory; the row image is the list.xml `Image`
@@ -23520,6 +23533,7 @@ void EquipmentScreen::update_impl(float dt) {
                      kProfileTabs[tab_hover_].label);
         std::fflush(stdout);
         tab_ = tab_hover_;
+        g_profile_tab = tab_;  // `vb.hla` L90913-90915 persists `b.DI`
         // `vb.hla` (L2190-2193) calls the new sub-view's `rka()`/`v2()`, which
         // rebuilds the `Gg` list and recentres it (`Gg.VK`/`ba` L1891/L1885) —
         // so the port's per-tab scroll resets to the top on entry.

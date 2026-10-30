@@ -1460,6 +1460,10 @@ public:
 
     ScreenId id() const override { return kScreenProfile; }
 
+    // [probe] the active sub-tab (`vb.hla`), so `--profile-tab-probe` can assert
+    // the reopen-on-last-tab behaviour (`vb.init` L91016).
+    int tab_index() const { return tab_; }
+
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
@@ -1838,6 +1842,10 @@ private:
 // nav button #5 (`Vfb` L1981) opens it OVER the current screen — it does NOT
 // navigate (`ma.Jg().jI(11)` was the port's invention). `SettingsScreen`
 // (the native `make_screen(kScreenSettings)` path) hosts the same dialog.
+// [probe] the persisted profile sub-tab (`vb.hla` L90913-90915 -> `b.DI`).
+int profile_tab_persist();
+void set_profile_tab_for_test(int t);
+
 bool settings_dialog_open();
 void open_settings_dialog(App& app);
 void close_settings_dialog();

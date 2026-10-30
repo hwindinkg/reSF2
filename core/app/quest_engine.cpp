@@ -6806,6 +6806,15 @@ std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
 // is `Bj.Av` (the `_$ButtonName` payload, L960); `Sf` routes the event through
 // the quest hub. The `Agb` signal is the button's own press callback — no port
 // consumer, so the fired quests are the observable result.
+// JS `kk.aab` (L85817-85819): the Results STORE plate fires
+// `QUEST_EVENT_SHOP_BUTTON_PRESS` and nothing else.
+std::vector<std::string> QuestEngine::press_shop_button(App& app) {
+    QuestJournal j;
+    std::fprintf(stdout, "[quest] ShopButtonPress -> event (no navigation)\n");
+    std::fflush(stdout);
+    return fire(app, "ShopButtonPress", j);
+}
+
 std::vector<std::string> QuestEngine::press_map_button(App& app,
                                                        const std::string& name) {
     QuestJournal j;
