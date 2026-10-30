@@ -7541,6 +7541,8 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
     // Results PERFECT row reads x0 — the old `hits_taken==0` test showed
     // PERFECT even on a loss.
     p.perfect = prize_fh_.d6 != 0;
+    p.perfect_count = prize_fh_.d6;   // `Fh.d6` (the row's `{0}`)
+    p.first_count = prize_fh_.c6;     // `Fh.c6`
     p.first_strike = battle_first_hit_ && battle_first_by_player_;
     p.max_combo = player_.max_combo;
     p.shocks = player_.shocks_dealt;

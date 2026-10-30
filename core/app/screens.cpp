@@ -16117,10 +16117,12 @@ void FightScreen::update_impl(float dt) {
             const auto prize = fight_->prize(pb.reward_prize_base, pb.reward_money,
                                              pb.reward_bonus, prize_kq);
             std::fprintf(stdout,
-                         "[fight] prize: perfect=%d first=%d combo=%d shocks=%d "
+                         "[fight] prize: perfect=%d(d6=%d) first=%d(c6=%d) "
+                         "combo=%d shocks=%d "
                          "style=%d rowMoney=%lld rowBonus=%lld prizeBaseAttr=%lld "
                          "m6=%lld mOa=%lld\n",
-                         prize.perfect ? 1 : 0, prize.first_strike ? 1 : 0,
+                         prize.perfect ? 1 : 0, prize.perfect_count,
+                         prize.first_strike ? 1 : 0, prize.first_count,
                          prize.max_combo, prize.shocks, prize.style_value,
                          static_cast<long long>(pb.reward_money),
                          static_cast<long long>(pb.reward_bonus),
@@ -16137,6 +16139,8 @@ void FightScreen::update_impl(float dt) {
             pb.prize_shocks = prize.shocks;
             pb.prize_perfect = prize.perfect;
             pb.prize_first = prize.first_strike;
+            pb.prize_perfect_count = prize.perfect_count;
+            pb.prize_first_count = prize.first_count;
             // The per-category bonus coins (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`) the
             // Results rows display (`Lr.ZMa` L2078-2079 `vI` calls).
             pb.prize_perfect_coins = prize.coins_perfect;
@@ -18508,6 +18512,8 @@ void ResultsScreen::update_impl(float dt) {
         prize_shocks_ = pb.prize_shocks;
         prize_perfect_ = pb.prize_perfect;
         prize_first_ = pb.prize_first;
+        prize_perfect_count_ = pb.prize_perfect_count;
+        prize_first_count_ = pb.prize_first_count;
         prize_perfect_coins_ = pb.prize_perfect_coins;
         prize_first_coins_ = pb.prize_first_coins;
         prize_combo_coins_ = pb.prize_combo_coins;
@@ -18734,10 +18740,12 @@ void ResultsScreen::render_impl(App& app) {
     };
     const KkRow kk_rows[7] = {
         {"goldPrize", "PRIZE", prize_base_, 0, false, false},
-        {"goldPerfect", "PERFECT x{0}", prize_perfect_coins_,
-         prize_perfect_ ? 1 : 0, true, false},
+        {"goldPerfect", "PERFECT x{0}", prize_perfect_coins_, prize_perfect_count_,
+         true, false},
+        // JS `Lr.ZMa` L86428-86429: the `{0}` is `a.d6` / `a.c6` — the
+        // PERFECT-ROUND and FIRST-STRIKE COUNTS (0..3), not a boolean.
         {"goldFirstStrike", "FIRST STRIKE x{0}", prize_first_coins_,
-         prize_first_ ? 1 : 0, true, false},
+         prize_first_count_, true, false},
         {"goldCombo", "MAX COMBO x{0}", prize_combo_coins_, prize_combo_, true,
          false},
         {"goldShock", "SHOCK x{0}", prize_shock_coins_, prize_shocks_, true, false},
@@ -23925,12 +23933,35 @@ void EquipmentScreen::render_impl(App& app) {
         // `Y.na("profile_BtnShow")` view button (L2234 `$r.ba`).
         if (!move_rows_.empty()) {
             const ShopRect& rp = pl.right_slot;
+            if (std::getenv("SF2_TRACE_PROFILE") != nullptr) {
+                static bool logged = false;
+                if (!logged) {
+                    logged = true;
+                    std::fprintf(stdout,
+                                 "[profile] right slot J=%.1f P=%.1f w=%.1f h=%.1f "
+                                 "js_ua=%.3f js_y=%.1f\n",
+                                 static_cast<double>(rp.J), static_cast<double>(rp.P),
+                                 static_cast<double>(rp.width()),
+                                 static_cast<double>(rp.height()),
+                                 static_cast<double>(rp.width() * 0.2f / 100.0f),
+                                 static_cast<double>(rp.P + rp.height() * 0.1f));
+                    std::fflush(stdout);
+                }
+            }
             // `vb.hqb` (L2198) sets `this.uj = a` (the clicked `ks` cell) and
             // `umb` (L2183) calls `this.Lo.refresh(a.Tp, a.jea())` -> the `$r`
             // panel shows the SELECTED move, not `move_rows_.front()`.
             const std::string nm = shown_move();
-            draw_ui_label(app, rp.J + 8.0f, rp.P + 26.0f, rp.width() - 16.0f, 44.0f,
-                          loc(app, nm, nm), 0.95f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+            // JS `Yr.ba` L90540-90547: `d = b*0.2` (b = the panel width),
+            // `Tm.C(a.J); Tm.D(a.P + c*0.1); Tm.Fa(b, d); Tm.ua(d)` — the title
+            // font is the panel width * 0.2 (a 266 px panel -> ua 53, i.e.
+            // glyph scale 0.53), and it sits a tenth of the panel height down.
+            // The port drew a fixed 0.95 scale 26 px below the panel top
+            // (measured: 40 px caps vs the oracle's 25).
+            const float title_ua = rp.width() * 0.2f / 100.0f;
+            draw_ui_label(app, rp.J, rp.P + rp.height() * 0.1f, rp.width(),
+                          rp.width() * 0.2f, loc(app, nm, nm), title_ua,
+                          UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f, /*fit=*/false);
             const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
             const float bx2 = rp.J + rp.width() * 0.5f;
             const float by2 = rp.W - 70.0f;
@@ -24080,15 +24111,23 @@ void EquipmentScreen::render_impl(App& app) {
                 } else {
                     std::snprintf(pbuf, sizeof(pbuf), "%d/%d", r.value, r.target);
                 }
-                draw_ui_label(app, x1 - 104.0f, cy - 8.0f, 100.0f, 16.0f, pbuf, 0.5f,
-                              UiAlign::Right, 0.184f, 0.145f, 0.106f);
+                // JS `is.ba` L91806-91813: the bar `uH.D(c - uH.qa())` sits
+                // ABOVE the cell centre and the count `uy.C(e); uy.D(c*0.8);
+                // uy.ua(b*0.4); uy.Fa(a, b*0.4)` sits BELOW it, LEFT-aligned at
+                // the bar's x with the bar's width. The port had them swapped
+                // (bar below, count right-aligned above).
+                const float cnt_h = cell_h * 0.4f;
+                draw_ui_label(app, e_x, cy - cell_h * 0.1f, std::max(40.0f, x1 - e_x),
+                              cnt_h, pbuf, cnt_h / 100.0f, UiAlign::Left, 0.184f, 0.145f,
+                              0.106f);
                 // `is.uH` progress bar (`Uf(y.eSa,y.HRa,258)` L2212): empty
                 // `pieces/achiev_progress_empty` (profile atlas, `y.eSa`) +
                 // `Level_bar` fill (misc atlas, `y.HRa`) at
                 // min(value,target)/target (`is.D1a` `uH.PT`/`DF`, L2213). The
                 // flat backing is the explicit miss fallback.
                 const float pbx = e_x;
-                const float pby = cy + 10.0f;
+                const float pbh_pre = 9.0f;
+                const float pby = cy - 4.0f - pbh_pre;  // `D(c - uH.qa())`
                 const float pbw = std::max(40.0f, x1 - cell_h * 0.2f - pbx);
                 const float pbh = 9.0f;
                 const float pfrac =

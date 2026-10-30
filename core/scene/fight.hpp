@@ -2211,6 +2211,10 @@ public:
         // The `goldPerfect`/`goldFirstStrike`/`goldCombo`/`goldShock`/style
         // RESULT rows show these values; the row's `{0}` suffix is the COUNT
         // (`d6`/`c6`/`jU`/`e6`), never the value (see screens.cpp ResultsScreen).
+        // JS `Fh.d6` / `c6`: the PERFECT-ROUND and FIRST-STRIKE **counts**
+        // (the `{0}` of the results rows, L86428-86429) — not just a flag.
+        int perfect_count = 0;
+        int first_count = 0;
         std::int64_t coins_perfect = 0;  // oc.P3
         std::int64_t coins_first = 0;    // oc.ep
         std::int64_t coins_combo = 0;    // oc.Ui

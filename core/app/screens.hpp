@@ -1184,6 +1184,9 @@ private:
     int prize_combo_ = 0;
     int prize_shocks_ = 0;
     bool prize_perfect_ = false;
+    // `Fh.d6`/`c6`: the results rows' `{0}` (the round counts).
+    int prize_perfect_count_ = 0;
+    int prize_first_count_ = 0;
     bool prize_first_ = false;
     // Per-category bonus COINS (`Fh.lXa` `oc.P3/ep/Ui/DZ/Ub`): the Results
     // rows show these; `prize_combo_`/`prize_shocks_` are the counts (`jU`/
