@@ -1924,6 +1924,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool achiev_probe = false;
     // --moves-damage-probe: the `$r.Ku` per-hit damage breakdown (`$r.l6a`).
     bool moves_damage_probe = false;
+    // --perk-probe: the perk info panel's key icons (`Zr.nca` L92172-92187).
+    bool perk_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2224,6 +2226,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             achiev_probe = true;
         } else if (arg == "--moves-damage-probe") {
             moves_damage_probe = true;
+        } else if (arg == "--perk-probe") {
+            perk_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5344,6 +5348,38 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (perk_probe) {
+        // --- `--perk-probe`: the perk panel's key icons ----------------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenProfile));
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* prof = static_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        const char* perk = std::getenv("SF2_PERK");
+        const bool sel = prof != nullptr && perk != nullptr
+                             ? prof->select_perk_by_name(perk)
+                             : false;
+        std::fprintf(stdout, "[perkprobe] perk='%s' selected=%d\n",
+                     perk != nullptr ? perk : "-", sel ? 1 : 0);
+        std::fflush(stdout);
+        for (int i = 0; i < 20; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[perkprobe] shot %s\n", shot);
+        }
+        std::fflush(stdout);
+        return 0;
     } else if (moves_damage_probe) {
         // --- `--moves-damage-probe`: `$r.Ku` damage breakdown ----------------
         glfwHideWindow(app.renderer().window());

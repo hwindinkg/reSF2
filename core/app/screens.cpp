@@ -2301,6 +2301,52 @@ float draw_atlas_icon_rot(App& app, const std::string& frame_name, float cx,
     return nat_w * sc;
 }
 
+// The WIDTH analogue of `draw_atlas_icon_rot` (`kf(a)` = `la(a / boundsWidth)`,
+// JS L67564-67567 `zf` is the height one): the perk panel sizes its key icons
+// with `g.kf(c)` (`Zr.ba` L92125-92131).
+float draw_atlas_icon_w(App& app, const std::string& frame_name, float cx, float cy,
+                        float width, float rot_deg, float alpha) {
+    sf2::data::atlas_frame fr;
+    int tw = 0, th = 0;
+    unsigned int gl = 0;
+    if (!app.get_atlas_frame(frame_name, &fr, &tw, &th, &gl)) return 0.0f;
+    const float nat_w =
+        fr.source_w > 0 ? static_cast<float>(fr.source_w) : static_cast<float>(fr.w);
+    const float nat_h =
+        fr.source_h > 0 ? static_cast<float>(fr.source_h) : static_cast<float>(fr.h);
+    if (nat_w <= 0.0f || nat_h <= 0.0f) return 0.0f;
+    const float sc = width / nat_w;
+    sf2::scene::Sprite s;
+    s.texture_name = frame_name;
+    s.frame_x = static_cast<float>(fr.x);
+    s.frame_y = static_cast<float>(fr.y);
+    s.frame_w = static_cast<float>(fr.w);
+    s.frame_h = static_cast<float>(fr.h);
+    s.tex_w = static_cast<float>(tw);
+    s.tex_h = static_cast<float>(th);
+    s.solid = false;
+    s.color_a = alpha;
+    s.rotated = fr.rotated;
+    s.transform.set_pos(cx, cy);
+    s.source_w = nat_w;
+    s.source_h = nat_h;
+    s.trim_x = static_cast<float>(fr.offset_x);
+    s.trim_y = static_cast<float>(fr.offset_y);
+    s.transform.set_scale(sc, sc);
+    s.transform.rotation = rot_deg;
+    sf2::render::Camera ui_cam;
+    ui_cam.center_x = 640.0f;
+    ui_cam.center_y = 360.0f;
+    ui_cam.zoom = 1.0f;
+    ui_cam.view_w = 1280.0f;
+    ui_cam.view_h = 720.0f;
+    ui_cam.arena_h = 720.0f;
+    ui_cam.arena_floor = 0.0f;
+    ui_cam.arena_center_x = 640.0f;
+    app.renderer().draw_sprite(s, ui_cam);
+    return nat_h * sc;
+}
+
 // Reads a frame's UNTRIMMED `sourceSize` (JS `.fa`) from the atlas cache,
 // falling back to the shipped size when the frame is not registered. The JS
 // sizes every cap/backdrop/icon sprite from `fa` (e.g. `Zh.ba` L1872
@@ -22641,6 +22687,7 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
     // character_progress.xml `<UpgradeLevel Value>` via `j0a` L1190).
     // Written into the save as `Ji.Ce` (UpgradeLevel) by `Bt.L1a` L306.
     std::map<std::string, int> upgrade_max;
+    std::map<std::string, std::string> perk_move;  // `Ih.move` (`<Perk Move>`)
     sf2::data::xml_doc doc;
     if (!parse_res_xml("reference/extracted/xml/res/character_progress.xml", doc)) {
         return out;
@@ -22651,6 +22698,7 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
         const std::string name = p.attribute("Name").value();
         if (name.empty()) continue;
         if (p.attribute("Description")) base_desc[name] = p.attribute("Description").value();
+        if (p.attribute("Move")) perk_move[name] = p.attribute("Move").value();
         for (pugi::xml_node u : p.children("UpgradeLevel")) {
             const std::string d = u.attribute("Description").value();
             const int val = sf2::data::xml_attr_int(u, "Value", 0);
@@ -22680,6 +22728,8 @@ std::vector<EquipmentScreen::PerkRow> load_perk_tree(App& app, const WarriorSave
                 r.learned_level = std::max(r.learned_level, pl.level);
             }
             r.type = tag == "Perk" ? 1 : 2;  // `id.f8a` L1357
+            const auto pm = perk_move.find(r.name);
+            if (pm != perk_move.end()) r.move = pm->second;  // `Ih.move`
             // `Ih.PQ()` = `Lc.Tc` (L1371). `e8a` (L1357) returns the FIRST
             // remaining `v.Rg.XS` def for the name; `cPa` -> `lnb` (L1353)
             // removes ONE def per `<PerkHistory>` record, so the matched
@@ -24048,15 +24098,85 @@ void EquipmentScreen::render_impl(App& app) {
             const std::string pname = loc(app, sel.name, sel.name);
             const std::string pdesc =
                 sel.description.empty() ? std::string() : loc(app, sel.description, sel.description);
-            draw_ui_wrapped(app, pl.right_slot.J + pad, pl.right_slot.P + 20.0f,
-                            pl.right_slot.width() - 2.0f * pad, 60.0f, pname, 0.6f,
-                            UiAlign::Left, 0.184f, 0.145f, 0.106f);
+            // The panel TITLE is the shared `Yr.Tm` (`B4(a.nb.getName())`
+            // L90582): `C(a.J); D(a.P + c*0.1); Fa(b, b*0.2); ua(b*0.2); mk()`.
+            const float perk_title_ua = fit_ua_width(
+                app, pname, pl.right_slot.width() * 0.2f / 100.0f,
+                pl.right_slot.width());
+            draw_ui_label(app, pl.right_slot.J, pl.right_slot.P + pl.right_slot.height() * 0.1f,
+                          pl.right_slot.width(), pl.right_slot.width() * 0.2f, pname,
+                          perk_title_ua, UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f,
+                          /*fit=*/false);
             if (!pdesc.empty()) {
-                draw_ui_wrapped(app, pl.right_slot.J + pad,
-                                pl.right_slot.P + 84.0f,
+                // JS `Zr.ba` L92139-92141: `le.D(0); le.ua(a*0.12); le.Kc(0.75);
+                // le.Fa(a, Yk.node.ra - c)` — the description starts at the `Zr`
+                // node, which `Yr.ba` places BELOW the title (`a.P + c*0.15 +
+                // title_height`).
+                const float desc_top = pl.right_slot.P + pl.right_slot.height() * 0.1f +
+                                       pl.right_slot.width() * 0.2f;
+                draw_ui_wrapped(app, pl.right_slot.J + pad, desc_top,
                                 pl.right_slot.width() - 2.0f * pad,
-                                pl.right_slot.height() - 190.0f, pdesc, 0.42f,
-                                UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                                pl.right_slot.height() - (desc_top - pl.right_slot.P) -
+                                    120.0f,
+                                pdesc, pl.right_slot.width() * 0.12f / 100.0f,
+                                UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.75f);
+            }
+            // JS `Zr.nca` (L92172-92187) + `Zr.ba` (L92117-92131): the perk's
+            // MOVE (`Ih.move` -> `aBa()` L92299-92307 -> the move's `jJ()` Keys
+            // condition) drawn as `ComboButtons/icon_*` sprites across the
+            // panel: container at `a*0.05`, one cell per icon
+            // `(a - 2*(a*0.05))/Ck.length`, each `g.kf(cell)` WIDE and centred
+            // at `b/2`. `Ck` = the HOLD list, then `icon_plus`, then the TAP
+            // list.
+            if (!sel.move.empty() && app.has_fight_assets()) {
+                const auto mit = app.fight_assets().moves.find(sel.move);
+                if (mit != app.fight_assets().moves.end() &&
+                    !mit->second.profile_key_spec.empty()) {
+                    const auto& ks = mit->second.profile_key_spec;
+                    std::vector<int> ck;
+                    bool any_hold = false;
+                    for (const auto& kv : ks) {
+                        if (kv.second != 2) continue;
+                        ck.push_back(kv.first);
+                        any_hold = true;
+                    }
+                    if (any_hold) ck.push_back(0);  // `ComboButtons/icon_plus`
+                    for (const auto& kv : ks) {
+                        if (kv.second == 2) continue;
+                        ck.push_back(kv.first);
+                    }
+                    const float pa = pl.right_slot.width();
+                    const float pb = pl.right_slot.height();
+                    const float c0 = pa * 0.05f;
+                    const float cell = (pa - 2.0f * c0) / static_cast<float>(ck.size());
+                    float d = c0 + cell * 0.5f;
+                    for (const int t : ck) {
+                        const char* frame = nullptr;
+                        float rot = 0.0f;
+                        if (t == 0) {
+                            frame = "ComboButtons/icon_plus";
+                            rot = 0.0f;
+                        } else if (!key_icon_for(t, &frame, &rot)) {
+                            d += cell;
+                            continue;
+                        }
+                        (void)draw_atlas_icon_w(app, frame, pl.right_slot.J + d,
+                                                pl.right_slot.P + pb * 0.5f, cell, rot,
+                                                1.0f);
+                        d += cell;
+                    }
+                    if (std::getenv("SF2_TRACE_PROFILE") != nullptr) {
+                        static int perk_ku = 0;
+                        if (perk_ku < 3) {
+                            ++perk_ku;
+                            std::fprintf(stdout,
+                                         "[profile] perk %s move=%s keys=%zu cell=%.1f\n",
+                                         sel.name.c_str(), sel.move.c_str(), ck.size(),
+                                         static_cast<double>(cell));
+                            std::fflush(stdout);
+                        }
+                    }
+                }
             }
             if (sel.state == 2) {
                 // `this.PB` (`profile_LblImprove`, `X(Be==2)` L2218).

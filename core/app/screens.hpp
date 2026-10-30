@@ -1474,6 +1474,17 @@ public:
 
     // [probe] select a Moves-tab row by NAME (`--moves-damage-probe` shows the
     // `$r.Ku` breakdown of a damaging move). Returns false when absent.
+    // [probe] select a perk-tree cell by NAME (`--perk-probe`).
+    bool select_perk_by_name(const std::string& name) {
+        for (std::size_t i = 0; i < perk_rows_.size(); ++i) {
+            if (perk_rows_[i].name == name) {
+                perk_sel_ = static_cast<int>(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool select_move_by_name(const std::string& name) {
         for (std::size_t i = 0; i < move_rows_.size(); ++i) {
             if (move_rows_[i].name == name) {
@@ -1615,6 +1626,11 @@ public:
         std::string kind;         // "Perk" (type 1) or "Upgrade" (type 2)
         std::string image;        // perks.xml Image ("Icons01.IconAvenger")
         std::string description;  // perks.xml Description key
+        // `Ih.move` (`Be.parse` L55461-55462): the perk's `<Perk Move="..">`
+        // attribute (character_progress.xml). `Zr.aBa()` (L92299-92307) resolves
+        // it against the move list and `Zr.nca` (L92172-92187) draws THAT
+        // move's `<Keys>` as the panel's key icons.
+        std::string move;
         int learned_level = 0;    // save progression level (0 = not learned)
         bool available = false;   // Mw.K1
         int upgrade_max = 0;      // `Lc.Tc` (`Be.Tc`): the def's max
