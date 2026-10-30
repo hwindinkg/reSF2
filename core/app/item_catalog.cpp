@@ -433,6 +433,14 @@ std::vector<CatalogItem> parse_item_catalog(const std::string& xml_text) {
         // button reads ?Item[Unlimited_Energy].RealPrice and that item is a
         // plain RealMoneyItem (SubType=UnlimitedEnergy) - without this the
         // price resolved to "" and the caption showed the raw query tail.
+        // JS item def `text`: the list.xml `Text` attribute (the Seal rows carry
+        // `Text="blue_seal_description"`, no `Description`); fall back to
+        // `Description` for rows that only have that.
+        if (item.attribute("Text")) {
+            ci.description = item.attribute("Text").value();
+        } else if (item.attribute("Description")) {
+            ci.description = item.attribute("Description").value();
+        }
         if (item.attribute("RealPrice")) {
             ci.offer_real_price = item.attribute("RealPrice").value();
         }

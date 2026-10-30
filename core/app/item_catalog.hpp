@@ -191,6 +191,10 @@ struct CatalogItem {
     bool is_offer = false;             // `mt.Mga`: SubType in {Offer, DailyOffer}
     std::string offer_kind;            // JS `Yb` (SubType): "Offer"|"DailyOffer"
     std::string offer_text;            // `text` <- Text (dialog Title)
+    // Raw list.xml `Description` for EVERY item (JS item ctor keeps it as the
+    // def's `text`); the Seal tab's info panel shows `Y.na(ib.text)`
+    // (`bs.refresh` L92570-92573).
+    std::string description;
     std::string offer_description;     // `description` <- Description
     std::string offer_profit_image;    // `Xt` <- ProfitImage
     std::string offer_button_image;    // `dZ` <- ButtonImage (map-button art)

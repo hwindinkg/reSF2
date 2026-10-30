@@ -22931,7 +22931,7 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
             for (const auto& oi : w.items) {
                 if (oi.name == ci.name) count += oi.count;
             }
-            if (count > 0) seal_rows_.push_back({ci.name, ci.image});
+            if (count > 0) seal_rows_.push_back({ci.name, ci.image, ci.description});
         }
         std::fprintf(stdout, "[profile] seals tab: %zu owned\n", seal_rows_.size());
         std::fflush(stdout);
@@ -24529,12 +24529,45 @@ void EquipmentScreen::render_impl(App& app) {
                                  ? list_scroll_[kProfileTabSeals].y
                                  : profile_list_top(v, 400.0f, 300.0f) - list_base;
             const float top = list_base + sy;
+            // JS `Gg.aa` (L1886) picks the selected cell (`Ac`) as the last one
+            // whose centre `Qk = size.y/2 - (ei.node.ra + i*pitch + cell_h/2)`
+            // is within 30 px; `gs.Cp` (L92628-92636) then draws EVERY cell at
+            // `ym(.5)` and the selected one at `ym(1)` (`js.ym` -> the image
+            // node's `wa`). The port drew all seals opaque with no selection.
+            int seal_sel = 0;
+            {
+                const float shalf = profile_scroll_h(v) * 0.5f;
+                for (std::size_t si = 0; si < seal_rows_.size(); ++si) {
+                    const float qk =
+                        shalf - (sy + static_cast<float>(si) * chh + chh * 0.5f);
+                    if (std::fabs(qk) < 30.0f) seal_sel = static_cast<int>(si);
+                }
+                if (seal_sel_ >= 0 && seal_sel_ < static_cast<int>(seal_rows_.size())) {
+                    seal_sel = seal_sel_;  // [probe] forced selection
+                }
+            }
+            if (std::getenv("SF2_TRACE_PROFILE") != nullptr) {
+                static int seal_logged = 0;
+                if (seal_logged < 2) {
+                    ++seal_logged;
+                    std::fprintf(stdout,
+                                 "[profile] seals=%zu sel=%d chh=%.1f "
+                                 "desc0='%s'\n",
+                                 seal_rows_.size(), seal_sel,
+                                 static_cast<double>(chh),
+                                 seal_rows_.empty() ? "" : seal_rows_.front().description.c_str());
+                    std::fflush(stdout);
+                }
+            }
             for (std::size_t i = 0; i < seal_rows_.size(); ++i) {
                 const SealRow& s = seal_rows_[i];
                 const float cy = top + chh * 0.5f + static_cast<float>(i) * chh;
                 if (cy + chh * 0.5f <= list_base) continue;  // above the viewer
                 if (cy - chh * 0.5f > v.W) break;
-                if (!draw_user_image(app, s.image, cxc, cy, img_h, img_h, 1.0f)) {
+                const float seal_alpha =
+                    (static_cast<int>(i) == seal_sel) ? 1.0f : 0.5f;  // `gs.Cp`
+                if (!draw_user_image(app, s.image, cxc, cy, img_h, img_h,
+                                     seal_alpha)) {
                     // Genuine art miss -> OPEN: JS `js` (L2232) draws only the
                     // `oe(a.fileName)` image; there is no JS flat/seal-name art.
                     draw_flat_button(app, s.name, cxc, cy, cell_w * 0.5f, chh * 0.5f,
@@ -24542,6 +24575,32 @@ void EquipmentScreen::render_impl(App& app) {
                 }
                 // `js.j5` (L2233) draws ONLY `new oe(a.fileName)`: no name
                 // text, no count. The former "<name> x<count>" row was invented.
+            }
+            // `vb.ihb` (L91217-91219) -> `zr.wmb(a.bc)` (L90610-90617):
+            // `B4(a.name)` sets the right-panel title and `Ds.refresh(a)`
+            // (the `bs` panel, L92555-92574) prints the def `text` at
+            // `D(b*.2)`, `Fa(a, b*.7)`, `ua(a*.14)`, `Kc(.7)`, left-aligned.
+            if (!seal_rows_.empty()) {
+                const ShopRect& rp = pl.right_slot;
+                const int ssel = std::clamp(seal_sel, 0,
+                                            static_cast<int>(seal_rows_.size()) - 1);
+                const SealRow& sr = seal_rows_[static_cast<std::size_t>(ssel)];
+                const float title_ua = rp.width() * 0.2f / 100.0f;
+                draw_ui_label(app, rp.J, rp.P + rp.height() * 0.1f, rp.width(),
+                              rp.width() * 0.2f, loc(app, sr.name, sr.name), title_ua,
+                              UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f,
+                              /*fit=*/false);
+                if (!sr.description.empty()) {
+                    // Inset from the panel's paper edge (the same 6% pad the
+                    // achievement panel uses) — at `rp.J` the first glyph sat
+                    // under the panel's dark border.
+                    const float pad = rp.width() * 0.06f;
+                    draw_ui_wrapped(app, rp.J + pad, rp.P + rp.height() * 0.2f,
+                                    rp.width() - 2.0f * pad, rp.height() * 0.7f,
+                                    loc(app, sr.description, sr.description),
+                                    rp.width() * 0.14f / 100.0f, UiAlign::Left,
+                                    0.184f, 0.145f, 0.106f, 0.7f);
+                }
             }
         }
     } else if (tab_ == kProfileTabAchiev) {

@@ -1464,6 +1464,10 @@ public:
     // the reopen-on-last-tab behaviour (`vb.init` L91016).
     int tab_index() const { return tab_; }
 
+    // [probe] force the Seals-tab selected cell (`--seal-probe` measures the
+    // `gs.Cp` alpha split by switching it); -1 = the derived `Gg.aa` cell.
+    void set_seal_sel_for_test(int i) { seal_sel_ = i; }
+
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
@@ -1568,6 +1572,9 @@ public:
     struct SealRow {
         std::string name;   // list.xml Item Name (the `gs.TA` identity)
         std::string image;  // list.xml `Image` == the JS `a.fileName`
+        // list.xml `Description` = the JS def `text` the `bs` panel prints
+        // (`bs.refresh` L92570-92573: `le.V(Y.na(this.ib.text))`).
+        std::string description;
     };
 
     // One `ds` perk-tier row item (JS `id.ht().tH` tiers of `Ih`, L1353/2227;
@@ -1660,6 +1667,7 @@ public:
 private:
     int tab_ = 0;        // `cs` tab index (0 = `ds` leveling .. 3)
     int tab_hover_ = -1;
+    int seal_sel_ = -1;   // [probe] forced Seals-tab selection (-1 = derived)
     int hover_ = -1;
     // Folded Moves tab data (JS Profile sub-view `qv`, To.kOa=11 L2201).
     std::string weapon_ = "Fists";

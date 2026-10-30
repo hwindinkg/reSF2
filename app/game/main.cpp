@@ -1917,6 +1917,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --credits-probe: the Credits overlay auto-closes when the last title
     // scrolls past the top (`xh.aa` L77942-77946).
     bool credits_probe = false;
+    // --seal-probe: the profile Seals tab (selection, 0.5 alpha, info panel).
+    bool seal_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2211,6 +2213,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             results_store_probe = true;
         } else if (arg == "--credits-probe") {
             credits_probe = true;
+        } else if (arg == "--seal-probe") {
+            seal_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5331,6 +5335,46 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (seal_probe) {
+        // --- `--seal-probe`: the profile Seals tab ---------------------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        app.screens().push(make_screen(app.screens(), kScreenProfile));
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* prof = static_cast<sf2::app::EquipmentScreen*>(app.screens().top());
+        const bool ok = prof != nullptr && prof->select_tab(3, std::string());
+        std::fprintf(stdout, "[sealprobe] select_tab(3) = %d\n", ok ? 1 : 0);
+        for (int i = 0; i < 30; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[sealprobe] shot %s\n", shot);
+        }
+        // Second capture with the selection moved to cell 1: the SAME art then
+        // draws at 0.5 alpha (`gs.Cp` L92628-92636), so the two frames differ
+        // exactly by the alpha split.
+        if (const char* shot2 = std::getenv("SF2_DRAG_SHOT2")) {
+            prof->set_seal_sel_for_test(1);
+            for (int i = 0; i < 3; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            app.capture_png(shot2);
+            std::fprintf(stdout, "[sealprobe] shot2 (sel=1) %s\n", shot2);
+        }
+        std::fprintf(stdout, "[sealprobe] done\n");
+        std::fflush(stdout);
+        return 0;
     } else if (credits_probe) {
         // --- `--credits-probe`: `xh.aa` auto-close ---------------------------
         glfwHideWindow(app.renderer().window());
