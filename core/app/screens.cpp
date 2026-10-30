@@ -10369,11 +10369,22 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
     // (Punchbag) has no backdrop, so a save whose CurrentZone points there
     // (e.g. after the invented zone-dot write) recovers to the first map
     // zone instead of showing the null/zero location with the Training bag.
+    // JS `Px.t5a()` (L88605-88613) = the ZONE of the `MapFocus` battle, and
+    // `Ya.init` opens the map on it (`Uw(a.t5a(), 0)` L88315-88318).
+    // `CurrentZone` is WRITE-ONLY in the JS (the ctor L10000 / `stb`
+    // L11118-11120 set it, nothing reads it), so the port's `CurrentZone`
+    // start showed ZONE_1 for a save focused on ZONE_2.
+    std::string focus_zone;
+    {
+        const std::size_t fp = focus.find('|');
+        if (fp != std::string::npos && fp > 0) focus_zone = focus.substr(0, fp);
+    }
+    const std::string open_zone = !focus_zone.empty() ? focus_zone : cur;
     zone_sel_ = -1;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         if (zones_[i].part < 0) continue;   // not a map zone
         if (zone_sel_ < 0) zone_sel_ = static_cast<int>(i);  // first map zone
-        if (zones_[i].name == cur) zone_sel_ = static_cast<int>(i);
+        if (zones_[i].name == open_zone) zone_sel_ = static_cast<int>(i);
     }
     if (zone_sel_ < 0) zone_sel_ = 0;  // no map zone at all (degraded)
     // WDa/`Qr.lla` VERBATIM (JS L256/L2094). `WDa(a) = iF.get(a) != null`:
@@ -11134,14 +11145,8 @@ void MapScreen::update_impl(float dt) {
                     zone_sel_ = static_cast<int>(zi);
                     hover_ = -1;
                     apply_map_focus(app().quest_engine().last_map_focus());
-                    try {
-                        WarriorSave w = app().save().load();
-                        if (w.current_zone != zones_[zi].name) {
-                            w.current_zone = zones_[zi].name;
-                            app().save().save(w);
-                        }
-                    } catch (const std::exception&) {
-                    }
+                    // JS: switching zones is a DRAG of the `Vr` strip and
+                    // writes NOTHING (`CurrentZone` has no writer there).
                     std::fprintf(stdout, "[map] zone dot -> %s (%zu nodes)\n",
                                  zones_[zi].name.c_str(), zones_[zi].nodes.size());
                     std::fflush(stdout);
@@ -11204,6 +11209,20 @@ void MapScreen::update_impl(float dt) {
         if (p.pressed) {
             node_tap = true;
             hover_ = node_hit;  // `qe.jhb` -> `GT(a)`: select on a real press
+            // JS `Ya.Iyb` (L88496-88505): selecting a battle persists it
+            // (`p.o.Ttb(b.Nb)` -> `Cr("MapFocus", ...)`, restored by
+            // `bKa`/`Px.t5a` on re-entry). The port only set `hover_`.
+            try {
+                WarriorSave w = app().save().load();
+                const std::string mf =
+                    n.zone + "|" + n.name + "|" +
+                    std::to_string(map_fight_index(app(), n.name, n.fight_count) + 1);
+                if (w.map_focus != mf) {
+                    w.map_focus = mf;
+                    app().save().save(w);
+                }
+            } catch (const std::exception&) {
+            }
             std::fprintf(stdout, "[map] node focus -> %s [%s] (%s)\n", n.name.c_str(),
                          n.zone.c_str(), n.active ? "active" : "locked");
             std::fflush(stdout);
