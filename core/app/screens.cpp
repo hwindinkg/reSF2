@@ -9386,9 +9386,27 @@ QuestDialogRow quest_dialog_row(App& app, const EngineDialog& d,
                 r.plates[i].cx = L.sx(dx);
             }
         } else {
+            const DialogKind dk = dialog_kind(d.type);
+            const bool base340 =
+                dk == DialogKind::kVe340 || dk == DialogKind::kVn370;
             // `rI` L1948: exactly one primary (`Rb`) and one secondary (`Kb`).
             QuestDialogPlate& prim = r.plates[primary ? 0 : 1];
-            if (primary && secondary) {
+            if (base340) {
+                // JS `od.EF` L79632-79655 (the 340 `Ve` / 370 `vn` base has
+                // NO `rI`): two plates sit symmetrically at `±(width/2 + 32)`,
+                // a lone plate is CENTRED (`C(0)`, natural width). The port
+                // applied the 280/290 `rI` constants to every kind, so the 40
+                // `NoAvatar` dialogs (5 two-button, 14 one-button-Right) drew
+                // their plates 550/-70 or +500 instead of ±332 / 0.
+                const float half = kOdBtnW * 0.5f + 32.0f;  // w/2 + 32
+                if (primary && secondary) {
+                    prim.cx = L.sx(half);
+                    r.plates[1].cx = L.sx(-half);
+                } else {
+                    prim.cx = L.sx(0.0f);
+                    prim.w = kOdBtnW * L.panel.c;
+                }
+            } else if (primary && secondary) {
                 prim.cx = L.sx(kOdBtnPrimaryX);
                 r.plates[1].cx = L.sx(kOdBtnSecondaryX);
             } else if (primary) {
