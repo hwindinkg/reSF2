@@ -4708,31 +4708,29 @@ void FightController::setup_bus(const PerkSetup& perks) {
     enemy_items_ = perks.enemy_items;
     item_perk_names_ = perks.item_perk_names;
     // JS `wd.K0` (L505): `parameters.ig != null && parameters.ig.Yb ==
-    // "NoRanged" ? 1 : -1`. `parameters.ig` is the equipped item of the
-    // NoRanged type (`vzb` L108540 maps type `I.Vh` -> name "NoRanged").
-    // The shipped equipment carries an equipped `NoRanged` item, so
-    // `ranged_available == false` -> `K2 = +1` (the old hardcoded -1 was
-    // inverted). Derived from the equipped item names the caller supplies.
-    auto has_noranged = [](const std::vector<std::string>& items) {
-        for (const std::string& n : items) {
-            if (n == "NoRanged") return true;
+    // "NoRanged" ? 1 : -1` — the RANGED SLOT item decides (`parameters.ig` is
+    // one item, `xc.hk` overwrites the slot in `<Items>` order). The port
+    // scanned a flat name list for ANY "NoRanged", so an enemy carrying the
+    // `Default` template's placeholder AND a real `RANGED_SHURIKENS` was
+    // marked unavailable (measured: the Lynx `ranged_available=0`, K2=+1).
+    // JS `kc.d$a()` (L820) is the same rule for the Magic slot (`NoMagic`).
+    const auto slot_available = [](const std::vector<sf2::scene::OwnedItem>& items,
+                                   const char* type, const char* placeholder) {
+        bool available = true;  // empty slot -> the default (available)
+        for (const sf2::scene::OwnedItem& o : items) {
+            if (o.type != type) continue;  // last item of the type wins
+            available = !(o.name == placeholder || o.subtype == placeholder);
         }
-        return false;
+        return available;
     };
-    // JS `kc.d$a()` (L820) twin of the Ranged flag: `Mg != null &&
-    // Mg.name != wea("Magic")`, `wea("Magic")` = the DefaultItems Magic NAME
-    // "NoMagic" (internal_settings.xml L100). So `magic_available` is the
-    // negation of "the equipped Magic slot is the NoMagic placeholder".
-    auto has_nomagic = [](const std::vector<std::string>& items) {
-        for (const std::string& n : items) {
-            if (n == "NoMagic") return true;
-        }
-        return false;
-    };
-    player_.ranged_available = !has_noranged(player_items_);
-    enemy_.ranged_available = !has_noranged(enemy_items_);
-    player_.magic_available = !has_nomagic(player_items_);
-    enemy_.magic_available = !has_nomagic(enemy_items_);
+    player_.ranged_available =
+        slot_available(player_.owned_items, "Ranged", "NoRanged");
+    enemy_.ranged_available =
+        slot_available(battle_.enemy_owned, "Ranged", "NoRanged");
+    player_.magic_available =
+        slot_available(player_.owned_items, "Magic", "NoMagic");
+    enemy_.magic_available =
+        slot_available(battle_.enemy_owned, "Magic", "NoMagic");
     if (perks.catalog == nullptr) return;
     // JS `Wk` L811-812: `let a=m.l(); m.addRange(a,this.AK); m.addRange(a,
     // this.TE); ... this.Mja(a,this.ZR)` — the save's LEARNED perks
@@ -7544,7 +7542,45 @@ FightController::BattlePrize FightController::prize(std::int64_t prize_base_in,
     return p;
 }
 
+// [probe, authorised] SF2_TRACE_CLOTH in the FIGHT: the worst stretched CLOTH
+// edge of a fighter's drawn pose (the preview-only gate `cloth-hangs` covers
+// the shop; this is the same metric in combat). Prints every 60 frames.
+static void trace_fight_cloth(const FightFighter& f, int frame) {
+    if (std::getenv("SF2_TRACE_CLOTH") == nullptr) return;
+    if (frame % 60 != 0) return;
+    const sf2::scene::Model& m = f.fighter.model();
+    const std::vector<float>& pv = f.fighter.positions();
+    float worst = 0.0f;
+    std::string name;
+    for (const sf2::scene::EdgeDef& e : m.edges) {
+        const int i1 = m.bone_by_name(e.end1);
+        const int i2 = m.bone_by_name(e.end2);
+        if (i1 < 0 || i2 < 0) continue;
+        if (!m.bones[static_cast<std::size_t>(i1)].cloth &&
+            !m.bones[static_cast<std::size_t>(i2)].cloth) {
+            continue;
+        }
+        const std::size_t a = static_cast<std::size_t>(i1) * 2;
+        const std::size_t b = static_cast<std::size_t>(i2) * 2;
+        if (a + 1 >= pv.size() || b + 1 >= pv.size()) continue;
+        const float dx = pv[a] - pv[b];
+        const float dy = pv[a + 1] - pv[b + 1];
+        const float d = std::sqrt(dx * dx + dy * dy);
+        const float excess = d - e.length;
+        if (excess > worst) {
+            worst = excess;
+            name = e.end1 + "->" + e.end2 + " d=" + std::to_string(static_cast<int>(d)) +
+                   " rest=" + std::to_string(static_cast<int>(e.length));
+        }
+    }
+    std::fprintf(stdout, "[cloth-fight] F%d %s worst=%s (+%.1f) ragdoll=%d\n", frame,
+                 f.name.c_str(), name.empty() ? "-" : name.c_str(),
+                 static_cast<double>(worst), f.fighter.ragdoll_active() ? 1 : 0);
+    std::fflush(stdout);
+}
+
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
+    trace_fight_cloth(me, frame_);
     // JS `kwb` (L522) + `Wqb` (L394): a disarmed fighter loosens the weapon
     // for `MFa` frames (`Wx`), then the weapon is DROPPED and the fighter
     // fights with `Ub.Au` (the config `<Weapon Name="Fists">`). The port only

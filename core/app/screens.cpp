@@ -7056,7 +7056,15 @@ void resolve_enemy_loadout(App& app, const BattleWarriorInfo& bw,
         if (nm.empty()) continue;
         const CatalogItem* ci = find_ci(nm);
         if (ci == nullptr) continue;  // unknown id is simply not worn
+        // All SIX equipment slots bucket with last-wins (`xc.hk` overwrites the
+        // slot in `<Items>` order). Ranged/Magic used to fall into `extras`, so
+        // the enemy carried BOTH the `Default` template's `NoRanged`/`NoMagic`
+        // placeholder AND the warrior's real `RANGED_SHURIKENS`/
+        // `MAGIC_MIND_THROW`: `ranged_available` became false for a boss that
+        // HAS a ranged weapon (measured: the Lynx K2=+1), and the missile
+        // child copied the `NoRanged` placeholder instead of the shuriken.
         if (ci->type == "Skeleton" || ci->type == "Weapon" ||
+            ci->type == "Ranged" || ci->type == "Magic" ||
             ci->type == "Armor" || ci->type == "Helm") {
             slot[ci->type] = {ci->type, ci->subtype, ci->name};
         } else {
