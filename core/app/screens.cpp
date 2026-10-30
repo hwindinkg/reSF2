@@ -4931,14 +4931,15 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     // aspect `N.lc = width/height` (L3281). So the plate's centre is
     // `height/2 - 75*d`, NOT the screen centre. 1280x720: d = 0.625 +
     // (1.7778-1.7)/0.5*0.2 = 0.6561 -> cy = 360 - 49.2 = 310.8.
-    const float lc = kViewW / kViewH;                // JS `N.lc` (L3281)
-    float bd = kViewH / 1152.0f;                     // JS `N.height/1152` (L76946)
-    if (lc <= 1.0f) {
-        bd *= lc;                                    // JS `d *= min(c,1)` (L76951)
-    } else if (lc > 1.7f) {
-        bd += (std::min(std::max(lc, 1.7f), 2.2f) - 1.7f) / 0.5f * 0.2f;  // L76955
-    }
-    const float cy = kViewH * 0.5f - 75.0f * bd;     // `(P+W)/2` (L65069)
+    // JS `Cr.layout` L84360-84361: `let a = ma.Kq; this.content.setPosition(
+    // a.F5a())` — the plate sits at the CENTRE of the fight's `ma.Kq` band.
+    // In a FIGHT `ma.Kq` is set by `ma.Sya` (L76972-77011) from the CAMERA
+    // projection of the visible band (`P`/`W`), which for the shipped fight
+    // camera is the full screen (the port's own HUD trace pins
+    // `kq=(0,1280,0,720)`), so the centre is `height/2`. The old Tya formula
+    // (`N.height/1152`, `576/426`) is the STANCE viewer's band and put the
+    // plate 49 px too high (`SF2_TRACE_BANNER` art_t=260.8 vs 305.5).
+    const float cy = kViewH * 0.5f;  // `(P+W)/2` with P=0, W=height
     // JS Cr.Qa (L2022, init L2026 	his.Qa.R(!0)): the plate's full-screen
     // backdrop is the E.q1a() VERTICAL gradient (E.Eua stops
     // #00000020/80/80/80/20, L93-94) - semi-transparent, NOT a black box. The
@@ -4984,6 +4985,7 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
     // (art,art) centred, so the drawn rect is nat*min(art/nat) - NOT the
     // square `art` (the round frame is 513x109).
     float art_w = art, art_h = art;  // fallback = the requested box
+    float banner_nat_w = art;        // the frame's `sourceSize.w` (`fa.x`)
     {
         sf2::data::atlas_frame fr;
         int tw = 0, th = 0;
@@ -4994,6 +4996,7 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
             const float nat_h = fr.source_h > 0 ? static_cast<float>(fr.source_h)
                                                 : static_cast<float>(fr.h);
             if (nat_w > 0.0f && nat_h > 0.0f) {
+                banner_nat_w = nat_w;
                 const float sc = std::min(art / nat_w, art / nat_h);
                 art_w = nat_w * sc;
                 art_h = nat_h * sc;
@@ -5013,7 +5016,14 @@ void draw_fight_banner(App& app, const sf2::scene::FightController& fight) {
         const sf2::data::font* rf = app.round_font();
         const unsigned int rtex = app.round_texture();
         if (rf != nullptr && rtex != 0) {
-            const float rscale = (64.0f * 1.6f) / 140.0f;  // round eF=140
+            // JS `Cr.layout` L84362: the CONTENT container is scaled by
+            // `min(800, min(W,H)) / image.fa.x * 0.6`; the round NUMBER is a
+            // child of that container, so its own `ua(64*1.6)` is multiplied
+            // by it (the ROUND frame's `sourceSize.w` = 513 -> 432/513 =
+            // 0.8422 at 1280x720; the port drew the digit 1/0.84 too big).
+            const float container_scale =
+                banner_nat_w > 0.0f ? (art / banner_nat_w) : 1.0f;
+            const float rscale = (64.0f * 1.6f) / 140.0f * container_scale;
             // JS `Cr.init` (L84302-84321) with `b=true`:
             //   a = b.W - b.P  (HEIGHT: getBounds uses `N-J` = width and
             //                   `W-P` = height, L67359-67362)
