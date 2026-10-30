@@ -8991,6 +8991,29 @@ std::string dialog_brace_substitute(App& app, const std::string& raw,
 // F.text=ba.Fz(F.text,a)` then the draw-time `Y.na`. The port's parse already
 // ran `ba.cg` for `_`-refs, so only `ba.Fz` + `loc_na` remain. The inline
 // sprite tweaks are `uj.sqb` L1006915.
+// JS `uj.sqb` L81427: `g = g.replace(RegExp("<color=#(\\w+)>(.*?)</color>",
+// "g"), "<style color=$1>$2</style>")` — the `Multiline` body rewrites the
+// `<color=#rrggbb>` span to a `<style color=..>` run. The port's rich-text
+// layer only understands `<image>`, so the raw tags were drawn literally
+// (`ShowOfferBuyDialog` row 2). Parse the FIRST span's colour and strip the
+// tags; the row is then drawn in that colour.
+bool dialog_color_tag(const std::string& raw, float& r, float& g, float& b) {
+    const std::size_t p = raw.find("<color=#");
+    if (p == std::string::npos) return false;
+    std::size_t e = p + 8;
+    std::string hex;
+    while (e < raw.size() && std::isxdigit(static_cast<unsigned char>(raw[e]))) {
+        hex.push_back(raw[e]);
+        ++e;
+    }
+    if (hex.size() != 6) return false;
+    const unsigned long v = std::strtoul(hex.c_str(), nullptr, 16);
+    r = static_cast<float>((v >> 16) & 0xff) / 255.0f;
+    g = static_cast<float>((v >> 8) & 0xff) / 255.0f;
+    b = static_cast<float>(v & 0xff) / 255.0f;
+    return true;
+}
+
 std::string dialog_line_text(App& app, const EngineDialog& d, const std::string& raw) {
     std::string text = dialog_brace_substitute(app, raw, d.journal);
     text = loc_na(app, text, raw);
@@ -9004,6 +9027,16 @@ std::string dialog_line_text(App& app, const EngineDialog& d, const std::string&
     rep(text, "<image>energy</image>", "<image y=0.2>energy</image>");
     rep(text, "<image>ruby</image>", "<image s=0.8>ruby</image>");
     rep(text, "<image>gold</image>", "<image s=0.8>gold</image>");
+    // JS `uj.sqb` L81427 strips the `<color=#..>` span markers (the colour is
+    // applied by `dialog_color_tag` at the draw site).
+    for (;;) {
+        const std::size_t p = text.find("<color=#");
+        if (p == std::string::npos) break;
+        const std::size_t gt = text.find('>', p);
+        if (gt == std::string::npos) break;
+        text.erase(p, gt - p + 1);
+    }
+    rep(text, "</color>", "");
     // A resolved query result carries the `yxa` private-use glyphs for the
     // markup chars (`$`, `.`, `:`, ...): `aa.yxa` (`n0a` L1217655) collapses
     // each `@X` pair into `String.fromCodePoint(10240+g)` with `g` the index
@@ -9596,6 +9629,7 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
                 kOdBodyKc);
             float rr = 0.12f, gg = 0.09f, bb = 0.06f;
             dialog_row_color(d, i, rr, gg, bb);
+            (void)dialog_color_tag(d.lines[i], rr, gg, bb);  // `<color=#..>`
             const float draw_h = std::min(h, body_bottom - y);
             draw_ui_wrapped(app, L.body_x, y, L.body_w, draw_h, text,
                             dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
