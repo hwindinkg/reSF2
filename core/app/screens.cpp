@@ -19017,9 +19017,15 @@ void ResultsScreen::render_impl(App& app) {
                       0.78039f * slide, 1.0f, /*fit=*/false);
         (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                     slide);
-        draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
-                      results_coin_text(app, shown), 0.95f, UiAlign::Left, 0.52941f * slide,
-                      0.93333f * slide, 0.98039f * slide);
+        // JS `Or.nx` L86750-86755: `if (this.w_ > 0 || this.x_ < 1) this.el.X(true)`
+        // — the GOLD value is HIDDEN when the row has 0 coins but rubies >= 1
+        // (the ruby sub-row carries the only number then).
+        const bool show_gold = !(shown <= 0 && prize_ruby_ > 0);
+        if (show_gold) {
+            draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
+                          results_coin_text(app, shown), 0.95f, UiAlign::Left,
+                          0.52941f * slide, 0.93333f * slide, 0.98039f * slide);
+        }
         // `Or.Qw` ruby sub-row (L2086-2088): the `ruby` icon (`y.boa`
         // L2466) + the `We.Sfa`-formatted `oc.OY` value, shown only when
         // `x_>0` (`Or.nx` L2087) and placed LEFT of the gold value
@@ -19028,11 +19034,19 @@ void ResultsScreen::render_impl(App& app) {
         if (i == 0 && prize_ruby_ > 0) {
             const std::int64_t ruby_shown = static_cast<std::int64_t>(
                 static_cast<double>(prize_ruby_) * count + 0.5);
-            (void)try_draw_atlas_button(app, "ruby", rx + coin_dx - 66.0f, ry, 40.0f,
-                                        40.0f, slide);
-            draw_ui_label(app, rx + coin_dx - 252.0f, ry - 16.0f, 160.0f, 32.0f,
-                          results_spaced_text(ruby_shown), 0.9f, UiAlign::Right,
-                          0.52941f * slide, 0.93333f * slide, 0.98039f * slide);
+            // JS `Or.Qw` = [icon][label] (`Hg.lj` L86682 `label.C(icon.za()*0.6)`)
+            // and the whole block is right-aligned so it ENDS where the gold
+            // block starts (`Or.align` L86788 `Qw.C(el.node.ya - Qw.za())`).
+            // The port drew [text][icon] (mirrored).
+            const std::string rtxt = results_spaced_text(ruby_shown);
+            const float rtw = app.measure_text_px(rtxt, 0.9f);
+            const float ricon = 40.0f;
+            const float rleft = rx + coin_dx - 34.0f - (ricon + rtw);
+            (void)try_draw_atlas_button(app, "ruby", rleft + ricon * 0.5f, ry, ricon,
+                                        ricon, slide);
+            draw_ui_label(app, rleft + ricon * 0.6f, ry - 16.0f, rtw + 8.0f, 32.0f,
+                          rtxt, 0.9f, UiAlign::Left, 0.52941f * slide,
+                          0.93333f * slide, 0.98039f * slide);
         }
     }
     // PROBE (temporary, `SF2_REVEAL_PROBE=1`): per-frame reveal telemetry —
