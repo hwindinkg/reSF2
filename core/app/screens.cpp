@@ -17002,9 +17002,13 @@ void FightScreen::render_impl(App& app) {
         const bool combo_live =
             !paused_ && !fight_->round_wait() && !fight_->battle_over();
         if (!combo_live) {
-            // `Gr.Ew` (`Hqa`) hides the elements while paused/hidden.
-            combo_callout_[0].elements.clear();
-            combo_callout_[1].elements.clear();
+            // JS `Gr.Ew(a)` (L85443-85445) ONLY sets the hide flag
+            // (`this.Hqa = a`); `Gr.azb`'s `l_a` then skips the MOTION while
+            // it is set. The `Gu` list is never cleared, so a callout live at
+            // the pause resumes after unpausing. The port cleared both lists
+            // (the plate vanished permanently — the reported "callouts die on
+            // pause"). The tick is already gated by the paused early-return in
+            // `update_impl`, so hiding here is draw-only.
         } else {
             load_callouts_atlas(app);
             // `Hx.i8a` (L2048): the callouts sprite frame per `Hx.wZ`
