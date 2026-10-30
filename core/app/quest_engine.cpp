@@ -3460,7 +3460,8 @@ QuestEngine::ActionRest QuestEngine::run_actions(
                     }
                     std::fprintf(stdout, "[quest] dialog queued (%s/%s): %zu lines\n",
                                  dlg.type.c_str(), dlg.title.c_str(), dlg.lines.size());
-                    dialogs_.push_back(std::move(dlg));
+                    ++dialog_post_seq_;  // `Ib.Qhb` resets the ReadTime on every post
+        dialogs_.push_back(std::move(dlg));
                     dlg_queued = true;
                     dlg_queue_index = dialogs_.size() - 1;
                 }

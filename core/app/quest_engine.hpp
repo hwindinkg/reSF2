@@ -991,8 +991,16 @@ public:
     // quest. Goes through the same queue + cap the parse path uses.
     void push_dialog_for_test(EngineDialog d) {
         if (dialogs_.size() >= 8) dialogs_.erase(dialogs_.begin());
+        ++dialog_post_seq_;
         dialogs_.push_back(std::move(d));
     }
+
+    // JS `Ib.Qhb` (L79956) resets the ReadTime budget `this.SK = f` on EVERY
+    // post — even when the text is identical (two `AllowDoubles` notifications
+    // of the same line). The bar's countdown is keyed on this sequence number
+    // (the port used to key on the CONTENT, so a repeated identical
+    // notification kept the spent budget).
+    std::uint64_t dialog_post_seq() const { return dialog_post_seq_; }
 
     // Test hook (`--changetab-probe`): parse+run ONE in-process action list so
     // a synthetic `Hn` ChangeTab can be asserted without a shipped quest.
@@ -1545,7 +1553,8 @@ private:
     mutable bool bonus_price_ready_ = false;
     std::string last_fight_;
     std::string last_result_;
-    std::vector<EngineDialog> dialogs_;  // Sensei-modal queue (cap below)
+    std::vector<EngineDialog> dialogs_;
+    std::uint64_t dialog_post_seq_ = 0;  // bumped on every push (`Ib.Qhb`)  // Sensei-modal queue (cap below)
     // Live UI guidance (see flash_target/nav_flash/last_map_focus above).
     std::string flash_target_;
     std::string nav_flash_;

@@ -194,15 +194,13 @@ bool quest_read_time_advance(App& app, float dt) {
     const EngineDialog* d = quest_notification_top(app);
     if (d == nullptr) return false;
     if (d->read_time <= 0.0f) return false;
-    // `Qhb` L1907 resets `this.SK=f` on EVERY post, so the identity of the
-    // visible bar is its whole content — the tutorial notifications carry an
-    // EMPTY Title (`Notification/`), so the joined lines are what separates
-    // `_NotificationTextMove` from `_NotificationTextPunchBag`.
-    std::string key = d->type + "|" + d->title;
-    for (const std::string& ln : d->lines) {
-        key += "|";
-        key += ln;
-    }
+    // JS `Ib.Qhb` (L79956) resets the budget `this.SK = f` on EVERY post, even
+    // when the text repeats (`AllowDoubles`). The identity of the visible bar is
+    // therefore the POST SEQUENCE, not the content: keying on the content made
+    // a repeated identical notification keep the already-spent budget (it
+    // auto-dismissed instantly instead of running its own ReadTime).
+    const std::string key =
+        d->type + "#" + std::to_string(app.quest_engine().dialog_post_seq());
     ReadTimeState& st = read_time_state();
     if (st.key != key) {
         st.key = key;
@@ -1402,7 +1400,11 @@ SettingsLayout settings_layout() {
     const float sprite_h = 222.0f * kNodeScale;    // `Y` drawn height
     s.btn_w = sprite_w * p.c;
     s.btn_h = sprite_h * p.c;
-    const float split = g_settings_restart_visible ? s.btn_w * 0.6f : 0.0f;
+    // JS `un.rHa` L80625-80626: `Kb.C(-Kb.width*0.6); Km.C(Km.width*0.6)` where
+    // `Bb.width` is the button's UNSCALED `xc(600)` (the `Pb(150)` only touches
+    // the node scale) -> ±360 design = ±169 px at 1280x720. The port used the
+    // drawn sprite width (600*kNodeScale*c = 378 px) so the plates sat ±227.
+    const float split = g_settings_restart_visible ? 360.0f * p.c : 0.0f;
     s.back_cx = cx - split;
     s.restart_cx = cx + split;
     // `od.layout` (L1898): `Cd.D(a + Cd.node.qa()/2)`, `a=Md/2=375`; the button
@@ -17619,7 +17621,11 @@ void FightScreen::render_impl(App& app) {
     // Geometry mirrors update_impl.
     const bool live =
         fight_ != nullptr && !fight_->round_wait() && !fight_->battle_over();
-    if (live && !paused_) {
+    // JS Sf.Jn stays VISIBLE while the pause dialog is up: its visibility is
+    // Lla (Gkb L84849-84854), not the pause state, and the pause dim
+    // (E.Zxa, alpha 0x20..0x80) is translucent — the oracle pause.png
+    // shows the disc at (640,117). The port skipped it while paused.
+    if (live) {
         // The HUD pause icon (`Jn`, L2034: `db.xz(E.get(1294), y.IQa)`;
         // `Jn.node.la(c*.8)` at `C(b/2)`). Oracle: disc 74 px centred at
         // (639.5,115); the 77 px rect reproduces it (the sprite carries a
@@ -18436,12 +18442,36 @@ constexpr float kRevealSettle = kRevealDelay + kRevealSlide * 6.0f + kRevealCoun
 // it (the oracle `results_win` МАГАЗИН plate).
 static bool results_store_visible(App& app) {
     const PendingBattle& pb = app.pending_battle();
+    // JS `Lr.Kub` (L85811-85816):
+    //   `if (a.Da.type=="FightSurvival" || p.o.zi.VQ()) return false;
+    //    return !this.Hi.zd();`
+    // `zd()` is `qD == 1` = a WIN, so the STORE plate exists only on a LOSS;
+    // `VQ()` is `HH != "END"` (the story is not finished) — the tutorial's
+    // results show OK only (the `results_win.tutorial.bak.png` oracle).
     if (pb.battle_name == "Survival") return false;
+    if (pb.player_won) return false;
+    try {
+        if (app.save().load().tutorial != "END") return false;
+    } catch (const std::exception&) {
+    }
     return true;
 }
 
 void ResultsScreen::update_impl(float dt) {
     ensure_lang(app());  // the lang table powers the `Y.na` string lookups
+    // [probe, authorised] SF2_TRACE_RESULTS: the STORE plate gate (`Lr.Kub`).
+    if (std::getenv("SF2_TRACE_RESULTS") != nullptr) {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            std::fprintf(stdout, "[results] store=%d won=%d battle=%s tutorial=%s\n",
+                         results_store_visible(app()) ? 1 : 0,
+                         app().pending_battle().player_won ? 1 : 0,
+                         app().pending_battle().battle_name.c_str(),
+                         app().save().load().tutorial.c_str());
+            std::fflush(stdout);
+        }
+    }
     // JS `Lr`/`Or` reveal clock (L2057-2081): the `kk` results container
     // schedules the list 500 ms after the battle end (`kk.rxa`:
     // `wh.delay(function(){...Yub},500)`), then row `i` slides over
@@ -18659,7 +18689,13 @@ void ResultsScreen::render_impl(App& app) {
     const float kk_scale = kkb_w / 750.0f;
     const float kk_label_cx = kkb_j + 375.0f * kk_scale;
     const float kk_label_cy = kkb_p + 60.0f * kk_scale;
-    const float kk_label_scale = 0.5f * kk_scale;
+    // `res/fight/callouts.fcaad38f.json` carries `"meta":{"scale":"0.7"}`; the
+    // JS frame natural size is `sourceSize / meta.scale` (`Jq` L71859 ->
+    // `a.fa.x*c` with `c = qc.ij = 1/scale`, L62794), so the `la(0.5)` sprite is
+    // drawn at `source/0.7*0.5*kk_scale`. The port dropped the 0.7 (measured:
+    // oracle ink 380x64 vs the port's 266x44 = exactly 1/0.7).
+    constexpr float kCalloutMetaScale = 0.7f;
+    const float kk_label_scale = 0.5f * kk_scale / kCalloutMetaScale;
     bool label_drawn = false;
     if (load_callouts_atlas(app)) {
         const char* lname = player_won_ ? "label_win" : "label_lose";
@@ -18725,9 +18761,16 @@ void ResultsScreen::render_impl(App& app) {
     }
     constexpr float kKkRowX = 420.0f;    // label left edge
     constexpr float kKkCoinX = 822.0f;   // gold coin centre
-    constexpr float kKkValX = 838.0f;    // value left edge (cyan)
+    // JS `Or` L86732 `el.C(pc.tB)` (+400 du) and `Hg.lj` L86682
+    // `label.C(icon.za()*0.6)` = +432 du -> the oracle cyan ink starts at 859.
+    constexpr float kKkValX = 858.0f;    // value left edge (cyan)
+    // JS `Lr.ZMa` L86439-86446: `this.lf[c].node.D(125 + c*60)` then the star
+    // row `b.D(b.ra + 20)` — 60 du per row and +20 du for the star, all inside
+    // the `kk` panel scaled by `kk_scale`. The port used a flat 58 px and no
+    // star offset (the oracle coin centres are 155/216/278/340/402/463/545).
     constexpr float kKkRowY0 = 155.0f;
-    constexpr float kKkRowStep = 58.0f;
+    const float kKkRowStep = 60.0f * kk_scale;
+    const float kKkStarExtra = 20.0f * kk_scale;
     // `Lr.ZMa` (L2078): the non-star rows start at dialog x -500; the reveal
     // ends at `Or.y_ = (750-(pc.tB+pc.oM))/2`; `pc.oM` is 40/80/120 by the
     // total money `oc.m6` (`Lr` ctor L2059).
@@ -18761,7 +18804,8 @@ void ResultsScreen::render_impl(App& app) {
         if (r.star ? count <= 0.0f : slide <= 0.0f) continue;
         const float from = r.star ? row_to : row_from;  // rows 0..n-2 set -500
         const float rx = from + (row_to - from) * slide;
-        const float ry = kKkRowY0 + static_cast<float>(i) * kKkRowStep;
+        const float ry = kKkRowY0 + static_cast<float>(i) * kKkRowStep +
+                         (r.star ? kKkStarExtra : 0.0f);
         const std::int64_t shown =
             static_cast<std::int64_t>(static_cast<double>(r.value) * count + 0.5);
         const float coin_dx = kKkCoinX - kKkRowX;
@@ -18801,8 +18845,14 @@ void ResultsScreen::render_impl(App& app) {
         // JS `Or.vU.La(Na.cd(16776391))` (L1073997): the results row LABEL is
         // (255,252,199)/255 — near-white cream. The port used (0.94,0.89,0.72)
         // (240,227,184), a visibly duller beige.
-        draw_ui_label(app, rx, ry - 16.0f, 400.0f, 32.0f, lab, 0.95f, UiAlign::Left,
-                      1.0f * slide, 0.98824f * slide, 0.78039f * slide);
+        // JS `Or` L86717-86720: `vU.Fa(pc.tB, 50); vU.ua(50)` — a 50 du box with
+        // the 50 px font (glyph scale 0.5, `fit` must NOT shrink it), centred
+        // 25 du under the row node, i.e. on the coin/value centre line. The
+        // port drew it 16 px above with a fitted 0.59 scale (32 px caps vs the
+        // oracle's 28).
+        draw_ui_label(app, rx, ry - 25.0f * kk_scale, 400.0f, 50.0f * kk_scale, lab,
+                      0.5f, UiAlign::Left, 1.0f * slide, 0.98824f * slide,
+                      0.78039f * slide, 1.0f, /*fit=*/false);
         (void)try_draw_atlas_button(app, "gold", rx + coin_dx, ry, 48.0f, 48.0f,
                                     slide);
         draw_ui_label(app, rx + val_dx, ry - 16.0f, 120.0f, 32.0f,
@@ -24394,23 +24444,31 @@ void credits_draw(App& app, sf2::render::Renderer& ren) {
     if (!g_credits_open) return;
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 1.0f);
-    // `a.Fa(1E3,120); a.C(-500); a.ua(120); a.V(Y.na("credits"))` (L1855).
-    float y = 120.0f - g_credits_scroll;
-    draw_ui_label(app, kViewW * 0.5f - 500.0f, y - 60.0f, 1000.0f, 120.0f,
-                  loc(app, "credits", "CREDITS"), 1.0f, UiAlign::Center, kCreditsTextR,
-                  kCreditsTextG, kCreditsTextB);
-    y += 220.0f;  // `a=220` (L1855)
+    // `xh`/`zx` (JS L77880-78012), all coordinates are DESIGN units inside the
+    // `ef` node (`la(1024/1126)` = 0.909 about the screen centre), so the port
+    // keeps the 1:1 design mapping the other dialogs use:
+    //   title `Fa(1E3,120) C(-500) ua(120)`            (L77898)
+    //   row   name  `Fa(500,60)  C(-520) ua(60)`       (L77997)
+    //         value `Fa(500,50)  C(20)   ua(50)`       (L77998-78000)
+    //   pitch `a += d.height + 90` where `d.height` = the WRAPPED value height
+    //         (L77904-77905), and the families title at `a + 60` (L77914).
+    const float cx0 = kViewW * 0.5f;
+    float y = 220.0f - g_credits_scroll;  // `a = 220` after the title
+    draw_ui_label(app, cx0 - 500.0f, 120.0f - g_credits_scroll - 60.0f, 1000.0f, 120.0f,
+                  loc(app, "credits", "CREDITS"), 1.2f, UiAlign::Center, kCreditsTextR,
+                  kCreditsTextG, kCreditsTextB, 1.0f, /*fit=*/false);
     for (const CreditsRow& r : g_credits_rows) {
-        // `$ja=c(Name,60)` at `C(-520)`, `V2=c(value,50)` at `C(20)` (L1857-1858).
-        draw_ui_label(app, 60.0f, y, 500.0f, 60.0f, r.name, 0.9f, UiAlign::Left, kCreditsTextR,
-                      kCreditsTextG, kCreditsTextB);
-        draw_ui_wrapped(app, 620.0f, y, kViewW - 680.0f, 50.0f, r.value, 0.9f, UiAlign::Left,
-                        kCreditsTextR, kCreditsTextG, kCreditsTextB);
-        y += 90.0f + 60.0f;  // `a += d.height + 90` (L1855)
+        draw_ui_label(app, cx0 - 520.0f, y, 500.0f, 60.0f, r.name, 0.6f, UiAlign::Left,
+                      kCreditsTextR, kCreditsTextG, kCreditsTextB, 1.0f, /*fit=*/false);
+        // `d.height` = the wrapped value height at `ua(50)`, `Kc(0.7)`.
+        const float vh = measure_ui_wrapped(app, r.value, 500.0f, 0.5f, 0.7f);
+        draw_ui_wrapped(app, cx0 + 20.0f, y, 500.0f, vh, r.value, 0.5f, UiAlign::Left,
+                        kCreditsTextR, kCreditsTextG, kCreditsTextB, 0.7f);
+        y += vh + 90.0f;
     }
-    draw_ui_label(app, kViewW * 0.5f - 500.0f, y, 1000.0f, 120.0f,
-                  loc(app, "CreditsFamilies", "CREDITS"), 1.0f, UiAlign::Center, kCreditsTextR,
-                  kCreditsTextG, kCreditsTextB);
+    draw_ui_label(app, cx0 - 500.0f, y + 60.0f, 1000.0f, 120.0f,
+                  loc(app, "CreditsFamilies", "CREDITS"), 1.2f, UiAlign::Center,
+                  kCreditsTextR, kCreditsTextG, kCreditsTextB, 1.0f, /*fit=*/false);
 }
 
 SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
