@@ -2790,3 +2790,35 @@ clamp `[size.x - b + 200, 0]` с перелётом +100, переключени
 Осталось по результатам: рубиновая подстрока [иконка][текст] и скрытие золота
 при 0 монет (L86733-86737, `Or.nx` L86750-86755); STORE в JS только шлёт
 `QUEST_EVENT_SHOP_BUTTON_PRESS` (L85817-85819).
+
+### QA-30.10 — пауза: QUIT-подтверждение и Pause_selected (закрыто)
+
+- `Xc.Zhb` L16765-16767 -> `Wb.openDialog(40, lv("dlgExitFightTitle",
+  "dlgExitFightMessage"))`: плашка QUIT больше не выкидывает из боя сразу, а
+  открывает диалог подтверждения (`sn extends od` L79815-79864): заголовок
+  `dlgExitFightTitle`, текст `dlgExitFightMessage`, основная плашка
+  `dlgExitButton` («ВЫЙТИ») подтверждает (`O3a` -> `Vwb`), вторая — отмена.
+  Замер `--pause-probe`:
+  ```
+  [fight] pause QUIT -> exit-confirm dialog
+  [pauseprobe] confirm dialog plates=1 ok=899,531 cancel=607,531
+  [fight] exit-confirm press at 607,531 -> slot 0
+  [fight] exit-confirm CANCEL
+  [pauseprobe] after CANCEL dialog=0 screen=6
+  [fight] exit-confirm press at 899,531 -> slot 1
+  [fight] exit-confirm OK -> leave the fight
+  [pauseprobe] after OK screen=3
+  ```
+  кадр `.harness/pause_confirm.png` (ВЫХОД / «Вы уверены, что хотите выйти?» /
+  ВЫЙТИ + ОК).
+- `Mr` L86073-86086: спрайт `Pause_selected` с `wa(0.5)` поверх ЗАЖАТОЙ
+  плашки (`db.Xw(true/false)`). Контрольный замер (зажимаем разные плашки):
+  ```
+  hold MUSIC: music (150,147,109) ярко / sound (109,16,10) темно
+  hold SOUND: music (47,40,33) темно   / sound (181,135,97) ярко
+  ```
+- Файделити-тур получил шаг на плашку подтверждения (клик QUIT теперь остаётся
+  на экране боя), поэтому гейт ждёт 41 шаг.
+
+Осталось по паузе: строка имени игрока под плашками (`Dr` ctor L86004-86015,
+`QA` при непустом `ca.Ka().Da.GD()`).
