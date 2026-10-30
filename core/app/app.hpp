@@ -304,10 +304,20 @@ public:
     // scales `ea.Kc()` -> `Qh.nha`, the line-height multiplier in the wrap
     // advance `d` (L1623/L1627) and the measured height `ew()` (L1635);
     // applied by `wrap_ui_text` (screens.cpp).
+    // JS `un.rHa` case 4 (L80610-80620) sets the GLOBAL `ea.a1`/`ea.b1` the
+    // moment the language row is tapped (ja/ko/ru -> 0.8/1.2, else 1/1), BEFORE
+    // the RESTART applies the language. The port read the SAVED `lang_`, so
+    // nothing changed until RESTART. `0` = no override.
+    void set_ui_text_scale_override(float a1, float b1) {
+        ui_a1_override_ = a1;
+        ui_b1_override_ = b1;
+    }
     float ui_text_scale() const {
+        if (ui_a1_override_ > 0.0f) return ui_a1_override_;
         return (lang_ == "ja" || lang_ == "ko" || lang_ == "ru") ? 0.8f : 1.0f;
     }
     float ui_text_spacing_scale() const {
+        if (ui_b1_override_ > 0.0f) return ui_b1_override_;
         return (lang_ == "ja" || lang_ == "ko" || lang_ == "ru") ? 1.2f : 1.0f;
     }
     // Splash/loader art (JS `Rg` L1967 / `ad` L1969, asset ids 274-279):
@@ -478,6 +488,10 @@ private:
     std::string res_root_;
     std::string save_path_;
     // The resolved UI language (JS `G.lang`; default "en", `G.Ska` L2392).
+    // `ea.a1`/`ea.b1` overrides set by the settings language tap (JS
+    // `un.rHa` case 4 L80610-80620); 0 = no override.
+    float ui_a1_override_ = 0.0f;
+    float ui_b1_override_ = 0.0f;
     std::string lang_ = "en";
     // Per-language settings-dialog fonts (`un.C8`, JS L1917) + their shared
     // page texture (asset 252/253).

@@ -1846,6 +1846,8 @@ void close_settings_dialog();
 void settings_dialog_cycle_language(App& app);
 // D15: `Nm`/`Km` visibility (`R(t9)`/`X(t9)`) — hidden until a language change.
 bool settings_dialog_restart_visible();
+// The PENDING language $u the dialog shows (before RESTART applies it).
+const std::string& settings_dialog_language();
 
 // [--flow-verify] The Settings `un` dialog Music/Sound row centre + hit size
 // (`un` icon rect, screens.cpp `settings_layout()`). `music=false` selects the

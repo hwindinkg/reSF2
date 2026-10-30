@@ -5983,6 +5983,63 @@ void battle_rewards(const std::string& battle_name, const std::string& zone_name
     }
 }
 
+// JS `dl.GD()` (`g8 ?? Sb`, L59263-59269): the CURRENT `<Fight>`'s description —
+// the `<Rules><Description Alias>` when authored, else the `<Fight Description>`
+// attr. `index` is the 0-based `<Fight>` ordinal (the pending triple's tail).
+std::string fight_description_for(const std::string& battle_name,
+                                  const std::string& zone_name, int index) {
+    std::string out;
+    try {
+        sf2::data::xml_doc doc;
+        std::ifstream in("reference/extracted/xml/res/stages.xml", std::ios::binary);
+        if (!in) return out;
+        std::vector<char> data((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        doc.parse(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+        const pugi::xml_node root = doc.root().first_child();
+        if (!root) return out;
+        const pugi::xml_node zones = root.child("Zones");
+        if (!zones) return out;
+        pugi::xml_node battle;
+        for (const pugi::xml_node z : zones.children("Zone")) {
+            if (!zone_name.empty() &&
+                std::string(z.attribute("Name").value()) != zone_name) {
+                continue;
+            }
+            for (const pugi::xml_node b : z.children("Battle")) {
+                if (std::string(b.attribute("Name").value()) == battle_name) {
+                    battle = b;
+                    break;
+                }
+            }
+            if (battle) break;
+        }
+        if (!battle) return out;
+        pugi::xml_node fight;
+        int i = 0;
+        for (const pugi::xml_node f : battle.children("Fight")) {
+            if (i++ == index) {
+                fight = f;
+                break;
+            }
+        }
+        if (!fight) return out;
+        if (fight.attribute("Description")) {
+            out = fight.attribute("Description").value();
+        }
+        for (pugi::xml_node r : fight.child("Rules").children()) {
+            if (std::string(r.name()) != "Description") continue;
+            const char* al = r.attribute("Alias") ? r.attribute("Alias").value() : "";
+            if (*al) {
+                out = al;
+                break;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
 // JS `hj.jt(true)` / `Lr` ctor L86368: the `<Reward><Item Name=...>` drops of
 // the GRANT row (the LAST `<Reward>` of the fight, the same row
 // `battle_rewards` reads). `jt(a)` returns the row's item list; the results
@@ -17818,6 +17875,53 @@ void FightScreen::render_impl(App& app) {
               kPauseDlgToggleS, "RESUME");
         frame("home", kPauseDlgHomeX, kPauseDlgRowY, kPauseDlgToggleS,
               kPauseDlgToggleS, "QUIT");
+        // JS `Dr` ctor L86004-86015: `b = ca.Ka().Da.GD()` (the CURRENT
+        // `<Fight>` description, `g8 ?? Sb`) -> an `ea` at `Fa(800,60)`,
+        // `C(50)`, `D(550)`, `ua(60)`, `Ia(128)` (left), colour
+        // `Na.cd(16627016)` = (253,181,72), drawn only when non-empty.
+        {
+            // `render_impl(App& app)` holds the App by reference (there is no
+            // zero-arg `app()` accessor here), so read the pending battle off
+            // `app` directly.
+            const PendingBattle& pbp = app.pending_battle();
+            int fi = 0;
+            {
+                const std::size_t p1 = pbp.fight_triple.find('|');
+                if (p1 != std::string::npos) {
+                    const std::size_t p2 = pbp.fight_triple.find('|', p1 + 1);
+                    if (p2 != std::string::npos) {
+                        fi = std::atoi(pbp.fight_triple.c_str() + p2 + 1) - 1;
+                    }
+                }
+            }
+            if (fi < 0) fi = 0;
+            const std::string desc =
+                fight_description_for(pbp.battle_name, pbp.zone, fi);
+            if (std::getenv("SF2_TRACE_PAUSE") != nullptr) {
+                std::fprintf(stdout,
+                             "[pause] desc lookup battle='%s' zone='%s' "
+                             "triple='%s' fi=%d -> '%s'\n",
+                             pbp.battle_name.c_str(), pbp.zone.c_str(),
+                             pbp.fight_triple.c_str(), fi, desc.c_str());
+                std::fflush(stdout);
+            }
+            if (!desc.empty()) {
+                const std::string text = loc(app, desc, desc);
+                if (!text.empty()) {
+                    // content `b = ma.Kq.fn(1.125)` = (235,0,1045,720), scale
+                    // 0.9 -> x = 235 + 50*0.9, y = 550*0.9.
+                    draw_ui_label(app, 235.0f + 50.0f * 0.9f, 550.0f * 0.9f,
+                                  800.0f * 0.9f, 60.0f * 0.9f, text, 0.6f,
+                                  UiAlign::Left, 253.0f / 255.0f, 181.0f / 255.0f,
+                                  72.0f / 255.0f, 1.0f, /*fit=*/false);
+                    if (std::getenv("SF2_TRACE_PAUSE") != nullptr) {
+                        std::fprintf(stdout, "[pause] description '%s' -> '%s'\n",
+                                     desc.c_str(), text.c_str());
+                        std::fflush(stdout);
+                    }
+                }
+            }
+        }
         // JS `Mr` (L86073-86086): `fill = R.$(1302, "Pause_selected", node)`
         // with `wa(0.5)`, hidden until `Xw(true)` on a press-down
         // (`db` L77263/77275). Draw it over the plate that is held.
@@ -24624,6 +24728,8 @@ int catalog_max_delivery_sec(App& app) {
 
 // `un.rHa` case 4 (L1931): `this.u9=(this.u9+1)%iv.length; this.$u=iv[this.u9];
 // this.t9=G.Rq()!=this.$u;` then `this.t9?(this.Km.X(!0),...)` reveals RESTART.
+const std::string& settings_dialog_language() { return g_settings_lang; }
+
 void settings_dialog_cycle_language(App& app) {
     g_settings_row_ua = 1.0f;  // `un.Oyb` L80648/80653/80658/80662 `ua(100)`
     int idx = 0;
@@ -24632,6 +24738,17 @@ void settings_dialog_cycle_language(App& app) {
     }
     idx = (idx + 1) % kSettingsLangCount;
     g_settings_lang = kSettingsLangs[idx];
+    // JS `un.rHa` case 4 L80610-80620: the GLOBAL `ea.a1`/`ea.b1` follow the
+    // pending language IMMEDIATELY (ja/ko/ru -> 0.8/1.2, else 1/1), before the
+    // RESTART applies the language.
+    {
+        const bool asian = g_settings_lang == "ja" || g_settings_lang == "ko" ||
+                           g_settings_lang == "ru";
+        app.set_ui_text_scale_override(asian ? 0.8f : 1.0f, asian ? 1.2f : 1.0f);
+        std::fprintf(stdout, "[settings] language '%s' -> ea.a1=%.1f ea.b1=%.1f\n",
+                     g_settings_lang.c_str(), asian ? 0.8 : 1.0, asian ? 1.2 : 1.0);
+        std::fflush(stdout);
+    }
     const std::string saved = app.language().empty() ? "en" : app.language();
     g_settings_restart_visible = g_settings_lang != saved;  // `t9`
     const sf2::data::font* f = app.settings_font(g_settings_lang);

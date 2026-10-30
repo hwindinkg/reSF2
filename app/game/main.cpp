@@ -1905,6 +1905,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --pause-probe: the pause plates' `Pause_selected` frame + the QUIT
     // exit-confirm dialog (JS `Mr.Xw` L86084-86086 / `Xc.Zhb` L16765-16767).
     bool pause_probe = false;
+    // --settings-lang-probe: the settings language row's IMMEDIATE `ea.a1/.b1`
+    // switch (JS `un.rHa` case 4 L80610-80620), before RESTART.
+    bool settings_lang_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2191,6 +2194,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             results_item_probe = true;
         } else if (arg == "--pause-probe") {
             pause_probe = true;
+        } else if (arg == "--settings-lang-probe") {
+            settings_lang_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5311,19 +5316,65 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (settings_lang_probe) {
+        // --- `--settings-lang-probe`: `ea.a1/.b1` on the language tap --------
+        // JS `un.rHa` case 4 (L80610-80620): ja/ko/ru -> `ea.a1=.8, ea.b1=1.2`
+        // immediately, else 1/1; the RESTART only applies the LANGUAGE.
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        open_settings_dialog(app);
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout,
+                     "[langprobe] start lang='%s' ea.a1=%.2f ea.b1=%.2f\n",
+                     app.language().c_str(), static_cast<double>(app.ui_text_scale()),
+                     static_cast<double>(app.ui_text_spacing_scale()));
+        std::fflush(stdout);
+        for (int k = 0; k < 5; ++k) {
+            settings_dialog_cycle_language(app);
+            std::fprintf(stdout,
+                         "[langprobe] cycle %d lang='%s' restart=%d ea.a1=%.2f "
+                         "ea.b1=%.2f\n",
+                         k + 1, settings_dialog_language().c_str(),
+                         settings_dialog_restart_visible() ? 1 : 0,
+                         static_cast<double>(app.ui_text_scale()),
+                         static_cast<double>(app.ui_text_spacing_scale()));
+            std::fflush(stdout);
+        }
+        close_settings_dialog();
+        return 0;
     } else if (pause_probe) {
         // --- `--pause-probe`: the pause plates + the QUIT confirm ----------
         glfwHideWindow(app.renderer().window());
         {
             PendingBattle& pb = app.pending_battle();
-            pb.battle_name = "BOSS_LYNX";
-            pb.zone = "ZONE_1";
+            pb.battle_name =
+                fight_battle.empty() ? std::string("BOSS_LYNX") : fight_battle;
+            pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
             pb.location = "dojo";
             pb.has_result = false;
             pb.reward_money = 0;
             pb.reward_exp = 0;
             pb.owned = loadout_owned(std::string("Fists"));
+            if (fight_ordinal > 0) {
+                pb.fight_triple = pb.zone + "|" + pb.battle_name + "|" +
+                                  std::to_string(fight_ordinal);
+            }
         }
+        std::fprintf(stdout, "[pauseprobe] battle=%s triple=%s desc='%s'\n",
+                     app.pending_battle().battle_name.c_str(),
+                     app.pending_battle().fight_triple.c_str(),
+                     app.quest_engine()
+                         .fight_description(app.pending_battle().fight_triple)
+                         .c_str());
+        std::fflush(stdout);
         app.screens().push(make_screen(app.screens(), kScreenFight));
         app.set_headless_frames(1);
         auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
@@ -5360,6 +5411,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         for (int i = 0; i < 14; ++i) {  // release
             glfwPollEvents();
             app.run_one_frame();
+        }
+        if (const char* s0 = std::getenv("SF2_PAUSE_SHOT0")) {
+            app.capture_png(s0);  // the settled pause dialog (description line)
+            std::fprintf(stdout, "[pauseprobe] dialog shot %s\n", s0);
         }
         // QUIT -> the exit-confirm dialog.
         app.inject_click(403.75, 396.0, 3);
