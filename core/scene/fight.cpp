@@ -8487,7 +8487,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         st.my_x = me.fighter.world_x();
         st.my_y = me.fighter.world_y();
         st.enemy_x = foe.fighter.world_x();
-        st.my_facing = me.fighter.facing();
+        // JS da.hd() (Te.hd(){return this.FX}) = MY CLIP MIRROR, not the
+        // 6a facing: acing() and clip_mirror() are OPPOSITE in this
+        // port (measured: enemy at x=159 / player 607 -> facing=-1,
+        // clip_mirror=+1), and the distance windows (my_facing*Wea + Mu) and
+        // the _1/_2 node pick (one_world_x) use this sign.
+        st.my_facing = me.fighter.clip_mirror();
         // JS `b.hd()` (L547 `Te.hd(){return this.FX}`): the OPPONENT's CLIP
         // MIRROR, not its `b6a` facing (`fighter.facing()`), or the `Pqb`
         // facing-lock fires every frame and the AI never issues a move.
