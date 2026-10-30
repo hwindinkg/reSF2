@@ -12047,6 +12047,94 @@ void draw_map_preview(App& app, const std::string& stem, float x, float y, float
 //   `WB` = the countdown at `ua(a*0.25)`, colour `Z.sc` (0.184,0.145,0.106),
 //          `HH:MM:SS` when hours > 0 else `MM:SS` (L89479-89489).
 // The body has NO FIGHT plate (`Whb`/`Cyb` is never reached for this branch).
+// JS `ci.ba` (L1105400) row: [gold+Money][ruby+Bonus], centred, spacing
+// `a*.05`. Shared by the `nk` (survival) body's two rows.
+void draw_map_badge_row(App& app, std::int64_t money, std::int64_t bonus,
+                        float body_x, float body_w, float y, float icon_h) {
+    struct B { const char* icon; std::int64_t v; };
+    const B rows[2] = {{"gold", money}, {"ruby", bonus}};
+    float icon_w[2] = {0.0f, 0.0f};
+    float txt_w[2] = {0.0f, 0.0f};
+    std::string texts[2];
+    int n = 0;
+    const float txt_scale = body_w * 0.16f / 100.0f;
+    const sf2::data::font* mfont = app.menu_font();
+    for (const B& b : rows) {
+        if (b.v <= 0) continue;
+        float gw = 0.0f, gh = 0.0f;
+        icon_w[n] = (map_frame_size(app, b.icon, gw, gh) && gh > 0.0f)
+                        ? icon_h * (gw / gh)
+                        : icon_h;
+        texts[n] = results_spaced_text(b.v);
+        txt_w[n] = mfont != nullptr ? app.measure_text(*mfont, texts[n], txt_scale)
+                                    : icon_h;
+        ++n;
+    }
+    if (n == 0) return;
+    const float gap = body_w * 0.05f;
+    float total = gap * static_cast<float>(n - 1);
+    for (int i = 0; i < n; ++i) total += icon_w[i] + txt_w[i];
+    float x = body_x + (body_w - total) * 0.5f;
+    int bi = 0;
+    for (const B& b : rows) {
+        if (b.v <= 0) continue;
+        try_draw_atlas_button(app, b.icon, x + icon_w[bi] * 0.5f, y + icon_h * 0.5f,
+                              icon_w[bi], icon_h, 1.0f);
+        draw_ui_label(app, x + icon_w[bi], y, txt_w[bi], icon_h, texts[bi], txt_scale,
+                      UiAlign::Left, 0.184f, 0.145f, 0.106f);
+        x += icon_w[bi] + txt_w[bi] + gap;
+        ++bi;
+    }
+}
+
+// JS `nk` (L89557-89623), the `FightSurvival` / `FightBossesIntermission` body:
+//   * (intermission) the battle description at the top 25% (`ua(a*.16*.8)`,
+//     `Kc(0.6)`), then `a*.1`;
+//   * `eH` = `Y.na("survive_min")` at `ua(a*.16*.8)`, `a*.12` below it the
+//     FIRST fight's reward row 1 as a badge row (`a*.15` icons);
+//   * `a*.2` lower `cH` = `Y.na("survive_max")` and its badge row (the same
+//     fight's LAST reward row).
+// No pips and no `Wc` difficulty.
+void draw_map_survival_body(App& app, const MapScreen::Node& n, float x, float y,
+                            float w, float h) {
+    float yy = y;
+    if (n.type == "BOSSES_INTERMISSION" && !n.description.empty()) {
+        draw_ui_wrapped(app, x, y, w, h * 0.25f, loc(app, n.description, n.description),
+                        w * 0.16f * 0.8f / 100.0f, UiAlign::Center, 0.184f, 0.145f,
+                        0.106f, /*line_factor=*/0.6f);
+        yy = y + h * 0.25f + w * 0.1f;
+    }
+    int level = 1;
+    try {
+        level = app.save().load().level;
+    } catch (const std::exception&) {
+    }
+    std::int64_t m1 = 0, b1 = 0, m2 = 0, b2 = 0, dummy_exp = 0, dummy_prize = -1;
+    // `c = b[0].wi; b = c[1].bm(d); c = c[c.length-1].bm(d)` — the FIRST
+    // fight's second and last `<Reward>` rows.
+    battle_rewards(n.name, n.zone, 0, level, m1, dummy_exp, b1, dummy_prize,
+                   /*row_from_end=*/0, /*abs_row=*/1);
+    battle_rewards(n.name, n.zone, 0, level, m2, dummy_exp, b2, dummy_prize,
+                   /*row_from_end=*/0, /*abs_row=*/-1);
+    const float lab_scale = w * 0.16f * 0.8f / 100.0f;
+    draw_ui_label(app, x, yy, w, w * 0.1f, loc(app, "survive_min", "MINIMUM"),
+                  lab_scale, UiAlign::Center, 0.216f, 0.157f, 0.086f);
+    yy += w * 0.12f;
+    draw_map_badge_row(app, m1, b1, x, w, yy, w * 0.15f);
+    yy += w * 0.2f;
+    draw_ui_label(app, x, yy, w, w * 0.1f, loc(app, "survive_max", "MAXIMUM"),
+                  lab_scale, UiAlign::Center, 0.216f, 0.157f, 0.086f);
+    yy += w * 0.12f;
+    draw_map_badge_row(app, m2, b2, x, w, yy, w * 0.15f);
+    if (std::getenv("SF2_TRACE_MAPBADGE") != nullptr) {
+        std::fprintf(stdout, "[map] survival %s|%s min=%lld/%lld max=%lld/%lld\n",
+                     n.zone.c_str(), n.name.c_str(), static_cast<long long>(m1),
+                     static_cast<long long>(b1), static_cast<long long>(m2),
+                     static_cast<long long>(b2));
+        std::fflush(stdout);
+    }
+}
+
 void draw_map_sr_body(App& app, const MapScreen::Node& n, float x, float y,
                       float w, float h) {
     float aw = 0.0f, ah = 0.0f;
@@ -12225,7 +12313,12 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         return;
     }
     float wy = 0.0f;  // the reward badge's y offset (`ty.D`), per body class
-    if (body_ok) {
+    // JS `Whb` `case "FightSurvival": this.Ah = new nk(a)` (L89560-89561).
+    const bool survival_type =
+        node->type == "SURVIVAL" || node->type == "BOSSES_INTERMISSION";
+    if (survival_type) {
+        draw_map_survival_body(app, *node, body_x, body_y, body_w, body_h);
+    } else if (body_ok) {
         // JS `ok` (L2150): NO `Xr` pips and NO `Wc` difficulty. The body is
         // the `Sb` description (`Fa(a, a*.5)`, `ua(a*.16)`, multiline,
         // centred), then the reward badge at `Sb.Oj().W + a*.2`. For the boss
@@ -12462,7 +12555,7 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
             }
             wy += icon_h + body_w * 0.05f;
         }
-        if (!(boss_family && badge_owned) &&
+        if (!survival_type && !(boss_family && badge_owned) &&
             (badge_money > 0 || badge_bonus > 0)) {
             // JS `ci` (L1104923): a horizontal row of `Ig` icon+value badges,
             // appended in order and laid out by `ci.ba` (L1105400): spacing
