@@ -12923,12 +12923,13 @@ void draw_boss_roster(App& app, sf2::render::Renderer& ren,
     // state-3 ramp. Oracle-pinned canvas: others 353 (= `g`), the selected
     // 353*1.4 = 494; vertical centre 362.
     const float kCy = 362.0f;
-    const float sel_scale = r.selected_scale();
     const float oth_alpha = r.other_alpha();
     for (int i = 0; i < static_cast<int>(r.entries.size()); ++i) {
         const float cx = r.scroll_x + r.entry_x(i);
         const bool sel = i == r.index;
-        const float d = BossRosterScroll::kBaseD * (sel ? sel_scale : 1.0f);
+        // `jk.init` L2068 pre-scales the LAST row by 1.4 and `jk.aa` L85940
+        // ramps only the SELECTED one; `entry_scale` folds both rules.
+        const float d = BossRosterScroll::kBaseD * r.entry_scale(i);
         const float a = r.row_alpha * (sel ? 1.0f : oth_alpha);
         if (!draw_user_image(app, r.entries[i].image, cx, kCy, d, d, a)) {
             draw_user_image(app, "avatar_masked", cx, kCy, d, d, a);
@@ -16993,7 +16994,6 @@ void FightScreen::render_impl(App& app) {
             const float name_y = panel_py - 100.0f * hud_c;      // 57.05
             const float name_px = panel_px + 150.0f * hud_c;     // 392.4
             const float name_ex = panel_ex - 150.0f * hud_c;     // 887.6
-            const float pw = app.measure_text_px(vs_player_name_, nscale);
             const float ew = app.measure_text_px(vs_enemy_name_, nscale);
             app.draw_text_with_font(*nf, nt, name_px + 1.5f, name_y + 1.5f, vs_player_name_,
                                     nscale, 0.0f, 0.0f, 0.0f, 0.55f);

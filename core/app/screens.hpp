@@ -303,14 +303,32 @@ struct BossRosterScroll {
         done = false;
         started = true;
         // L2063: `Pp = -(Jq[last].node.ya - Jq[0].node.ya)` then
-        // `-= Jq[0].Hf.size/2` and `-= Jq[last].Hf.size/2`.
-        const float span = static_cast<float>(n > 0 ? n - 1 : 0) * kStep;
+        // `-= Jq[0].Hf.size/2` and `-= Jq[last].Hf.size/2` — with the LAST
+        // row's `+0.2g` shift already applied to its `node.ya` (L2068-2070).
+        const float span = entry_x(n > 0 ? n - 1 : 0) - entry_x(0);
         Pp = -span - kBaseD;
         scroll_x = Pp;  // case 0: `this.scrollX = this.Pp`
     }
 
-    // `Jq[i].node.ya` — the entry's row x (L2062 `h.node.C(d); d += g*.8`).
-    float entry_x(int i) const { return static_cast<float>(i) * kStep; }
+    // `Jq[i].node.ya` — the entry's row x (L2062 `h.node.C(d); d += g*.8`),
+    // PLUS the last row's `h.C(h.ya + (g*1.4 - g)/2)` = `+0.2g` when the boss
+    // flag `c` (`TF.Y1`, true for every boss battle) is set (L2067-2070).
+    float entry_x(int i) const {
+        const bool last = !entries.empty() &&
+                          i == static_cast<int>(entries.size()) - 1;
+        return static_cast<float>(i) * kStep + (last ? 0.2f * kBaseD : 0.0f);
+    }
+
+    // The drawn scale of entry `i`: the SELECTED one ramps 1->1.4 (or
+    // 1.4->2.0 at the last index) in state 3 (`jk.aa` L85940-85941); every
+    // OTHER entry keeps the scale `jk.init` left on it — 1.4 for the last row
+    // (L2068 `h.node.la(1.4)`), 1 otherwise.
+    float entry_scale(int i) const {
+        if (i == index) return selected_scale();
+        const bool last = !entries.empty() &&
+                          i == static_cast<int>(entries.size()) - 1;
+        return last ? 1.4f : 1.0f;
+    }
 
     // `ed(t)` (L2064): the shared 0->1 ease over `t` seconds.
     static float ed(float t, float elapsed) {
