@@ -426,6 +426,11 @@ void FightController::init_locks(
     const sf2::scene::Model* enemy_model,
     const sf2::scene::TacticDef* player_tactic) {
     battle_ = battle;
+    // The <CreatePlayer> children vector is indexed by slot and referenced
+    // while a child hit runs (dvance_child); pply_hit can spawn another
+    // child, and a reallocation would dangle that reference. Reserve the
+    // shipped ceiling up front (JS d holds a handful of missiles).
+    children_.reserve(64);
     prng_.set_tag("fight");  // SF2_TRACE_PRNG label for the shared stream
     prize_fh_ = PrizeFh();  // fresh Fh per battle (JS `v.kD(new Fh, ...)`)
     player_shocked_ = false;  // JS `ca.m$` ctor init (L379 `this.m$=!1`)
@@ -1614,10 +1619,14 @@ void FightController::advance_child(std::size_t i) {
                              hit_cap.name.c_str(),
                              static_cast<double>(hit_iv->damage));
                 std::fflush(stdout);
-                apply_hit(atk, victim, *c.move, *hit_iv, hit_cap, ch,
+                // `apply_hit` can spawn/remove children (`children_` may
+                // REALLOCATE), so `c` (a reference into the vector) is
+                // captured as a pointer for the Delete check below.
+                const sf2::scene::MoveDef* const cmove = c.move;
+                apply_hit(atk, victim, *cmove, *hit_iv, hit_cap, ch,
                           c.clip_frame, atk_cap);
                 // JS `<Delete Player="Me" Event="Strike"/>` on the missile.
-                for (const sf2::scene::MoveAction& a : c.move->actions) {
+                for (const sf2::scene::MoveAction& a : cmove->actions) {
                     if (a.frame_trigger || a.event != "Strike") continue;
                     if (a.kind == "Delete" && a.player == 1) {
                         remove_child(i);

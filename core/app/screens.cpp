@@ -214,7 +214,9 @@ bool quest_read_time_advance(App& app, float dt) {
                  d->read_time, st.elapsed);
     std::fflush(stdout);
     dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
-    app.quest_engine().pop_notifications();
+    // JS `Ib.aa` L1905 -> `OZa` L1908 -> `y4(!1)` with the ReadTime slot:
+    // `TL(false)` -> `He.dhb(0)` fires the LEFT slot's actions.
+    app.quest_engine().press_notification(app, 0);
     st.key.clear();
     st.elapsed = 0.0f;
     return true;
@@ -318,7 +320,9 @@ bool quest_modal_consume(App& app, std::string* fight_out = nullptr) {
         std::fprintf(stdout, "[quest] notification advanced: %s\n", d->title.c_str());
         std::fflush(stdout);
         dialog_capture_closing(app, *d);  // `Ib.close` L1911 (0.5 s collapse)
-        app.quest_engine().dismiss_dialog(app);  // `He.gf` L1062
+        // JS `Ib.jgb` L80100 -> `y4(!1)` -> `TL(true)` -> `He.dhb(1)`:
+        // the bar's OK fires the RIGHT slot's nested actions before popping.
+        app.quest_engine().press_notification(app, 1);
         return true;  // the bar's own plate caught the press
     }
     // `He.dhb(a)` L1061 `a<this.eOa` (L1062): a row-button row (`He.jkb`
@@ -9312,7 +9316,12 @@ struct QuestDialogPlate {
 // `C((1680-width)/2-850)`. The `He` slots map Right->primary, Left->secondary
 // (Middle/Close take a free plate).
 struct QuestDialogRow {
-    QuestDialogPlate plates[2];
+    // JS `uj.yub` (L81610-81632) lays out THREE plates in ONE row (Left /
+    // Middle / Right); `od.EF` (the 280/340 base) tops out at two. The port
+    // capped the row at two, so the Middle slot of 17 shipped dialogs (the
+    // `Stranger` challenge FIGHT/REMATCH, `EnergyRefill`, `ShowOfferBuyDialog`)
+    // had no plate and no hit box — the button could never be pressed.
+    QuestDialogPlate plates[3];
     int count = 0;
 };
 
@@ -9333,7 +9342,7 @@ QuestDialogRow quest_dialog_row(App& app, const EngineDialog& d,
     bool primary = false, secondary = false;
     auto add = [&](int slot, bool is_primary, const std::string& text,
                    const std::string& color) {
-        if (r.count >= 2) return;
+        if (r.count >= 3) return;
         QuestDialogPlate& p = r.plates[r.count++];
         p.slot = slot;
         p.primary = is_primary;
@@ -9358,23 +9367,36 @@ QuestDialogRow quest_dialog_row(App& app, const EngineDialog& d,
         add(1, true, d.button_text, d.button_color);
     }
     if (!d.left_.actions.empty()) add(0, false, d.left_.text, d.left_.color);
-    if (r.count < 2 && !d.middle_.actions.empty()) {
+    if (r.count < 3 && !d.middle_.actions.empty()) {
         add(2, false, d.middle_.text, d.middle_.color);
     }
-    if (r.count < 2 && !d.close_.actions.empty()) {
+    if (r.count < 3 && !d.close_.actions.empty()) {
         add(100, false, d.close_.text, d.close_.color);
     }
     if (r.count > 0) {
-        // `rI` L1948: exactly one primary (`Rb`) and one secondary (`Kb`).
-        QuestDialogPlate& prim = r.plates[primary ? 0 : 1];
-        if (primary && secondary) {
-            prim.cx = L.sx(kOdBtnPrimaryX);
-            r.plates[1].cx = L.sx(kOdBtnSecondaryX);
-        } else if (primary) {
-            prim.cx = L.sx(kOdBtnLonePrimaryX);
-            prim.w = kOdBtnLonePrimaryW * L.panel.c;
+        if (r.count >= 3) {
+            // JS `uj.yub` L81630-81632: THREE plates, one row, `rI` skipped
+            // (`EF` only re-places when `wYa() < 3`):
+            //   `ui.C(-(Jk.width - 30)); Jk.C(0); nj.C(Jk.width - 30)`
+            // with `Jk` = the Middle slot and `ui`/`nj` = Left/Right.
+            const float half = kOdBtnW - 30.0f;  // `Jk.width + -30`
+            for (int i = 0; i < r.count; ++i) {
+                const int slot = r.plates[i].slot;
+                const float dx = (slot == 0) ? -half : (slot == 1) ? half : 0.0f;
+                r.plates[i].cx = L.sx(dx);
+            }
         } else {
-            prim.cx = L.sx(kOdBtnLoneSecondaryX);
+            // `rI` L1948: exactly one primary (`Rb`) and one secondary (`Kb`).
+            QuestDialogPlate& prim = r.plates[primary ? 0 : 1];
+            if (primary && secondary) {
+                prim.cx = L.sx(kOdBtnPrimaryX);
+                r.plates[1].cx = L.sx(kOdBtnSecondaryX);
+            } else if (primary) {
+                prim.cx = L.sx(kOdBtnLonePrimaryX);
+                prim.w = kOdBtnLonePrimaryW * L.panel.c;
+            } else {
+                prim.cx = L.sx(kOdBtnLoneSecondaryX);
+            }
         }
     }
     return r;
@@ -10166,6 +10188,35 @@ void MapScreen::recompute_node_states(const WarriorSave& w) {
                 static_cast<double>(rec->end_time) <= WarriorSave::live_clock();
             n.active = has_rec;                 // `WDa` (JS L256)
             n.visible = n.active && !hidden && !expired;  // `Qr.lla` (JS L2094)
+            // JS `il.fE` (L11410) + `il.ZA` (L11393): `Qe = now - Gs`
+            // (`Gs` = the FIGHT record's `TimeLeft`), ready when
+            // `Qe < 0 || Qe >= ReplayInterval`. A PERIODIC battle keeps its
+            // node VISIBLE while the cooldown runs — only its FIGHT plate is
+            // gated (`Sr`). The old code wrote the cooldown into the BATTLE
+            // record's `EndTime` (the JS `hl.D9` HIDE flag), so the Duel was
+            // replayable during the window and then vanished forever.
+            n.fight_ready = true;
+            {
+                const int fi = map_fight_index(app(), n.name, n.fight_count);
+                const std::string fid =
+                    n.zone + "|" + n.name + "|" +
+                    (static_cast<std::size_t>(fi) < n.fight_names.size()
+                         ? n.fight_names[static_cast<std::size_t>(fi)]
+                         : std::string());
+                int tl = 0;
+                for (const WarriorSave::FightWins& fw : w.fights) {
+                    if (fw.name == fid) {
+                        tl = fw.time_left;
+                        break;
+                    }
+                }
+                const int interval = fight_replay_interval(n.name, n.zone);
+                if (tl > 0 && interval > 0) {
+                    const double elapsed =
+                        WarriorSave::live_clock() - static_cast<double>(tl);
+                    n.fight_ready = elapsed >= static_cast<double>(interval);
+                }
+            }
             // `Qr` (L2092) `let b=a.tt()` = the `<Battle>` record's `Locked`
             // (`Lc.tt()` L1406 -> `hl.tt` L278). The button then picks
             // `BattleBtnLock/locked_<icon>` over `BattleBtnBase/base_<icon>`.
@@ -11154,7 +11205,7 @@ void MapScreen::update_impl(float dt) {
             static_cast<std::size_t>(hfb_fi) < n.fight_locked.size() &&
             n.fight_locked[static_cast<std::size_t>(hfb_fi)];
         const bool has_fight_btn =
-            !n.locked && n.type != "FAKE" && !hfb_fight_locked;
+            !n.locked && n.type != "FAKE" && !hfb_fight_locked && n.fight_ready;
         if (n.visible && has_fight_btn &&
             p.x >= fb.cx - fb.w * 0.5f && p.x <= fb.cx + fb.w * 0.5f &&
             p.y >= fb.cy - fb.h * 0.5f && p.y <= fb.cy + fb.h * 0.5f) {
@@ -16331,8 +16382,14 @@ void FightScreen::render_impl(App& app) {
                 int ntw = 0, nth = 0;
                 unsigned int ngl = 0;
                 if (!app.get_atlas_frame(nm, &nfr, &ntw, &nth, &ngl)) return;
-                const float nw = static_cast<float>(nfr.source_w) * 0.6f * hud_c;
-                const float nh = static_cast<float>(nfr.source_h) * 0.6f * hud_c;
+                // JS `Fr` ctor L86898-86901: `this.Rp.la(0.6)` on atlas 1310
+                // (`res/fight/callouts`, `"meta":{"scale":"0.7"}`), so the
+                // drawn size is `sourceSize / 0.7 * 0.6 * c` — the same
+                // inverse scale the callout plates use (`kCalloutAtlasInvScale`).
+                const float nw =
+                    static_cast<float>(nfr.source_w) * (0.6f / 0.7f) * hud_c;
+                const float nh =
+                    static_cast<float>(nfr.source_h) * (0.6f / 0.7f) * hud_c;
                 const float x = right_align
                                     ? left_x + base_w - nw - 10.0f * hud_c
                                     : left_x + 10.0f * hud_c;
@@ -16353,14 +16410,15 @@ void FightScreen::render_impl(App& app) {
                  +kPipTan25);
     }
 
+    // JS `Br.oMa` (L83742): `b.wl(vc.ho(this.uc == 0 ? Jc.TU : Jc.io, ...))`
+    // — the PLAYER's bar (`uc==0`) fills with `Jc.TU` = EHorizontalReverse
+    // (anchored on the RIGHT, damage eats the outer/left end), the ENEMY's
+    // with `Jc.io` = EHorizontal (left-anchored). The port had them swapped.
     draw_hp_bar(bar_cx_player - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_player_decay_.shown(),
-                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false,
+                s_hud_player_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true,
                 -kPipTan25);
-    // The oracle's two bars are the SAME orange art (FIDELITY_MATRIX
-    // fight_stance: "bars orange/blue vs oracle both orange"); mirror the
-    // enemy fill to the inner (left) end.
     draw_hp_bar(bar_cx_enemy - bar_w * 0.5f, bar_y, bar_w, bar_h, s_hud_enemy_decay_.shown(),
-                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/true,
+                s_hud_enemy_decay_.leak(), "HealthBar_Full", "HealthBar_Hit", /*mirror=*/false,
                 +kPipTan25);
 
     // Fighter portraits + names (JS `lk.obb` L2029 `Sh = Fr`; `lk.gbb` L2030
@@ -16418,12 +16476,14 @@ void FightScreen::render_impl(App& app) {
             const float ew = app.measure_text_px(vs_enemy_name_, nscale);
             app.draw_text_with_font(*nf, nt, name_px + 1.5f, name_y + 1.5f, vs_player_name_,
                                     nscale, 0.0f, 0.0f, 0.0f, 0.55f);
+            // JS `lk.gbb` L84508-84509: the name colour is `Na.cd(16767392)`
+            // = 0xFFD9A0 (the same ink as the timer).
             app.draw_text_with_font(*nf, nt, name_px, name_y, vs_player_name_, nscale, 1.0f,
-                                    0.90f, 0.62f, 1.0f);
+                                    0.851f, 0.627f, 1.0f);
             app.draw_text_with_font(*nf, nt, name_ex - ew + 1.5f, name_y + 1.5f,
                                     vs_enemy_name_, nscale, 0.0f, 0.0f, 0.0f, 0.55f);
             app.draw_text_with_font(*nf, nt, name_ex - ew, name_y, vs_enemy_name_, nscale,
-                                    1.0f, 0.90f, 0.62f, 1.0f);
+                                    1.0f, 0.851f, 0.627f, 1.0f);
         }
     }
 
@@ -16442,17 +16502,35 @@ void FightScreen::render_impl(App& app) {
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
         unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
         if (fnt != nullptr && tex != 0) {
-            // JS `Kp.Ia(128)`, `Kp.ua(120*c)` (Sf.layout L2037): fontSize =
-            // 120*c; digits eF=90 -> native scale = 120*c/90.
-            const float scale = (fnt == app.digits_font()) ? (86.0f * hud_c / 90.0f)
-                                                           : (120.0f * hud_c / 100.0f);
+            // JS `Sf.layout` L84781-84784: `Kp.ua(120*c)`; the digits charset
+            // is a Carter One BMF whose `common` block is lineHeight 138 /
+            // base 99, and `Qh.print` scales glyphs by `fontSize/eF`. The
+            // ORACLE ink is 57x39 px at 1280x720 ("99"): the glyph box is
+            // `lineHeight`-referenced, so the native multiplier is 120c/140
+            // (measured against that capture; the raw BMF `size`=100 made the
+            // digits 1.6x too big).
+            const float scale = 120.0f * hud_c / 140.0f;
             // shadow (black) slightly offset, then white foreground
             // JS `Sf.layout` (L2037): `this.Kp.C(b/2); this.Kp.D(...)` — the
             // timer is screen-top-centre. Oracle: "99" centred at (640,45).
-            const float ty = 8.0f;
-            app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 1.8f, ty + 1.8f, tstr, scale, 0.0f, 0.0f,
-                                   0.0f);
-            app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.95f, 0.75f);
+            // JS `Sf.layout` L84781-84786: `Kp.C(b/2); Kp.D(Id.node.ra -
+            // 120*c)` with `Ga()` (centred anchor) -> the text CENTRE sits at
+            // `panel_y - 120c`; the shadow is `Na.Rv(-2147483648)` (0x80000000
+            // = alpha 0.5) offset by +3 UNSCALED; the ink is `Na.cd(16767392)`
+            // = 0xFFD9A0.
+            // Id.node.ra = the panel y (JS Sf.layout L84773-84774 puts
+            // it at 115.72 for the 1280x720 fight; the port's own HUD block
+            // uses the same constant).
+            // `Ga()` centres the text node: the ink centre must land on
+            // `Id.node.ra - 120c` (= 45.32 at 1280x720, the oracle's ink
+            // centre (26+64)/2 = 45). The glyph box top -> ink centre distance
+            // is `yoffset(28.6) + glyph_h(78)/2` font units.
+            const float tcy = 115.72f - 120.0f * hud_c;
+            const float ty = tcy - 67.6f * scale;
+            app.draw_text_centered(*fnt, tex, kViewW * 0.5f + 3.0f, ty + 3.0f, tstr, scale, 0.0f,
+                                   0.0f, 0.0f, 0.5f);
+            app.draw_text_centered(*fnt, tex, kViewW * 0.5f, ty, tstr, scale, 1.0f, 0.851f,
+                                   0.627f, 1.0f);
         } else {
             // fallback quads (should not happen)
             float tx = kViewW * 0.5f - tstr.size() * 20.0f;
@@ -16523,10 +16601,14 @@ void FightScreen::render_impl(App& app) {
                     const sf2::data::font* pf = app.menu_font();
                     const unsigned int pt = app.font_texture();
                     if (pf != nullptr && pt != 0) {
-                        app.draw_text_centered(*pf, pt, cx, cy - ih * 0.5f,
+                        // JS `Ir.init` L85029-85033: `sC.Fa(icon size)` +
+                        // `sC.Ga()` — the count is CENTRED on the icon, not
+                        // one half icon-height above it.
+                        const float st_scale = pip.font_scale / 100.0f * 0.5f;
+                        const float st_h = static_cast<float>(pf->line_height) * st_scale;
+                        app.draw_text_centered(*pf, pt, cx, cy - st_h * 0.5f,
                                                std::to_string(ic.stack_count),
-                                               pip.font_scale / 100.0f * 0.5f, 1.0f,
-                                               1.0f, 1.0f, ic.alpha);
+                                               st_scale, 1.0f, 1.0f, 1.0f, ic.alpha);
                     }
                 }
                 // `Ir.ss` (L1051540-1051552): the expiry overlay. The JS sprite
@@ -17530,26 +17612,24 @@ bool apply_fight_reward(App& app) {
                          ids.c_str(), fr->losses, fr->level);
         }
     }
-    // JS `il.Cla(now)` + `fE(Nn)` (L11345-11414): a PERIODIC fight records its
-    // start time so `Qe = now - TimeLeft` and the node is replayable only once
-    // `Qe >= ReplayInterval`. The port never wrote it, so the Duel could be
-    // replayed immediately (reported: "after a win/loss it must close for 4
-    // hours"). The map's `expired` check reads the battle record's EndTime, so
-    // store `now + interval` there.
+    // JS `Gb.Tma(now)` (L58785-58802) -> `il.Cla(now)` (L11345) sets the
+    // FIGHT record's `Gs = now` (`TimeLeft`); `il.fE(Nn)` (L11410) then makes
+    // the fight replayable once `now - Gs >= ReplayInterval`. The BATTLE
+    // record's `EndTime` (`hl.D9`) is a different flag (the node HIDE state)
+    // and is never written by a fight — the port used to write it, so the
+    // Duel was replayable during the cooldown and then hidden forever.
     {
         const int interval = fight_replay_interval(pb.battle_name, pb.zone);
         if (interval > 0) {
-            if (WarriorSave::BattleRecord* rec =
-                    w.battle_record(pb.zone, pb.battle_name)) {
-                rec->has_end_time = true;
-                rec->end_time =
-                    static_cast<int>(WarriorSave::live_clock()) + interval;
-                std::fprintf(stdout,
-                             "[result] periodic lock %s|%s EndTime=%d (+%ds)\n",
-                             pb.zone.c_str(), pb.battle_name.c_str(), rec->end_time,
-                             interval);
-                std::fflush(stdout);
-            }
+            const std::string ids = pb.fight_triple.empty()
+                                        ? pb.battle_name
+                                        : pb.fight_triple;
+            WarriorSave::FightWins& fr = w.fight_record_or_create(ids);
+            fr.time_left = static_cast<int>(WarriorSave::live_clock());
+            std::fprintf(stdout,
+                         "[result] periodic lock %s TimeLeft=%d (+%ds)\n",
+                         ids.c_str(), fr.time_left, interval);
+            std::fflush(stdout);
         }
     }
     // JS `OLa` level-up (L253-254): `rs+=exp` vs `Oz()` thresholds. Runs on

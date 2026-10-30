@@ -6659,6 +6659,60 @@ QuestEngine::ActionRest QuestEngine::run_chain_effects(
     return rest;
 }
 
+// JS `Ib.TL(a)` (L80110-80113): the bar hands `a ? 1 : 0` to `He`'s
+// `dhb`, which fires that slot's nested action list (`Ng.actions` for 0,
+// `rh.actions` for 1) and then pops the bar. The port's bar press/ReadTime
+// only popped the queue, so a `DeliveryNotification`'s
+// `<OpenShop><GiveItem>` (and the upgrade/enchantment ones) never ran.
+std::vector<std::string> QuestEngine::press_notification(App& app,
+                                                         int button_index) {
+    std::vector<std::string> fights;
+    std::size_t mi = dialogs_.size();
+    for (std::size_t i = dialogs_.size(); i > 0; --i) {
+        if (is_bar_notification(dialogs_[i - 1])) {
+            mi = i - 1;
+            break;
+        }
+    }
+    if (mi >= dialogs_.size()) return fights;
+    EngineDialog dlg = std::move(dialogs_[mi]);
+    dialogs_.erase(dialogs_.begin() + static_cast<std::ptrdiff_t>(mi));
+    const std::vector<QuestAction>* chosen = &dlg.button_actions;  // `rh`
+    const char* slot = "Right";
+    if (button_index == 0) {
+        chosen = &dlg.left_.actions;  // `Ng`
+        slot = "Left";
+    }
+    std::fprintf(stdout, "[quest] notification button pressed: %s (%s)\n",
+                 dlg.title.c_str(), slot);
+    std::fflush(stdout);
+    std::map<std::string, std::string> locals;
+    const std::size_t queue_before = dialogs_.size();
+    {
+        const ActionRest rest = run_chain_effects(
+            app, *chosen, dlg.journal, locals, dlg.quest, dlg.continuation,
+            &fights);
+        if (!rest.suspended && !dlg.continuation.empty()) {
+            run_chain_effects(app, dlg.continuation, dlg.journal,
+                              dlg.continuation_locals, dlg.quest,
+                              std::vector<QuestAction>(), &fights);
+        }
+    }
+    if (dialogs_.size() > queue_before) {
+        std::vector<EngineDialog> nested;
+        nested.reserve(dialogs_.size() - queue_before);
+        for (std::size_t i = queue_before; i < dialogs_.size(); ++i) {
+            nested.push_back(std::move(dialogs_[i]));
+        }
+        dialogs_.resize(queue_before);
+        const std::size_t at = std::min(mi, dialogs_.size());
+        dialogs_.insert(dialogs_.begin() + static_cast<std::ptrdiff_t>(at),
+                        std::make_move_iterator(nested.begin()),
+                        std::make_move_iterator(nested.end()));
+    }
+    return fights;
+}
+
 std::vector<std::string> QuestEngine::press_dialog(App& app, int button_index) {
     std::vector<std::string> fights;
     // `Wb` pops its TOP dialog (`Xc`/`dhb`); a bar Notification is not in that

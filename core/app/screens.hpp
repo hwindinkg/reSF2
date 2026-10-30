@@ -480,6 +480,10 @@ public:
                                // boss types (`Xr` ctor L2134)
         int reward_money = 0;  // first <Reward Money> (the `ci`/`bi` gold icon
                                // value shown under the difficulty bar, L2133)
+        // JS `il.fE` (L11410) via `il.ZA` (L11393): the CURRENT `<Fight>` is
+        // replayable once `now - TimeLeft >= <Fight ReplayInterval>`. False
+        // while the PERIODIC cooldown runs (the `Sr` body hides FIGHT then).
+        bool fight_ready = true;
         std::vector<std::string> warriors;  // Fight Warriors FirstNames (Xs)
         // The `<Fight Name>` per ladder slot (JS `dl.name`), in order. The
         // `Xr` pip row (L2133-2136) draws one pip per rendered fight (boss

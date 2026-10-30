@@ -864,6 +864,11 @@ public:
     // Returns the recorded fight-request names (`Sn`) for the caller to
     // launch (the engine never navigates). Save writes are applied.
     std::vector<std::string> press_dialog(App& app, int button_index = 1);
+    // The `Ib` bar's own slots (JS `Ib.TL` L80110 -> `He.dhb(a)`, L1061):
+    // slot 1 = the OK press (`rh.actions`), slot 0 = the spent ReadTime
+    // (`Ng.actions`). The bar is NOT in the `Wb` modal queue, so
+    // `press_dialog`'s `modal_index()` never reaches it.
+    std::vector<std::string> press_notification(App& app, int button_index);
 
     // D1 `He.gf` L1062 / `He.dhb(0)` with no `Ng` slot (L1061): dismiss the
     // top modal and resume the chain parked at it (the `continuation` tail).
