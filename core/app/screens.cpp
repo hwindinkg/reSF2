@@ -10229,10 +10229,15 @@ void MapScreen::recompute_node_states(const WarriorSave& w) {
                     }
                 }
                 const int interval = fight_replay_interval(n.name, n.zone);
+                n.cooldown_left = 0;
                 if (tl > 0 && interval > 0) {
                     const double elapsed =
                         WarriorSave::live_clock() - static_cast<double>(tl);
                     n.fight_ready = elapsed >= static_cast<double>(interval);
+                    if (!n.fight_ready) {
+                        n.cooldown_left =
+                            static_cast<int>(static_cast<double>(interval) - elapsed);
+                    }
                 }
             }
             // `Qr` (L2092) `let b=a.tt()` = the `<Battle>` record's `Locked`
@@ -11960,6 +11965,53 @@ void draw_map_preview(App& app, const std::string& stem, float x, float y, float
 }
 
 // The `Rr` info panel body. `node` may be null (empty panel: title only).
+// JS `Sr` (L89429-89493), the map body used when the ACTIVE fight is not
+// playable (`Rr.Rr` L87431-87436: `d = b != null && !b.uR()` -> `new Sr`):
+//   `Xu` = the `board` art at 95% of the content width, centred (`ba` L89452);
+//   `YG` = the title `battleComingSoon`/`battleCompleted`/`battleLocked`
+//          at `ua(a*0.17)`, colour `Na.cd(16711555)` = 0xFEFF83 (L89441/89445);
+//   `WB` = the countdown at `ua(a*0.25)`, colour `Z.sc` (0.184,0.145,0.106),
+//          `HH:MM:SS` when hours > 0 else `MM:SS` (L89479-89489).
+// The body has NO FIGHT plate (`Whb`/`Cyb` is never reached for this branch).
+void draw_map_sr_body(App& app, const MapScreen::Node& n, float x, float y,
+                      float w, float h) {
+    float aw = 0.0f, ah = 0.0f;
+    const bool has_art = map_frame_size(app, "board", aw, ah) && aw > 0.0f;
+    const float art_w = w * 0.95f;  // `wc.width*.95 / Xu.fa.x` (scaled)
+    const float art_h = has_art ? art_w * (ah / aw) : w * 0.4f;
+    if (has_art) {
+        try_draw_atlas_button(app, "board", x + w * 0.5f, y + art_h * 0.5f, art_w,
+                              art_h, 1.0f);
+    } else {
+        const float bg[] = {x, y, x + art_w, y, x, y + art_h,
+                            x + art_w, y, x + art_w, y + art_h, x, y + art_h};
+        app.renderer().draw_triangles(bg, 6, 0.72f, 0.62f, 0.45f, 1.0f);
+    }
+    // `YG.V(Y.na(a.ag == 0 ? "battleComingSoon" : b ? "battleCompleted"
+    // : "battleLocked"))` — the cooldown case is a played fight (`b` true).
+    const std::string title = loc(app, "battleCompleted", "COMPLETED");
+    draw_ui_label(app, x, y, w, art_h * 0.5f, title, w * 0.17f / 100.0f,
+                  UiAlign::Center, 0.996f, 1.0f, 0.514f);
+    // The countdown (`WB.D(Xu.ra + Xu.qa()/2*1.1)`): the board's bottom +
+    // half its height * 1.1.
+    if (n.cooldown_left > 0) {
+        const int secs = n.cooldown_left;
+        const int hh = secs / 3600;
+        const int mm = (secs % 3600) / 60;
+        const int ss = secs % 60;
+        char buf[32];
+        if (hh > 0) {
+            std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hh, mm, ss);
+        } else {
+            std::snprintf(buf, sizeof(buf), "%02d:%02d", mm, ss);
+        }
+        const float cd_h = w * 0.25f;
+        draw_ui_label(app, x, y + art_h * 0.5f + art_h * 0.5f * 1.1f, w, cd_h, buf,
+                      cd_h / 100.0f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+    }
+    (void)h;
+}
+
 void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics& mm,
                          const PkFade* fade) {
     draw_map_paper_panel(app, mm);
@@ -12080,6 +12132,22 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
                             body_w * 0.16f / 100.0f, UiAlign::Center, 0.184f, 0.145f,
                             0.106f, /*line_factor=*/0.65f);
         }
+        return;
+    }
+    // JS `Rr.Rr` L87431-87436: the `Sr` body wins over every fight body while
+    // the active fight is not playable (the PERIODIC replay cooldown, the port's
+    // `fight_ready` = `il.fE` L11410). It draws the board + countdown and NO
+    // FIGHT plate (the `return` also skips the `tj` plate at the end).
+    if (!node->fight_ready) {
+        static std::string last_sr;
+        const std::string key = node->name + "|sr";
+        if (key != last_sr) {
+            last_sr = key;
+            std::fprintf(stdout, "[map] info panel %s type=%s branch=Sr cooldown=%ds\n",
+                         node->name.c_str(), node->type.c_str(), node->cooldown_left);
+            std::fflush(stdout);
+        }
+        draw_map_sr_body(app, *node, body_x, body_y, body_w, body_h);
         return;
     }
     float wy = 0.0f;  // the reward badge's y offset (`ty.D`), per body class

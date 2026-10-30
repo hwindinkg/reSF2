@@ -484,6 +484,9 @@ public:
         // replayable once `now - TimeLeft >= <Fight ReplayInterval>`. False
         // while the PERIODIC cooldown runs (the `Sr` body hides FIGHT then).
         bool fight_ready = true;
+        // `Sr.aa` L89476-89489: `b = Nn - (now - TimeLeft)` = the remaining
+        // replay cooldown, formatted `HH:MM:SS` (hours > 0) or `MM:SS`.
+        int cooldown_left = 0;
         std::vector<std::string> warriors;  // Fight Warriors FirstNames (Xs)
         // The `<Fight Name>` per ladder slot (JS `dl.name`), in order. The
         // `Xr` pip row (L2133-2136) draws one pip per rendered fight (boss
