@@ -12261,8 +12261,14 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     const std::string md_triple =
         node->zone + "|" + node->name + "|" + std::to_string(md_fi + 1);
     const bool challenge_type = node->type == "CHALLENGE" || node->type == "REPLAYABLE";
+    // JS `Tr` (L89508-89535, the `FightPeriodic` body): `md` = the ACTIVE
+    // fight's `GD()` description at the TOP (`Fa(a, a*.5)`, `ua(a*.16)`,
+    // `Kc(0.6)` line spacing, colour `Z.sc`), the difficulty `Lm` at
+    // `D(a*.5)` and the reward badge below it. The port had no `Tr` body, so
+    // a Duel panel left the description slot empty.
+    const bool periodic_type = node->type == "PERIODIC";
     std::string md_text;
-    if (challenge_type) {
+    if (challenge_type || periodic_type) {
         md_text = app.quest_engine().fight_description(md_triple);
         const bool fl =
             static_cast<std::size_t>(md_fi) < node->fight_locked.size() &&
@@ -12275,7 +12281,19 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
         md_op = (fade->rG == 0) ? fade->out_op : fade->in_op;
         lm_op = (fade->rG == 1) ? fade->out_op : fade->in_op;
     }
-    wy = body_h * 0.35f + body_h * 0.05f;  // `c = b*.05`, `b*.35 + c`
+    if (periodic_type) {
+        // `Tr.md` sits at the body top with half the body width of space, and
+        // the difficulty follows at exactly `a*.5` (NOT the `pk` `b*.35+c`).
+        if (!md_text.empty()) {
+            draw_ui_wrapped(app, body_x, body_y, body_w, body_w * 0.5f,
+                            loc(app, md_text, md_text), body_w * 0.16f / 100.0f,
+                            UiAlign::Center, 0.184f, 0.145f, 0.106f,
+                            /*line_factor=*/0.6f);
+        }
+        wy = body_w * 0.5f;  // `b += 0; this.Lm.D(b)`
+    } else {
+        wy = body_h * 0.35f + body_h * 0.05f;  // `c = b*.05`, `b*.35 + c`
+    }
     {
         float fw = 0.0f, fh = 0.0f;
         const float bar_h = map_frame_size(app, "difficulty_empty", fw, fh) && fw > 0.0f
