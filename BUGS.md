@@ -2822,3 +2822,50 @@ clamp `[size.x - b + 200, 0]` с перелётом +100, переключени
 
 Осталось по паузе: строка имени игрока под плашками (`Dr` ctor L86004-86015,
 `QA` при непустом `ca.Ka().Da.GD()`).
+
+### QA-30.10 — пауза/настройки/результаты/профиль: ещё четыре пункта закрыты
+
+- **Пауза, строка описания боя** (`Dr` ctor L86004-86015: `b =
+  ca.Ka().Da.GD()`, `ea` `Fa(800,60) C(50) D(550) ua(60) Ia(128)`,
+  цвет `Na.cd(16627016)` = (253,181,72), только при непустом). Добавлен
+  `fight_description_for(battle, zone, fight_index)` (`g8 ?? Sb` L59263-59269:
+  `<Rules><Description Alias>`, иначе `<Fight Description>`). Замер:
+  ```
+  [pause] desc lookup battle='Challenge' zone='ZONE_2' triple='ZONE_2|Challenge|1'
+          fi=0 -> 'NO_WEAPON'
+  [pause] description 'NO_WEAPON' -> 'Без оружия'
+  ```
+  кадр `.harness/pause_desc.png` (строка под плашками). Порт рисует авторский
+  `ua(60)` без повторного `Sk()`: фит порта считает по своей line-height базе и
+  сжал бы строку до ~0.43 вместо 0.6.
+- **Настройки, `ea.a1/.b1` сразу** (`un.rHa` case 4 L80610-80620): ja/ko/ru ->
+  0.8/1.2 немедленно, остальные 1/1, RESTART применяет только ЯЗЫК. Порт читал
+  СОХРАНЁННЫЙ `lang_`, поэтому до RESTART ничего не менялось. Замер
+  (`--settings-lang-probe`):
+  ```
+  [langprobe] start lang='ru' ea.a1=0.80 ea.b1=1.20
+  [langprobe] cycle 1 lang='es' restart=1 ea.a1=1.00 ea.b1=1.00
+  [langprobe] cycle 2 lang='tr' restart=1 ea.a1=1.00 ea.b1=1.00
+  [langprobe] cycle 3 lang='ja' restart=1 ea.a1=0.80 ea.b1=1.20
+  ```
+- **Результаты, плашка STORE** (`kk.aab` L85817-85819): в JS она ТОЛЬКО шлёт
+  `QUEST_EVENT_SHOP_BUTTON_PRESS`; порт открывал магазин. Теперь
+  `QuestEngine::press_shop_button`. Замер (`--results-store-probe`, поражение):
+  ```
+  [result] STORE -> ShopButtonPress event
+  [quest] ShopButtonPress -> event (no navigation)
+  [quest] FIRED ShopAfterBattleButtonPress on ShopButtonPress (step=END ...)
+  [storeprobe] after screen=10 -> PASS
+  ```
+- **Профиль, вкладка при открытии** (`vb.init` L91016 + `vb.hla` L90913-90915
+  пишет `b.DI`): экран пересоздавался на вкладке 0. Замер
+  (`--profile-tab-probe`): `[tabprobe] first=0 persisted=2 reopened=2 -> PASS`.
+
+Осталось (с номерами строк JS):
+- Настройки: открывающий фейд `od.aa` (L79476-79480); кредиты — авто-закрытие и
+  отсечение строк (`xh.aa` L77942-77946), фон `ef` и масштаб 0.909
+  (L77656-77692).
+- Профиль: иконки клавиш `ComboButtons/icon_*` (L92826-92835); разбивка урона
+  `$r.Ku` (L92744-92775); кнопка награды ачивки в правой панели (L91734-91766);
+  вкладка Seal — панель и 0.5-альфа (L92628-92636).
+- Кусаригама: форма косы/верёвки — нужен покадровый эталон живой игры.
