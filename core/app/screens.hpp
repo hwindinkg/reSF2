@@ -1468,6 +1468,16 @@ public:
     // `gs.Cp` alpha split by switching it); -1 = the derived `Gg.aa` cell.
     void set_seal_sel_for_test(int i) { seal_sel_ = i; }
 
+    // [probe] force the Achievements-tab selected cell and report the first
+    // claimable row (`--achiev-probe` measures the `as.nv` plate position).
+    void set_achiev_sel_for_test(int i) { achiev_sel_ = i; }
+    int first_claimable_achiev() const {
+        for (int i = 0; i < static_cast<int>(achiev_rows_.size()); ++i) {
+            if (achiev_claimable(i)) return i;
+        }
+        return -1;
+    }
+
     void update_impl(float dt) override;
     void render_impl(App& app) override;
 
@@ -1668,6 +1678,7 @@ private:
     int tab_ = 0;        // `cs` tab index (0 = `ds` leveling .. 3)
     int tab_hover_ = -1;
     int seal_sel_ = -1;   // [probe] forced Seals-tab selection (-1 = derived)
+    int achiev_sel_ = -1;  // [probe] forced Achievements selection (-1 = derived)
     int hover_ = -1;
     // Folded Moves tab data (JS Profile sub-view `qv`, To.kOa=11 L2201).
     std::string weapon_ = "Fists";

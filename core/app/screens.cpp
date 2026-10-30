@@ -22432,16 +22432,35 @@ ShopRect profile_achiev_row_rect(const ShopRect& v, int i, float scroll_y) {
     return r;
 }
 
-// `as` (L2210) reward button: `nv.xc(a*.4)` at `C(a/2)`, `D(b - nv.qa())`
-// (bottom-centre of the cell). Native anchor: the row's right edge.
-ShopRect profile_achiev_reward_rect(const ShopRect& v, int i, float scroll_y) {
-    const ShopRect row = profile_achiev_row_rect(v, i, scroll_y);
-    ShopRect b;
-    b.N = row.N - 8.0f;
-    b.J = b.N - 92.0f;
-    b.P = row.P + row.height() * 0.5f - 13.0f;
-    b.W = b.P + 26.0f;
-    return b;
+// JS `Gg.aa` (L1886): the selected cell `Ac` = the LAST cell whose centre
+// `Qk = size.y/2 - (ei.node.ra + i*pitch + cell_h/2)` is within 30 px.
+int profile_achiev_selected(const ShopRect& v, float scroll_y, std::size_t count) {
+    int sel = 0;
+    const float cell_h = profile_cell_h(v, 400.0f, 130.0f);
+    const float row_h = cell_h + 10.0f;
+    const float shalf = profile_scroll_h(v) * 0.5f;
+    for (std::size_t i = 0; i < count; ++i) {
+        const float qk = shalf - (scroll_y + static_cast<float>(i) * row_h + cell_h * 0.5f);
+        if (std::fabs(qk) < 30.0f) sel = static_cast<int>(i);
+    }
+    return sel;
+}
+
+// `as.nv` claim plate (`Bb("EButtonWhite")`, L91734-91745): the plate lives in
+// the RIGHT INFO PANEL, not in the cell —
+//   `nv.C(a/2); nv.zf(a*0.4); nv.D(b - nv.qa())`
+// with `Bb.qa()` = `112 * node.Eb` (L77431-77433) and `zf(a*.4)` setting
+// `Eb = a*0.4/222` (the `btnWhite` source height) -> `qa = 0.2018*a`. The sprite
+// is 300x222, so the drawn plate is `0.54a` wide and `0.4a` tall.
+ShopRect profile_achiev_claim_rect(const ShopRect& rp) {
+    const float a = rp.width();
+    const float qa = 112.0f * (0.4f * a / 222.0f);
+    ShopRect r;
+    r.J = rp.J + a * 0.5f - a * 0.2703f;
+    r.N = rp.J + a * 0.5f + a * 0.2703f;
+    r.P = rp.P + rp.height() - qa - a * 0.2f;
+    r.W = rp.P + rp.height() - qa + a * 0.2f;
+    return r;
 }
 
 // Hit test for the `cs` tab strip; -1 when outside every button.
@@ -23746,18 +23765,20 @@ void EquipmentScreen::update_impl(float dt) {
                                   static_cast<int>(achiev_rows_.size())));
         }
         const ProfileLayout pl = profile_layout();
-        for (int i = 0; i < static_cast<int>(achiev_rows_.size()); ++i) {
-            const ShopRect row = profile_achiev_row_rect(
-                pl.viewer, i, list_scroll_[kProfileTabAchiev].y);
-            if (row.W > pl.viewer.W) break;
-            if (!achiev_claimable(i)) continue;
-            const ShopRect rb = profile_achiev_reward_rect(
-                pl.viewer, i, list_scroll_[kProfileTabAchiev].y);
+        // The claim plate belongs to the INFO PANEL and claims the SELECTED
+        // achievement (`as.zhb` L91768-91772 -> `vb.exb(this.Xr)`).
+        int asel = profile_achiev_selected(
+            pl.viewer, list_scroll_[kProfileTabAchiev].y, achiev_rows_.size());
+        if (achiev_sel_ >= 0 && achiev_sel_ < static_cast<int>(achiev_rows_.size())) {
+            asel = achiev_sel_;  // [probe] forced selection
+        }
+        if (achiev_claimable(asel)) {
+            const ShopRect rb = profile_achiev_claim_rect(pl.right_slot);
             if (p.x >= rb.J && p.x <= rb.N && p.y >= rb.P && p.y <= rb.W) {
-                achiev_hover_ = i;
+                achiev_hover_ = asel;
                 if (p.pressed) {
                     sf2::audio::AudioEngine::instance().play("snd_buy");
-                    achiev_claim(i);
+                    achiev_claim(asel);
                 }
                 return;
             }
@@ -24636,6 +24657,10 @@ void EquipmentScreen::render_impl(App& app) {
                     shalf - (ssy + static_cast<float>(si) * srow_h + scell_h * 0.5f);
                 if (std::fabs(qk) < 30.0f) achiev_sel = static_cast<int>(si);
             }
+            if (achiev_sel_ >= 0 &&
+                achiev_sel_ < static_cast<int>(achiev_rows_.size())) {
+                achiev_sel = achiev_sel_;  // [probe] forced selection
+            }
         }
         if (achiev_rows_.empty()) {
             draw_ui_label(app, v.J, v.P + v.height() * 0.5f - 14.0f, v.width(), 28.0f,
@@ -24726,20 +24751,6 @@ void EquipmentScreen::render_impl(App& app) {
                 if (pfrac > 0.0f) {
                     (void)app.draw_atlas_rect("Level_bar", pbx, pby, pbw * pfrac, pbh, 1.0f);
                 }
-                // `as.nv` reward button (L2210, `Y.na("achievement_BtnReward")`)
-                // visible while `sq.dg() && Wpa >= counter` (L2211).
-                if (achiev_claimable(static_cast<int>(ri))) {
-                    const ShopRect rb = profile_achiev_reward_rect(
-                        v, static_cast<int>(ri), sy);
-                    const float bx = (rb.J + rb.N) * 0.5f;
-                    const float by = (rb.P + rb.W) * 0.5f;
-                    const bool hov = achiev_hover_ == static_cast<int>(ri);
-                    draw_flat_button(app, "REWARD", bx, by, rb.width(), rb.height(),
-                                     hov ? 0.6f : 0.42f, 0.5f, 0.2f, hov);
-                    draw_ui_label(app, rb.J, by - 9.0f, rb.width(), 18.0f,
-                                  loc(app, "achievement_BtnReward", "Reward"), 0.5f,
-                                  UiAlign::Center, 0.184f, 0.145f, 0.106f);
-                }
                 yy += row_h;
             }
         }
@@ -24754,18 +24765,33 @@ void EquipmentScreen::render_impl(App& app) {
                 const int asel = std::clamp(achiev_sel, 0,
                                             static_cast<int>(achiev_rows_.size()) - 1);
                 const AchievRow& ar = achiev_rows_[static_cast<std::size_t>(asel)];
-                draw_ui_label(app, rp.J + pad, rp.P + 22.0f, rp.width() - 2.0f * pad,
-                              40.0f, loc(app, ar.name, ar.name), 0.95f, UiAlign::Left,
-                              0.184f, 0.145f, 0.106f);
+                // JS `Yr.ba` (L90540-90547): `d = b*0.2` (b = the content
+                // width), `Tm.C(a.J); Tm.D(a.P + c*0.1); Tm.Fa(b,d); Tm.ua(d)`.
+                const float title_ua = rp.width() * 0.2f / 100.0f;
+                draw_ui_label(app, rp.J, rp.P + rp.height() * 0.1f, rp.width(),
+                              rp.width() * 0.2f, loc(app, ar.name, ar.name), title_ua,
+                              UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f,
+                              /*fit=*/false);
                 const std::string dk = ar.description.empty() ? ar.name : ar.description;
                 // JS `as.ba` L2210: the description label is `Fa(a, b*0.4)` with
                 // `ua(a*0.13)` and `Kc(0.7)`. The old fixed 0.52 drew ~1.2x the
                 // oracle's cap height (measured 18 px vs 15 px on
                 // `profile_tab2`), so it wrapped one word earlier
                 // ("Победы" / "безупречно в 1" instead of "Победы безупречно").
-                draw_ui_wrapped(app, rp.J + pad, rp.P + 78.0f, rp.width() - 2.0f * pad,
-                                rp.height() - 156.0f, loc_template(app, dk, ar.name),
-                                0.35f, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                // JS `as.ba` L91738-91742: `le.D(b*0.25); le.Fa(a, b*0.4);
+                // le.ua(a*0.13); le.Kc(0.7)` — the text box is centred
+                // vertically (`mk()` fits it inside `b*0.4`), which is what
+                // puts the oracle's first line at y≈275.
+                const float desc_ua = rp.width() * 0.13f / 100.0f;
+                const float desc_box_h = rp.height() * 0.4f;
+                const std::string dtext = loc_template(app, dk, ar.name);
+                const float dtext_h =
+                    measure_ui_wrapped(app, dtext, rp.width() - 2.0f * pad, desc_ua, 0.7f);
+                const float desc_y = rp.P + rp.height() * 0.25f +
+                                     std::max(0.0f, (desc_box_h - dtext_h) * 0.5f);
+                draw_ui_wrapped(app, rp.J + pad, desc_y, rp.width() - 2.0f * pad,
+                                desc_box_h, dtext, desc_ua, UiAlign::Left, 0.184f,
+                                0.145f, 0.106f, 0.7f);
                 if (ar.money_prize > 0 || ar.bonus_prize > 0) {
                     // JS `as.refresh` L2210: `b + " <image>" + icon + "</image> " + a`
                     // with the icon `p.o.Vf` (money) or `Z.Ur` (ruby). The port
@@ -24774,13 +24800,17 @@ void EquipmentScreen::render_impl(App& app) {
                     const std::string rlabel =
                         loc(app, "achievementReward", "REWARD:");
                     const int ramount = ar.money_prize + ar.bonus_prize;
-                    const float rscale = 0.40f;
+                    // JS `as.ba` L91746-91748: `sq.Fa(a,100); sq.ua(a*0.15);
+                    // sq.D(b - nv.qa()*3)` — the reward line sits ABOVE the
+                    // claim plate, `qa` = the plate height (0.2018*a).
+                    const float rscale = rp.width() * 0.15f / 100.0f;
                     const sf2::data::font* rf = app.menu_font();
                     const float rw = rf != nullptr
                                          ? app.measure_text(*rf, rlabel, rscale * ea_a1(app))
                                          : 0.0f;
-                    const float rx = rp.J + pad;
-                    const float ry = rp.W - 58.0f;
+                    const float qa = 112.0f * (0.4f * rp.width() / 222.0f);
+                    const float rx = rp.J;
+                    const float ry = rp.P + rp.height() - 3.0f * qa;
                     draw_ui_label(app, rx, ry, rp.width() - 2.0f * pad, 30.0f, rlabel,
                                   rscale, UiAlign::Left, 0.184f, 0.145f, 0.106f);
                     const char* ricon = ar.money_prize > 0 ? "gold" : "ruby";
@@ -24792,6 +24822,25 @@ void EquipmentScreen::render_impl(App& app) {
                     draw_ui_label(app, rx + rw + isz * 1.2f + 4.0f, ry,
                                   rp.width() - 2.0f * pad, 30.0f, rb, rscale,
                                   UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                }
+                // `as.nv` (L91734-91745 + L91766): the claim plate is drawn
+                // only while `sq.dg() && Wpa >= counter` (the port's
+                // `achiev_claimable`).
+                if (achiev_claimable(asel)) {
+                    const ShopRect cb = profile_achiev_claim_rect(rp);
+                    const float bcx = (cb.J + cb.N) * 0.5f;
+                    const float bcy = (cb.P + cb.W) * 0.5f;
+                    const bool hov = achiev_hover_ == asel;
+                    (void)load_sliced_atlas(app);  // tnWhite lives there
+                    if (!draw_bb_plate(app, "btnWhite", bcx, bcy, cb.width(),
+                                       cb.height(), hov ? 0.85f : 1.0f)) {
+                        draw_flat_button(app, "", bcx, bcy, cb.width(), cb.height(),
+                                         0.85f, 0.78f, 0.55f, hov);
+                    }
+                    draw_ui_label(app, cb.J, bcy - 12.0f, cb.width(), 24.0f,
+                                  loc(app, "achievement_BtnReward", "Reward"),
+                                  rp.width() * 0.16f / 100.0f, UiAlign::Center,
+                                  0.184f, 0.145f, 0.106f);
                 }
             }
         }
