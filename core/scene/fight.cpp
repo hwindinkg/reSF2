@@ -1671,6 +1671,13 @@ void FightController::advance_child(std::size_t i) {
             // the same move MUST stay eligible — skipping it made the arrow
             // fall back to StandupAfterThrowFall after one flight clip.
             if (m->events.count("AnimationEnd") == 0) continue;
+            // JS `Im.compare` (the `Gc.EZa` admission for an `AnimationEnd`
+            // spec): a NAMED spec matches only that ended animation
+            // (`StandupAfterThrowFall` -> `<AnimationEnd Name="ThrowFall"/>`),
+            // an empty Name admits any clip end. Without this a missile whose
+            // flight clip ended fell back to the getup move
+            // (`StandupAfterThrowFall`, Priority 400) instead of continuing.
+            if (!m->anim_end_matches({anim})) continue;
             std::string ctr;
             if (!sf2::scene::eval_move_conditions(m->conditions, cctx, &ctr)) {
                 if (std::getenv("SF2_CHILD_TICK") != nullptr) {
