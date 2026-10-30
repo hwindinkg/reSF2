@@ -356,15 +356,30 @@ void AiController::init(const std::string& weapon,
             // the boss-ability (InvisibilityCloakPlayer, HermitStorm...)
             // check.
             std::map<std::string, int> names;
+            std::map<std::string, int> outcome_names;
             for (const TacticsFile& tf : tactics_) {
                 for (const auto& tab : tf.set.tables) {
                     for (const TacticRecord& rec : tab) {
                         ++names[rec.anim];
+                        // The AI CANDIDATE animation is the record's outcome
+                        // anim (`Ju.frames` -> `Hu` -> `Gu.animation`, the
+                        // `de.XAa` inner list), so dump both.
+                        for (const TacticRow& row : rec.rows) {
+                            for (const TacticOutcome& oc : row.outcomes) {
+                                ++outcome_names[oc.anim];
+                            }
+                        }
                     }
                 }
             }
             std::fprintf(stdout, "[tactic] %zu distinct animations:", names.size());
             for (const auto& kv : names) {
+                std::fprintf(stdout, " %s(%d)", kv.first.c_str(), kv.second);
+            }
+            std::fprintf(stdout, "\n");
+            std::fprintf(stdout, "[tactic] %zu distinct OUTCOME animations:",
+                         outcome_names.size());
+            for (const auto& kv : outcome_names) {
                 std::fprintf(stdout, " %s(%d)", kv.first.c_str(), kv.second);
             }
             std::fprintf(stdout, "\n");

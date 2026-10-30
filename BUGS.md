@@ -2613,3 +2613,40 @@ clamp `[size.x - b + 200, 0]` с перелётом +100, переключени
 - Кусаригама: 8 узлов `Weapon-Node*` с `Shock="1"`, ни одного cloth-ребра —
   это не cloth-солвер; нужен покадровый визуальный эталон привязки оружия
   (какая кость держит косу, где верёвка).
+
+### QA-30.10 — «перки боссов» и «магия врагов»: это НЕ расхождение с JS (замер)
+
+Проверено по эталону, а не по ощущению:
+
+1. Способности боссов (`InvisibilityCloakPlayer`, `ButcherEarthquakePlayer`,
+   `HermitStormPlayer`, `WaspFly`):
+   - единственный путь активации в JS — `EnableBossAbility` -> `wd.$vb`
+     (L21519-21524) -> `this.dS.Z(a)` -> `Pi.dS` (L16211-16213). Оба метода
+     НАЧИНАЮТСЯ с `debugger;`, т.е. в шипнутом билде это заглушки;
+   - мув-кандидаты ИИ = только таблицы тактики: замер
+     `SF2_TRACE_TACTIC` на `BOSS_LYNX` (Tactic=Standard): 210 `rec.anim` +
+     46 OUTCOME-анимаций, среди них НЕТ ни `InvisibilityCloakPlayer`, ни
+     `BossAbility`;
+   - `<AttackMoves>` в `tactic_settings.xml` отсутствует (есть только
+     `UnexpectedMoves`, `MissileAnimations`, `MagicAnimations`,
+     `DistanceNode`), т.е. «всегда доступных» мувов ИИ нет;
+   - `<BossAbilityState>` (`nm.he` L31260-31265) возвращает только `Not`.
+   => JS-эталон тоже не может проиграть эти мувы. Порт совпадает.
+
+2. Магия врагов (Титан, `MAGIC_MIND_THROW` -> `MindThrowPlayer`):
+   - в таблице тактики Титана (`weapon=TitanGiantSword`,
+     `tactic=Titan_Aggressive`, files=22) 212 `rec.anim`, среди них только
+     `MindThrowHit` (реакция) и анимации СНАРЯДОВ (`MagicBombStart/Middle/Wall`,
+     `MagicWaveStart`, ...), но НЕТ `MindThrowPlayer`; 49 OUTCOME-анимаций —
+     ни одной magic;
+   - значит и JS-ИИ не может выбрать каст (кандидаты строятся из тех же строк
+     `Z0()[0..2]`), а порт использует те же данные.
+
+Проверка воспроизводится: `SF2_TRACE_TACTIC=1` теперь печатает и
+`distinct OUTCOME animations` (кандидаты `de.XAa`), и `distinct animations`
+(record-анимации).
+
+Осталось действительно открытым (нужен эталон от человека):
+- Кусаригама: 8 узлов `Weapon-Node*` с `Shock="1"`, ни одного cloth-ребра —
+  это не cloth-солвер; нужен покадровый визуальный эталон привязки оружия
+  (какая кость держит косу, где идёт верёвка).
