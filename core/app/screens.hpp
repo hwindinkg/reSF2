@@ -1471,6 +1471,18 @@ public:
     // [probe] force the Achievements-tab selected cell and report the first
     // claimable row (`--achiev-probe` measures the `as.nv` plate position).
     void set_achiev_sel_for_test(int i) { achiev_sel_ = i; }
+
+    // [probe] select a Moves-tab row by NAME (`--moves-damage-probe` shows the
+    // `$r.Ku` breakdown of a damaging move). Returns false when absent.
+    bool select_move_by_name(const std::string& name) {
+        for (std::size_t i = 0; i < move_rows_.size(); ++i) {
+            if (move_rows_[i].name == name) {
+                move_sel_ = static_cast<int>(i);
+                return true;
+            }
+        }
+        return false;
+    }
     int first_claimable_achiev() const {
         for (int i = 0; i < static_cast<int>(achiev_rows_.size()); ++i) {
             if (achiev_claimable(i)) return i;
@@ -1569,6 +1581,11 @@ public:
         // (key type id 1..14, press 1=Tap/2=Hold/3=Release) — the `Ck` icon
         // list the row draws (`Vf.Ij`/`Vf.X8a`, `ls.ba` L92826-92835).
         std::vector<std::pair<int, int>> key_spec;
+        // JS `ls.jea()` (L92846-92860): the move's ATTACK interval damages
+        // (`Tp.Yq.va.xb` entries with `type == 4`), in document order. The `$r`
+        // panel prints them as `<image>ComboButtons/base_damage</image>NN`
+        // runs (`$r.l6a` L92753-92775).
+        std::vector<float> damage_list;
         int rank = 0;
         // `ra.Ul` (L712) document order - the STABLE tie-break of the
         // `es.uZ` (L2239) `pb(a.v4,b.v4)` sort when `Rank` values are equal.

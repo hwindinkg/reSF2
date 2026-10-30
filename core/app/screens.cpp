@@ -510,6 +510,23 @@ bool draw_ui_label_font(App& app, const sf2::data::font* font, unsigned int tex,
 // divides by `charset.eF` (the BMF line height), so the `ua_scale` param of
 // `draw_ui_label` is `px / eF` (it applies `ea.a1` itself). Same convention as
 // the boot splash (`app.cpp` `jo_scale`).
+// JS `ea.mk()` (the text FIT the panel title uses, L90547): shrink the glyph
+// scale ONLY when the single line is wider than its box (the port's
+// `draw_ui_label(fit=true)` also clamps to the box HEIGHT, which would shrink
+// even a short title because the panel box is shorter than one line).
+float fit_ua_width(App& app, const std::string& text, float ua, float max_w) {
+    if (text.empty() || max_w <= 0.0f) return ua;
+    const sf2::data::font* f = app.menu_font();
+    if (f == nullptr) return ua;
+    const float w = app.measure_text(*f, text, ua * ea_a1(app));
+    // `measure_text` sums the glyph `xadvance`; the renderer's drawn run comes
+    // out ~8% wider (measured on `moves.png`: 266 -> 290 px), so fit against
+    // 0.92 of the box to keep `mk()`'s "never overflows" contract.
+    const float box = max_w * 0.92f;
+    if (w > box && w > 0.0f) return ua * (box / w);
+    return ua;
+}
+
 float ui_ua_scale(App& app, float px) {
     const sf2::data::font* f = app.menu_font();
     const float eF = (f != nullptr && f->size > 0) ? static_cast<float>(f->size) : 100.0f;
@@ -23059,6 +23076,12 @@ EquipmentScreen::EquipmentScreen(ScreenManager& mgr) : Screen(mgr, "Equipment") 
             r.image = m->profile_image;   // `Ru.image` (L1253) -> atlas 246
             r.keys = m->profile_keys;     // `Ru.fFa` (L1253) -> `ls.ymb` label
             r.key_spec = m->profile_key_spec;  // `vm` `<Keys>` -> `ls.Ck`
+            // `ls.jea()` (L92846-92860): `Tp.Yq.va.xb` entries with `type==4`
+            // (`Ul`, the Attack interval) -> their `Xb` damage values.
+            for (const sf2::scene::Interval& iv : m->intervals) {
+                if (iv.type != 4 || !iv.has_damage) continue;
+                r.damage_list.push_back(iv.damage);
+            }
             r.rank = m->profile_rank;     // `v4` (`es.uZ` sort key, L2239)
             r.order = m->profile_order;   // `ra.Ul` document order (L712)
             move_rows_.push_back(r);
@@ -24502,10 +24525,77 @@ void EquipmentScreen::render_impl(App& app) {
             // glyph scale 0.53), and it sits a tenth of the panel height down.
             // The port drew a fixed 0.95 scale 26 px below the panel top
             // (measured: 40 px caps vs the oracle's 25).
-            const float title_ua = rp.width() * 0.2f / 100.0f;
+            const std::string title_txt = loc(app, nm, nm);
+            const float title_ua = fit_ua_width(
+                app, title_txt, rp.width() * 0.2f / 100.0f, rp.width());  // `mk()`
+            if (std::getenv("SF2_TRACE_PROFILE") != nullptr) {
+                static bool tlog = false;
+                if (!tlog) {
+                    tlog = true;
+                    const sf2::data::font* tf = app.menu_font();
+                    const float tw = tf != nullptr ? app.measure_text(
+                                                         *tf, title_txt,
+                                                         title_ua * ea_a1(app))
+                                                   : -1.0f;
+                    std::fprintf(stdout,
+                                 "[profile] title '%s' ua=%.3f a1=%.2f w=%.1f "
+                                 "box=%.1f\n",
+                                 title_txt.c_str(), static_cast<double>(title_ua),
+                                 static_cast<double>(ea_a1(app)),
+                                 static_cast<double>(tw),
+                                 static_cast<double>(rp.width()));
+                    std::fflush(stdout);
+                }
+            }
             draw_ui_label(app, rp.J, rp.P + rp.height() * 0.1f, rp.width(),
-                          rp.width() * 0.2f, loc(app, nm, nm), title_ua,
+                          rp.width() * 0.2f, title_txt, title_ua,
                           UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f, /*fit=*/false);
+            // JS `$r.ba` L92740-92742: `Ku.D(b*0.3); Ku.Fa(a, b*0.4);
+            // Ku.ua(a*0.2)` — the per-hit damage breakdown sits between the
+            // title and the VIEW plate. `$r.l6a` L92753-92775 emits, for every
+            // RUN of equal damages, `<image>ComboButtons/base_damage</image>` +
+            // `int(v*100)` + (` x N` when the run repeats), one per line.
+            // The panel shows `shown_move()` (not `move_rows_.front()`), so
+            // resolve the damage list of THAT row by name.
+            std::vector<float> ku_ps;
+            for (const MoveRow& row : move_rows_) {
+                if (row.name == nm) {
+                    ku_ps = row.damage_list;
+                    break;
+                }
+            }
+            if (!ku_ps.empty()) {
+                const std::vector<float>& ps = ku_ps;
+                std::string ku;
+                std::size_t e = 0;
+                int run = 1;
+                while (e < ps.size()) {
+                    if (e + 1 < ps.size() && ps[e] == ps[e + 1]) {
+                        ++run;
+                    } else {
+                        ku += "<image>ComboButtons/base_damage</image>";
+                        ku += std::to_string(static_cast<int>(ps[e] * 100.0f));
+                        if (run > 1) {
+                            ku += " x " + std::to_string(run);
+                            run = 1;
+                        }
+                        if (e < ps.size() - 1) ku += "\n";
+                    }
+                    ++e;
+                }
+                draw_ui_wrapped(app, rp.J, rp.P + rp.height() * 0.3f, rp.width(),
+                                rp.height() * 0.4f, ku, rp.width() * 0.2f / 100.0f,
+                                UiAlign::Left, 0.184f, 0.145f, 0.106f);
+                if (std::getenv("SF2_TRACE_PROFILE") != nullptr) {
+                    static int ku_logged = 0;
+                    if (ku_logged < 3) {
+                        ++ku_logged;
+                        std::fprintf(stdout, "[profile] Ku %s: %zu hits -> '%s'\n",
+                                     nm.c_str(), ps.size(), ku.c_str());
+                        std::fflush(stdout);
+                    }
+                }
+            }
             const float bw2 = rp.width() * 0.72f, bh2 = 46.0f;
             const float bx2 = rp.J + rp.width() * 0.5f;
             const float by2 = rp.W - 70.0f;
@@ -24767,9 +24857,11 @@ void EquipmentScreen::render_impl(App& app) {
                 const AchievRow& ar = achiev_rows_[static_cast<std::size_t>(asel)];
                 // JS `Yr.ba` (L90540-90547): `d = b*0.2` (b = the content
                 // width), `Tm.C(a.J); Tm.D(a.P + c*0.1); Tm.Fa(b,d); Tm.ua(d)`.
-                const float title_ua = rp.width() * 0.2f / 100.0f;
+                const std::string atitle = loc(app, ar.name, ar.name);
+                const float title_ua = fit_ua_width(
+                    app, atitle, rp.width() * 0.2f / 100.0f, rp.width());  // `mk()`
                 draw_ui_label(app, rp.J, rp.P + rp.height() * 0.1f, rp.width(),
-                              rp.width() * 0.2f, loc(app, ar.name, ar.name), title_ua,
+                              rp.width() * 0.2f, atitle, title_ua,
                               UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f,
                               /*fit=*/false);
                 const std::string dk = ar.description.empty() ? ar.name : ar.description;
