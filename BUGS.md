@@ -2761,3 +2761,32 @@ clamp `[size.x - b + 200, 0]` с перелётом +100, переключени
   сохранение вкладки (`vb.init` L91016); вкладка Seal — панель и 0.5-альфа
   (L92628-92636).
 - Кусаригама: форма косы/верёвки — нужен покадровый эталон живой игры.
+
+### QA-30.10 — страница предмета в результатах (закрыто)
+
+Было: `<Reward><Item Name=...>` не парсились и не выдавались, результаты всегда
+показывали таблицу.
+
+Сделано:
+- `battle_reward_items(battle, zone, fight_index)` — список `<Item Name>` из
+  строки выдачи (последний `<Reward>`), т.е. JS `hj.jt(true)`;
+- `apply_fight_reward` (грант на конце боя, JS `v.kD` -> `dmb`) добавляет
+  каждый дроп в инвентарь сейва и кладёт имена в `PendingBattle::reward_items`;
+- экран результатов открывается на СТРАНИЦЕ ПРЕДМЕТА (`Lr.gvb` L86403-86422):
+  иконка первого предмета в design `C(375) D(350)` + плашка OK; нажатие OK —
+  `AHa` (L86468-86472): страница снимается, таблица (`ZMa`) запускает свой
+  reveal.
+
+Замер (`--results-item-probe`, BOSS_LYNX fight 6 -> `drop_name_blueseal`):
+```
+[result] reward items: drop_name_blueseal
+[itemprobe] reward_items=1: drop_name_blueseal
+[itemprobe] save owns 'drop_name_blueseal' = 1
+[results] item page: drop_name_blueseal (1 granted)
+[result] item page OK -> stat table
+```
+плюс кадр `.harness/item_page.png` (иконка + OK над плашкой результатов).
+
+Осталось по результатам: рубиновая подстрока [иконка][текст] и скрытие золота
+при 0 монет (L86733-86737, `Or.nx` L86750-86755); STORE в JS только шлёт
+`QUEST_EVENT_SHOP_BUTTON_PRESS` (L85817-85819).
