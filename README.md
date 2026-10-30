@@ -46,7 +46,7 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 44898 | 18 |
-| `core/scene` | 39212 | 35 |
+| `core/scene` | 39219 | 35 |
 | `app/game` | 10310 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
@@ -62,5 +62,5 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **104363** | |
+| **total** | **104370** | |
 <!-- STATUS:END -->
