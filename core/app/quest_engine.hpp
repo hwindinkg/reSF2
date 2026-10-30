@@ -822,9 +822,14 @@ public:
     static bool is_bar_notification(const EngineDialog& d) {
         return d.type == "Notification";
     }
-    // `Wb`'s top = the first queued dialog that is NOT a bar Notification.
+    // `Wb`'s top = the LAST queued dialog that is NOT a bar Notification.
+    // JS `Wb.Xob` (L39252-39263) pushes the newest and keeps it as `this.If`;
+    // `Wb.Bwb` (L39301-39307) re-tops to `b[b.length-1]`; `wn.I0a`
+    // (L39501-39516) deactivates every dialog but the last (the last two when
+    // the top is a `Ve`). The port returned the FIRST, so with two modals
+    // queued it drew/popped the OLDER one.
     std::size_t modal_index() const {
-        for (std::size_t i = 0; i < dialogs_.size(); ++i) {
+        for (std::size_t i = dialogs_.size(); i-- > 0;) {
             if (!is_bar_notification(dialogs_[i])) return i;
         }
         return dialogs_.size();

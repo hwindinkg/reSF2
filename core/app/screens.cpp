@@ -9840,14 +9840,40 @@ void draw_vn370_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
 void draw_closing_dialog(App& app, sf2::render::Renderer& ren) {
     ClosingDialog& s = closing_slot();
     if (!s.active) return;
+    const DialogKind kind = dialog_kind(s.d.type);
+    // JS `Ib.close(false)` L80125 `this.scroll.collapse(0.5)` (the `Ib` bar)
+    // vs `Od.Ge(1)`/`n_()` L1898 for the modals: the bar's own tween is 0.5 s,
+    // the modal's 0.25 s.
+    constexpr float kBarCollapseSecs = 0.5f;
+    const float dur = (kind == DialogKind::kIbBar) ? kBarCollapseSecs : kDialogAnimSecs;
     const float now = app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
     const float age = now - s.start;
-    if (age < 0.0f || age >= kDialogAnimSecs) {
+    if (age < 0.0f || age >= dur) {
         s.active = false;  // `n_()`: the tween landed, unlink
         return;
     }
+    if (kind == DialogKind::kIbBar) {
+        // `gk.aa` L83037: `NLa(dc.Ln()(this.uJ ? a : 1 - a))` — on a COLLAPSE
+        // (`uJ == false`) the fraction `a` counts 0 -> 1 and the mask `yI`
+        // goes 1 -> 0 through the same ease-out, i.e. the bar shrinks from the
+        // LEFT toward its right edge (`gk.JT` L83138 `J = width - yI*width`).
+        // The port did not draw the bar during its close at all.
+        const float t = std::clamp(age / kBarCollapseSecs, 0.0f, 1.0f);
+        const float reveal = dialog_ease_out(1.0f - t);
+        static int collapse_log = 0;
+        if (collapse_log < 3) {
+            ++collapse_log;
+            std::fprintf(stdout, "[ib] collapse=%.3f clip_w=%.1f\n",
+                         static_cast<double>(reveal),
+                         static_cast<double>(600.0f * reveal));
+            std::fflush(stdout);
+        }
+        draw_ib_hint(app, ren, s.d.image, ib_joined_lines(app, s.d),
+                     notification_show_ok(s.d), reveal);
+        return;
+    }
     const DialogAnim anim = dialog_anim_at(age, /*closing=*/true);
-    switch (dialog_kind(s.d.type)) {
+    switch (kind) {
         case DialogKind::kOd280: draw_od280_dialog(app, ren, s.d, anim); return;
         case DialogKind::kUj290: draw_uj290_dialog(app, ren, s.d, anim); return;
         case DialogKind::kVe340: draw_ve340_dialog(app, ren, s.d, anim); return;
@@ -25870,6 +25896,22 @@ bool run_quest_dialog_selfcheck(App& app) {
         dlg_case("D11 soa boss_huntress shifts the portrait 50 design px left", ok_h);
         dlg_case("D11 soa+toa man_spear shifts it 100 left and 100 down", ok_s);
         dlg_case("D11 an unkeyed portrait image keeps -450/0", ok_p);
+    }
+    // --- D15: `Wb`'s top is the LAST opened dialog (`Wb.Xob` L39252-39263 /
+    // `Wb.Bwb` L39301-39307 / `wn.I0a` L39501-39516), not the first queued.
+    {
+        q.clear_dialogs();
+        q.push_dialog_for_test(probe_dialog("d15_first"));
+        q.push_dialog_for_test(probe_dialog("d15_second"));
+        const EngineDialog* top = q.modal_top();
+        const bool last_wins = top != nullptr && top->title == "d15_second";
+        std::fprintf(stdout, "[dlgverify][wbtop] queue=%zu top=%s\n",
+                     q.dialog_count(), top != nullptr ? top->title.c_str() : "-");
+        std::fflush(stdout);
+        dlg_case("D15 Wb top is the LAST queued modal (Wb.Xob/Bwb)", last_wins);
+        q.press_dialog(app, 1);
+        const bool popped_last = q.has_dialog() && q.dialog().title == "d15_first";
+        dlg_case("D15 pressing the top pops the LAST queued modal", popped_last);
     }
     q.clear_dialogs();
 
