@@ -479,6 +479,15 @@ void FightController::init_locks(
     }
     std::fprintf(stdout, "[fight] player equip subtype='%s' owned=%zu\n",
                  player_subtype.c_str(), player_owned.size());
+    if (std::getenv("SF2_MODEL_PROBE") != nullptr) {
+        std::fprintf(stdout, "[fight] player kit:");
+        for (const sf2::scene::OwnedItem& o : player_owned) {
+            std::fprintf(stdout, " [%s/%s/%s]", o.type.c_str(), o.subtype.c_str(),
+                         o.name.c_str());
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
     std::fflush(stdout);
     // The pristine kit: the disarm replaces the Weapon row with Fists in
     // `player_.owned_items`, so the round reset needs the ORIGINAL list to
@@ -2309,6 +2318,30 @@ FightFighter FightController::make_fighter(
         std::fprintf(stdout, "[model] %s weapon-ish bones=%d total=%zu capsules=%zu\n",
                      f.name.c_str(), shown, f.fighter.model().bones.size(),
                      f.fighter.model().capsules.size());
+        std::fprintf(stdout, "[model] %s parts(%zu):", f.name.c_str(),
+                     f.fighter.model().part_names.size());
+        for (const std::string& pn : f.fighter.model().part_names) {
+            std::fprintf(stdout, " %s", pn.c_str());
+        }
+        std::fprintf(stdout, "\n");
+        // The weapon nodes' clip key at the CURRENT clip frame vs the drawn
+        // position: a mismatch means the clip does not drive the weapon (the
+        // kusarigama rig measurement).
+        {
+            const std::vector<float>& pv = f.fighter.positions();
+            for (const char* wn : {"Weapon-Node1_1", "Weapon-Node1_2", "Weapon-Node4_1",
+                                   "Weapon-Node4_2"}) {
+                const int bi = f.fighter.model().bone_by_name(wn);
+                if (bi < 0) continue;
+                const std::size_t u = static_cast<std::size_t>(bi) * 2;
+                if (u + 1 >= pv.size()) continue;
+                std::fprintf(stdout, "[model]   %s idx=%d pos=%.1f,%.1f bind=%.1f,%.1f\n",
+                             wn, bi, static_cast<double>(pv[u]),
+                             static_cast<double>(pv[u + 1]),
+                             static_cast<double>(f.fighter.model().bones[static_cast<std::size_t>(bi)].x),
+                             static_cast<double>(f.fighter.model().bones[static_cast<std::size_t>(bi)].y));
+            }
+        }
         std::fflush(stdout);
     }
     // [probe, authorised] `SF2_TRACE_MOVELIST=1`: what the fighter's own list
@@ -7597,6 +7630,32 @@ static void trace_fight_cloth(const FightFighter& f, int frame) {
 
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
     trace_fight_cloth(me, frame_);
+    // [probe, authorised] SF2_TRACE_WEAPON: the weapon rig — the weapon nodes'
+    // drawn model positions vs their BIND values, plus the live clip. A weapon
+    // node that stays at its bind while the clip keys it means the rig does
+    // not follow the animation (the kusarigama measurement).
+    if (std::getenv("SF2_TRACE_WEAPON") != nullptr && (frame_ % 10) == 0) {
+        const sf2::scene::Model& m = me.fighter.model();
+        const std::vector<float>& pv = me.fighter.positions();
+        std::fprintf(stdout, "[weapon] F%d %s move=%s frame=%d",
+                     frame_, me.name.c_str(),
+                     me.fighter.current_move() != nullptr
+                         ? me.fighter.current_move()->name.c_str()
+                         : "-",
+                     me.fighter.move_frame());
+        for (const char* wn : {"Weapon-Node1_1", "Weapon-Node2_1", "Weapon-Node4_1"}) {
+            const int bi = m.bone_by_name(wn);
+            if (bi < 0) continue;
+            const std::size_t u = static_cast<std::size_t>(bi) * 2;
+            if (u + 1 >= pv.size()) continue;
+            std::fprintf(stdout, " %s=%.1f,%.1f(bind %.1f,%.1f)", wn,
+                         static_cast<double>(pv[u]), static_cast<double>(pv[u + 1]),
+                         static_cast<double>(m.bones[static_cast<std::size_t>(bi)].x),
+                         static_cast<double>(m.bones[static_cast<std::size_t>(bi)].y));
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
     // JS `kwb` (L522) + `Wqb` (L394): a disarmed fighter loosens the weapon
     // for `MFa` frames (`Wx`), then the weapon is DROPPED and the fighter
     // fights with `Ub.Au` (the config `<Weapon Name="Fists">`). The port only

@@ -578,6 +578,9 @@ private:
     float pan_vel_ = 0.0f;
     bool pan_dragging_ = false;
     bool pan_moved_ = false;
+    // JS `Vr.qF(.., 1)` (L87990-87992): the zone-switch SNAP — `Sw` target +
+    // `sLa = 0.1/(dur/.6)` exponential slide of `ca` (see `screens.cpp`).
+    bool pan_snap_ = false;
     std::vector<ZoneTab> zones_;
     int zone_sel_ = 0;
     int hover_ = -1;      // JS `qe.kE` — the SELECTED node (a real press only)

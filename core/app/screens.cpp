@@ -6848,6 +6848,14 @@ std::vector<sf2::scene::OwnedItem> owned_items(App& app) {
     // RANGED or MAGIC item equipped in `ig`/`Mg` was invisible to every Locks
     // test (`ra.Hza` L684 reads `a.parameters.jt()`), dropping that weapon's
     // moves from the fighter's list (the reported "equipped weapon removed").
+    if (std::getenv("SF2_MODEL_PROBE") != nullptr) {
+        std::fprintf(stdout,
+                     "[owned] save slots: skel='%s' weapon='%s' ranged='%s' magic='%s' "
+                     "armor='%s' helm='%s' catalog=%zu\n",
+                     w.skeleton.c_str(), w.weapon.c_str(), w.ranged.c_str(),
+                     w.magic.c_str(), w.armor.c_str(), w.helm.c_str(), catalog.size());
+        std::fflush(stdout);
+    }
     push(w.skeleton);
     push(w.weapon);
     push(w.ranged);
@@ -11395,6 +11403,12 @@ void MapScreen::update_impl(float dt) {
             if (p.x >= dot_cx - dot_half && p.x <= dot_cx + dot_half &&
                 p.y >= dot_cy - dot_half && p.y <= dot_cy + dot_half) {
                 if (p.pressed && static_cast<int>(zi) != zone_sel_) {
+                    // JS `Vr.uka` (L87977-87979) -> `qF(items[a], b)`: a dot
+                    // tap runs the SAME `sLa` snap as a drag release.
+                    const MapMetrics dm = map_metrics(app());
+                    pan_ca_ = static_cast<float>(zone_sel_ - static_cast<int>(zi)) *
+                              dm.map_fr_w * dm.bg_scale;
+                    pan_snap_ = true;
                     zone_sel_ = static_cast<int>(zi);
                     hover_ = -1;
                     apply_map_focus(app().quest_engine().last_map_focus());
@@ -11503,7 +11517,22 @@ void MapScreen::update_impl(float dt) {
         const bool fits = static_cast<float>(kViewW) > total - 200.0f;
         const bool in_strip = p.y >= mm.map_y && p.y <= mm.map_y + mm.map_h &&
                               p.x <= mm.panel_x;
-        if (fits) {
+        if (pan_snap_) {
+            // JS `Vr.aa` state 0 (L88053-88060): `a = Sw - ca; ca += a*sLa;
+            // if (|a| < 1) { ca = Sw; Sw = null; }` with
+            // `sLa = 0.1 / (dur / 0.6)` (L87991) — the zone switch slides the
+            // strip into place instead of teleporting.
+            const float sLa = 0.1f / (1.0f / 0.6f);  // `qF(items[a], 1)`
+            const float delta = 0.0f - pan_ca_;
+            pan_ca_ += delta * sLa;
+            if (std::fabs(delta) < 1.0f) {
+                pan_ca_ = 0.0f;
+                pan_snap_ = false;
+            }
+            std::fprintf(stdout, "[map] pan snap ca=%.1f (sLa=%.3f)\n",
+                         static_cast<double>(pan_ca_), static_cast<double>(sLa));
+            std::fflush(stdout);
+        } else if (fits) {
             pan_ca_ = 0.0f;  // `N.width > b - 200 -> ca = 0; dA.C(0)`
             pan_dragging_ = false;
         } else if (in_strip && p.pressed && !node_tap && !pan_dragging_) {
@@ -11550,13 +11579,18 @@ void MapScreen::update_impl(float dt) {
                     }
                 }
             }
-            pan_ca_ = 0.0f;  // `qF(.., 1)` snaps the strip to the new widget
             if (next != zone_sel_) {
+                // `qF(items[a], 1)`: the strip keeps the OLD widget offset and
+                // slides to the new one over the `sLa` ease.
+                pan_ca_ = static_cast<float>(zone_sel_ - next) * strip_w;
+                pan_snap_ = true;
                 zone_sel_ = next;
                 hover_ = -1;
                 apply_map_focus(app().quest_engine().last_map_focus());
-                std::fprintf(stdout, "[map] pan release dx=%.1f -> zone %s\n",
-                             static_cast<double>(dx), zones_[zone_sel_].name.c_str());
+                std::fprintf(stdout,
+                             "[map] pan release dx=%.1f -> zone %s (snap ca=%.0f)\n",
+                             static_cast<double>(dx), zones_[zone_sel_].name.c_str(),
+                             static_cast<double>(pan_ca_));
             } else {
                 std::fprintf(stdout,
                              "[map] pan release dx=%.1f -> no switch (zone=%s "
@@ -11565,7 +11599,7 @@ void MapScreen::update_impl(float dt) {
                              zone_sel_, next);
             }
             std::fflush(stdout);
-        } else {
+        } else if (!pan_snap_) {
             pan_ca_ = 0.0f;  // settled: the strip is snapped
         }
     }
