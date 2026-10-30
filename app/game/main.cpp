@@ -5314,9 +5314,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              sf2::app::map_zone_selected(app));
                 std::fflush(stdout);
                 app.inject_click(dcx, dcy, 3);
+                const char* dot_shot = std::getenv("SF2_DRAG_SHOT");
                 for (int i = 0; i < 8; ++i) {
                     glfwPollEvents();
                     app.run_one_frame();
+                    if (dot_shot != nullptr && i == 1) {
+                        app.capture_png(dot_shot);  // mid-snap: the strip slides
+                        std::fprintf(stdout, "[mapdot] mid-snap shot %s\n", dot_shot);
+                        std::fflush(stdout);
+                    }
                 }
                 std::fprintf(stdout, "[mapdot] now=%d\n",
                              sf2::app::map_zone_selected(app));
