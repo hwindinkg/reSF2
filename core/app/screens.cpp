@@ -398,6 +398,8 @@ float ea_a1(const App& app) { return app.ui_text_scale(); }
 // `un` ctor sets it on every row (`t.La(Z.sc)` L1917) and the `Bb` button
 // `V(a)` sets it on the label (`this.label.La(Z.sc)`, L949170); the title
 // uses `Z.W6` (already). White was wrong.
+// JS `Bg` ctor `ua(72)` -> `un.Oyb` `ua(100)` on a language change.
+float g_settings_row_ua = 0.72f;
 constexpr float kSettingsTextR = 0.1843137254901961f;
 constexpr float kSettingsTextG = 0.1450980392156863f;
 constexpr float kSettingsTextB = 0.10588235294117647f;
@@ -24359,6 +24361,7 @@ int catalog_max_delivery_sec(App& app) {
 // `un.rHa` case 4 (L1931): `this.u9=(this.u9+1)%iv.length; this.$u=iv[this.u9];
 // this.t9=G.Rq()!=this.$u;` then `this.t9?(this.Km.X(!0),...)` reveals RESTART.
 void settings_dialog_cycle_language(App& app) {
+    g_settings_row_ua = 1.0f;  // `un.Oyb` L80648/80653/80658/80662 `ua(100)`
     int idx = 0;
     for (int i = 0; i < kSettingsLangCount; ++i) {
         if (g_settings_lang == kSettingsLangs[i]) idx = i;
@@ -24687,9 +24690,13 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         {s.lang_cx, s.lang_cy, loc_lang(app, lang, "Settings_Language", "English")},
     };
     for (const RowLabel& row : labels) {
+        // JS `Bg` ctor sets `this.ua(72)` and `un.Oyb` (L80640-80670) re-sizes
+        // every row to `ua(100)` on a language change; the port drew 60 for
+        // both states.
         draw_ui_label_font(app, sfont, stex, row.cx + s.icon * 0.7f,
                            row.cy - s.icon * 0.25f, 596.0f * s.panel.c, s.icon, row.text,
-                           0.6f, UiAlign::Left, kSettingsTextR, kSettingsTextG, kSettingsTextB);
+                           g_settings_row_ua, UiAlign::Left, kSettingsTextR,
+                           kSettingsTextG, kSettingsTextB);
     }
     // `Nm` (L1929): `ea` at `Fa(1500,50)`, `C(-750)`, `D(250)`, `ua(75)`,
     // `Kc(.6)`, `V(Y.na("dlgSettingsRestart"))`, `R(!1)`; `R(t9)` (L1933) on a
@@ -24702,11 +24709,15 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         // like `Vc.D(-(a+pfa().y))` at `od.layout` L1898): the old
         // `- 25*p.c` double-counted the half-height, drawing the notice ~12 px
         // (design 25) too high.
+        // JS `Nm.Fa(1500,50); Nm.ua(75); Nm.Kc(0.6)` (L80541-80546) with NO
+        // `Sk()`/`mk()` and `Bg.clip=false` (L68270): the 75 px text OVERFLOWS
+        // the 50 px box. The port fitted it into the box (`fit=true`), which
+        // shrank it to ~0.34.
         draw_ui_label_font(app, sfont, stex,
                       s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
                       s.notice_y, 1500.0f * s.panel.c, 50.0f * s.panel.c,
                       loc_lang(app, lang, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
-                      kSettingsTextR, kSettingsTextG, kSettingsTextB);
+                      kSettingsTextR, kSettingsTextG, kSettingsTextB, /*fit=*/false);
     }
     // BACK (`Bb("EButtonDark")` L1930 -> `btnDark`), `Ge(0)` closes.
     if (!(load_sliced_atlas(app) &&
