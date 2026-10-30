@@ -16890,6 +16890,23 @@ void FightScreen::render_impl(App& app) {
             float prev_w = 0.0f;
             std::string last_stack;
             bool first_stack = true;
+            // JS `Jr.move` (L85146-85154): each stack container slides toward
+            // its target by 10 LOCAL px per frame (`this.C(this.node.ya +
+            // (a ? -10 : 10))`), the target coming from `Hr.Vnb`; the port
+            // snapped. The glide is advanced with the PRESENT dt scaled to
+            // 60 Hz so its speed is frame-rate independent (the JS runs it in
+            // the HUD `aa`, one 60 Hz step).
+            struct PerkGlide { float x = 0.0f; bool init = false; };
+            static std::map<std::string, PerkGlide> perk_glide[2];
+            static float perk_glide_t = -1.0f;
+            const float perk_now =
+                app.screens().top() != nullptr ? app.screens().top()->time() : 0.0f;
+            float perk_dt = perk_glide_t >= 0.0f ? (perk_now - perk_glide_t)
+                                                 : (1.0f / 60.0f);
+            perk_glide_t = perk_now;
+            perk_dt = std::clamp(perk_dt, 0.0f, 0.1f);
+            const float perk_step = 10.0f * hud_c * perk_dt * 60.0f;
+            std::set<std::string> perk_seen;
             for (const auto& ic : icons) {
                 if (first_stack || ic.stack != last_stack) {
                     if (!first_stack) cursor += dir * (spacing_step + prev_w);
@@ -16909,7 +16926,18 @@ void FightScreen::render_impl(App& app) {
                 }
                 const float iw = static_cast<float>(fr.source_w) * ic.scale * hud_c;
                 const float ih = static_cast<float>(fr.source_h) * ic.scale * hud_c;
-                const float cx = base_x + cursor;
+                const float target_x = base_x + cursor;
+                const std::string gkey = ic.action_name + "|" + ic.stack;
+                perk_seen.insert(gkey);
+                PerkGlide& g = perk_glide[side & 1][gkey];
+                if (!g.init) {
+                    g.x = target_x;
+                    g.init = true;
+                } else {
+                    const float dx = target_x - g.x;
+                    g.x += std::clamp(dx, -perk_step, perk_step);
+                }
+                const float cx = g.x;
                 const float cy = base_y;
                 (void)try_draw_atlas_button(app, frame, cx, cy, iw, ih, ic.alpha);
                 prev_w = iw;
@@ -16977,6 +17005,14 @@ void FightScreen::render_impl(App& app) {
                                  "stack=%d\n",
                                  side, frame.c_str(), static_cast<double>(ic.alpha),
                                  static_cast<double>(ic.scale), ic.stack_count);
+                }
+            }
+            for (auto it = perk_glide[side & 1].begin();
+                 it != perk_glide[side & 1].end();) {
+                if (perk_seen.count(it->first) == 0) {
+                    it = perk_glide[side & 1].erase(it);
+                } else {
+                    ++it;
                 }
             }
         }
