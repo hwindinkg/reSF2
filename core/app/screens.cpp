@@ -11610,7 +11610,8 @@ float map_battle_rating_cached(App& app, const std::string& battle_name,
 void map_reward_badge_cached(App& app, const std::string& battle_name,
                              const std::string& zone, int fight_index,
                              std::int64_t& money, std::int64_t& bonus,
-                             bool& owned) {
+                             bool& owned, std::string& drop_image,
+                             bool& drop_owned) {
     struct Badge {
         std::int64_t money = 0;
         // JS `bi` (L2133) feeds `ci` the fight's `c.h4`/`c.g4`, set by
@@ -11621,6 +11622,11 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
         // field, NOT its `Exp`.
         std::int64_t bonus = 0;
         bool owned = false;
+        // JS `ci` (L89204-89248): the reward's `ShowReward` item icon
+        // (`this.Oo(a)` with `p.items.$b(a.name).image`) is appended when the
+        // player does NOT own it (`p.o.xa.te(a) == null`).
+        std::string drop_image;
+        bool drop_owned = false;
     };
     static std::map<std::string, Badge> cache;
     int level = 1;
@@ -11636,6 +11642,8 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
         money = hit->second.money;
         bonus = hit->second.bonus;
         owned = hit->second.owned;
+        drop_image = hit->second.drop_image;
+        drop_owned = hit->second.drop_owned;
         return;
     }
     Badge b;
@@ -11711,7 +11719,17 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
                             const std::string nm = it0.attribute("Name").value();
                             if (!nm.empty()) {
                                 for (const CatalogItem& ci : load_full_catalog(app)) {
-                                    if (ci.name == nm) { b.owned = true; break; }
+                                    if (ci.name != nm) continue;
+                                    b.owned = true;       // `p.items.$b` resolves
+                                    b.drop_image = ci.image;
+                                    break;
+                                }
+                                // `p.o.xa.te(a) == null` -> the save does not
+                                // own the item, so `ci` draws its icon.
+                                try {
+                                    const WarriorSave w = app.save().load();
+                                    b.drop_owned = w.has_item(nm);
+                                } catch (const std::exception&) {
                                 }
                             }
                         }
@@ -11725,6 +11743,8 @@ void map_reward_badge_cached(App& app, const std::string& battle_name,
     money = b.money;
     bonus = b.bonus;
     owned = b.owned;
+    drop_image = b.drop_image;
+    drop_owned = b.drop_owned;
 }
 
 // Defined below; the probe reports the tier each ratio lands in.
@@ -12349,8 +12369,45 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     {
         std::int64_t badge_money = 0, badge_bonus = 0;
         bool badge_owned = false;
+        std::string badge_drop_image;
+        bool badge_drop_owned = false;
         map_reward_badge_cached(app, node->name, node->zone, mk_fi, badge_money,
-                                badge_bonus, badge_owned);
+                                badge_bonus, badge_owned, badge_drop_image,
+                                badge_drop_owned);
+        // JS `bi` (L88619-88648) zeroes the Money/Gems of a `Fga` reward (its
+        // `ShowReward` item exists in the catalog) and `ci` then appends that
+        // item's ICON when the player does not own it. The port drew NOTHING
+        // for a boss drop reward (the "boss reward shows no badge" report).
+        if (boss_family && badge_owned && !badge_drop_image.empty() &&
+            !badge_drop_owned) {
+            const float icon_h = body_w * 0.15f;
+            float gw = 0.0f, gh = 0.0f;
+            const float icon_w =
+                (map_frame_size(app, badge_drop_image.c_str(), gw, gh) && gh > 0.0f)
+                    ? icon_h * (gw / gh)
+                    : icon_h;
+            // JS `ci.Oo(a)` resolves the item's `Image` through `Rf` (L2307):
+            // a grouped ref ("Weapon1.img_weapon_x") lives in
+            // `items/images-1x/<group>/`, an ungrouped one (the boss seals:
+            // "img_drop_blue_seal") in `res/users/images/`. Try the atlas
+            // frame, then the item-image helper, then the users atlas.
+            const float bcx = body_x + body_w * 0.5f;
+            const float bcy = body_y + wy + icon_h * 0.5f;
+            if (!try_draw_atlas_button(app, badge_drop_image.c_str(), bcx, bcy,
+                                       icon_w, icon_h, 1.0f) &&
+                !draw_item_image(app, badge_drop_image, bcx, bcy, icon_w, icon_h,
+                                 1.0f)) {
+                draw_user_image(app, badge_drop_image, bcx, bcy, icon_w, icon_h,
+                                1.0f, /*flip_x=*/false);
+            }
+            if (std::getenv("SF2_TRACE_MAPBADGE") != nullptr) {
+                std::fprintf(stdout, "[map] badge %s|%s|%d drop=%s owned=%d\n",
+                             node->zone.c_str(), node->name.c_str(), mk_fi,
+                             badge_drop_image.c_str(), badge_drop_owned ? 1 : 0);
+                std::fflush(stdout);
+            }
+            wy += icon_h + body_w * 0.05f;
+        }
         if (!(boss_family && badge_owned) &&
             (badge_money > 0 || badge_bonus > 0)) {
             // JS `ci` (L1104923): a horizontal row of `Ig` icon+value badges,
