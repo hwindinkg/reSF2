@@ -9139,6 +9139,137 @@ float dialog_content_md(App& app, const EngineDialog& d) {
     return std::max(h / safe_c, d.min_content_height);
 }
 
+// JS `Od.soa` (L103360-103414) / `Od.toa` (L103415-103447): the per-portrait
+// pixel corrections `Od.ala` (L81167-81176) applies to the dialog avatar —
+//   `b = -450; if (soa[fileName]) b = -450 - soa[fileName];`
+//   `if (toa[fileName]) Zg.D(toa[fileName]);`
+// `fileName` is `v.RIa(a).fileName` = the basename after the last `/` of the
+// `Image` ref (the `|Flip` suffix is already split off). 23 shipped dialog
+// images are keyed (boss_huntress 50, man_spear 100, boss_wasp 50/50, …); the
+// port drew every portrait at the un-corrected -450/0.
+int dialog_portrait_soa(const std::string& file_name) {
+    static const std::map<std::string, int> kSoa = {
+        {"boss_huntress", 50},
+        {"boss_shogun", 50},
+        {"girl_kusarigama_2", 100},
+        {"girl_kusarigama", 100},
+        {"girl_shuang_gou", 100},
+        {"looter_girl_staff", 50},
+        {"looter_man_glaive", 100},
+        {"man_axes_3", 100},
+        {"man_big_swords", 50},
+        {"man_chinese_sabre", 25},
+        {"man_clutches", 25},
+        {"man_crescent_knives", 125},
+        {"man_crescent", 50},
+        {"man_dadao_janissary", 50},
+        {"man_deerhorn", 50},
+        {"man_glaive_2", 50},
+        {"man_glaive_3", 100},
+        {"man_glaive", 50},
+        {"man_hero_composite_sword", 100},
+        {"man_hero_power_fists", 100},
+        {"man_katar", 100},
+        {"man_keris", 100},
+        {"man_knives_2", 100},
+        {"man_machete", 100},
+        {"man_ninja_naginata", 100},
+        {"man_nunchaku_2", 100},
+        {"man_spear", 100},
+        {"man_staff", 50},
+        {"man_steel_claws", 100},
+        {"man_swords_2", 50},
+        {"man_titans_army_4", 50},
+        {"man_tonfa_2", 100},
+        {"man_yari", 50},
+        {"man_z7_tournament_swords", 50},
+        {"ninja_girl_nunchaku", 100},
+        {"ninja_girl_sickles", 100},
+        {"ninja_man_butterfly_swords", 100},
+        {"ninja_man_crescent_knives", 100},
+        {"ninja_man_knives_2", 100},
+        {"ninja_man_knuckles", 100},
+        {"ninja_man_labrys_axes", 100},
+        {"ninja_man_machete", 100},
+        {"ninja_man_ninja_sword", 50},
+        {"ninja_man_nunchaku", 100},
+        {"ninja_man_sai", 100},
+        {"ninja_man_shuang_gou", 100},
+        {"ninja_man_spear", 100},
+        {"ninja_man_staff", 100},
+        {"ninja_man_swords", 100},
+        {"ninja_man_tonfa", 100},
+        {"scavenger_3", 100},
+        {"boss_hermit", 50},
+        {"boss_lynx_young", 50},
+        {"boss_wasp", 50},
+        {"girl_kusarigama_1", 100},
+        {"looter_girl_scythe", 50},
+        {"man_cool_staff", 50},
+        {"man_heavy_hammer", 50},
+        {"man_heavy_staff", 50},
+        {"man_magari_yari", 50},
+        {"man_trident_1", 100},
+        {"man_trident", 50},
+        {"man_two_handed_mace", 50},
+        {"man_z7_tournament_knobsticks", 100},
+        {"man_z7_tournament_staff", 50},
+        {"ninja_girl_katar", 50},
+        {"ninja_girl_stilettos", 50},
+        {"ninja_man_dadao", 50},
+        {"ninja_man_kusarigama", 50},
+    };
+    const auto it = kSoa.find(file_name);
+    return it == kSoa.end() ? 0 : it->second;
+}
+
+int dialog_portrait_toa(const std::string& file_name) {
+    static const std::map<std::string, int> kToa = {
+        {"boss_hermit", 50},
+        {"boss_lynx_young", 50},
+        {"boss_wasp", 50},
+        {"girl_kusarigama_1", 100},
+        {"looter_girl_scythe", 50},
+        {"looter_girl_staff", 50},
+        {"man_cool_staff", 50},
+        {"man_crescent", 50},
+        {"man_glaive_2", 50},
+        {"man_glaive_3", 100},
+        {"man_glaive", 50},
+        {"man_heavy_hammer", 50},
+        {"man_heavy_staff", 50},
+        {"man_magari_yari", 50},
+        {"man_spear", 100},
+        {"man_staff", 50},
+        {"man_titans_army_4", 50},
+        {"man_trident_1", 100},
+        {"man_trident", 50},
+        {"man_two_handed_mace", 50},
+        {"man_yari", 50},
+        {"man_z7_tournament_knobsticks", 100},
+        {"man_z7_tournament_staff", 50},
+        {"man_z7_tournament_swords", 50},
+        {"ninja_girl_katar", 50},
+        {"ninja_girl_stilettos", 50},
+        {"ninja_man_dadao", 50},
+        {"ninja_man_kusarigama", 50},
+        {"ninja_man_ninja_sword", 50},
+    };
+    const auto it = kToa.find(file_name);
+    return it == kToa.end() ? 0 : it->second;
+}
+
+// `v.RIa(a).fileName` (L50977-50992): split on `|`, then the basename after the
+// last `/`. The port's `EngineDialog::image` keeps the `|Flip` suffix.
+std::string dialog_avatar_basename(const std::string& image) {
+    std::string head = image;
+    const std::size_t bar = head.find('|');
+    if (bar != std::string::npos) head = head.substr(0, bar);
+    const std::size_t slash = head.rfind('/');
+    if (slash != std::string::npos) head = head.substr(slash + 1);
+    return head;
+}
+
 OdLayout dialog_layout_for(App& app, const EngineDialog& d, const DialogAnim& anim) {
     OdLayout o = od_layout(dialog_content_md(app, d));
     o.anim_scale = anim.scale;  // `od.aa` L1895 `node.la`
@@ -9152,8 +9283,13 @@ OdLayout dialog_layout_for(App& app, const EngineDialog& d, const DialogAnim& an
     //   `TM`      (L1044)  ContentOffsetX -> the content x (`Jva`/`sqb`).
     // Defaults reproduce `od_layout` exactly (scale 1, offsets 0, LH true).
     o.portrait = kOdAvatarSrc * kOdAvatarScale * d.image_scale * o.panel.c;  // L1947
-    o.portrait_cx = o.sx(kOdAvatarX + d.image_offset_x);  // `C(-450+OB)`
-    o.portrait_cy = o.sy(d.image_offset_y);               // `D(YV)`
+    // `Od.ala` L81167-81176: the per-image `soa`/`toa` corrections, then the
+    // authored `ImageOffsetX/Y`.
+    const std::string avatar = dialog_avatar_basename(d.image);
+    const int avatar_soa = dialog_portrait_soa(avatar);
+    const int avatar_toa = dialog_portrait_toa(avatar);
+    o.portrait_cx = o.sx(kOdAvatarX - static_cast<float>(avatar_soa) + d.image_offset_x);
+    o.portrait_cy = o.sy(static_cast<float>(avatar_toa) + d.image_offset_y);
     // `Jva` L1951 `this.LH?a.C(-100+this.OB):a.C(0)` + `eba` L1950 `ov` +
     // the authored `ContentOffsetX`.
     o.body_x = o.sx((d.text_pos_x_by_image ? kOdBodyX + d.image_offset_x : 0.0f) +
@@ -9225,13 +9361,20 @@ bool notification_blocks_raycast(const EngineDialog& d) { return d.block_raycast
 // notification carries a button caption (`b=!(b==null||b=="")`). `Ib.RP` is
 // `He.DisableNotificationsButtons` (L1045 `Ib.RP=this.qUa`).
 bool notification_show_ok(const EngineDialog& d) {
-    // JS `Ib.RP` (He.DisableNotificationsButtons L1045) + `hab()` L1060: the
-    // Notification OK plate exists whenever the dialog HAS a `Right` slot
-    // (`He.Rib` L1057 creates `rh` even with no nested actions; the tutorial
-    // notifications are `<Button Type="Right" Color="White" Text="OK"/>`
-    // with no children). The old `!button_actions.empty()` gate dropped the
-    // plate on every such notification (the reported missing OK).
-    return !d.disable_notifications_buttons && d.has_right_button;
+    // JS `hab()` (L1060) + `He.S` L1050 `g = this.hab() ? l : ""` +
+    // `Ib` L1910 `yba != ""`: the bar's OK plate exists only when SOME slot
+    // carries actions AND the caption is non-empty. `hab()` counts ACTIONS
+    // (`Ng.actions`/`rh.actions`/`Nh.actions`/`Hj.actions`), not slot
+    // presence: the 20 shipped notifications that are
+    // `<Button Type="Right" Text="OK"/>` with NO children draw no plate in the
+    // JS, while `DeliveryNotification`/`UpgradeNotification`/
+    // `EnchantmentNotification` (a Right `<OpenShop><GiveItem>`) do.
+    if (d.disable_notifications_buttons) return false;  // `Ib.RP` (`qUa`)
+    const bool any_actions = !d.button_actions.empty() ||
+                             !d.left_.actions.empty() ||
+                             !d.middle_.actions.empty() ||
+                             !d.close_.actions.empty();
+    return any_actions && !d.button_text.empty();
 }
 
 void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog& d) {
@@ -25460,10 +25603,12 @@ bool run_quest_dialog_selfcheck(App& app) {
         const float cy0 = L.panel.py + L.panel.ph * 0.5f;
         dlg_case("D10 ImageScale -> portrait 512*1.8*iy*c (L1947 `la(1.8*iy)`)",
                  std::fabs(L.portrait - 512.0f * 1.8f * 0.9f * c) < 1e-2f);
-        dlg_case("D10 ImageOffsetX -> avatar x -450+OB (L1947 `C(-450+OB)`)",
-                 std::fabs(L.portrait_cx - (cx0 + (-450.0f - 130.0f) * c)) < 1e-2f);
-        dlg_case("D10 ImageOffsetY -> avatar y = YV (L1947 `D(YV)`)",
-                 std::fabs(L.portrait_cy - (cy0 + 40.0f * c)) < 1e-2f);
+        // `Od.ala` L81167-81176: `boss_lynx_young` is keyed in BOTH tables
+        // (soa 50, toa 50), so the avatar is `C(-450-50+OB)` / `D(50+YV)`.
+        dlg_case("D10 ImageOffsetX -> avatar x -450-soa+OB (L1947/L81170)",
+                 std::fabs(L.portrait_cx - (cx0 + (-450.0f - 50.0f - 130.0f) * c)) < 1e-2f);
+        dlg_case("D10 ImageOffsetY -> avatar y = toa+YV (L1947/L81173)",
+                 std::fabs(L.portrait_cy - (cy0 + (50.0f + 40.0f) * c)) < 1e-2f);
         dlg_case("D10 TextPosXByImage=0 -> content x from 0 + TM + TextOffset "
                  "(`Jva` L1951 / `eba` L1950)",
                  std::fabs(L.body_x - (cx0 + (0.0f + 30.0f + 10.0f) * c)) < 1e-2f);
@@ -25686,6 +25831,45 @@ bool run_quest_dialog_selfcheck(App& app) {
                          " = " + std::to_string(oracle_lines) + " lines)",
                      static_cast<int>(wr.lines.size()) == oracle_lines);
         }
+    }
+    // --- D11: the `Od.soa`/`Od.toa` per-portrait corrections (`Od.ala`
+    // L81167-81176). `boss_huntress` = 50 -> `C(-450-50)`; `man_spear` =
+    // 100/100 -> `C(-450-100)` + `D(100)`; an unkeyed image stays -450/0.
+    {
+        q.clear_dialogs();
+        auto portrait = [&](const char* img) {
+            EngineDialog d = probe_dialog("d11_probe");
+            d.image = img;
+            return dialog_layout_for(app, d, DialogAnim{});
+        };
+        const OdLayout huntress = portrait("boss_huntress");
+        const OdLayout spear = portrait("man_spear");
+        const OdLayout plain = portrait("boss_lynx");
+        const OdLayout base = portrait("");
+        const float c = huntress.panel.c;
+        const bool ok_h = std::fabs(huntress.portrait_cx -
+                                    (base.portrait_cx - 50.0f * c)) < 1e-2f;
+        const bool ok_s = std::fabs(spear.portrait_cx -
+                                    (base.portrait_cx - 100.0f * c)) < 1e-2f &&
+                          std::fabs(spear.portrait_cy - (base.portrait_cy + 100.0f * c)) <
+                              1e-2f;
+        const bool ok_p = std::fabs(plain.portrait_cx - base.portrait_cx) < 1e-2f &&
+                          std::fabs(plain.portrait_cy - base.portrait_cy) < 1e-2f;
+        std::fprintf(stdout,
+                     "[dlgverify][portrait] base=(%.2f,%.2f) huntress=(%.2f,%.2f) "
+                     "spear=(%.2f,%.2f) plain=(%.2f,%.2f) c=%.4f\n",
+                     static_cast<double>(base.portrait_cx),
+                     static_cast<double>(base.portrait_cy),
+                     static_cast<double>(huntress.portrait_cx),
+                     static_cast<double>(huntress.portrait_cy),
+                     static_cast<double>(spear.portrait_cx),
+                     static_cast<double>(spear.portrait_cy),
+                     static_cast<double>(plain.portrait_cx),
+                     static_cast<double>(plain.portrait_cy), static_cast<double>(c));
+        std::fflush(stdout);
+        dlg_case("D11 soa boss_huntress shifts the portrait 50 design px left", ok_h);
+        dlg_case("D11 soa+toa man_spear shifts it 100 left and 100 down", ok_s);
+        dlg_case("D11 an unkeyed portrait image keeps -450/0", ok_p);
     }
     q.clear_dialogs();
 
