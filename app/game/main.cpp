@@ -5303,6 +5303,29 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             glfwPollEvents();
             app.run_one_frame();
         }
+        // `SF2_MAP_DOT=<zone index>`: tap that zone's DOT instead of dragging
+        // (the `Vr.uka` -> `qF` snap path).
+        if (const char* dote = std::getenv("SF2_MAP_DOT")) {
+            const std::size_t zi = static_cast<std::size_t>(std::atoi(dote));
+            float dcx = 0.0f, dcy = 0.0f;
+            if (sf2::app::map_zone_dot_center(app, zi, dcx, dcy)) {
+                std::fprintf(stdout, "[mapdot] tap zone=%zu dot=%.0f,%.0f from=%d\n",
+                             zi, static_cast<double>(dcx), static_cast<double>(dcy),
+                             sf2::app::map_zone_selected(app));
+                std::fflush(stdout);
+                app.inject_click(dcx, dcy, 3);
+                for (int i = 0; i < 8; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                }
+                std::fprintf(stdout, "[mapdot] now=%d\n",
+                             sf2::app::map_zone_selected(app));
+            } else {
+                std::fprintf(stdout, "[mapdot] zone %zu has no dot\n", zi);
+            }
+            std::fflush(stdout);
+            return 0;
+        }
         const double drag_y = 300.0;
         const double drag_x0 = 800.0;
         // `SF2_DRAG_DX` overrides the drag distance (default -288 = LEFT = the
