@@ -567,6 +567,17 @@ public:
     };
 
 private:
+    // JS `Vr.aa` (L88008-88128) zone-strip PAN state: `ca` (the strip offset),
+    // the drag anchor `rLa`, the press x `WP`, the release velocity `ub` and
+    // the `state == 1` drag latch. `pan_ca_ == 0` when settled, so a settled
+    // capture draws the old rects exactly.
+    float pan_ca_ = 0.0f;
+    float pan_anchor_ = 0.0f;
+    float pan_start_x_ = 0.0f;
+    float pan_last_x_ = 0.0f;  // the last HELD pointer x (the release dx)
+    float pan_vel_ = 0.0f;
+    bool pan_dragging_ = false;
+    bool pan_moved_ = false;
     std::vector<ZoneTab> zones_;
     int zone_sel_ = 0;
     int hover_ = -1;      // JS `qe.kE` — the SELECTED node (a real press only)

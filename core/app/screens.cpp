@@ -10593,6 +10593,11 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         if (fp != std::string::npos && fp > 0) focus_zone = focus.substr(0, fp);
     }
     const std::string open_zone = !focus_zone.empty() ? focus_zone : cur;
+    if (std::getenv("SF2_TRACE_MAPFOCUS") != nullptr) {
+        std::fprintf(stdout, "[map] focus='%s' current='%s' open='%s'\n",
+                     focus.c_str(), cur.c_str(), open_zone.c_str());
+        std::fflush(stdout);
+    }
     zone_sel_ = -1;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
         if (zones_[i].part < 0) continue;   // not a map zone
@@ -11437,7 +11442,11 @@ void MapScreen::update_impl(float dt) {
     // fired the locked placeholder ("complete the previous act") instead of
     // the real boss. Scan on and keep the LAST hit to match the JS z-order.
     int node_hit = -1;
-    for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size(); ++i) {
+    // A panned strip (`ca != 0`) has the nodes under the finger offset by the
+    // drag: do not resolve a tap from the un-panned rects (`Vr.aa` owns the
+    // press while `state == 1`).
+    for (std::size_t i = 0; i < zones_[zone_sel_].nodes.size() && pan_ca_ == 0.0f;
+         ++i) {
         const Node& n = zones_[zone_sel_].nodes[i];
         if (!n.visible) continue;  // JS `Qr.lla` L2094 (hidden alt-state twin)
         const float node_half = map_node_size(app()) * 0.5f;
@@ -11477,6 +11486,88 @@ void MapScreen::update_impl(float dt) {
         }
     } else {
         hover_node_ = -1;  // off every node: clear the pressed-look
+    }
+    // JS `Vr.aa` (L88008-88128): the zone strip DRAG/PAN.
+    //   `b = this.cCa()` = the summed widget widths; `N.width > b - 200` ->
+    //   `ca = 0` (the strip fits, never pans). Otherwise the press inside the
+    //   strip starts `state 1`: `ca = rLa + (x - WP)`, clamped to
+    //   `[size.x - b + 200, 0]` with a 100 px overshoot; on release with
+    //   `|dx| > 10` the pointer velocity `ub` picks the neighbour widget
+    //   (`ub < 0` -> the NEXT zone) and `qF(items[a], 1)` switches. The port
+    //   only had the dot taps.
+    {
+        const MapMetrics mm = map_metrics(app());
+        const float strip_w = mm.map_fr_w * mm.bg_scale;
+        const float total = strip_w * static_cast<float>(zones_.size());
+        const float min_ca = static_cast<float>(kViewW) - total + 200.0f;
+        const bool fits = static_cast<float>(kViewW) > total - 200.0f;
+        const bool in_strip = p.y >= mm.map_y && p.y <= mm.map_y + mm.map_h &&
+                              p.x <= mm.panel_x;
+        if (fits) {
+            pan_ca_ = 0.0f;  // `N.width > b - 200 -> ca = 0; dA.C(0)`
+            pan_dragging_ = false;
+        } else if (in_strip && p.pressed && !node_tap && !pan_dragging_) {
+            pan_dragging_ = true;                       // `state = 1`
+            pan_start_x_ = static_cast<float>(p.x);     // `WP = a.x`
+            pan_last_x_ = pan_start_x_;
+            pan_anchor_ = pan_ca_;                      // `rLa = this.ca`
+            pan_vel_ = 0.0f;                            // `ub = 0`
+            pan_moved_ = false;                         // `Kx = false`
+            std::fprintf(stdout, "[map] pan start x=%.0f ca=%.1f strip=%.0f\n",
+                         static_cast<double>(p.x), static_cast<double>(pan_ca_),
+                         static_cast<double>(strip_w));
+            std::fflush(stdout);
+        } else if (pan_dragging_ && p.down) {
+            pan_last_x_ = static_cast<float>(p.x);
+            const float dx = static_cast<float>(p.x) - pan_start_x_;
+            pan_moved_ = std::fabs(dx) > 10.0f;         // `Kx = |c| > 10`
+            pan_ca_ = pan_anchor_ + dx;                 // `ca = rLa + c`
+            if (pan_ca_ > 100.0f) pan_ca_ = 100.0f;     // `ca > 100 -> 100`
+            if (pan_ca_ < min_ca - 100.0f) pan_ca_ = min_ca - 100.0f;
+            std::fprintf(stdout, "[map] pan ca=%.1f dx=%.1f moved=%d\n",
+                         static_cast<double>(pan_ca_), static_cast<double>(dx),
+                         pan_moved_ ? 1 : 0);
+            std::fflush(stdout);
+        } else if (pan_dragging_) {
+            // Release (`L.K.dd().xh(0)`): `ub = pointer velocity * .01`; a
+            // negative `ub` moves to `iJ(Eq) + 1` (the NEXT zone), else back.
+            pan_dragging_ = false;
+            // The release dx is the LAST HELD position: the release frame's
+            // `p.x` can already be the real cursor (outside the drag).
+            const float dx = pan_last_x_ - pan_start_x_;
+            pan_vel_ = dx * 0.01f;
+            // The neighbour WIDGET: the `Vr` strip only holds zones with a
+            // map backdrop (`FileName`), so skip the `Start`/Punchbag zone; if
+            // there is no neighbour in that direction the strip stays put.
+            int next = zone_sel_;
+            if (pan_moved_) {
+                const int step = (dx < 0.0f) ? 1 : -1;
+                for (int k = zone_sel_ + step;
+                     k >= 0 && k < static_cast<int>(zones_.size()); k += step) {
+                    if (zones_[static_cast<std::size_t>(k)].part >= 0) {
+                        next = k;
+                        break;
+                    }
+                }
+            }
+            pan_ca_ = 0.0f;  // `qF(.., 1)` snaps the strip to the new widget
+            if (next != zone_sel_) {
+                zone_sel_ = next;
+                hover_ = -1;
+                apply_map_focus(app().quest_engine().last_map_focus());
+                std::fprintf(stdout, "[map] pan release dx=%.1f -> zone %s\n",
+                             static_cast<double>(dx), zones_[zone_sel_].name.c_str());
+            } else {
+                std::fprintf(stdout,
+                             "[map] pan release dx=%.1f -> no switch (zone=%s "
+                             "sel=%d next=%d)\n",
+                             static_cast<double>(dx), zones_[zone_sel_].name.c_str(),
+                             zone_sel_, next);
+            }
+            std::fflush(stdout);
+        } else {
+            pan_ca_ = 0.0f;  // settled: the strip is snapped
+        }
     }
     // The `Rr` FIGHT button (`tj`, L2099/L2102): the ONLY fight trigger.
     // JS `Ya` -> `v.Am(battle)` (L1216) -> `wa.mp(6)`. A boss node arms the
@@ -12963,12 +13054,31 @@ void MapScreen::render_impl(App& app) {
     // zone's backdrop (JS `qe.W0a` L2143 `parseInt(fileName.split(".")[1])-1`)
     // is scaled to the strip height `d` and drawn at `dA.x` (0 for the
     // single-zone content; `-100+ca` once the strip scrolls).
+    // `Vr.aa` L88125 `this.dA.C(-100 + this.ca)`: the whole strip (every zone
+    // widget laid side by side, `cCa()` = the summed background widths) shifts
+    // by the drag offset. `pan_ca_` is the JS `ca` (0 when settled), so a
+    // settled capture draws exactly the old rects.
+    const float strip_w = mm.map_fr_w * mm.bg_scale;
+    const float pan_dx = pan_ca_;
     bool bg_done = false;
     if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size() &&
         zones_[zone_sel_].part >= 0) {
         bg_done = app.draw_atlas_rect("map" + std::to_string(zones_[zone_sel_].part),
-                                      mm.bg_x, mm.map_y, mm.map_fr_w * mm.bg_scale,
-                                      mm.map_h, 1.0f);
+                                      mm.bg_x + pan_dx, mm.map_y,
+                                      mm.map_fr_w * mm.bg_scale, mm.map_h, 1.0f);
+    }
+    // The neighbours slide in during a drag (`Vr` lays the widgets side by
+    // side; each is one `mapN` backdrop wide).
+    if (pan_dx != 0.0f) {
+        for (int dir = -1; dir <= 1; dir += 2) {
+            const int zi = zone_sel_ + dir;
+            if (zi < 0 || static_cast<std::size_t>(zi) >= zones_.size()) continue;
+            if (zones_[static_cast<std::size_t>(zi)].part < 0) continue;
+            app.draw_atlas_rect(
+                "map" + std::to_string(zones_[static_cast<std::size_t>(zi)].part),
+                mm.bg_x + pan_dx + static_cast<float>(dir) * strip_w, mm.map_y,
+                mm.map_fr_w * mm.bg_scale, mm.map_h, 1.0f);
+        }
     }
     if (!bg_done) {
         const float verts[] = {0, mm.map_y, kViewW, mm.map_y, kViewW, mm.bar_y,
@@ -12985,14 +13095,18 @@ void MapScreen::render_impl(App& app) {
     }
     const bool zone_ok =
         zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size();
-    const std::size_t node_count = zone_ok ? zones_[zone_sel_].nodes.size() : 0;
     const float node_px = map_node_size(app);
     const float node_ls = node_px / kMapNodeSourcePx;  // local -> screen
-    for (std::size_t i = 0; i < node_count; ++i) {
-        const Node& n = zones_[zone_sel_].nodes[i];
+    // One zone's `Qr` nodes at `dx` (the `Vr` strip offset). Only the ACTIVE
+    // zone carries the selection/pressed frames (its `qe.kE`/hover).
+    auto draw_zone_nodes = [&](const ZoneTab& z, float dx, bool active_zone) {
+    for (std::size_t i = 0; i < z.nodes.size(); ++i) {
+        const Node& n = z.nodes[i];
         if (!n.visible) continue;  // `WDa` + `Qr.lla` (JS L256/L2094)
-        const bool selected = static_cast<int>(i) == hover_;      // JS `kE`
-        const bool hovered = static_cast<int>(i) == hover_node_;  // pointer only
+        const float nx = n.x + dx;
+        const bool selected = active_zone && static_cast<int>(i) == hover_;  // `kE`
+        const bool hovered =
+            active_zone && static_cast<int>(i) == hover_node_;  // pointer only
         // JS `Qr` (L2092-2095) `b=a.tt()`: the `<Battle>` record's `Locked`
         // (not `!active` — the visible-node gate already implies `active`).
         const bool locked = n.locked;
@@ -13011,17 +13125,17 @@ void MapScreen::render_impl(App& app) {
         const std::string pressed = std::string("BattleBtnPressed/pressed_") + n.icon;
         const char* tex_frame =
             selected ? active.c_str() : (hovered ? pressed.c_str() : base.c_str());
-        bool drawn = try_draw_atlas_button(app, tex_frame, n.x, n.y, node_px, node_px, 1.0f);
+        bool drawn = try_draw_atlas_button(app, tex_frame, nx, n.y, node_px, node_px, 1.0f);
         if (!drawn && locked) {
             const std::string lock_base = std::string("BattleBtnBase/base_") + n.icon;
-            drawn = try_draw_atlas_button(app, lock_base.c_str(), n.x, n.y, node_px,
+            drawn = try_draw_atlas_button(app, lock_base.c_str(), nx, n.y, node_px,
                                           node_px, 0.6f);
         }
         if (!drawn) {
             const float r = hovered ? 0.9f : (n.active ? 0.6f : 0.3f);
             const float g = hovered ? 0.5f : (n.active ? 0.4f : 0.3f);
             const float b = hovered ? 0.3f : (n.active ? 0.25f : 0.3f);
-            const float x0 = n.x - node_px / 2, y0 = n.y - node_px / 2;
+            const float x0 = nx - node_px / 2, y0 = n.y - node_px / 2;
             const float verts[] = {x0, y0, x0 + node_px, y0, x0 + node_px, y0 + node_px,
                                    x0, y0, x0 + node_px, y0 + node_px, x0, y0 + node_px};
             ren.draw_triangles(verts, 6, r, g, b, n.active ? 0.95f : 0.5f);
@@ -13030,9 +13144,19 @@ void MapScreen::render_impl(App& app) {
         // black, `Ia(128)` (no align shift -> left edge at `C`); text
         // `Y.na(a.Cg)` (Alias, `Qr.Bka` L2094 / `Lc.Cg` L1403).
         const std::string label_key = n.alias.empty() ? n.name : n.alias;
-        draw_ui_label(app, n.x - 50.0f * node_ls, n.y + 65.0f * node_ls,
+        draw_ui_label(app, nx - 50.0f * node_ls, n.y + 65.0f * node_ls,
                       100.0f * node_ls, 55.0f * node_ls, loc(app, label_key, n.name), 0.6f,
                       UiAlign::Left, 0.0f, 0.0f, 0.0f);
+    }
+    };
+    if (zone_ok) draw_zone_nodes(zones_[zone_sel_], pan_dx, true);
+    if (pan_dx != 0.0f) {
+        for (int dir = -1; dir <= 1; dir += 2) {
+            const int zi = zone_sel_ + dir;
+            if (zi < 0 || static_cast<std::size_t>(zi) >= zones_.size()) continue;
+            draw_zone_nodes(zones_[static_cast<std::size_t>(zi)],
+                            pan_dx + static_cast<float>(dir) * strip_w, false);
+        }
     }
     // `Ur` zone strip (JS L2112-2116, `qk.layout` L2137): the selected zone
     // name (`Dk`) + the zone dots (`WG`, `inactive_bulb`; the selected slot

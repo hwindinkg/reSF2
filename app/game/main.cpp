@@ -1886,6 +1886,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool changetab_probe = false;   // --changetab-probe: synthetic `Hn` action
     bool quest_query_probe = false;  // --quest-query-probe: Foreach query proof
     bool map_button_probe = false;   // --map-button-probe: Vb map-button proof
+    // --map-drag-probe: drive the `Vr.aa` zone-strip drag (press, 24 held
+    // moves, release) with injected pointers and log the pan/zone switch.
+    bool map_drag_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2166,6 +2169,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             quest_query_probe = true;
         } else if (arg == "--map-button-probe") {
             map_button_probe = true;
+        } else if (arg == "--map-drag-probe") {
+            map_drag_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5286,6 +5291,68 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (map_drag_probe) {
+        // --- `--map-drag-probe`: the `Vr.aa` zone-strip drag (L88008-88128) --
+        // Hidden window, no OS input: the pointer is injected (press at
+        // `x0`, 24 held moves to `x0-288`, then release). A negative dx is a
+        // LEFT drag -> `ub < 0` -> the NEXT zone (`iJ(Eq) + 1`).
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenMap));
+        app.set_headless_frames(1);  // uncapped deterministic stepping
+        for (int i = 0; i < 30; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const double drag_y = 300.0;
+        const double drag_x0 = 800.0;
+        // `SF2_DRAG_DX` overrides the drag distance (default -288 = LEFT = the
+        // NEXT zone; a positive value drags right = the PREVIOUS zone).
+        double drag_dx = -288.0;
+        if (const char* dxe = std::getenv("SF2_DRAG_DX")) drag_dx = std::atof(dxe);
+        // `SF2_DRAG_SHOT=<path>` captures the MID-DRAG frame (the strip panned).
+        const char* drag_shot = std::getenv("SF2_DRAG_SHOT");
+        std::fprintf(stdout, "[mapdrag] dx=%.0f\n", drag_dx);
+        std::fflush(stdout);
+        app.inject_click(drag_x0, drag_y, 3);  // press edge + 2 held
+        for (int i = 0; i < 3; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        // `SF2_DRAG_TWICE=1`: run the SAME drag twice (the second one starts on
+        // the zone the first switched to, so a right drag proves the PREVIOUS
+        // neighbour).
+        const bool drag_twice = std::getenv("SF2_DRAG_TWICE") != nullptr;
+        const int drags = drag_twice ? 2 : 1;
+        // `SF2_DRAG_DX2` = the SECOND drag's distance (e.g. left then right).
+        double drag_dx2 = drag_dx;
+        if (const char* dxe = std::getenv("SF2_DRAG_DX2")) drag_dx2 = std::atof(dxe);
+        for (int dg = 0; dg < drags; ++dg) {
+            const double this_dx = (dg == 0) ? drag_dx : drag_dx2;
+            if (dg > 0) {
+                app.inject_click(drag_x0, drag_y, 3);  // press again
+                for (int i = 0; i < 3; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                }
+            }
+            for (int i = 1; i <= 24; ++i) {
+                app.inject_click(drag_x0 + this_dx * (i / 24.0), drag_y, 1);  // held
+                glfwPollEvents();
+                app.run_one_frame();
+                if (drag_shot != nullptr && i == 12) {
+                    app.capture_png(drag_shot);  // mid-drag: the strip is panned
+                    std::fprintf(stdout, "[mapdrag] mid-drag shot %s\n", drag_shot);
+                    std::fflush(stdout);
+                }
+            }
+            for (int i = 0; i < 3; ++i) {  // release
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+        }
+        std::fprintf(stdout, "[mapdrag] done\n");
+        std::fflush(stdout);
+        return 0;
     } else if (map_button_probe) {
         // --- `--map-button-probe`: the `Vb` map-button manager, JS-exact ------
         // Hidden window + RULE 0 watchdog (driver_mode). NO OS input.
