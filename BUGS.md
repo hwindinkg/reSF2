@@ -2461,3 +2461,23 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
 (короткий сегмент в позиции снаряда против капсул цели) — урон/импульс всё
 равно из `<Interval>`. Ветка `hit_test` по рёбрам остаётся для моделей с
 капсулами.
+
+### QA-30.10 — слоты Ranged/Magic (замер)
+
+`resolve_enemy_loadout` раскладывал по слотам только Skeleton/Weapon/Armor/
+Helm, а Ranged/Magic клал в `extras`, поэтому у босса оказывались ОБА: и
+плейсхолдер `Default`-шаблона (`NoRanged`/`NoMagic`), и его реальный предмет
+(`RANGED_SHURIKENS`, `MAGIC_MIND_THROW`). Следствия:
+
+- `ranged_available` был false у босса С ranged-оружием: замер — Линкс
+  `K2=+1, alt=-1`; после фикса `K2=-1, alt=1`;
+- ребёнок снаряда (`CopyParentType="Ranged"`) копировал `NoRanged` вместо
+  сюрикена (модель skeleton-only).
+
+JS `wd.K0` (L505) / `kc.d$a` (L820) читают СЛОТ (`parameters.ig`/`Mg`, один
+на тип, `xc.hk` перезаписывает слот в порядке `<Items>`). Порт теперь
+бакетирует все шесть слотов last-wins и выводит оба флага из типизированного
+списка.
+
+Замер: `--wave-probe BOSS_LYNX` раунд 2 — 2× `RangedShurikenPlayer`,
+`[child] HIT Player dmg=0.075`.
