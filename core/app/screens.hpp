@@ -1850,6 +1850,11 @@ private:
 int profile_tab_persist();
 void set_profile_tab_for_test(int t);
 
+// [probe] the Credits overlay state (`xh`; `--credits-probe`).
+bool credits_view_open();
+void credits_view_show(App& app);
+float credits_view_scroll();
+
 bool settings_dialog_open();
 void open_settings_dialog(App& app);
 void close_settings_dialog();

@@ -1914,6 +1914,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --results-store-probe: the Results STORE plate only fires
     // `QUEST_EVENT_SHOP_BUTTON_PRESS` (`kk.aab` L85817-85819).
     bool results_store_probe = false;
+    // --credits-probe: the Credits overlay auto-closes when the last title
+    // scrolls past the top (`xh.aa` L77942-77946).
+    bool credits_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2206,6 +2209,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             profile_tab_probe = true;
         } else if (arg == "--results-store-probe") {
             results_store_probe = true;
+        } else if (arg == "--credits-probe") {
+            credits_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5326,6 +5331,39 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (credits_probe) {
+        // --- `--credits-probe`: `xh.aa` auto-close ---------------------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 4; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        // The Credits overlay is a child of the settings dialog: `xh` sits on
+        // the still-open `un`, and only settings_dialog_consume pumps it.
+        sf2::app::open_settings_dialog(app);
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        sf2::app::credits_view_show(app);
+        std::fprintf(stdout, "[creditsprobe] open=%d scroll=%.1f\n",
+                     sf2::app::credits_view_open() ? 1 : 0,
+                     static_cast<double>(sf2::app::credits_view_scroll()));
+        int frames = 0;
+        while (sf2::app::credits_view_open() && frames < 6000) {
+            glfwPollEvents();
+            app.run_one_frame();
+            ++frames;
+        }
+        std::fprintf(stdout,
+                     "[creditsprobe] closed=%d after %d frames scroll=%.1f -> %s\n",
+                     sf2::app::credits_view_open() ? 0 : 1, frames,
+                     static_cast<double>(sf2::app::credits_view_scroll()),
+                     sf2::app::credits_view_open() ? "FAIL" : "PASS");
+        std::fflush(stdout);
+        return sf2::app::credits_view_open() ? 1 : 0;
     } else if (profile_tab_probe) {
         // --- `--profile-tab-probe`: `vb.init` L91016 -----------------------
         glfwHideWindow(app.renderer().window());

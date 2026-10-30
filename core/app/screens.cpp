@@ -25002,6 +25002,21 @@ void credits_close() {
 bool credits_consume(App& app) {
     if (!g_credits_open) return false;
     g_credits_scroll += 1.3f;  // `this.content.D(this.content.ra-1.3)`
+    // JS `xh.aa` (L77942-77946): every row is hidden once it leaves the view
+    // (`c.node.R(!this.Wbb(c.node, c.height))`) and the overlay CLOSES by
+    // itself when the last title has scrolled past the top
+    // (`if (this.kma(this.At.Yn(...).y) < 0) this.pn();`). The content is the
+    // title (120) + `a = 220` start + each row's wrapped height + 90, then the
+    // `CreditsFamilies` title at +60.
+    float total = 220.0f;
+    for (const CreditsRow& r : g_credits_rows) {
+        total += measure_ui_wrapped(app, r.value, 500.0f, 0.5f, 0.7f) + 90.0f;
+    }
+    total += 60.0f + 120.0f;  // the families title (Fa(1E3,120)) at `a + 60`
+    if (g_credits_scroll > total) {
+        credits_close();  // `this.pn()`
+        return true;
+    }
     const App::PointerState& p = app.pointer();
     if (p.pressed) credits_close();  // `L.K.dd().Db(0)&&this.pn()`
     return true;
@@ -25823,6 +25838,13 @@ int shop_tab_index_for(const std::string& tab) {
 }
 
 } // namespace
+
+// [probe] the Credits overlay state (`xh`): `--credits-probe` opens it and
+// steps frames until the auto-close (`xh.aa` L77944-77946) fires. Defined
+// outside the anonymous namespace so `main.cpp` can call them.
+bool credits_view_open() { return g_credits_open; }
+void credits_view_show(App& app) { credits_show(app); }
+float credits_view_scroll() { return g_credits_scroll; }
 
 // `Oa.uLa(a,b)` (L1181866) = `e1(a)` (`f5(Cj.l6(a))`, L2286) + `Za.SA(b)`
 // (select the named cell).
