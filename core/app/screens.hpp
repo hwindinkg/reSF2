@@ -1859,6 +1859,9 @@ void za_nav_rail_center(App& app, ScreenId id, float& cx, float& cy);
 // the wins recorded for the battle, clamped to its `<Fight>` count, so the
 // quest journal's `_$Fight` is `zone|name|(index+1)`.
 int map_fight_index(App& app, const std::string& name, int fight_count);
+// JS .wD L50302 + YL L9023: the FIRST fight with status==2 (not beaten,
+// not locked) — the node-based ladder cursor.
+int map_fight_index_for(App& app, const MapScreen::Node& n);
 // `Wc.NAa(v.Gz(fight))` (JS L2163): the `Wc` difficulty LEVEL index (0..4) for
 // a fight, resolved from the SAME rating the Map's `Wc` bar uses
 // (`map_battle_rating_cached` -> `map_difficulty_level`). `fight_triple` is the

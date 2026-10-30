@@ -10215,7 +10215,7 @@ void MapScreen::recompute_node_states(const WarriorSave& w) {
             // replayable during the window and then vanished forever.
             n.fight_ready = true;
             {
-                const int fi = map_fight_index(app(), n.name, n.fight_count);
+                const int fi = map_fight_index_for(app(), n);
                 const std::string fid =
                     n.zone + "|" + n.name + "|" +
                     (static_cast<std::size_t>(fi) < n.fight_names.size()
@@ -10506,6 +10506,41 @@ int map_fight_index(App& app, const std::string& name, int fight_count) {
     return wins;
 }
 
+// JS `v.wD(a)` (L50302) + the status setter `YL` (L9023): the ladder is on
+// the FIRST `<Fight>` whose status is 2 — NOT beaten (`repeat > 0 &&
+// CompletedCount >= repeat` = status 1) and not locked (`<Fight Locked>` =
+// status 3). The port used the SUM of the battle's wins clamped, so a save
+// with a gap (fight 2 won, fight 1 not) launched fight 2 where the JS still
+// launches fight 1.
+int map_fight_index_for(App& app, const MapScreen::Node& n) {
+    const int count = n.fight_count > 0 ? n.fight_count : 1;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return 0;
+    }
+    for (int k = 0; k < count; ++k) {
+        const std::size_t kk = static_cast<std::size_t>(k);
+        const std::string fname =
+            kk < n.fight_names.size() ? n.fight_names[kk] : std::to_string(k + 1);
+        const std::string ids = n.zone + "|" + n.name + "|" + fname;
+        int wins = 0;
+        for (const WarriorSave::FightWins& f : w.fights) {
+            if (f.name == ids) {
+                wins = f.wins;
+                break;
+            }
+        }
+        if (wins == 0 && count == 1) wins = map_fight_wins(app, n.name);
+        const int repeat = kk < n.fight_replays.size() ? n.fight_replays[kk] : 0;
+        const bool beaten = repeat > 0 && wins >= repeat;
+        const bool locked = kk < n.fight_locked.size() && n.fight_locked[kk];
+        if (!beaten && !locked) return k;
+    }
+    return count - 1;  // every fight beaten/locked: keep the last (roster clamp)
+}
+
 void MapScreen::launch_battle(const Node& n) {
     // JS `Ya` battle-start (L2131-2132): `wa.F().mp(6, battle)`.
     // Carry the battle into the pending flow: name/location +
@@ -10516,7 +10551,7 @@ void MapScreen::launch_battle(const Node& n) {
     // `<Fight>`, so the quest journal's `_$Fight` is `zone|name|<n>`
     // (FirstGuardBeaten keys on `ZONE_1|BOSS_LYNX|1`, quests.xml L265; the
     // ladder's next opponent is `|2` = BRICK, zone_1/story.xml L176-193).
-    const int fight_index = map_fight_index(app(), n.name, n.fight_count);
+    const int fight_index = map_fight_index_for(app(), n);
     pb.fight_triple =
         n.zone + "|" + n.name + "|" + std::to_string(fight_index + 1);
     pb.zone = n.zone;  // stages.xml Zone (`hp` scope for the <Rules> feeder)
@@ -10572,7 +10607,7 @@ std::vector<BossRosterEntry> boss_roster_entries(App& app, const MapScreen::Node
 }
 
 void MapScreen::start_battle(const Node& n) {
-    const int fight_index = map_fight_index(app(), n.name, n.fight_count);
+    const int fight_index = map_fight_index_for(app(), n);
     // JS `ha.RA("FightEnter")` (`be.FightEnter` -> `QUEST_EVENT_FIGHT_ENTER`,
     // sf2.js L998): fired on ENTERING a fight, before the `ik` VS intro. The
     // zone-1 ladder greets each opponent on it (`zone_1/story.xml` L176-193
@@ -11216,7 +11251,7 @@ void MapScreen::update_impl(float dt) {
                 WarriorSave w = app().save().load();
                 const std::string mf =
                     n.zone + "|" + n.name + "|" +
-                    std::to_string(map_fight_index(app(), n.name, n.fight_count) + 1);
+                    std::to_string(map_fight_index_for(app(), n) + 1);
                 if (w.map_focus != mf) {
                     w.map_focus = mf;
                     app().save().save(w);
@@ -11242,7 +11277,7 @@ void MapScreen::update_impl(float dt) {
         // record / `FightFake` node has NO fight trigger.
         // Branch 2 of `Rr` (L1083413): a locked ACTIVE `<Fight>` also takes
         // the `mk` description panel and never builds `tj` (`Cyb`).
-        const int hfb_fi = map_fight_index(app(), n.name, n.fight_count);
+        const int hfb_fi = map_fight_index_for(app(), n);
         const bool hfb_fight_locked =
             static_cast<std::size_t>(hfb_fi) < n.fight_locked.size() &&
             n.fight_locked[static_cast<std::size_t>(hfb_fi)];
@@ -12089,7 +12124,7 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // selected index is the LAST (`b.index != a.ag-1 ? new pk : new ok`);
     // every other fight body is `pk`. `mk_fi` = the selected `<Fight>` index
     // (`b.index`), `node->fight_count` = `a.ag`.
-    const int mk_fi = map_fight_index(app, node->name, node->fight_count);
+    const int mk_fi = map_fight_index_for(app, *node);
     const bool boss_family = node->type == "BOSSES" ||
                              node->type == "BOSSES_REPLAYABLE" ||
                              node->type == "FINAL_BATTLE_TITAN";
