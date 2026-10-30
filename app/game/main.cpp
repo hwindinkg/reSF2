@@ -3372,6 +3372,26 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             sf2::app::SaveSystem ss(save_path, save_path);
             sf2::app::WarriorSave w = ss.load();
             w.weapon = equip_probe_item;
+            // [probe, authorised] SF2_EQUIP_TIER=N: give the equipped weapon a
+            // concrete UpgradeLevel (the tier -> fight-stat measurement).
+            if (const char* tp = std::getenv("SF2_EQUIP_TIER")) {
+                const int tier = std::atoi(tp);
+                bool found = false;
+                for (auto& oi : w.items) {
+                    if (oi.name != equip_probe_item) continue;
+                    oi.upgrade_level = tier;
+                    found = true;
+                    break;
+                }
+                if (!found) {
+                    sf2::app::WarriorSave::OwnedItem oi;
+                    oi.name = equip_probe_item;
+                    oi.count = 1;
+                    oi.equipped = true;
+                    oi.upgrade_level = tier;
+                    w.items.push_back(oi);
+                }
+            }
             ss.save(w);
             std::fprintf(stdout, "[probe] equip -> %s\n", equip_probe_item.c_str());
             std::fflush(stdout);

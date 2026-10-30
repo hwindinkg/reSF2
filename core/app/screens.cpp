@@ -7439,6 +7439,20 @@ std::map<std::string, float> resolve_player_attributes(App& app) {
         if (it != per_level.end()) v += static_cast<float>(level) * it->second;
         out[name] = v;
     }
+    // [probe, authorised] SF2_TRACE_DMG: the resolved attribute map (the item
+    // UPGRADE TIER's effect on the fight stats — `zf.uu`/`tZa` apply the
+    // current tier's absolute values before this sum).
+    if (std::getenv("SF2_TRACE_DMG") != nullptr) {
+        std::fprintf(stdout, "[attrs] resolved:");
+        for (const auto& kv : out) {
+            if (kv.second != 0.0f) {
+                std::fprintf(stdout, " %s=%.0f", kv.first.c_str(),
+                             static_cast<double>(kv.second));
+            }
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
     return out;
 }
 

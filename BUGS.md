@@ -2481,3 +2481,16 @@ JS `wd.K0` (L505) / `kc.d$a` (L820) читают СЛОТ (`parameters.ig`/`Mg`,
 
 Замер: `--wave-probe BOSS_LYNX` раунд 2 — 2× `RangedShurikenPlayer`,
 `[child] HIT Player dmg=0.075`.
+
+### QA-30.10 — тир улучшения ДОХОДИТ до боя (замер)
+
+Проверено, что «улучшение не поднимает показатели» — это ТОЛЬКО отображение
+в магазине (исправлено), а не боевые статы. `resolve_player_attributes`
+применяет текущий тир (`zf.uu`/`tZa`, абсолютные значения строки `<Upgrade>`)
+до суммирования:
+
+  SF2_EQUIP_TIER=300  -> `[attrs] WeaponDamage=45`   (30 тир-300 + 5 старт + 10*ур.)
+  SF2_EQUIP_TIER=5240 -> `[attrs] WeaponDamage=1372` (1357 тир-5240 + 5 + 10*ур.)
+
+Новые пробники: `SF2_EQUIP_TIER=N` (тир для `--equip-probe`) и
+`SF2_TRACE_DMG` печатает итоговую карту атрибутов.
