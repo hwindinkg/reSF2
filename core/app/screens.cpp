@@ -4362,9 +4362,33 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                           cy - bar_h * 0.5f, bar_w, bar_h, 1.0f, /*fill=*/true, false,
                           /*top_left=*/true);
     if (en_frac > 0.0f) {
-        try_draw_atlas_button(app, "Energy_Bar", x + icon_energy * 1.1f, cy - bar_h * 0.5f,
-                              bar_w * en_frac, bar_h, 1.0f, /*fill=*/true, false,
-                              /*top_left=*/true);
+        // JS `Uf.kB` L83275-83277: `this.Swb.wl(vc.ho(Jc.io, this.ratio()))` — the
+        // bar is drawn at its FULL width with the sprite's own pitch and the
+        // `EFilled` draw mode (`Jc.io` = EHorizontal) discards everything past
+        // `amount` of that width. Re-emitting the quad narrower (`bar_w*frac`)
+        // instead SQUEEZES all five energy segments into the filled fraction.
+        // The UV clip below is the same left-fraction wipe `draw_bar_layer`
+        // uses for the shop parameter bars.
+        sf2::data::atlas_frame efr;
+        int etw = 0, eth = 0;
+        unsigned int egl = 0;
+        const bool have_e = app.get_atlas_frame("Energy_Bar", &efr, &etw, &eth, &egl);
+        if (have_e && etw > 0 && eth > 0 && efr.w > 0 && efr.h > 0) {
+            const float bx = x + icon_energy * 1.1f;
+            const float by = cy - bar_h * 0.5f;
+            const float x1 = bx + bar_w * en_frac;
+            const float xy[8] = {bx, by, x1, by, bx, by + bar_h, x1, by + bar_h};
+            const float un = 1.0f / static_cast<float>(etw);
+            const float vn = 1.0f / static_cast<float>(eth);
+            const float u0 = static_cast<float>(efr.x) * un;
+            const float u1 =
+                (static_cast<float>(efr.x) + static_cast<float>(efr.w) * en_frac) * un;
+            const float v0 = static_cast<float>(efr.y) * vn;
+            const float v1 =
+                (static_cast<float>(efr.y) + static_cast<float>(efr.h)) * vn;
+            const float uv[8] = {u0, v0, u1, v0, u0, v1, u1, v1};
+            app.renderer().draw_textured_quad("Energy_Bar", xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+        }
     }
     }  // !unlimited_energy (the bolt icon + bar are hidden, `xr.kB` L82605)
     // The tap itself is handled in `za_update` (see `ZaTapRect`).
@@ -18380,6 +18404,9 @@ const std::map<int, int>& level_thresholds() {
 
 // JS `OLa`/`Oz` (L253-254): `Oz()` = `$B[level-1]` (the threshold to go from
 // `level` to `level+1`); 100 fallback when the file is absent.
+// The energy cap for the probes.
+int za_energy_max() { return energy_max(); }
+
 // The level cap (the highest level in the XP table, `wr.myb` L82714).
 int max_player_level() {
     int cap = 0;

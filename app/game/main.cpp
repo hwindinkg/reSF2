@@ -1980,6 +1980,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --za-widget-probe: the `za` level `max` badge (`wr.myb` L82709-82725) and
     // the `unlimited_energy` energy state (`xr.kB` L82605-82619).
     bool za_widget_probe = false;
+    // --za-energy-probe: the energy bar's `EFilled` clip (`Uf.kB` L83275) —
+    // `Power=2` must keep the 5-segment pitch, not squeeze all segments into
+    // 40% of the bar.
+    bool za_energy_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2296,6 +2300,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             ruby_upgrade_probe = true;
         } else if (arg == "--za-widget-probe") {
             za_widget_probe = true;
+        } else if (arg == "--za-energy-probe") {
+            za_energy_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5416,6 +5422,42 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (za_energy_probe) {
+        // --- `--za-energy-probe`: the `EFilled` clip --------------------------
+        glfwHideWindow(app.renderer().window());
+        const int power = std::getenv("SF2_ENERGY_POWER")
+                              ? std::atoi(std::getenv("SF2_ENERGY_POWER"))
+                              : 2;
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            w.power = power;
+            // the energy REGENERATES from PowerSyncTime (the sync would
+            // restore it to full before the Dojo renders)
+            w.power_sync_time = sf2::app::WarriorSave::wall_now();
+            app.save().save(w);
+            std::fprintf(stdout, "[enprobe] save write: power=%d reload=%d\n",
+                         w.power, app.save().load().power);
+            std::fflush(stdout);
+        } catch (const std::exception&) {
+        }
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[enprobe] power=%d / %d -> energy fill drawn at %.0f%%\n",
+                     power, sf2::app::za_energy_max(),
+                     sf2::app::za_energy_max() > 0
+                         ? 100.0 * power / sf2::app::za_energy_max()
+                         : 0.0);
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[enprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return 0;
     } else if (za_widget_probe) {
         // --- `--za-widget-probe`: the `max` / `unlimited_energy` widgets ------
         glfwHideWindow(app.renderer().window());

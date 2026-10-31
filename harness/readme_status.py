@@ -110,8 +110,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "flag (`yj`/`aE`) the save does not model", False),
         ("dojo `max` / `unlimited_energy` widgets (L82709/L82605, probe "
          "`--za-widget-probe`)", True),
-        ("dojo bar fill uses a shortened quad, not the EFilled clip "
-         "(`Uf.kB` L83275)", False),
+        ("dojo bar fill clips the full-width sprite (`Uf.kB` L83275, probe "
+         "`--za-energy-probe`: segment pitch preserved at Power=2)", True),
     ]),
     ("Quests & progress", [
         ("`quest-verify`, `quest-verify-buy`", True),
