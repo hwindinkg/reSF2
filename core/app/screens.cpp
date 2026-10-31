@@ -13248,9 +13248,15 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     const float btn_w = fb.w;
     const float btn_cx = fb.cx;
     const float btn_cy = fb.cy;
+    // JS `Bb` (L1842) draws its sprite (`btnWhite`, atlas frame 300x222)
+    // STRETCHED to the button's design box `xc(600)` x 112 (the node scale is
+    // `Pb(c*.2)` = `la(c*.2/112)`), i.e. a plain non-uniform stretch — NOT the
+    // 9-slice `draw_bb_plate` path (which squashed the 222-tall art into the
+    // 55.8 px box and left a 27 px visible face where the oracle's is 55).
     bool btn_drawn = false;
     if (load_sliced_atlas(app)) {
-        btn_drawn = draw_bb_plate(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h, 1.0f);
+        btn_drawn = try_draw_atlas_button(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h,
+                                          1.0f, /*fill=*/true);
     }
     if (!btn_drawn) {
         draw_flat_button(app, "^startFight^", btn_cx, btn_cy, btn_w, btn_h, 0.35f, 0.45f,
@@ -17031,6 +17037,13 @@ void FightScreen::render_impl(App& app) {
     const bool results_covered = app.screens().current_id() == kScreenResults;
     if (!results_covered) {
     // The round plate + scrim, UNDER the HUD (JS: `Cr` is a location child).
+    // The round plate + its full-screen scrim (`Cr`) are drawn BEFORE the HUD.
+    // The audit read `Ar.E1` (L83904/83909: `Sf` appended, then `Cr`) as "the
+    // plate composites over the HUD", but the ORACLE contradicts it: in
+    // `oracle_matrix/fight_stance.png` (FIGHT plate up) the HP-bar fill at
+    // (450,100) is (249,57,9) — the UNDIMMED colour. Drawing the plate after
+    // the HUD measured (167,38,6) there (a 0.67 factor), so the JS scrim does
+    // NOT cover the bars; the previous order matches the capture.
     draw_fight_banner(app, *fight_);
 
     // --- Fight HUD (JS `Ar`/`Sf`/`lk`/`Er` L2016-2041) ------------------
