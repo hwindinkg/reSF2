@@ -1150,6 +1150,10 @@ private:
     };
     ComboTracker combo_callout_[2];           // [0]=player, [1]=enemy
     int callout_sim_frame_ = 0;               // the fixed-step frame counter
+    // JS `Gr.Omb` L85468 (via `lk.WK` L84608 <- `Sf.WK` L84959 <- `ca.WK`
+    // L16244): the round advance clears EVERY `Gr.Gu` element. The screen
+    // tracks the round number to detect it.
+    int callout_round_ = -1;
     // Appends one `Gr.Gu` element for a drained `CalloutSignal` (JS
     // `Gr.addElement` + `Hx.init`). Defined in screens.cpp.
     void push_callout_element(int side, int type, int value);

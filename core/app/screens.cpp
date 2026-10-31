@@ -16219,6 +16219,24 @@ void FightScreen::update_impl(float dt) {
     // + the hot-ground rule tick) into the per-side `Gr.Gu` lists (JS
     // `Gr.addElement`, L2051). JS pushes synchronously from the producers;
     // the native queues them and appends here, once per tick.
+    // JS `Gr.Omb` L85468 (`Omb(){ for(...) b.node.B(); this.Gu.length = 0; }`)
+    // runs from `ca.WK` L16244 on the round advance: every live callout plate
+    // is unlinked. The port never cleared them, so a plate alive at the flip
+    // survived into the next round and `Gr.addElement`'s slot
+    // `d = 200 + Gu.length*100` (L85406) started one slot lower.
+    {
+        const int round_now = fight_->round().number;
+        if (round_now != callout_round_) {
+            callout_round_ = round_now;
+            const std::size_t had_p = combo_callout_[0].elements.size();
+            const std::size_t had_e = combo_callout_[1].elements.size();
+            for (ComboTracker& tr : combo_callout_) tr.elements.clear();
+            std::fprintf(stdout,
+                         "[callout] round %d -> Gr.Omb cleared %zu/%zu plates\n",
+                         round_now, had_p, had_e);
+            std::fflush(stdout);
+        }
+    }
     for (const sf2::scene::CalloutSignal& s : fight_->take_callouts()) {
         push_callout_element(s.side, s.type, s.value);
     }
@@ -17523,12 +17541,15 @@ void FightScreen::render_impl(App& app) {
     //   `this.NF=this.xU/60|0; this.NF!=this.fma&&(this.fma=this.NF,
     //    this.Kp.V(K.T((this.NF<10?"0":null)+Math.max(0,this.NF))),...)`
     // The seconds are zero-padded to two digits while below 10 ("09", "00").
-    // JS `Sf.iPa` only runs while the round is live; the port drew the timer
-    // in every phase, so the end-of-round banner had the digits behind it.
-    const bool timer_live = fight_->phase() == 2;  // fight_phase::fight
-    const int timer = timer_live ? std::max(0, fight_->round().time_nf) : -1;
+    // JS `Sf.reset` (L84746) seeds `xU = round.gma*60 + 1` and calls `iPa()`,
+    // so the digits are ON SCREEN from the fight init (the ROUND plate and the
+    // start stance) and stay after the round ends — only the COUNTING is gated
+    // on `round.Vt` (`Sf.iPa` L84729 `if (this.DJ && this.round.Vt)`). The port
+    // hid them outside phase 2, so `fight_stance.png` had no timer at all while
+    // the oracle shows "99".
+    const int timer = std::max(0, fight_->round().time_nf);
     const std::string tstr = (timer < 10 ? "0" : "") + std::to_string(timer);
-    if (timer_live) {
+    {
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
         unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
         if (fnt != nullptr && tex != 0) {
