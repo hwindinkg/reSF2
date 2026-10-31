@@ -7636,6 +7636,33 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // drawn model positions vs their BIND values, plus the live clip. A weapon
     // node that stays at its bind while the clip keys it means the rig does
     // not follow the animation (the kusarigama measurement).
+    // `SF2_TRACE_WEAPON_ALL=1` prints EVERY frame for ALL EIGHT weapon nodes
+    // (the kusarigama rig consistency check: clip key -> drawn node, per frame).
+    const bool trace_weapon_all = std::getenv("SF2_TRACE_WEAPON_ALL") != nullptr;
+    if (trace_weapon_all) {
+        const sf2::scene::Model& m = me.fighter.model();
+        const std::vector<float>& pv = me.fighter.positions();
+        std::fprintf(stdout, "[weaponall] F%d move=%s frame=%d", frame_,
+                     me.fighter.current_move() != nullptr
+                         ? me.fighter.current_move()->name.c_str()
+                         : "-",
+                     me.fighter.move_frame());
+        for (const char* wn : {"Weapon-Node1_1", "Weapon-Node2_1", "Weapon-Node3_1",
+                               "Weapon-Node4_1", "Weapon-Node1_2", "Weapon-Node2_2",
+                               "Weapon-Node3_2", "Weapon-Node4_2"}) {
+            const int bi = m.bone_by_name(wn);
+            if (bi < 0) {
+                std::fprintf(stdout, " %s=none", wn);
+                continue;
+            }
+            const std::size_t u = static_cast<std::size_t>(bi) * 2;
+            if (u + 1 >= pv.size()) continue;
+            std::fprintf(stdout, " %s=%.2f,%.2f", wn, static_cast<double>(pv[u]),
+                         static_cast<double>(pv[u + 1]));
+        }
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
+    }
     if (std::getenv("SF2_TRACE_WEAPON") != nullptr && (frame_ % 10) == 0) {
         const sf2::scene::Model& m = me.fighter.model();
         const std::vector<float>& pv = me.fighter.positions();
