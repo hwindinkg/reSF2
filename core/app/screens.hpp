@@ -1280,6 +1280,11 @@ public:
     // The live `Oa.Hg` shop tab index (probe/verify read).
     int tab() const { return tab_; }
 
+    // [probe] The `Sb` status line the last render drew (`Ne.Qqb` L93659-93682:
+    // MAKING / ORDER / `shopUpgrade{star}{N}`), so `--shop-upgrade-probe` can
+    // assert the upgrade label without duplicating the logic.
+    const std::string& status_text() const { return last_status_; }
+
     // [probe] `--settings-profile-shop-probe` (vi): drive the REAL `M8` price
     // plate (`Ne.ZYa` L2251 -> `Pa.iwa` L1228) for `it`, so the JS level/
     // availability gate (`shop_detail_buy_available`) is observable end-to-end
@@ -1457,6 +1462,7 @@ public:
 
 private:
     bool buy_confirm_ = false;
+    std::string last_status_;  // [probe] the `Sb` line of the last render
     CatalogItem buy_item_;
     std::shared_ptr<EngineDialog> buy_dlg_;
 };
@@ -2125,5 +2131,10 @@ bool run_quest_dialog_selfcheck(App& app);
 // shown move; (iii) the shop cell draws the sale badge on the RUBY tab.
 // Prints one `[sps]` line per assertion and returns the FAIL count.
 int run_shell_probe(App& app);
+
+// [probe] Force the WARRIOR `ShowUpgrades` attr in the save file (the port's
+// `WarriorSave` models it, but the shipped template ships "0" and the driver
+// baseline rewrites the save).
+bool patch_save_show_upgrades(const std::string& path);
 
 } // namespace sf2::app

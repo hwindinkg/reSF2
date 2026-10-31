@@ -1968,6 +1968,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // (`za.layout` L82213-82218: `a/2 + PL.qa() + scroll.Af.height`, the rail
     // being `90*d`).
     bool disciple_probe = false;
+    // --shop-upgrade-probe: the `Sb` `shopUpgrade{star}{N}` line (`Ne.Qqb`
+    // L93665-93676) on an OWNED upgradeable item with `ShowUpgrades`.
+    bool shop_upgrade_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2276,6 +2279,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             buy_confirm_probe = true;
         } else if (arg == "--disciple-probe") {
             disciple_probe = true;
+        } else if (arg == "--shop-upgrade-probe") {
+            shop_upgrade_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5396,6 +5401,56 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (shop_upgrade_probe) {
+        // --- `--shop-upgrade-probe`: the `Sb` upgrade label --------------------
+        glfwHideWindow(app.renderer().window());
+        sf2::app::patch_save_show_upgrades(save_path);
+        // the next upgrade tier needs Level <= player level (the shipped rows
+        // ask for 3..10); the tutorial save is level 1.
+        try {
+            // The driver rewrites the save with the baseline at launch, so the
+            // probe seeds its OWN owned+upgradeable item instead of trusting the
+            // input save: ARMOR_ROBE at tier 200 with a level-10 player (the
+            // shipped Armor_Bonus rows above 200 ask for Level 3..4).
+            sf2::app::WarriorSave w = app.save().load();
+            w.level = 10;
+            bool have = false;
+            for (const auto& oi : w.items) {
+                if (oi.name == "ARMOR_ROBE") have = true;
+            }
+            if (!have) {
+                sf2::app::WarriorSave::OwnedItem oi;
+                oi.name = "ARMOR_ROBE";
+                oi.count = 1;
+                oi.upgrade_level = 200;
+                w.items.push_back(oi);
+            }
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+        const bool opened = shop != nullptr && shop->open_at("Armor", "ARMOR_ROBE");
+        for (int i = 0; i < 10; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const std::string st = shop != nullptr ? shop->status_text() : std::string();
+        const bool star = st.find("<image s=0.9 y=-0.2>star</image>") != std::string::npos;
+        std::fprintf(stdout, "[upgprobe] open=%d status='%s' star=%d\n", opened ? 1 : 0,
+                     st.c_str(), star ? 1 : 0);
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[upgprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return (opened && star) ? 0 : 1;
     } else if (disciple_probe) {
         // --- `--disciple-probe`: the `za.zq` toggle position ------------------
         glfwHideWindow(app.renderer().window());

@@ -977,6 +977,23 @@ void draw_ui_rich_line_centered(App& app, float cx, float w, float y, float h,
     }
 }
 
+// Width of ONE rich line (text runs + inline `<image>` sprites) at `ua`, using
+// the SAME advance rules as `draw_ui_wrapped` (`size = line_step * scale`), so a
+// rich label can be centred by hand (the wrapper strips the images for any
+// alignment other than Left).
+float measure_rich_line(App& app, const std::string& text, float ua) {
+    std::vector<RichImage> imgs;
+    std::string plain = rich_strip_images(text, imgs);
+    plain.erase(std::remove(plain.begin(), plain.end(), '\x01'), plain.end());
+    const float step = measure_ui_wrapped(app, "Ag", 1.0e6f, ua, 1.0f);
+    const sf2::data::font* f = app.menu_font();
+    float w = (f != nullptr) ? app.measure_text(*f, plain, ua * ea_a1(app)) : 0.0f;
+    for (const RichImage& ri : imgs) {
+        w += step * (ri.scale > 0.0f ? ri.scale : 1.0f);
+    }
+    return w;
+}
+
 void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                      const std::string& text, float ua_scale, UiAlign align,
                      float r, float g, float b, float line_factor = 1.0f) {
@@ -22160,7 +22177,89 @@ void ShopScreen::render_impl(App& app) {
         // draws the `attributes/<icon>` art + `ie.Or(value)` + the
         // `(±(compare-value))` delta. The old native hard-picked ONE stat.
         const float stat_h = cw0 * 0.22f;   // `lH.ba(a, a*.22)` L2248
-        const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f;
+        // JS `Ne.ba` L93256-93294 lays the panel out in ONE running `d`:
+        // title (`Vc`), `lH`, the `Sb` status, `xg`, `Tl` — so the stat rows
+        // start BELOW the status, not under it (the port drew the status at a
+        // fixed `+0.27*cw` INSIDE the stats and it collided with the second
+        // row's bar).
+        // `Sb` status line (`Ne.Qqb` L2259): `kW` -> "shopMaking", else `tra`
+        // -> "shopOrder", else hidden. (`Ne.Uqb` L2257 resets `Sb`/`xg`; the
+        // `xg` description branch is `I.Ox`/`I.Bu`/`I.wk` only — consumable /
+        // Bonus / RealMoneyItem — so a Weapon/Armor/Helm row NEVER shows `xg`.
+        // `re.xcb` L2285: `kW = $e.Bh > now` (the selected item is in
+        // delivery); `re.Ccb` L2285: `tra = $e==null && Aa.Ec > 0` (no owned
+        // save entry and the item carries a `DeliveryTime`).
+        const std::int64_t shop_now = WarriorSave::wall_now();
+        const auto sel_timer = seen_.timers.find(sel_it->name);
+        const bool making = sel_timer != seen_.timers.end() && sel_timer->second > shop_now;
+        const bool order = !seen_.has_item(sel_it->name) && sel_it->delivery_sec > 0;
+        std::string status;
+        if (making) {
+            status = loc(app, "shopMaking", "MAKING");
+        } else if (order) {
+            status = loc(app, "shopOrder", "ORDER");
+        } else if (show_upgrades_ &&                      // `&& p.o.qC`
+                   seen_.has_item(sel_it->name)) {         // `$e != null`
+            // JS `Qqb` L93665-93676: `a = $e.Qi` (the NEXT tier clone);
+            // `a = a.Y6a()` -> `{index, type}`; type 1 prints
+            // `shopUpgrade{img::star}{index}` with the star rewritten to
+            // `<image s=0.9 y=-0.2>star</image>`, else `shopUpgrade{}{index}`.
+            const int tier = shop_owned_tier(seen_, *sel_it);
+            const ItemUpgradeState ust =
+                shop_upgrade_state(*sel_it, tier, seen_.level, load_upgrade_templates(app));
+            const bool k9 = ust.has_rows && !ust.maxed;  // `re.Zcb` L94799-94804
+            if (k9 && ust.has_next) {                    // `$e.Qi != null`
+                // `Y6a()` L13721-13744: `b` counts the template rows with
+                // `level == item.level && Tc < next.Tc && Tc > ml.Tg`, plus 1
+                // when `ml.xf == item.xf`. The shipped `<Upgrades>` blocks carry
+                // NO `Level`/`UpgradeLevel` attributes (`list.xml`
+                // `<Upgrades Name=.. ItemType=..>`), so every comparison is
+                // `undefined` -> false and `b` stays 0 -> type 1,
+                // `index = this.xf` = the item's Level.
+                const int b = 0;
+                if (b == 0) {
+                    status = loc(app,
+                                 "shopUpgrade{img::star}{" +
+                                     std::to_string(sel_it->level) + "}",
+                                 "UPGRADE");
+                    // `Eb.replace(a, "<image>star</image>",
+                    //             "<image s=0.9 y=-0.2>star</image>")`
+                    const std::string from = "<image>star</image>";
+                    const std::string to = "<image s=0.9 y=-0.2>star</image>";
+                    for (std::size_t p = status.find(from); p != std::string::npos;
+                         p = status.find(from, p + to.size())) {
+                        status.replace(p, from.size(), to);
+                    }
+                } else {
+                    status = loc(app, "shopUpgrade{}{" + std::to_string(b) + "}",
+                                 "UPGRADE");
+                }
+            }
+        }
+        last_status_ = status;  // [probe] `--shop-upgrade-probe`
+        if (std::getenv("SF2_TRACE_SHOP_STATUS") != nullptr) {
+            static int logged = 0;
+            if (logged < 40) {
+                ++logged;
+                const int dbg_tier = shop_owned_tier(seen_, *sel_it);
+                const ItemUpgradeState dbg = shop_upgrade_state(
+                    *sel_it, dbg_tier, seen_.level, load_upgrade_templates(app));
+                std::fprintf(stdout,
+                             "[shopstatus] item=%s has=%d nItems=%zu lvl=%d owned=%d qC=%d "
+                             "tier=%d rows=%d maxed=%d next=%d making=%d order=%d -> '%s'\n",
+                             sel_it->name.c_str(),
+                             seen_.has_item(sel_it->name) ? 1 : 0, seen_.items.size(),
+                             seen_.level,
+                             shop_owned_live(seen_, sel_it->name) ? 1 : 0,
+                             show_upgrades_ ? 1 : 0, dbg_tier, dbg.has_rows ? 1 : 0,
+                             dbg.maxed ? 1 : 0, dbg.has_next ? 1 : 0, making ? 1 : 0,
+                             order ? 1 : 0, status.c_str());
+                std::fflush(stdout);
+            }
+        }
+        const float status_box_h = cw0 * 0.2f;  // `c = a*0.2` (L93272)
+        const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f +
+                             (status.empty() ? 0.0f : status_box_h + cw0 * 0.01f);
         // JS `Ne.refresh` L93198: for an OWNED item `Aa` becomes `$e.fw()`
         // (the current tier clone), so the VALUE is the tier's stat. The
         // compare `$e.Qi` (next tier) is drawn only under `qC && gW`.
@@ -22284,23 +22383,33 @@ void ShopScreen::render_impl(App& app) {
             }
             row_y += stat_h;  // `ms.ba`: `c += f.node.qa()` L2274
         }
-        // `Sb` status line (`Ne.Qqb` L2259): `kW` -> "shopMaking", else `tra`
-        // -> "shopOrder", else hidden. (`Ne.Uqb` L2257 resets `Sb`/`xg`; the
-        // `xg` description branch is `I.Ox`/`I.Bu`/`I.wk` only — consumable /
-        // Bonus / RealMoneyItem — so a Weapon/Armor/Helm row NEVER shows `xg`.
-        // `re.xcb` L2285: `kW = $e.Bh > now` (the selected item is in
-        // delivery); `re.Ccb` L2285: `tra = $e==null && Aa.Ec > 0` (no owned
-        // save entry and the item carries a `DeliveryTime`).
-        const std::int64_t shop_now = WarriorSave::wall_now();
-        const auto sel_timer = seen_.timers.find(sel_it->name);
-        const bool making = sel_timer != seen_.timers.end() && sel_timer->second > shop_now;
-        const bool order = !seen_.has_item(sel_it->name) && sel_it->delivery_sec > 0;
-        const std::string status = making ? loc(app, "shopMaking", "MAKING")
-                                          : (order ? loc(app, "shopOrder", "ORDER") : "");
         if (!status.empty()) {
-            const float sb_y = cy0 + ch0 * 0.1f + tfont * 1.3f + cw0 * 0.27f;
-            draw_ui_label(app, cx0, sb_y, cw0, cw0 * 0.14f, status, 0.8f, UiAlign::Center,
-                          0.184f, 0.145f, 0.106f);
+            // `Sb.D(d)` right under the title (`Ne.ba` L93264-93275).
+            const float sb_y = cy0 + ch0 * 0.1f + tfont * 1.3f;
+            // JS `Ne.ba` L93271-93278: `c = a*0.2; Sb.Fa(a, c); Sb.ua(c);
+            // Sb.D(d); Sb.mk()` — font size `c` (= the content width * 0.2 px),
+            // box `a x c`, `mk()` fits.
+            float sb_ua = cw0 * 0.2f / 100.0f;
+            const float sb_box_h = cw0 * 0.2f;
+            const bool rich = status.find("<image") != std::string::npos;
+            float sb_w = rich ? measure_rich_line(app, status, sb_ua)
+                              : (app.menu_font() != nullptr
+                                     ? app.measure_text(*app.menu_font(), status,
+                                                        sb_ua * ea_a1(app))
+                                     : 0.0f);
+            if (sb_w > cw0 && sb_w > 0.0f) sb_ua *= cw0 / sb_w;   // `mk()` width
+            const float sb_step = measure_ui_wrapped(app, "Ag", 1.0e6f, sb_ua, 1.0f);
+            if (sb_step > sb_box_h && sb_step > 0.0f) {
+                sb_ua *= sb_box_h / sb_step;                       // `mk()` height
+            }
+            if (rich) {
+                const float w = measure_rich_line(app, status, sb_ua);
+                draw_ui_wrapped(app, cx0 + (cw0 - w) * 0.5f, sb_y, cw0, sb_box_h, status,
+                                sb_ua, UiAlign::Left, 0.184f, 0.145f, 0.106f);
+            } else {
+                draw_ui_label(app, cx0, sb_y, cw0, sb_box_h, status, sb_ua, UiAlign::Center,
+                              0.184f, 0.145f, 0.106f, 1.0f, /*fit=*/true);
+            }
         }
         // `Tl` delivery countdown (`Ne.j7a` L2256 -> `Ksb` L2256, `Ne.aa` L2248):
         // the remaining seconds of the SELECTED item's delivery, shown inside
