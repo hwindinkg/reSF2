@@ -1936,6 +1936,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool moves_damage_probe = false;
     // --perk-probe: the perk info panel's key icons (`Zr.nca` L92172-92187).
     bool perk_probe = false;
+    // --nav-probe: the `za` nav interaction — a press on the already-active row
+    // is inert (`za.AT` L82553-82563 sets `Nf=false`; `db.aa` L77256-77281 only
+    // handles presses inside `if (this.Nf)`), while another row navigates.
+    bool nav_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2238,6 +2242,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             moves_damage_probe = true;
         } else if (arg == "--perk-probe") {
             perk_probe = true;
+        } else if (arg == "--nav-probe") {
+            nav_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5358,6 +5364,39 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (nav_probe) {
+        // --- `--nav-probe`: the `za` nav press rules -------------------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const int start_screen = static_cast<int>(app.screens().current_id());
+        // row 0 = Dojo (the ACTIVE screen) -> must be inert
+        const bool active_tap = sf2::app::za_nav_try_tap(app, 0);
+        for (int i = 0; i < 3; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const int after_active = static_cast<int>(app.screens().current_id());
+        // row 1 = Map -> must navigate
+        const bool map_tap = sf2::app::za_nav_try_tap(app, 1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const int after_map = static_cast<int>(app.screens().current_id());
+        const bool ok = !active_tap && after_active == start_screen && map_tap &&
+                        after_map == static_cast<int>(kScreenMap);
+        std::fprintf(stdout,
+                     "[navprobe] start=%d active_row_accepted=%d after=%d map_accepted=%d "
+                     "after_map=%d -> %s\n",
+                     start_screen, active_tap ? 1 : 0, after_active, map_tap ? 1 : 0,
+                     after_map, ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return ok ? 0 : 1;
     } else if (perk_probe) {
         // --- `--perk-probe`: the perk panel's key icons ----------------------
         glfwHideWindow(app.renderer().window());

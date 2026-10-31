@@ -3603,6 +3603,16 @@ bool za_nav_activate(App& app, Screen& self, ScreenId active, int hit) {
             std::fflush(stdout);
         }
     }
+    // JS `za.AT` L82553-82563 sets `Nf = false` on the button of the screen
+    // that just became active, and `db.aa` L77256-77281 only processes presses
+    // inside `else if (this.Nf)` — so a press on the ALREADY-ACTIVE row is
+    // inert: no `snd_click_1`, no navigation. The port played the click and
+    // re-pushed/reported.
+    if (kZaNav[hit].nav == active) {
+        std::fprintf(stdout, "[za] nav %s INERT (already active)\n", kZaNav[hit].label);
+        std::fflush(stdout);
+        return false;
+    }
     sf2::audio::AudioEngine::instance().play("snd_click_1");
     if (hit == 4) {  // Settings (JS `Vfb` L1981 -> `Xc.Shb()` L931)
         std::fprintf(stdout, "[za] nav %s -> settings dialog (no nav)\n", kZaNav[hit].label);
@@ -4449,7 +4459,13 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         const ZaNavDef& def = kZaNav[i];
         const bool is_active = def.nav == active;
         const bool is_hover = i == hover;
-        const char* frame = is_hover && def.pushed != nullptr
+        // JS `db.aa` L77256-77281 + `Xw` L77301-77309: the `_pushed` frame is
+        // swapped in ONLY on the touch-DOWN branch (`this.Zo = true` ... then
+        // `this.Xw(true)`); on release it reverts to `this.frame`, and the JS
+        // has no hover state at all. The port painted `_pushed` on a bare
+        // pointer hover.
+        const bool held = is_hover && app.pointer().down;
+        const char* frame = held && def.pushed != nullptr
                                 ? def.pushed
                                 : (is_active && def.active != nullptr ? def.active : def.normal);
         const float cy_i = lay.nav_first_y + static_cast<float>(i) * lay.nav_step;
