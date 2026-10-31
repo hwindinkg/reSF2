@@ -1954,6 +1954,10 @@ float credits_view_scroll();
 // hard-coded pixel that drifts whenever the stack moves.
 bool shop_price_center(App& app, int slot, float& cx, float& cy);
 
+// The level cap (the highest XP threshold); `wr.myb` L82714 compares
+// `o.bb() >= v.$0()` to swap the XP bar for the `max` badge.
+int max_player_level();
+
 bool settings_dialog_open();
 void open_settings_dialog(App& app);
 void close_settings_dialog();

@@ -1977,6 +1977,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --ruby-upgrade-probe: the RUBY purchase auto-upgrade (`Pa.gI` L51178-51199,
     // `Pa.EYa` L51287 passes `c = true`).
     bool ruby_upgrade_probe = false;
+    // --za-widget-probe: the `za` level `max` badge (`wr.myb` L82709-82725) and
+    // the `unlimited_energy` energy state (`xr.kB` L82605-82619).
+    bool za_widget_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2291,6 +2294,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             shop_delivery_probe = true;
         } else if (arg == "--ruby-upgrade-probe") {
             ruby_upgrade_probe = true;
+        } else if (arg == "--za-widget-probe") {
+            za_widget_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5411,6 +5416,46 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (za_widget_probe) {
+        // --- `--za-widget-probe`: the `max` / `unlimited_energy` widgets ------
+        glfwHideWindow(app.renderer().window());
+        const int cap = sf2::app::max_player_level();
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            w.level = cap;          // `wr.myb`: `o.bb() >= v.$0()` -> the `max` badge
+            w.experience = 0;
+            bool have = false;
+            for (const auto& oi : w.items) {
+                if (oi.name == "Unlimited_Energy") have = true;
+            }
+            if (!have) {  // `p.o.yN` = owning the item (existence only)
+                sf2::app::WarriorSave::OwnedItem oi;
+                oi.name = "Unlimited_Energy";
+                oi.count = 1;
+                w.items.push_back(oi);
+            }
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const sf2::app::WarriorSave wv = app.save().load();
+        std::fprintf(stdout,
+                     "[zaw] level=%d cap=%d unlimited=%d -> level widget %s, energy %s\n",
+                     wv.level, cap, wv.unlimited_energy() ? 1 : 0,
+                     wv.level >= cap ? "max" : "bar",
+                     wv.unlimited_energy() ? "unlimited_energy" : "bolt+bar");
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[zaw] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return (wv.level >= cap && wv.unlimited_energy()) ? 0 : 1;
     } else if (ruby_upgrade_probe) {
         // --- `--ruby-upgrade-probe`: `Pa.gI(a, !0, !0)` -----------------------
         glfwHideWindow(app.renderer().window());

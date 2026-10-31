@@ -4235,6 +4235,25 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
     // `character_progress.xml` threshold (`ResultsScreen::exp_for_level`),
     // `rs` = the save `Experience` (JS `p.o.rs`). Clamped 0..1.
     const float lvl_bar_x = x + icon_level + q + num_w + q;
+    // JS `wr.myb` L82709-82725: at the level cap (`o.bb() >= v.$0()`) the bar and
+    // the XP text are HIDDEN and the shared `np` sprite shows `y.KRa` = "max"
+    // instead (`np.Pb(iw.qa()/2)` = half the level icon's height,
+    // `np.D((iw.qa()-np.qa())/2)` = centred on it, `np.C(Vd.node.ya)` = the
+    // bar's x).
+    const int level_cap = max_player_level();
+    const bool level_maxed = level_cap > 0 && sv.level >= level_cap;
+    if (level_maxed) {
+        const float max_h = icon_level * 0.5f;
+        try_draw_atlas_button(app, "max", lvl_bar_x, cy - max_h * 0.5f, max_h, max_h, 1.0f,
+                              false, false, /*top_left=*/true);
+        static bool logged_max = false;
+        if (!logged_max) {
+            logged_max = true;
+            std::fprintf(stdout, "[za] level widget: 'max' badge (level %d >= cap %d)\n",
+                         sv.level, level_cap);
+            std::fflush(stdout);
+        }
+    } else {
     try_draw_atlas_button(app, "level_bar_empty_short", lvl_bar_x, cy - bar_h * 0.5f, bar_w,
                           bar_h, 1.0f, /*fill=*/true, false, /*top_left=*/true);
     const int need_exp = ResultsScreen::exp_for_level(sv.level);
@@ -4248,6 +4267,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                               bar_w * lvl_frac, bar_h, 1.0f, /*fill=*/true, false,
                               /*top_left=*/true);
     }
+    }  // !level_maxed
     // [XP hint] arm/dismiss on a tap inside the level widget (`wr.Xc` = from
     // the icon's left edge to the bar's right end, widget height).
     {
@@ -4308,6 +4328,21 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                      static_cast<double>(cy + am_h * 0.5f));
         std::fflush(stdout);
     }
+    // JS `xr.kB` L82605-82619: with `p.o.yN` (Unlimited_Energy owned) the bolt
+    // icon (`icon`), the bar (`Vd`) and the gem button (`Xc`) are HIDDEN and the
+    // shared `np` sprite shows `y.RRa` = "unlimited_energy" at the icon's slot
+    // (`np.la(a / np.fa.y)` = the icon's height, `xr.layout` L82595-82597).
+    const bool unlimited_energy = sv.unlimited_energy();
+    if (unlimited_energy) {
+        try_draw_atlas_button(app, "unlimited_energy", x, cy - icon * 0.5f, icon_energy,
+                              icon, 1.0f, false, false, /*top_left=*/true);
+        static bool logged_unl = false;
+        if (!logged_unl) {
+            logged_unl = true;
+            std::fprintf(stdout, "[za] energy widget: 'unlimited_energy' (p.o.yN)\n");
+            std::fflush(stdout);
+        }
+    } else {
     try_draw_atlas_button(app, "energy", x, cy - icon * 0.5f, icon_energy, icon, 1.0f, false,
                           false, /*top_left=*/true);
     // `xr.Vd = zr` extends `Uf(y.$na, y.zRa)` (L2003-2004): empty
@@ -4331,6 +4366,7 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
                               bar_w * en_frac, bar_h, 1.0f, /*fill=*/true, false,
                               /*top_left=*/true);
     }
+    }  // !unlimited_energy (the bolt icon + bar are hidden, `xr.kB` L82605)
     // The tap itself is handled in `za_update` (see `ZaTapRect`).
     x += en_w + lay.gap;
     // `yr` (money). `Ss`/`PA` DO call `Ga()` (L1990) -> centre anchor, so the
@@ -18344,6 +18380,15 @@ const std::map<int, int>& level_thresholds() {
 
 // JS `OLa`/`Oz` (L253-254): `Oz()` = `$B[level-1]` (the threshold to go from
 // `level` to `level+1`); 100 fallback when the file is absent.
+// The level cap (the highest level in the XP table, `wr.myb` L82714).
+int max_player_level() {
+    int cap = 0;
+    for (const auto& kv : level_thresholds()) {
+        if (kv.first > cap) cap = kv.first;
+    }
+    return cap;
+}
+
 int ResultsScreen::exp_for_level(int level) {
     const std::map<int, int>& thresholds = level_thresholds();
     const auto it = thresholds.find(level);
