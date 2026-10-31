@@ -4482,6 +4482,20 @@ void FightController::end_battle(const FightFighter& winner) {
     // dialog made the battle stats appear "momentally" (instantly).
     battle_end_pending_ = true;
     winner_ = &winner;
+    // JS `bea` L16910-16917 (verbatim order):
+    //   this.yrb();                              // bars latch `IFa` (both sides)
+    //   if (this.Da.type != "FightRaid") this.NA();  // between-round heal
+    hud_bars_frozen_ = true;   // `yrb` -> `mb.l5(true,true)` + `mb.l5(false,true)`
+    if (battle_.type != "FightRaid") {
+        const float hp_before = player_.hp;
+        between_rounds_recover();   // `NA()`
+        std::fprintf(stdout,
+                     "[fight] bea: bars frozen, NA healed P %.3f -> %.3f "
+                     "(recovery=%.3f)\n",
+                     static_cast<double>(hp_before), static_cast<double>(player_.hp),
+                     static_cast<double>(battle_.health_recovery));
+        std::fflush(stdout);
+    }
     // JS `Pf` (L196253) -> `Cr.GZ` (L1042575): the plate was chosen in
     // `apply_round_result` (`result_plate_`) from the winner's `cE`/HP
     // fraction — perfect on an unhit player win, great at <=10% HP, `none`

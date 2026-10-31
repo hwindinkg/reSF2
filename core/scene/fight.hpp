@@ -2237,6 +2237,9 @@ public:
     // (L85443 `this.Hqa = a`): while the finishing-blow hit-stun / slow-mo is
     // running the callout plates are FROZEN (no slide, no count) — except the
     // type-4 hot-ground plate (`Gr.l_a` L85499 `if (a.HEa) return true`).
+    // JS `Br.IFa` (L83648/L84549): the HP bars are latched at the battle end.
+    bool hud_bars_frozen() const { return hud_bars_frozen_; }
+
     bool finish_blow_active() const {
         return finish_blow_pending_ || slowmo_on_ || finish_frozen_ != nullptr;
     }
@@ -2465,6 +2468,12 @@ private:
     const FightFighter* winner_ = nullptr;
     bool auto_attack_ = false;     // the demo's simple auto-attack driver
     bool round_live_ = false;      // JS `h9` — a round is in progress
+    // JS `bea` L16910-16917: the battle end runs `yrb()` FIRST — the HP bars
+    // latch `Br.IFa` (`l5(a)` L84549) on BOTH sides — and only then the
+    // between-round heal `NA()` (skipped for `FightRaid`). `Br.ia` L83648
+    // (`if (!this.IFa) { this.Qyb(); }`) therefore stops re-targeting the live
+    // HP, so the heal is never animated on the bars.
+    bool hud_bars_frozen_ = false;
     // JS `lk.ia(a)` (L84573-84577): while the round is LIVE (`a` = `round.Vt`)
     // the style meter is ticked TWICE per frame, once otherwise. Set by the
     // phase-2 branch of `update()`.

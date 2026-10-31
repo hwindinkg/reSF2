@@ -16156,8 +16156,13 @@ void FightScreen::update_impl(float dt) {
         const float e_ratio = fight_->enemy().max_hp > 0.0f
                                   ? std::clamp(fight_->enemy().hp / fight_->enemy().max_hp, 0.0f, 1.0f)
                                   : 0.0f;
-        s_hud_player_decay_.retarget(p_ratio);
-        s_hud_enemy_decay_.retarget(e_ratio);
+        // JS `Br.ia` L83648: `if (!this.IFa) { this.Qyb(); }` — after the
+        // battle end latches `IFa` (`bea` L16910 `yrb` -> `l5(a)` L84549) the
+        // bar keeps its value, so the between-round heal (`NA`) is not shown.
+        if (!fight_->hud_bars_frozen()) {
+            s_hud_player_decay_.retarget(p_ratio);
+            s_hud_enemy_decay_.retarget(e_ratio);
+        }
         s_hud_player_decay_.tick();
         s_hud_enemy_decay_.tick();
     }
@@ -21644,7 +21649,11 @@ void ShopScreen::update_impl(float dt) {
     // Detail-panel action button (`bc` content `Up.Fhb`, L2300; label
     // `Oa.DU` L2299). Side panels show on tabs 0..4 (`Q5` L2302).
     side_hover_ = 0;
-    if (!rows.empty()) {
+    // JS `h$a` L95320-95325 + `DU` L95351 `this.Up.X(re.Rcb(this.h$a()))`:
+    // the TRY/EQUIP plate exists only on tabs 0..4 and 6 — hidden on 5 (RUBY)
+    // and 7 (FREE). `re.Rcb` (L94816-94818) is the identity.
+    const bool try_visible = tab_ != 5 && tab_ != 7;
+    if (try_visible && !rows.empty()) {
         const int sel = std::clamp(sel_, 0, static_cast<int>(rows.size()) - 1);
         const CatalogItem& it = items_[rows[static_cast<std::size_t>(sel)]];
         const ShopRect ar = shop_try_rect(sl);
@@ -22588,7 +22597,7 @@ void ShopScreen::render_impl(App& app) {
     // `Up` TRY/EQUIP/UNEQUIP button (`Oa.init` L2289 `Bb("EButtonWhite")`;
     // `Oa.layout` L2295 `Up.kf(b.N-b.J)`, `jP.D(b.P+Up.qa())` — top of the
     // LEFT slot). Label via `Oa.DU` (L2299), visible on tabs 0..4 (`h$a`).
-    if (sel_it != nullptr) {
+    if (sel_it != nullptr && tab_ != 5 && tab_ != 7) {  // `h$a` L95320-95325
         const ShopRect ar = shop_try_rect(sl);
         const std::string alabel = shop_action_label(app, seen_, *sel_it);
         const bool ah = side_hover_ == 1;
