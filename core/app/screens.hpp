@@ -1439,6 +1439,7 @@ private:
     // storage; no shared asset is touched.
     void arm_preview(App& app, const CatalogItem& it);
 
+public:
     // `Ne.ZYa` L2251 (`Pa.iwa(this.Ch) && p.o.xa.$o(this.Ch,!0)`) = the shop's
     // BUY + EQUIP at the `M8` price plate, gated by `Pa.iwa` L1228
     // (`p.o.Tb >= a.jp()`, else `v.Bv(a,2)`). Returns true when accepted.
@@ -1446,7 +1447,6 @@ private:
     // `Ne.Ehb` case 2 L2254 -> `bka(0, Aa.nn())` -> `Pa.EYa` L1228: the `pVa`
     // RubyButton buys with the Ruby/crystal balance (`p.o.fd`).
     bool purchase_gem_price_plate(App& app, const CatalogItem& bit);
-
 public:
     // JS `Xc.$hb` L39348-39356: the price-plate press does NOT charge — it
     // opens `Wb.openDialog(350, new kv(action, currency, price, cb, delivery))`

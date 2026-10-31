@@ -20711,6 +20711,26 @@ bool ShopScreen::purchase_gem_price_plate(App& app, const CatalogItem& bit) {
     // catalog item, so `Ce` = the item's `UpgradeLevel` (`Tg`); see the gold
     // path above (the missing write made `UpgradeToLevelReminder` fire).
     oi.upgrade_level = bit.upgrade_level;
+    // JS `Pa.gI(a, !0, !0)` L51194-51199: the RUBY path passes `c = true`, and
+    // a freshly granted entry is raised to the NEXT `UpgradeList` row when the
+    // item's own Level is below the player's and it is not maxed:
+    //   `if (c && d.ib.xf < a && !d.zN) { c = d.Qi; ...
+    //    Pa.Cba(c, d, false) }`
+    // `Cba` (L51231-51241) does `b.Np(a.Tg)` — the entry's tier becomes that
+    // row's `Tc`. The GOLD path passes `c = false`, so it never upgrades.
+    {
+        const ItemUpgradeState auto_st = resolve_item_upgrade(
+            bit, load_upgrade_templates(app), oi.upgrade_level, bw.level);
+        if (bit.level < bw.level && !auto_st.maxed && auto_st.has_next) {
+            std::fprintf(stdout,
+                         "[shop] Pa.gI auto-upgrade %s: UpgradeLevel %d -> %d "
+                         "(item level %d < player %d)\n",
+                         bit.name.c_str(), oi.upgrade_level, auto_st.next.tc,
+                         bit.level, bw.level);
+            std::fflush(stdout);
+            oi.upgrade_level = auto_st.next.tc;
+        }
+    }
     shop_apply_slot(bw, bit.type, bit.name);
     oi.equipped = true;
     bw.items.push_back(oi);

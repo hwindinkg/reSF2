@@ -3580,3 +3580,30 @@ ln("TimeDaysShort")+" ", false, true, true, true, false, "", "", "", c ? 4 : 3)`
   меняется вместе с работой, а не живёт отдельным списком в отчётах.
   Состояние на этот коммит: **43 из 61 (70%), открыто 18** (было 40/50 при
   неполном покрытии).
+
+### QA-31.10 — авто-апгрейд при рубиновой покупке (закрыто)
+
+`Pa.gI(a, b, c)` L51178-51208: при СОЗДАНИИ записи (`c` = третий аргумент,
+рубиновый путь `Pa.EYa` L51287 передаёт `true`) после `d.uu(p.o.bb())`
+(`if (c && d.ib.xf < a && !d.zN) { c = d.Qi; if (c == null) return false;
+Pa.Cba(c, d, false); }`) — запись поднимается на следующую строку
+`UpgradeList`, если `Level` предмета ниже уровня игрока и предмет не maxed.
+`Pa.Cba` L51231-51241 делает `b.Np(a.Tg)` — тир становится `Tc` этой строки.
+Золотой путь (`Pa.iwa`) передаёт `c = false`, поэтому там апгрейда нет.
+
+Порт писал `oi.upgrade_level = bit.upgrade_level` (каталог) без апгрейда.
+
+Теперь в `purchase_gem_price_plate` после записи тира:
+`resolve_item_upgrade(bit, templates, oi.upgrade_level, bw.level)` и, если
+`bit.level < bw.level && !maxed && has_next`, `oi.upgrade_level = next.tc`.
+
+Замер (`--ruby-upgrade-probe`: сейв получает уровень 10 и 10 000 рубинов,
+предмет вычищается, затем покупка рубиновой плашкой):
+```
+[shop] Pa.gI auto-upgrade WEAPON_XMAS14_CANES: UpgradeLevel 100 -> 1000
+       (item level 1 < player 10)
+[rubyup] item=WEAPON_XMAS14_CANES Tg=100 bought=1 UpgradeLevel -1 -> 1000 -> PASS
+```
+`WEAPON_KNIVES` как пример из аудита не годится: у него `bonus=0`, а `pVa`
+неактивна при нулевой цене (`Ne.kL` L93500) — поэтому проба берёт первый
+рубиново-ценный клинок.

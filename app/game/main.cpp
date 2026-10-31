@@ -1974,6 +1974,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --shop-delivery-probe: the `Tl` delivery countdown (`Ne.Ksb` L93581-93589
     // -> `Xe.qfa(..., c ? 4 : 3)`, `Z.CTa = 86400`).
     bool shop_delivery_probe = false;
+    // --ruby-upgrade-probe: the RUBY purchase auto-upgrade (`Pa.gI` L51178-51199,
+    // `Pa.EYa` L51287 passes `c = true`).
+    bool ruby_upgrade_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2286,6 +2289,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             shop_upgrade_probe = true;
         } else if (arg == "--shop-delivery-probe") {
             shop_delivery_probe = true;
+        } else if (arg == "--ruby-upgrade-probe") {
+            ruby_upgrade_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5406,6 +5411,60 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (ruby_upgrade_probe) {
+        // --- `--ruby-upgrade-probe`: `Pa.gI(a, !0, !0)` -----------------------
+        glfwHideWindow(app.renderer().window());
+        int before = -1;
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            w.level = 10;
+            w.bonus = 10000;
+            // a fresh grant: no WEAPON_KNIVES entry yet
+            w.items.erase(std::remove_if(w.items.begin(), w.items.end(),
+                                         [](const sf2::app::WarriorSave::OwnedItem& oi) {
+                                             return oi.name == "WEAPON_KNIVES" ||
+                                                    oi.name == "WEAPON_SAI";
+                                         }),
+                          w.items.end());
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+        // the item must carry a RUBY price (`pVa` is inactive at 0 — `Ne.kL`
+        // L93500): WEAPON_KNIVES ships `bonus=0`, so take the first weapon with
+        // one (WEAPON_SAI, bonus 20, Tg 300).
+        sf2::app::CatalogItem knives;
+        bool found = false;
+        for (const sf2::app::CatalogItem& ci : sf2::app::load_full_catalog(app)) {
+            if (ci.bonus_price > 0 && ci.upgrade_level > 0 && ci.type == "Weapon") {
+                knives = ci;
+                found = true;
+                break;
+            }
+        }
+        for (const auto& oi : app.save().load().items) {
+            if (oi.name == knives.name) before = oi.upgrade_level;
+        }
+        const bool bought =
+            found && shop != nullptr && shop->purchase_gem_price_plate(app, knives);
+        int after = -1;
+        for (const auto& oi : app.save().load().items) {
+            if (oi.name == knives.name) after = oi.upgrade_level;
+        }
+        const bool ok = bought && before < 0 && after > knives.upgrade_level;
+        std::fprintf(stdout,
+                     "[rubyup] item=%s Tg=%d bought=%d UpgradeLevel %d -> %d -> %s\n",
+                     knives.name.c_str(), knives.upgrade_level, bought ? 1 : 0, before,
+                     after,
+                     ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return ok ? 0 : 1;
     } else if (shop_delivery_probe) {
         // --- `--shop-delivery-probe`: the `Tl` countdown format --------------
         glfwHideWindow(app.renderer().window());

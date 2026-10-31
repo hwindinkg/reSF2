@@ -92,7 +92,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("shop: TRY plate only on tabs 0-4/6 (`h\$a` L95320)", True),
         ("shop: TRY plate face 195x24 vs the oracle 184x48 (`btnWhite` "
          "margins)", False),
-        ("shop: ruby purchase auto-upgrade (`Pa.gI` L51178)", False),
+        ("shop: ruby purchase auto-upgrade (`Pa.gI` L51178-51199, probe "
+         "`--ruby-upgrade-probe`)", True),
         ("shop: tab badges (`ss` L94726-94730)", False),
         ("shop: discount stripe (`ns.j5` L95673-95682)", False),
         ("shop: tab-5 payment buttons (`Ne.Op` L93467-93488)", False),
