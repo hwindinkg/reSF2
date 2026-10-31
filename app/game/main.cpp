@@ -1964,6 +1964,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --buy-confirm-probe: the shop BUY is a two-step flow (`Xc.$hb` L39348-39356
     // -> `Wb.openDialog(350, kv)`; only `ZYa` -> `Pa.iwa` charges).
     bool buy_confirm_probe = false;
+    // --disciple-probe: the `za.zq` disciple/bag toggle's position
+    // (`za.layout` L82213-82218: `a/2 + PL.qa() + scroll.Af.height`, the rail
+    // being `90*d`).
+    bool disciple_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2270,6 +2274,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             nav_probe = true;
         } else if (arg == "--buy-confirm-probe") {
             buy_confirm_probe = true;
+        } else if (arg == "--disciple-probe") {
+            disciple_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5390,6 +5396,36 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (disciple_probe) {
+        // --- `--disciple-probe`: the `za.zq` toggle position ------------------
+        glfwHideWindow(app.renderer().window());
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            w.show_dojo_disciple = true;   // `p.o.g$a()` (`ShowDojoDisciple`)
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 12; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        float cx = 0.0f, cy = 0.0f, bw = 0.0f, bh = 0.0f;
+        const bool have = sf2::app::za_disciple_center(app, cx, cy, bw, bh);
+        std::fprintf(stdout,
+                     "[discprobe] visible=%d rect cx=%.1f cy=%.1f w=%.1f h=%.1f -> %s\n",
+                     have ? 1 : 0, static_cast<double>(cx), static_cast<double>(cy),
+                     static_cast<double>(bw), static_cast<double>(bh),
+                     (have && cy < 320.0f) ? "PASS (under the top bar)"
+                                           : "FAIL (still at the column bottom)");
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[discprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return (have && cy < 320.0f) ? 0 : 1;
     } else if (buy_confirm_probe) {
         // --- `--buy-confirm-probe`: the two-step BUY -------------------------
         glfwHideWindow(app.renderer().window());

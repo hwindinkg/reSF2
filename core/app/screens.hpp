@@ -2009,6 +2009,11 @@ bool za_nav_try_tap(App& app, int hit);
 // The `za` column's expanded state for a shell screen (`gk.uJ`) - asserted by
 // the `--flow-verify` probe for the Map/Shop header tap.
 bool za_nav_expanded(ScreenId id);
+
+// [probe] The `za.zq` disciple/punching-bag toggle's on-screen rect
+// (`za.layout` L82213-82218). Read-only geometry; only meaningful on the Dojo
+// with `ShowDojoDisciple`.
+bool za_disciple_center(App& app, float& cx, float& cy, float& w, float& h);
 // The LIVE centre of the `gk.Af` header/rail the toggle button rides (`gk.JT`
 // L2001: `this.Af.node.D(a*this.height-a*this.Af.height/2)`): the collapsed
 // header at the top (`yI=0`) or the full-width column-bottom rail (`yI=1`).

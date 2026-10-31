@@ -3455,9 +3455,6 @@ struct ZaDiscipleRect {
 
 ZaDiscipleRect za_disciple_rect(App& app, bool disciple) {
     const ZaLayout lay = za_layout(app);
-    const float row = lay.nav_row;
-    const float content_h =
-        (row * static_cast<float>(kZaNavCount) + 45.0f) * lay.nav_scale;
     ZaDiscipleRect r;
     r.w = lay.nav_w * 0.5f;
     r.h = r.w;  // default square; refined from the frame aspect below
@@ -3478,7 +3475,15 @@ ZaDiscipleRect za_disciple_rect(App& app, bool disciple) {
         r.h = r.w * sh / sw;
     }
     r.cx = lay.nav_x + r.w * 0.5f;
-    r.cy = r.w * 0.5f + lay.bar_h + content_h;
+    // JS `za.layout` L82213-82218:
+    //   `this.zq.la(this.scroll.Af.width * 0.5 / this.zq.Y.fa.x)`  (width)
+    //   `this.zq.C(a/2 + this.scroll.node.ya)`                      (x)
+    //   `this.zq.D(a/2 + this.PL.qa() + this.scroll.Af.height)`     (y)
+    // with `a = zq.node.za()` (its on-screen WIDTH) and the title rail
+    // `scroll.Af.height = 90*d` — `ndb` L82270 `this.scroll.ba(e, f, 90 * d)`.
+    // The old code used the WHOLE nav column `(row*5+45)*d` (~547 px) instead
+    // of the 90*d rail, which dropped the button ~500 px down the screen.
+    r.cy = r.w * 0.5f + lay.bar_h + 90.0f * lay.nav_scale;
     return r;
 }
 
@@ -26480,6 +26485,21 @@ std::string catalog_item_type(App& app, const std::string& item_name) {
 }
 
 // The `za` column's expanded TARGET (JS `gk.uJ`), read by --flow-verify.
+// [probe] `za.zq` rect in screen space.
+bool za_disciple_center(App& app, float& cx, float& cy, float& w, float& h) {
+    bool disciple = false;
+    try {
+        disciple = app.save().load().disciple;
+    } catch (const std::exception&) {
+    }
+    const ZaDiscipleRect r = za_disciple_rect(app, disciple);
+    cx = r.cx;
+    cy = r.cy;
+    w = r.w;
+    h = r.h;
+    return r.w > 0.0f;
+}
+
 bool za_nav_expanded(ScreenId id) { return za_nav_state(id).uJ; }
 
 // The live Map screen's `Ur` strip (see screens.hpp). Null-safe: a probe run
