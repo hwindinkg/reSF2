@@ -8304,7 +8304,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // HUD style decay `ia()` (L2092): bar-only drain, levels never drop.
         static const StyleTable kStyleDecay =
             sf2::scene::style_table_from_params();
-        style_decay(me.style, kStyleDecay.tya);
+        // JS `lk.ia` L84573-84577: `this.Sh.ia()` then, when the round is
+        // live, `this.Sh.ia()` AGAIN — 2 x `tya/60/on()` per frame while
+        // fighting, 1 otherwise. The port ticked once.
+        style_decay(me.style, kStyleDecay.tya * (style_double_tick_ ? 2.0f : 1.0f));
     }
 
     const std::string prev_move = me.last_move;
@@ -9356,6 +9359,7 @@ void FightController::banner_expire() {
 
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
 void FightController::update(float dt) {
+    style_double_tick_ = false;  // `lk.ia(round.Vt)`: only phase 2 doubles
     sf2::scene::set_math_random_trace_frame(static_cast<int>(frame_));
     // The fight frame counter (JS `ca.frame`): counts the LIVE phases only.
     // The idle lead-in (the ROUND plate, before phase 1) keeps it at 0 so
@@ -9496,6 +9500,7 @@ void FightController::update(float dt) {
             // start_stance, so nothing to do.
             break;
         case fight_phase::start_stance: {
+            style_double_tick_ = false;
             // JS: the StartStance animation plays once; when it finishes
             // the fight enters phase 2 (`kg` handler: eu==1 && anim.OCa()
             // -> Am()/xF(2)).
@@ -9528,6 +9533,7 @@ void FightController::update(float dt) {
             break;
         }
         case fight_phase::fight: {
+            style_double_tick_ = true;  // `lk.ia(round.Vt)` -> 2 ticks
             // The round timer (JS `Sf.iPa` L2036 — `--xU`, `NF = xU/60|0`;
             // C++ `/` truncates toward zero = JS `|0`). Ticks while `Vt`.
             if (round_.running) {

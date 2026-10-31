@@ -2451,6 +2451,10 @@ private:
     const FightFighter* winner_ = nullptr;
     bool auto_attack_ = false;     // the demo's simple auto-attack driver
     bool round_live_ = false;      // JS `h9` — a round is in progress
+    // JS `lk.ia(a)` (L84573-84577): while the round is LIVE (`a` = `round.Vt`)
+    // the style meter is ticked TWICE per frame, once otherwise. Set by the
+    // phase-2 branch of `update()`.
+    bool style_double_tick_ = false;
     bool dga_ = false;             // JS `Dga` — a hit landed this round
                                    // (`ep` = !Dga, L394; init false L380)
     // Wave log: the last AI decision string, so the `[ai]` diagnostic line

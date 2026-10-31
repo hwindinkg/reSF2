@@ -17388,7 +17388,10 @@ void FightScreen::render_impl(App& app) {
             static int last_pf = -1, last_ef = -1;
             const int pf = static_cast<int>(sm_p.frac * 10.0f);
             const int ef = static_cast<int>(sm_e.frac * 10.0f);
-            if (sm_p.level != last_p || sm_e.level != last_e || pf != last_pf ||
+            // `SF2_TRACE_STYLE_ALL=1` prints EVERY frame (the `--style-decay`
+            // measurement: the JS `lk.ia` double tick while the round is live).
+            static const bool style_all = std::getenv("SF2_TRACE_STYLE_ALL") != nullptr;
+            if (style_all || sm_p.level != last_p || sm_e.level != last_e || pf != last_pf ||
                 ef != last_ef) {
                 last_p = sm_p.level;
                 last_e = sm_e.level;
@@ -20121,7 +20124,7 @@ int shop_effective_bonus(App& app, const CatalogItem& it) {
 // `ie.Or(a)` = `We.Sfa(a)` (JS L633556 / L1257554): the display number, with a
 // space as the thousands separator. `<1e3` is the raw string; the shipped shop
 // combat stats are all small, but the grouping is exact for every magnitude.
-std::string shop_format_number(int a) {
+std::string shop_format_number(std::int64_t a) {
     if (a < 0) return std::to_string(a);
     std::string c = std::to_string(a);
     for (int i = static_cast<int>(c.size()) - 3; i > 0; i -= 3) c.insert(i, 1, ' ');
@@ -21552,12 +21555,18 @@ void ShopScreen::render_impl(App& app) {
             const float cx = tl.cx0 + static_cast<float>(k) * tl.step;
             const bool sel = t == tab_;
             const bool hov = t == tab_hover_;
-            const int state = sel ? 1 : (hov ? 2 : 0);  // normal/active/pushed
+            // JS `Eg.aa` (L77808-77836) + `db.aa` (L77256-77281): the strip only
+            // swaps the ACTIVE frame (`Gya` -> `tL`); the `_pushed` frame is
+            // drawn only while the pointer is DOWN on that button (`Xw(true)`
+            // from the touch-down branch), and the inactive tabs are NOT dimmed
+            // (the oracle `shop_tab1` tab icon luma 151.7 vs the port's 127.2 =
+            // exactly the old 0.75 alpha over the bar).
+            (void)hov;
+            const int state = sel ? 1 : 0;  // normal/active
             const char* art = shop_tab_art(t, state);
             bool drawn = false;
             if (art != nullptr) {
-                drawn = try_draw_atlas_button(app, art, cx, tl.cy, tl.btn_w, tl.btn_h,
-                                              sel ? 1.0f : (hov ? 0.9f : 0.75f));
+                drawn = try_draw_atlas_button(app, art, cx, tl.cy, tl.btn_w, tl.btn_h, 1.0f);
             }
             if (!drawn) {
                 draw_flat_button(app, kShopTabs[t].label, cx, tl.cy, tl.btn_w, tl.btn_h,
@@ -21585,11 +21594,18 @@ void ShopScreen::render_impl(App& app) {
         const float v[] = {r.J, r.P, r.N, r.P, r.N, r.W, r.J, r.P, r.N, r.W, r.J, r.W};
         ren.draw_triangles(v, 6, cr, cg, cb, ca);
     };
+    // The `Oe.scroll` `Fg(500,800,0,30)` frame (paper body + rails + the two
+    // `Zh` roll bands, L1869-1872) — the oracle centre column (the port drew
+    // the room through the viewer with no scroll art).
+    draw_shop_scroll(app, ren, sl.viewer);
     if (rows.empty()) {
         // `Oe.Dn` no-items label (L2261 `Dn.V("noItems")`); `Oa.f5` overrides
         // it with the lock copy per tab: `Y.na("shopRangedLocked")` (case 3) /
-        // `Y.na("shopMagicLocked")` (case 4) (L2287). The old native drew a
-        // hard-coded EN sentence.
+        // `Y.na("shopMagicLocked")` (case 4) (L2287). JS `Dn` is a child of
+        // `scroll.content` (L93762), so it draws ON TOP of the paper — the port
+        // painted it first and `draw_shop_scroll` then covered it, which is why
+        // the oracle `shop_tab4`/`shop_tab5` show the lock sentence and the
+        // port's captures were blank.
         const char* key = "noItems";
         const char* fb = "No items";
         if (tab_ == 3) {
@@ -21599,14 +21615,21 @@ void ShopScreen::render_impl(App& app) {
             key = "shopMagicLocked";
             fb = "Defeat the Hermit to unlock";
         }
-        draw_ui_wrapped(app, sl.viewer.J + sl.scroll_inset, sl.cell_top,
-                        sl.viewer.width() - 2.0f * sl.scroll_inset, sl.list_h,
-                        loc(app, key, fb), 1.0f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
+        // JS `Oe.Pn` L93783-93786: `Dn.C(4); Dn.Fa(b, c); Dn.ua(b*0.12);
+        // Dn.Kc(0.6)` with `b = scroll.Gv - 8` (the content width). The port
+        // drew it at ua 1.0, i.e. ~2x the oracle's cap height.
+        const float dn_w = sl.viewer.width() - 2.0f * sl.scroll_inset;
+        const std::string dn_txt = loc(app, key, fb);
+        const float dn_ua = dn_w * 0.12f / 100.0f;
+        // `Fa(b, c)` gives the label the WHOLE content box and `rd(true)` makes
+        // it multiline; the lines are centred inside it (the oracle
+        // `shop_tab4` puts the sentence at the vertical middle of the paper).
+        const float dn_h = measure_ui_wrapped(app, dn_txt, dn_w, dn_ua, 0.6f);
+        const float dn_y = sl.cell_top + std::max(0.0f, (sl.list_h - dn_h) * 0.5f);
+        draw_ui_wrapped(app, sl.viewer.J + sl.scroll_inset + 4.0f, dn_y, dn_w,
+                        sl.list_h, dn_txt, dn_ua, UiAlign::Center, 0.184f, 0.145f,
+                        0.106f, 0.6f);
     }
-    // The `Oe.scroll` `Fg(500,800,0,30)` frame (paper body + rails + the two
-    // `Zh` roll bands, L1869-1872) — the oracle centre column (the port drew
-    // the room through the viewer with no scroll art).
-    draw_shop_scroll(app, ren, sl.viewer);
     // The JS scroller clips its cells to the `scroll.content` rect (inset by
     // the rails `c` and the roll bands `vk`) — `Gg.VK` (L1891) plus the node
     // mask (L1603). `Renderer::push_clip`/`pop_clip` is the native equivalent
@@ -21644,7 +21667,13 @@ void ShopScreen::render_impl(App& app) {
         // Bk.C(ce.x/2); Bk.D(ce.y/2)` — the item image is aspect-fit (`kLa` =
         // `la(min(a/fa.x,b/fa.y))`, @828371) and centred EXACTLY on the cell
         // (`ce/2`), at alpha 1. The old `cy - ch*.04` / 0.95f were invented.
-        bool drawn = draw_item_image(app, it.image, cx, cy, cw * 0.8f, ch * 0.8f, 1.0f);
+        // JS `Oe.NC` (L94044 `b.ym(0.3); b.JDa = 0.3`) + `SOa`
+        // (L95719 `this.Ne.wa(this.aC.dg() ? this.JDa : 1)`) + the `aC` gate
+        // (`a.xf > p.o.bb() && !re.sEa(a)`, L95636): a LEVEL-LOCKED cell's art is
+        // drawn at alpha 0.3 behind the padlock. The port drew it at 1.0.
+        const bool level_locked = it.level > seen_.level && !owned;
+        bool drawn = draw_item_image(app, it.image, cx, cy, cw * 0.8f, ch * 0.8f,
+                                     level_locked ? 0.3f : 1.0f);
         if (!drawn) {
             const float r = equipped ? 0.72f : (selected ? 0.75f : (hovered ? 0.7f : 0.5f));
             const float g = equipped ? 0.60f : (selected ? 0.62f : (hovered ? 0.56f : 0.4f));
@@ -21711,7 +21740,7 @@ void ShopScreen::render_impl(App& app) {
             // anchor, @1185816); shown when `a.xf>p.o.bb()&&!re.sEa(a)`
             // (@1187015) = required level above the player's AND not owned
             // (`re.sEa` = owned-entry exists, @1176056).
-            if (it.level > seen_.level && !owned) {
+            if (level_locked) {
                 try_draw_atlas_button(app, "lock", cx, cy, cw * 0.2f, cw * 0.2f, 1.0f,
                                       false, false);
             }
@@ -22048,9 +22077,11 @@ void ShopScreen::render_impl(App& app) {
             }
             try_draw_atlas_button(app, icon, cx0 + 30.0f, py, 40.0f, 40.0f, avail_a, false,
                                   false);
+            // JS `Ne.kL` (L93500) `c5(a, ie.Or(b), c)` — the price string is
+            // thousands-grouped (`ie.Or`/`Sfa` L101746 insert a space).
             draw_ui_label(app, cx0 + 56.0f, py - 15.0f, cw0 - 56.0f, 30.0f,
-                          std::to_string(value), 0.9f, UiAlign::Left, 0.184f * avail_a,
-                          0.145f * avail_a, 0.106f * avail_a);
+                          shop_format_number(value), 0.9f, UiAlign::Left,
+                          0.184f * avail_a, 0.145f * avail_a, 0.106f * avail_a);
         };
         int slot = 0;
         if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
