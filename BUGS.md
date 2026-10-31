@@ -3291,3 +3291,32 @@ shop_price_center: 934.6,485.2   (старый клик 460.1 = ровно по�
 [za] nav MAP -> screen 5 (guidance=-)
 [navprobe] start=3 active_row_accepted=0 after=3 map_accepted=1 after_map=5 -> PASS
 ```
+
+### QA-31.10 — диалог подтверждения покупки в магазине (закрыто)
+
+`Ne.ZYa`/`Eh` -> `transaction` L93372: сначала проверка средств
+(`if (c > d) v.Bv(...)`), затем `Xc.$hb` L39348-39356 открывает диалог типа 350
+(`Wb.openDialog(350, new kv(action, currency, price, cb, delivery))`), и только
+его колбэк (`ZYa` -> `Pa.iwa`) списывает деньги, сохраняет и шлёт
+`QUEST_EVENT_PURCHASE`. `ph extends od` L81749-81872: заголовок `dlgBuyTitle`,
+тело `dlgBuyMessage` + `dlgCurrencyQuestion{icon}{price}?`, плашки
+`shopBuy` / `CANCEL`.
+
+Сделано: `open_buy_confirm(app, item, ruby)` (гейт средств -> диалог),
+`buy_confirm_accept` (отложенный `purchase_price_plate`), `CANCEL` закрывает,
+диалог владеет вводом и рисуется последним поверх магазина. Скриптовый
+туториальный путь (`Ao.Qg` L46820-46835) по-прежнему покупает напрямую — в JS
+он именно так и делает.
+
+Замер (`--buy-confirm-probe`, headless):
+```
+[shop] Xc.$hb -> dlgBuy WEAPON_KNIVES (gold 50)
+[buyprobe] the price plate opens the dlgBuy dialog          PASS
+[buyprobe] the balance is UNCHANGED while the dialog is up  PASS
+[buyprobe] the confirm plate charges the price              PASS
+[buyprobe] the confirm plate grants the item                PASS
+[buyprobe] RESULT 5/5 -> PASS
+```
+Кадр `.harness/buy_dialog.png`: «КУПИТЬ» / «Вы уверены, что хотите купить это
+за 🪙 50?» / ОТМЕНА + КУПИТЬ. Пробники, которые доводят покупку
+(`--quest-verify-buy`, `--flow-verify`), теперь жмут плашку подтверждения.
