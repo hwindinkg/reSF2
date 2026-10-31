@@ -10358,7 +10358,13 @@ void DojoScreen::render_impl(App& app) {
         // settled rest on the oracle is `800 - 848.79 = -48.79` (the previous
         // `-31.5` was calibrated against the spawn midpoint 831.5, which is NOT
         // the live focus base — using it here panned the whole hub 17px left).
-        constexpr float kHubFocusDeltaLive = -48.79f;   // live smoothed-focus base -> 800
+        // MEASURED CORRECTION (31.10): the previous -48.79 landed the hub 69 px
+        // RIGHT of the oracle (`dojo_hub`: best whole-frame alignment of the
+        // oracle against the port is `oracle_x = port_x - 69`, luma-residual
+        // 2.25). At zoom 1.3 a 69 px screen shift is 53.08 design px of focus
+        // (`screen = (world - focus)*zoom`), so the delta becomes
+        // `-48.79 + 53.08 = +4.29`.
+        constexpr float kHubFocusDeltaLive = 4.29f;    // live smoothed-focus base -> oracle frame
         constexpr float kHubFocusDeltaSpawn = -31.5f;   // spawn-midpoint base -> 800
         if (dojo_fight_ != nullptr) {
             focus_x = dojo_fight_->camera().center_x + kHubFocusDeltaLive;
@@ -10375,11 +10381,24 @@ void DojoScreen::render_impl(App& app) {
         // effective arena_w). Capped to a few frames to show settling.
         if (g_dojo_cam_probe) {
             static int probe_n = 0;
-            if (probe_n < 24) {
+            // Sample the whole settle: the live focus is a spring, so the first
+            // frames are still ~15 px short of the rest value (the earlier
+            // 24-frame cap printed an unsettled `io_eff` and looked like a
+            // camera error). Print every 30th frame for 300 frames.
+            const bool probe_print = probe_n < 300 && (probe_n % 30) == 0;
+            if (probe_print) {
                 float lamp_x = 0.0f, lamp_factor = 0.0f, lamp_ls = 0.0f, lamp_sx = 0.0f;
                 for (const auto& L : assets.dojo.layers()) {
                     for (const auto& sp : L->sprites) {
-                        if (sp && sp->texture_name == "_0009_lamp_left") {
+                        // The loader prefixes the atlas page onto the
+                        // ClassName (`location_scene.cpp:661`), so the live
+                        // name is `dojo#_0009_lamp_left`. Match by SUBSTRING —
+                        // the old exact compare never hit and the probe printed
+                        // world_x=0 (the broken measurement).
+                        const bool is_lamp =
+                            sp != nullptr &&
+                            sp->texture_name.find("_0009_lamp_left") != std::string::npos;
+                        if (is_lamp) {
                             lamp_x = sp->transform.x;
                             lamp_factor = L->factor;
                             lamp_ls = (L->type == 2 || L->scaling) ? hub_cam.layer_zoom
@@ -10410,13 +10429,20 @@ void DojoScreen::render_impl(App& app) {
                     "layer_zoom=%.6f view_w=%.1f view_h=%.1f\n",
                     probe_n, hub_cam.center_x, hub_cam.center_y, hub_cam.zoom,
                     hub_cam.layer_zoom, hub_cam.view_w, hub_cam.view_h);
+                // The oracle reference (lamp centre 335.4, `Io = 180`) is the
+                // state of the `dojo_hub` CAPTURE. This probe launches its own
+                // scene, whose settled live focus differs by a few design px
+                // (printed as `io_eff`), so `delta_px` is only meaningful once
+                // `io_eff == oracle_io`. The authoritative check is the
+                // whole-frame alignment of `port_matrix/dojo_hub.png` against
+                // the oracle (best dx over the lantern/punchbag/doorway bands).
                 std::fprintf(
                     stdout,
                     "[dojoprobe] n=%d lamp world_x=%.3f factor=%.3f "
                     "layer_scale=%.3f screen_x=%.4f io_eff=%.4f "
-                    "oracle_x=%.1f delta_px=%.2f\n",
+                    "oracle_x=%.1f oracle_io=%.1f delta_px=%.2f\n",
                     probe_n, lamp_x, lamp_factor, lamp_ls, lamp_sx, io_eff,
-                    oracle_lamp_x, lamp_sx - oracle_lamp_x);
+                    oracle_lamp_x, 180.0f, lamp_sx - oracle_lamp_x);
                 // [dojo-cam-probe] bag vs holder: their layer index/factor and
                 // projected screen x through the SAME hub_cam. If they share a
                 // factor the separation is constant across the pan.
@@ -10472,8 +10498,8 @@ void DojoScreen::render_impl(App& app) {
                     bag_top_x, bag_top_sx, bag_piv_x, bag_piv_sx,
                     bag_top_sx - holder_sx, bag_piv_sx - holder_sx);
                 std::fflush(stdout);
-                ++probe_n;
             }
+            ++probe_n;
         }
         // JS `Ut.UWa` L832: the location layers append in XML order and the
         // fighters live INSIDE the ModelsViewer (Type=2) layer, so every
