@@ -19599,13 +19599,24 @@ void ResultsScreen::render_impl(App& app) {
         // the oracle's `results_win` МАГАЗИН plate was missing.
         const bool store_visible = results_store_visible(app);
         const float cx = kViewW * 0.5f;
-        const float oky = 645.0f;
+        const float oky = 643.0f;  // oracle `results_lose` face centre 642.5
         const float half = store_visible ? 132.0f : 0.0f;
         const float okx = cx - half;
         // `$g.V(Y.na("OK"))` (L2075): the plate caption is the localized `OK`
         // key, not a literal.
         const std::string ok_label = loc(app, "OK", "OK");
-        if (!draw_bb_plate(app, "btnWhite", okx, oky, 230.0f, 52.0f, 1.0f)) {
+        // JS `Bb` draws its `btnWhite` sprite (300x222 atlas frame) STRETCHED to
+        // the button's design box (`zf(100)` sets the node scale from the
+        // source height); the 9-slice `draw_bb_plate` path squashed the art into
+        // a 24 px face where the oracle's is 50 px (measured on
+        // `results_lose`: oracle 617..667, port 633..657).
+        // The `btnWhite` frame is 300x222 with transparent padding: the visible
+        // plate occupies ~60% of its width and ~48% of its height, so a box of
+        // 230x52 produced a 138x25 face while the oracle's is 229x50
+        // (`results_lose`, bright mask). The box is the JS node box
+        // (`Bb` 600x112 design scaled by `zf(100)`), sized so the FACE matches.
+        if (!try_draw_atlas_button(app, "btnWhite", okx, oky, 362.0f, 104.0f, 1.0f,
+                                   /*fill=*/true)) {
             draw_flat_button(app, ok_label, okx, oky, 210.0f, 48.0f, 0.85f, 0.78f, 0.55f,
                              false);
         }
@@ -19614,7 +19625,8 @@ void ResultsScreen::render_impl(App& app) {
         if (store_visible) {
             const float stx = cx + half;
             const std::string st_label = loc(app, "dlgStoryBtnStore", "SHOP");
-            if (!draw_bb_plate(app, "btnGreen", stx, oky, 230.0f, 52.0f, 1.0f)) {
+            if (!try_draw_atlas_button(app, "btnGreen", stx, oky, 362.0f, 104.0f, 1.0f,
+                                       /*fill=*/true)) {
                 draw_flat_button(app, st_label, stx, oky, 210.0f, 48.0f, 0.35f, 0.6f,
                                  0.25f, false);
             }

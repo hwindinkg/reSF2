@@ -4,11 +4,11 @@
 
 ![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 80%
+### Readiness: 82%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-40 of 50 checklist items; every gap below is documented in BUGS.md.
+41 of 50 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -19,15 +19,15 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | **Animation & physics** | 🟨 | 75% | 3/4 | gravity / impulses point UP instead of down (reported) |
 | **Combat** | 🟨 | 83% | 5/6 | player throw: gate correct, probe cannot hold the range |
 | **AI** | 🟥 | 67% | 4/6 | `fk=9` (dodge) and `fk=10` (block) never fire in a live fight; in Survival one clean hit kills the enemy (Eclipse x4000) - unverified after the align fix |
-| **UI & screens** | 🟥 | 60% | 6/10 | results: RETRY plate (`Hl`, gate `Cob` L85802) missing; STORE done; map: a completed battle still offers FIGHT; shop: solver state on the preview start; first-quest crystal grant for the energy tutorial (reported) |
+| **UI & screens** | 🟨 | 70% | 7/10 | map: a completed battle still offers FIGHT; shop: solver state on the preview start; first-quest crystal grant for the energy tutorial (reported) |
 | **Quests & progress** | 🟩 | 100% | 4/4 | - |
 | **Audio** | 🟥 | 67% | 2/3 | SFX while the scene is hidden during a round change |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟨 | 80% | 40/50 | - |
+| **overall** | 🟨 | 82% | 41/50 | - |
 
-The `overall` row is every checklist item at once (40 of 50); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (41 of 50); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
@@ -48,7 +48,7 @@ The `overall` row is every checklist item at once (40 of 50); a system row count
 
 | Module | Lines | Files |
 |---|---:|---:|
-| `core/app` | 47494 | 18 |
+| `core/app` | 47506 | 18 |
 | `core/scene` | 39400 | 35 |
 | `app/game` | 11140 | 1 |
 | `core/data` | 2162 | 20 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (40 of 50); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **107977** | |
+| **total** | **107989** | |
 <!-- STATUS:END -->

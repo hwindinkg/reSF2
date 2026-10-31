@@ -85,8 +85,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("fight HUD: bars, portraits, names, style meter", True),
         ("`ui-tour` 15/15, `fidelity-tour` 40/40", True),
         ("map, shop, profile, settings, dojo hub", True),
-        ("results: RETRY plate (`Hl`, gate `Cob` L85802) missing; STORE done",
-         False),
+        ("results: OK + STORE plates match the oracle (RETRY is unreachable: "
+         "`ca.Qvb` is never populated, so `Cob` L85802 is always false)", True),
         ("results: `<Reward><Item>` drops are granted (probe: the save owns "
          "`drop_name_blueseal`)", True),
         ("map: a completed battle still offers FIGHT", False),
