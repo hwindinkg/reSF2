@@ -2232,6 +2232,20 @@ public:
     BattlePrize prize(std::int64_t prize_base, std::int64_t money,
                       std::int64_t bonus, int kq = 0) const;
     int phase() const { return static_cast<int>(phase_); }
+
+    // JS `ql` event 0 -> `ca.Jfb` (L15556) -> `Ar.Ew(true)` -> `Gr.Ew(a)`
+    // (L85443 `this.Hqa = a`): while the finishing-blow hit-stun / slow-mo is
+    // running the callout plates are FROZEN (no slide, no count) — except the
+    // type-4 hot-ground plate (`Gr.l_a` L85499 `if (a.HEa) return true`).
+    bool finish_blow_active() const {
+        return finish_blow_pending_ || slowmo_on_ || finish_frozen_ != nullptr;
+    }
+    // [probe] the three latch flags, for the `SF2_TRACE_CALLOUT` line.
+    void finish_blow_flags(bool& pending, bool& slowmo, bool& frozen) const {
+        pending = finish_blow_pending_;
+        slowmo = slowmo_on_;
+        frozen = finish_frozen_ != nullptr;
+    }
     const RoundState& round() const { return round_; }
     bool battle_over() const { return battle_over_; }
     // JS `ca.m$` (L379/397/409): set true when the PLAYER is shocked by an

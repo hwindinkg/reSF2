@@ -15808,10 +15808,31 @@ void FightScreen::push_callout_element(int side, int type, int value) {
 // fixed-step tick (`update_impl`); `render_impl` only replays the stored clock.
 void FightScreen::tick_callouts() {
     constexpr float kSlide = 0.5f;  // `Ix.move` `.5`
+    // JS `Gr.azb` L85505-85534: while `Hqa` (the finishing-blow cinematic) is
+    // set, `l_a` (L85499 `if (a.HEa) return true; return !this.Hqa;`) skips the
+    // slide AND the count for every element except the type-4 hot-ground plate.
+    const bool freeze = fight_ != nullptr && fight_->finish_blow_active();
+    // [probe] `SF2_TRACE_CALLOUT=1`: the freeze latch + the live plates every
+    // 30 sim frames (the finishing-blow window measurement).
+    if (std::getenv("SF2_TRACE_CALLOUT") != nullptr && (callout_sim_frame_ % 30) == 0 &&
+        (!combo_callout_[0].elements.empty() || !combo_callout_[1].elements.empty())) {
+        bool fp = false, fs = false, ff = false;
+        fight_->finish_blow_flags(fp, fs, ff);
+        std::fprintf(stdout,
+                     "[callout] f=%d freeze=%d (pending=%d slowmo=%d frozen=%d) p=%zu e=%zu\n",
+                     callout_sim_frame_, freeze ? 1 : 0, fp ? 1 : 0, fs ? 1 : 0,
+                     ff ? 1 : 0, combo_callout_[0].elements.size(),
+                     combo_callout_[1].elements.size());
+        std::fflush(stdout);
+    }
     for (int side = 0; side < 2; ++side) {
         ComboTracker& tr = combo_callout_[side];
         for (std::size_t i = 0; i < tr.elements.size();) {
             ComboElement& e = tr.elements[i];
+            if (freeze && e.type != 4) {
+                ++i;  // frozen mid-slide (`l_a` false)
+                continue;
+            }
             e.time += 1.0f / 60.0f;  // `L.K.sk.Bm` (the fixed step)
             const float a = std::min(1.0f, e.time / kSlide);
             const bool landed = (a >= 1.0f);
@@ -15825,9 +15846,9 @@ void FightScreen::tick_callouts() {
                 // `Gr.azb` `J.remove(this.Gu,c)`: the retract landed. The
                 // element lived `Qq(type)` count frames after the 0.5 s slide
                 // plus the 0.5 s `dc.KK` retract -> `life + 60` fixed steps.
-                static bool life_logged[2][6] = {};
-                if (e.type >= 0 && e.type < 6 && !life_logged[side][e.type]) {
-                    life_logged[side][e.type] = true;
+                // Every element is logged (the frozen finishing-blow plate is
+                // the interesting one; a per-type one-shot hid it).
+                if (e.type >= 0 && e.type < 6) {
                     std::fprintf(stdout,
                                  "[callout-life] side=%d type=%d born_f=%d "
                                  "last_f=%d span_frames=%d\n",
@@ -17797,8 +17818,14 @@ void FightScreen::render_impl(App& app) {
     // `Na.cd(16777087)` = (255,255,127). Positions are in the port's
     // screen-space HUD (`Gr.node` is a child of the `lk` panel, scaled `c`).
     {
+        // The plates stay ON SCREEN while the finishing blow runs (they are
+        // frozen, not hidden: `Gr.Ew` only sets the hide flag `Hqa`, and
+        // `Gr.azb` keeps drawing them), so the round-wait gate must not drop
+        // them in that window.
         const bool combo_live =
-            !paused_ && !fight_->round_wait() && !fight_->battle_over();
+            !paused_ &&
+            (fight_->finish_blow_active() ||
+             (!fight_->round_wait() && !fight_->battle_over()));
         if (!combo_live) {
             // JS `Gr.Ew(a)` (L85443-85445) ONLY sets the hide flag
             // (`this.Hqa = a`); `Gr.azb`'s `l_a` then skips the MOTION while
