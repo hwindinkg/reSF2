@@ -3422,3 +3422,23 @@ this.zq.D(a / 2 + this.PL.qa() + this.scroll.Af.height);
 обод кнопки на x 104..165, y 153..193 — под плашкой заголовка (y 72..112) и не
 задевает джойстик; тот же пиксель в старой позиции (136,690) чёрный в обоих
 кадрах (там больше ничего не рисуется).
+
+### QA-31.10 — README: две записи закрыты, одна уточнена
+
+- **`<Reward><Item>` больше не «не выдаётся»** — `apply_fight_reward`
+  (`screens.cpp:18789`) кладёт дропы из `battle_reward_items` в сейв
+  (`w.items.push_back`). Замер `--results-item-probe`:
+  ```
+  [result] reward items: drop_name_blueseal
+  [itemprobe] reward_items=1: drop_name_blueseal
+  [itemprobe] save owns 'drop_name_blueseal' = 1
+  ```
+  -> в README пункт переведён в True.
+- **Квесты больше не «встают после покупки ножей до перезапуска»** — гейт
+  `tutorial-chain-verify` проходит всю цепочку training -> shop (покупка) -> map
+  без перезапуска (3 pass, 0 fail, RESULT ... -> PASS). -> True.
+- **RETRY на экране результатов всё ещё НЕ нарисован** (порт рисует только OK и
+  STORE): JS `Lr` ctor L86336-86346 создаёт `Hl` при `c = Cob(ca.Ka())`
+  (L85802-85810: законченный бой, не Stranger, для Survival только
+  `FightSurvival`), `bza` его показывает. Пункт README переформулирован точно
+  («RETRY plate missing; STORE done») и остаётся False.

@@ -2,13 +2,13 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![readiness](https://img.shields.io/badge/readiness-76%25-blue) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![readiness](https://img.shields.io/badge/readiness-80%25-blue) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 76%
+### Readiness: 80%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-38 of 50 checklist items; every gap below is documented in BUGS.md.
+40 of 50 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -19,8 +19,8 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | **Animation & physics** | 🟨 | 75% | 3/4 | gravity / impulses point UP instead of down (reported) |
 | **Combat** | 🟨 | 83% | 5/6 | player throw: gate correct, probe cannot hold the range |
 | **AI** | 🟥 | 67% | 4/6 | `fk=9` (dodge) and `fk=10` (block) never fire in a live fight; in Survival one clean hit kills the enemy (Eclipse x4000) - unverified after the align fix |
-| **UI & screens** | 🟥 | 50% | 5/10 | results screen: RETRY / STORE buttons missing; results: `<Reward><Item>` drops are not granted; map: a completed battle still offers FIGHT; shop: solver state on the preview start; first-quest crystal grant for the energy tutorial (reported) |
-| **Quests & progress** | 🟨 | 75% | 3/4 | quests stall after buying the knives until a restart (reported) |
+| **UI & screens** | 🟥 | 60% | 6/10 | results: RETRY plate (`Hl`, gate `Cob` L85802) missing; STORE done; map: a completed battle still offers FIGHT; shop: solver state on the preview start; first-quest crystal grant for the energy tutorial (reported) |
+| **Quests & progress** | 🟩 | 100% | 4/4 | - |
 | **Audio** | 🟥 | 67% | 2/3 | SFX while the scene is hidden during a round change |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |

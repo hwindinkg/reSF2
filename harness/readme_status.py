@@ -85,8 +85,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("fight HUD: bars, portraits, names, style meter", True),
         ("`ui-tour` 15/15, `fidelity-tour` 40/40", True),
         ("map, shop, profile, settings, dojo hub", True),
-        ("results screen: RETRY / STORE buttons missing", False),
-        ("results: `<Reward><Item>` drops are not granted", False),
+        ("results: RETRY plate (`Hl`, gate `Cob` L85802) missing; STORE done",
+         False),
+        ("results: `<Reward><Item>` drops are granted (probe: the save owns "
+         "`drop_name_blueseal`)", True),
         ("map: a completed battle still offers FIGHT", False),
         ("shop: solver state on the preview start", False),
         ("dialog captions render the inline `<image>` icons (rich text)", True),
@@ -98,8 +100,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("`quest-verify`, `quest-verify-buy`", True),
         ("`tutorial-chain-verify` (training -> shop -> map)", True),
         ("`tutorial-real-verify`, `dialog-verify`", True),
-        ("quests stall after buying the knives until a restart (reported)",
-         False),
+        ("`tutorial-chain-verify`: knives -> Map with no restart", True),
     ]),
     ("Audio", [
         ("bus, voice pool (2 loops + 16 one-shots), de-dup", True),
