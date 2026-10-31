@@ -17600,6 +17600,13 @@ void FightScreen::render_impl(App& app) {
     const int timer = std::max(0, fight_->round().time_nf);
     const std::string tstr = (timer < 10 ? "0" : "") + std::to_string(timer);
     {
+        // The audit read `Sf` L84690/84694 as `new ea(E.Na(), ...)` (asset 264,
+        // the localized UI font) and asked for the menu font here. The ORACLE
+        // contradicts it: `fight_stance` "99" is 57x35 px (aspect 1.63), while
+        // the same glyphs in the port's menu font at the matching height come
+        // out 80x35 (aspect 2.29) — the oracle's digits are the NARROW fight
+        // digits (1308), which is what this draw uses and which reproduces the
+        // oracle box. Recorded rather than "fixed" on the audit's word.
         const sf2::data::font* fnt = app.digits_font() ? app.digits_font() : app.menu_font();
         unsigned int tex = app.digits_font() ? app.digits_texture() : app.font_texture();
         if (fnt != nullptr && tex != 0) {
