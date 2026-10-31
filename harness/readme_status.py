@@ -87,6 +87,16 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("map, shop, profile, settings, dojo hub", True),
         ("results: OK + STORE plates match the oracle (RETRY is unreachable: "
          "`ca.Qvb` is never populated, so `Cob` L85802 is always false)", True),
+        ("battle-over HP bars latch at the KO (`Br.IFa` L83648; the `NA` heal "
+         "is not animated)", True),
+        ("shop: TRY plate only on tabs 0-4/6 (`h\$a` L95320)", True),
+        ("shop: TRY plate face 195x24 vs the oracle 184x48 (`btnWhite` "
+         "margins)", False),
+        ("shop: ruby purchase auto-upgrade (`Pa.gI` L51178)", False),
+        ("shop: tab badges (`ss` L94726-94730)", False),
+        ("shop: discount stripe (`ns.j5` L95673-95682)", False),
+        ("shop: tab-5 payment buttons (`Ne.Op` L93467-93488)", False),
+        ("shop: price ink ~1.45x the oracle (menu-font `ua` calibration)", False),
         ("results: `<Reward><Item>` drops are granted (probe: the save owns "
          "`drop_name_blueseal`)", True),
         ("map: a completed battle still offers FIGHT", False),
@@ -95,6 +105,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("HUD energy tap fires `EnergyBarPress`; the green plus opens the "
         "shop RUBY tab", True),
         ("first-quest crystal grant for the energy tutorial (reported)", False),
+        ("dojo nav badges (`Mma`/`bM` L82543-82550)", False),
+        ("dojo `max` / `unlimited_energy` widgets (L82709/L82605)", False),
+        ("dojo bar fill uses a shortened quad, not the EFilled clip "
+         "(`Uf.kB` L83275)", False),
     ]),
     ("Quests & progress", [
         ("`quest-verify`, `quest-verify-buy`", True),
