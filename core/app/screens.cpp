@@ -476,7 +476,7 @@ void draw_ui_label(App& app, float x, float y, float w, float h,
 bool draw_ui_label_font(App& app, const sf2::data::font* font, unsigned int tex,
                         float x, float y, float w, float h, const std::string& text,
                         float ua_scale, UiAlign align, float r, float g, float b,
-                        bool fit = true) {
+                        bool fit = true, float alpha = 1.0f) {
     if (text.empty() || w <= 0.0f || h <= 0.0f || font == nullptr || tex == 0) return false;
     // The call sites express `ua` in the MENU font's units (`ua_scale = px/100`,
     // `ui_ua_scale`). The JS divides by the ACTIVE charset's `eF`: the settings
@@ -503,7 +503,7 @@ bool draw_ui_label_font(App& app, const sf2::data::font* font, unsigned int tex,
     } else if (align == UiAlign::Right) {
         dx = x + w - draw_w;
     }
-    return app.draw_text_with_font(*font, tex, dx, y, text, scale, r, g, b, 1.0f);
+    return app.draw_text_with_font(*font, tex, dx, y, text, scale, r, g, b, alpha);
 }
 
 // JS `ea.ua(px)` -> glyph scale for a font size in PIXELS: `Qh.print` (L1631)
@@ -1059,7 +1059,8 @@ struct OdPanel {
     float c = 1.0f;                                    // design -> screen scale
 };
 OdPanel od_panel(float src_w, float src_h);
-void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p);
+void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p,
+                  float alpha = 1.0f);
 // Sliced-button path (defined below): the Regular quest dialog's button
 // plate reuses it. No default args here (the definitions below carry the
 // defaults; repeating them is an error).
@@ -1275,11 +1276,11 @@ OdPanel od_panel(float src_w, float src_h) {
     return p;
 }
 
-void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
+void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p, float alpha) {
     bool drew = false;
     if (load_scroll_atlas(app)) {
         drew = try_draw_atlas_button(app, "bg", p.px + p.pw * 0.5f, p.py + p.ph * 0.5f,
-                                     p.pw, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
+                                     p.pw, p.ph, alpha, /*fill=*/true, /*flip_x=*/false);
         if (drew) {
             // `XN[0]` left + `XN[2]` right (`l4a` L1896): `f.C(-(e+b/2*c))`,
             // `h.C(e+b/2*c)` with `e=XN[0].fa.x/2`, `b=d.w` -> the cap centre
@@ -1301,16 +1302,16 @@ void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p) {
             const float off = (cap_w + p.pw) * 0.5f;
             const float cx = p.px + p.pw * 0.5f;
             try_draw_atlas_button(app, "bg_edge", cx - off, p.py + p.ph * 0.5f,
-                                  cap_w, p.ph, 1.0f, /*fill=*/true, /*flip_x=*/false);
+                                  cap_w, p.ph, alpha, /*fill=*/true, /*flip_x=*/false);
             try_draw_atlas_button(app, "bg_edge", cx + off,
-                                  p.py + p.ph * 0.5f, cap_w, p.ph, 1.0f, /*fill=*/true,
+                                  p.py + p.ph * 0.5f, cap_w, p.ph, alpha, /*fill=*/true,
                                   /*flip_x=*/true);
         }
     }
     if (!drew) {
         const float panel[] = {p.px, p.py, p.px + p.pw, p.py, p.px, p.py + p.ph,
                                p.px + p.pw, p.py, p.px + p.pw, p.py + p.ph, p.px, p.py + p.ph};
-        ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f);
+        ren.draw_triangles(panel, 6, 0.08f, 0.07f, 0.10f, 0.95f * alpha);
     }
 }
 
@@ -1355,9 +1356,21 @@ struct SettingsLayout {
     float rail_w = 0.0f, rail_h = 0.0f;
 };
 
-SettingsLayout settings_layout() {
+SettingsLayout settings_layout(float scale_mul = 1.0f) {
     SettingsLayout s;
     s.panel = od_panel(2340.0f, 1530.0f);  // od AV = fc(2340,1530), L1894
+    // `od.aa` L1895 `node.la(node.Eb + (-.2+.2*dc.kYa()(t)))` (the 0.25 s open
+    // tween): the whole `un` node — paper included — scales about the screen
+    // centre, so scale the panel rect and `c` together before deriving.
+    if (scale_mul != 1.0f) {
+        const float cx0 = kViewW * 0.5f;
+        const float cy0 = kViewH * 0.5f;
+        s.panel.px = cx0 + (s.panel.px - cx0) * scale_mul;
+        s.panel.py = cy0 + (s.panel.py - cy0) * scale_mul;
+        s.panel.pw *= scale_mul;
+        s.panel.ph *= scale_mul;
+        s.panel.c *= scale_mul;
+    }
     const OdPanel& p = s.panel;
     const float cx = p.px + p.pw * 0.5f;  // design x=0
     const float cy = p.py + p.ph * 0.5f;  // design y=0
@@ -25599,23 +25612,30 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     // applies for the settings dialog, so the whole screen behind the panel
     // rendered at 0.5*0.45 = 0.225 instead of 0.502 (the oracle `settings`
     // backdrop is exactly 0.502 of `dojo_hub`, measured 0.5*0.45=0.2241 port).
-    draw_dialog_backdrop(ren, 1.0f);
-    const SettingsLayout s = settings_layout();
-    draw_od_base(app, ren, s.panel);
+    // `od.aa` L1895 open tween (0.25 s): `node.wa(dc.Ln()(t))` +
+    // `node.la(Eb + (-.2 + .2*dc.kYa()(t)))` — alpha 0->1, scale 0.8->1.0. The
+    // port drew the `un` overlay at its final state from the first frame; only
+    // the `He` dialogs ran the tween (`dialog_anim_at`, D6 cases).
+    const float settings_age_s = static_cast<float>(g_settings_age) / 60.0f;
+    const DialogAnim un_anim = dialog_anim_at(settings_age_s, /*closing=*/false);
+    const float aa = un_anim.alpha;  // `node.wa`
+    draw_dialog_backdrop(ren, aa);
+    const SettingsLayout s = settings_layout(un_anim.scale);
+    draw_od_base(app, ren, s.panel, aa);
     // Title `Vc`: `IVa.Settings_Title` (L1917); `ua(152)` + `La(Z.W6)` (L1900).
     draw_ui_label_font(app, sfont, stex, s.title_x, s.title_y, s.title_w, s.title_h,
-                       loc_lang(app, lang, "Settings_Title", "SETTINGS"), 1.52f, UiAlign::Center, 0.404f,
-                       0.243f, 0.141f);
+                       loc_lang(app, lang, "Settings_Title", "SETTINGS"), 1.52f,
+                       UiAlign::Center, 0.404f, 0.243f, 0.141f, /*fit=*/true, aa);
     // JS `y.loa/koa` (L1928): the Sound row icon reflects the SFX mute (`lb.Mz()`).
     const bool sfx_on = !sf2::audio::AudioEngine::instance().sfx_muted();
     if (load_settings_icons_atlas(app)) {
         try_draw_atlas_button(app, sfx_on ? "sound" : "sound_off", s.sound_cx, s.sound_cy,
-                              s.icon, s.icon, 1.0f);
+                              s.icon, s.icon, aa);
         try_draw_atlas_button(app, g_settings_music_off ? "music_off" : "music", s.music_cx,
-                              s.music_cy, s.icon, s.icon, 1.0f);
+                              s.music_cy, s.icon, s.icon, aa);
         try_draw_atlas_button(app, "credits", s.credits_cx, s.credits_cy, s.icon, s.icon,
-                              1.0f);
-        try_draw_atlas_button(app, lang, s.lang_cx, s.lang_cy, s.icon, s.icon, 1.0f);
+                              aa);
+        try_draw_atlas_button(app, lang, s.lang_cx, s.lang_cy, s.icon, s.icon, aa);
     }
     struct RowLabel {
         float cx, cy;
@@ -25634,7 +25654,7 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         draw_ui_label_font(app, sfont, stex, row.cx + s.icon * 0.7f,
                            row.cy - s.icon * 0.25f, 596.0f * s.panel.c, s.icon, row.text,
                            g_settings_row_ua, UiAlign::Left, kSettingsTextR,
-                           kSettingsTextG, kSettingsTextB);
+                           kSettingsTextG, kSettingsTextB, /*fit=*/true, aa);
     }
     // `Nm` (L1929): `ea` at `Fa(1500,50)`, `C(-750)`, `D(250)`, `ua(75)`,
     // `Kc(.6)`, `V(Y.na("dlgSettingsRestart"))`, `R(!1)`; `R(t9)` (L1933) on a
@@ -25654,30 +25674,33 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
         draw_ui_label_font(app, sfont, stex,
                       s.panel.px + s.panel.pw * 0.5f - 750.0f * s.panel.c,
                       s.notice_y, 1500.0f * s.panel.c, 50.0f * s.panel.c,
-                      loc_lang(app, lang, "dlgSettingsRestart", "RESTART"), 0.75f, UiAlign::Center,
-                      kSettingsTextR, kSettingsTextG, kSettingsTextB, /*fit=*/false);
+                      loc_lang(app, lang, "dlgSettingsRestart", "RESTART"), 0.75f,
+                      UiAlign::Center, kSettingsTextR, kSettingsTextG, kSettingsTextB,
+                      /*fit=*/false, aa);
     }
     // BACK (`Bb("EButtonDark")` L1930 -> `btnDark`), `Ge(0)` closes.
     if (!(load_sliced_atlas(app) &&
-          draw_bb_plate(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 1.0f))) {
+          draw_bb_plate(app, "btnDark", s.back_cx, s.back_cy, s.btn_w, s.btn_h, aa))) {
         draw_flat_button(app, "", s.back_cx, s.back_cy, s.btn_w, s.btn_h, 0.35f, 0.3f, 0.28f,
                          g_settings_hover == 0);
     }
     draw_ui_label_font(app, sfont, stex, s.back_cx - s.btn_w * 0.5f, s.back_cy - 14.0f,
-                       s.btn_w, 28.0f, loc_lang(app, lang, "Settings_Back", "BACK"), 0.9f, UiAlign::Center,
-                       kSettingsTextR, kSettingsTextG, kSettingsTextB);
+                       s.btn_w, 28.0f, loc_lang(app, lang, "Settings_Back", "BACK"), 0.9f,
+                       UiAlign::Center, kSettingsTextR, kSettingsTextG, kSettingsTextB,
+                       /*fit=*/true, aa);
     // RESTART (`Bb("EButtonBeige")` L1930 -> `btnBeige`), revealed by L1931.
     if (g_settings_restart_visible) {
         if (!(load_sliced_atlas(app) &&
               draw_bb_plate(app, "btnBeige", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h,
-                            1.0f))) {
+                            aa))) {
             draw_flat_button(app, "", s.restart_cx, s.restart_cy, s.btn_w, s.btn_h, 0.6f, 0.5f,
                              0.3f, g_settings_hover == 2);
         }
         draw_ui_label_font(app, sfont, stex, s.restart_cx - s.btn_w * 0.5f,
                            s.restart_cy - 14.0f, s.btn_w, 28.0f,
-                           loc_lang(app, lang, "dlgServiceRestart", "RESTART"), 0.9f, UiAlign::Center,
-                           kSettingsTextR, kSettingsTextG, kSettingsTextB);
+                           loc_lang(app, lang, "dlgServiceRestart", "RESTART"), 0.9f,
+                           UiAlign::Center, kSettingsTextR, kSettingsTextG,
+                           kSettingsTextB, /*fit=*/true, aa);
     }
     // `od` divider rails (`un` ctor L1928 + `od.layout` L1898): both
     // `stripe_top` (E.get(254) = ui/scroll, `y.pB`), natural 984x22 size,
@@ -25687,9 +25710,9 @@ void draw_settings_dialog(App& app, sf2::render::Renderer& ren) {
     // divider measures y92-100 (top) and y673-679 (bottom), x411-868.
     if (load_scroll_atlas(app)) {
         try_draw_atlas_button(app, "stripe_top", s.panel.px + s.panel.pw * 0.5f, s.rail_top_y,
-                              s.rail_w, s.rail_h, 1.0f, /*fill=*/true, /*flip_x=*/false);
+                              s.rail_w, s.rail_h, aa, /*fill=*/true, /*flip_x=*/false);
         try_draw_atlas_button(app, "stripe_top", s.panel.px + s.panel.pw * 0.5f, s.rail_bot_y,
-                              s.rail_w, s.rail_h, 1.0f, /*fill=*/true, /*flip_x=*/false);
+                              s.rail_w, s.rail_h, aa, /*fill=*/true, /*flip_x=*/false);
     }
     // `xh` credits overlay (L1854-1857): drawn over the settings surface,
     // exactly as `xh.show` appends to the root above the `Wb` dialog.

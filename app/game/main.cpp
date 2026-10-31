@@ -5589,6 +5589,22 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             glfwPollEvents();
             app.run_one_frame();
         }
+        // `od.aa` open tween: the early frame (alpha/scale mid-ramp) and the
+        // settled frame.
+        if (const char* s1 = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(s1);
+            std::fprintf(stdout, "[langprobe] open shot %s\n", s1);
+            std::fflush(stdout);
+        }
+        for (int i = 0; i < 24; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        if (const char* s2 = std::getenv("SF2_DRAG_SHOT2")) {
+            app.capture_png(s2);
+            std::fprintf(stdout, "[langprobe] settled shot %s\n", s2);
+            std::fflush(stdout);
+        }
         std::fprintf(stdout,
                      "[langprobe] start lang='%s' ea.a1=%.2f ea.b1=%.2f\n",
                      app.language().c_str(), static_cast<double>(app.ui_text_scale()),
