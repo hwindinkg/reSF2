@@ -953,6 +953,7 @@ public:
     // headless-loop shop step clicks `shop_price_rect`'s centre.
     bool pause_dialog_open() const { return paused_; }
 
+
     // [trace, Phase 0] Arms the FightController's per-frame pose dump
     // (the first `frames` fight frames -> `path` JSONL). Defined in
     // screens.cpp (needs the full FightController type).
@@ -1906,6 +1907,11 @@ void set_profile_tab_for_test(int t);
 bool credits_view_open();
 void credits_view_show(App& app);
 float credits_view_scroll();
+
+// [--flow-verify] The shop PRICE PLATE centre (`Ne.ba` L93295-93304 stack),
+// so the driver clicks the plate the renderer actually drew instead of a
+// hard-coded pixel that drifts whenever the stack moves.
+bool shop_price_center(App& app, int slot, float& cx, float& cy);
 
 bool settings_dialog_open();
 void open_settings_dialog(App& app);

@@ -200,14 +200,16 @@ static const LoopStep kLoopSteps[] = {
     //    plate, `Pa.iwa` L1228 + `p.o.xa.$o(b,!0)` equip, `ZYa` L2251) then
     //    buys AND equips. `tab_x/tab_y` = the TRY plate press (JS `Up`, opens
     //    the panel ~5 frames early); the main click is the price-plate centre
-    //    (`shop_price_rect` at 1280x720 = 934.6, 460.1).
-    {934.6f, 460.1f, "shop->buy+equip WEAPON_KNIVES (M8)", kScreenShop, 0, -1, 12,
+    //    (`shop_price_center` at 1280x720 = 934.6, 485.2).
+    // `shop_price_center` (JS `Ne.ba` L93295) reports 934.6,485.2 —
+    // the old 460.1 was half a plate too high.
+    {934.6f, 485.2f, "shop->buy+equip WEAPON_KNIVES (M8)", kScreenShop, 0, -1, 12,
      nullptr, 305.4f, 199.5f},
     // 6: No re-toggle. After step 5 the item is owned+equipped, so the TRY/
     //    EQUIP plate (`Up`) would UNEQUIP (`xa.Qxb` L2300). The `Pi` panel is
     //    closed, so this click at the price-plate position is inert; the step
     //    only reports the save state.
-    {934.6f, 460.1f, "shop->no re-toggle (owned)", kScreenShop, 0, -1, 12, nullptr},
+    {934.6f, 485.2f, "shop->no re-toggle (owned)", kScreenShop, 0, -1, 12, nullptr},
     // 7: Shop -> BACK to the Dojo hub.
     {64.0f, 40.0f, "shop->dojo (BACK)", kScreenShop, 0, kScreenDojo, 0, nullptr},
     // 8: Dojo -> Equipment (the PROFILE button). Capture loop_equip.png on
@@ -7659,7 +7661,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             tick(20);
             const auto buy0 = au.played("snd_buy");
             const auto up0 = au.played("snd_upgrade");
-            app.inject_click(934.6, 460.1);  // the `M8` plate centre (1280x720)
+            {
+                float pcx = 934.6f, pcy = 460.1f;
+                if (sf2::app::shop_price_center(app, 0, pcx, pcy)) {
+                    std::fprintf(stdout, "[flowverify] price plate centre %.1f,%.1f\n",
+                                 static_cast<double>(pcx), static_cast<double>(pcy));
+                }
+                app.inject_click(pcx, pcy);  // the `M8` plate centre
+            }
             tick(14);
             bool owned = false;
             try {

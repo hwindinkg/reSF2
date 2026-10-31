@@ -19691,12 +19691,22 @@ ShopRect shop_price_rect(const ShopLayout& sl, int slot) {
     const float ch0 = rp.height() - 2.0f * by;
     const float bpad = cw0 * 0.05f;
     const float bh = 112.0f * pscale;
-    // `Ne.ba` L2249: `d = b - c*3` for the first active button, then
-    // `d -= e.qa() + c` per stacked button. `slot` is the 0-based position
-    // from the BOTTOM (ruby at 0 when both prices are live).
+    // JS `Ne.ba` L93295-93304: `c = a*0.05; d = b - c*3;` then for every
+    // ACTIVE button from the last: `e.D(d); d -= e.qa() + c`. `D` is the
+    // button CENTRE (`Bb` calls `Ga()`), so the bottom plate's centre is
+    // `b - c*3` — the old extra `- bh*0.5` put the whole stack half a plate
+    // too high. `slot` counts from the BOTTOM (ruby 0 when both are live).
     const float byy =
-        cy0 + ch0 - bpad * 3.0f - bh * 0.5f - static_cast<float>(slot) * (bh + bpad);
+        cy0 + ch0 - bpad * 3.0f - static_cast<float>(slot) * (bh + bpad);
     return {cx0, byy - bh * 0.5f, cx0 + cw0, byy + bh * 0.5f};
+}
+
+// [--flow-verify] the plate centre the driver must click.
+bool shop_price_center(App& app, int slot, float& cx, float& cy) {
+    const ShopRect r = shop_price_rect(shop_layout(0), slot);
+    cx = (r.J + r.N) * 0.5f;
+    cy = (r.P + r.W) * 0.5f;
+    return r.width() > 0.0f && r.height() > 0.0f;
 }
 
 // The `Oe` viewer scroll = JS `new Fg(500,800,0,30)` + `.Vaa(30)` (L2261-2262)
@@ -22038,7 +22048,9 @@ void ShopScreen::render_impl(App& app) {
         // (`Ne.ba` L2249).
         const float bpad = cw0 * 0.05f;
         const float bh = 112.0f * pscale;
-        const float byy0 = cy0 + ch0 - bpad * 3.0f - bh * 0.5f;
+        // `Ne.ba` L93296 `d = b - c*3` — the bottom plate's CENTRE (no extra
+        // half-plate: the old `- bh*0.5` raised the whole stack by 17 px).
+        const float byy0 = cy0 + ch0 - bpad * 3.0f;
         // `Ne.Wub` L2254 verbatim: the default branch draws the `M8`
         // GoldButton (`c5(M8, Aa.jp())`) AND the `pVa` RubyButton
         // (`c5(pVa, Aa.nn())`); `kL` L2254 activates a button only while its
@@ -22075,13 +22087,37 @@ void ShopScreen::render_impl(App& app) {
                 draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f * avail_a,
                                  0.62f * avail_a, 0.30f * avail_a, false);
             }
-            try_draw_atlas_button(app, icon, cx0 + 30.0f, py, 40.0f, 40.0f, avail_a, false,
+            // JS `Qf.V` L77506-77518 centres the icon+label pair inside the
+            // plate: the icon is `zf(89.6)` (its HEIGHT in the button's design
+            // units) with its centre at `-(label_w/2)*1.1`, and the label's
+            // centre at `+(icon_w/2)*1.1`. The port pinned the icon at
+            // `cx0+30` and left-aligned the number at `cx0+56`, ~40 px left of
+            // the oracle.
+            const float eb = bh / 112.0f;     // the plate's node scale (`kf`)
+            const float icon_h = 89.6f * eb;  // `icon.zf(89.6)`
+            float nat_w = icon_h, nat_h = icon_h;
+            {
+                sf2::data::atlas_frame pfr;
+                int ptw = 0, pth = 0;
+                unsigned int pgl = 0;
+                if (app.get_atlas_frame(icon, &pfr, &ptw, &pth, &pgl) && pfr.source_h > 0) {
+                    nat_w = pfr.source_w > 0 ? static_cast<float>(pfr.source_w)
+                                             : static_cast<float>(pfr.w);
+                    nat_h = static_cast<float>(pfr.source_h);
+                }
+            }
+            const float icon_w = nat_h > 0.0f ? icon_h * (nat_w / nat_h) : icon_h;
+            const std::string ptxt = shop_format_number(value);
+            const float label_scale = 0.9f;
+            const float label_w = app.measure_text_px(ptxt, label_scale);
+            const float pcx = cx0 + cw0 * 0.5f;
+            const float icon_cx = pcx - (label_w * 0.5f) * 1.1f;
+            const float label_cx = pcx + (icon_w * 0.5f) * 1.1f;
+            try_draw_atlas_button(app, icon, icon_cx, py, icon_w, icon_h, avail_a, false,
                                   false);
-            // JS `Ne.kL` (L93500) `c5(a, ie.Or(b), c)` — the price string is
-            // thousands-grouped (`ie.Or`/`Sfa` L101746 insert a space).
-            draw_ui_label(app, cx0 + 56.0f, py - 15.0f, cw0 - 56.0f, 30.0f,
-                          shop_format_number(value), 0.9f, UiAlign::Left,
-                          0.184f * avail_a, 0.145f * avail_a, 0.106f * avail_a);
+            draw_ui_label(app, label_cx - label_w * 0.5f, py - 15.0f, label_w + 2.0f,
+                          30.0f, ptxt, label_scale, UiAlign::Left, 0.184f * avail_a,
+                          0.145f * avail_a, 0.106f * avail_a);
         };
         int slot = 0;
         if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
