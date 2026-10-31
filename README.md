@@ -2,7 +2,7 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![readiness](https://img.shields.io/badge/readiness-80%25-blue) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
 ### Readiness: 80%
 
@@ -25,6 +25,9 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
+| **overall** | 🟨 | 80% | 40/50 | - |
+
+The `overall` row is every checklist item at once (40 of 50); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 

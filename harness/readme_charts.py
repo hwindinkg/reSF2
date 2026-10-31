@@ -65,8 +65,8 @@ def colour(pct: int) -> str:
 
 
 def progress_svg(rows: list[tuple[str, int]], overall: int) -> str:
-    w, row_h, top = 760, 34, 96
-    h = top + row_h * len(rows) + 24
+    w, row_h, top = 760, 34, 116
+    h = top + row_h * (len(rows) + 1) + 24
     label_w = 250
     bar_w = w - label_w - 120
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
@@ -78,7 +78,9 @@ def progress_svg(rows: list[tuple[str, int]], overall: int) -> str:
          f'generated from the gate baseline + the checklist in '
          f'harness/readme_status.py</text>',
          f'<text x="{w-24}" y="40" fill="{colour(overall)}" font-size="26" '
-         f'font-weight="700" text-anchor="end">{overall}%</text>']
+         f'font-weight="700" text-anchor="end">{overall}%</text>',
+         f'<text x="{w-24}" y="58" fill="{MUTED}" font-size="12" '
+         f'text-anchor="end">overall (all checklist items)</text>']
     y = top
     for name, pct in rows:
         c = colour(pct)
@@ -90,6 +92,18 @@ def progress_svg(rows: list[tuple[str, int]], overall: int) -> str:
         p.append(f'<text x="{label_w+bar_w+12}" y="{y+14}" fill="{c}" font-size="13" '
                  f'font-weight="600">{pct}%</text>')
         y += row_h
+    # the overall row: the SAME number as the heading/README (all items at
+    # once), so the bars and the headline can never read as different metrics
+    c = colour(overall)
+    p.append(f'<line x1="24" y1="{y+2}" x2="{w-24}" y2="{y+2}" stroke="{GRID}"/>')
+    p.append(f'<text x="24" y="{y+18}" fill="{TEXT}" font-size="13" '
+             f'font-weight="700">overall (all items)</text>')
+    p.append(f'<rect x="{label_w}" y="{y+7}" width="{bar_w}" height="14" '
+             f'rx="7" fill="{PANEL}" stroke="{GRID}"/>')
+    p.append(f'<rect x="{label_w}" y="{y+7}" width="{max(2, round(bar_w*overall/100))}" '
+             f'height="14" rx="7" fill="{c}"/>')
+    p.append(f'<text x="{label_w+bar_w+12}" y="{y+18}" fill="{c}" font-size="13" '
+             f'font-weight="700">{overall}%</text>')
     p.append("</svg>")
     return "\n".join(p)
 

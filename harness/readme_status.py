@@ -199,8 +199,6 @@ def block() -> str:
     out.append("")
     out.append("![gates](https://img.shields.io/badge/gates-"
                f"{total}%20%C2%B7%20{zero}%20%C2%B70-{gate_colour}) "
-               "![readiness](https://img.shields.io/badge/"
-               f"readiness-{overall}%25-blue) "
                "![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) "
                "![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) "
                "![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)")
@@ -225,6 +223,13 @@ def block() -> str:
         gap_txt = "; ".join(gaps) if gaps else "-"
         out.append(f"| **{name}** | {square(pct)} | {pct}% | "
                    f"{ok}/{len(items)} | {gap_txt} |")
+    out.append(f"| **overall** | {square(overall)} | {overall}% | "
+               f"{sum(overall_items)}/{len(overall_items)} | - |")
+    out.append("")
+    out.append("The `overall` row is every checklist item at once "
+               f"({sum(overall_items)} of {len(overall_items)}); a system row "
+               "counts only that system's own items, so the rows are NOT "
+               "averaged into the overall.")
     out.append("")
     out.append("### Oracle divergences by scenario")
     out.append("")

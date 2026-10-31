@@ -1,50 +1,56 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="494" viewBox="0 0 760 494" font-family="Segoe UI,Ubuntu,sans-serif">
-<rect width="760" height="494" rx="10" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="548" viewBox="0 0 760 548" font-family="Segoe UI,Ubuntu,sans-serif">
+<rect width="760" height="548" rx="10" fill="#0d1117"/>
 <text x="24" y="34" fill="#e6edf3" font-size="20" font-weight="600">Readiness by system</text>
 <text x="24" y="58" fill="#8b949e" font-size="12">generated from the gate baseline + the checklist in harness/readme_status.py</text>
 <text x="736" y="40" fill="#d29922" font-size="26" font-weight="700" text-anchor="end">80%</text>
-<text x="24" y="110" fill="#e6edf3" font-size="13">Assets &amp; archives</text>
-<rect x="250" y="99" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="99" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="110" fill="#3fb950" font-size="13" font-weight="600">100%</text>
-<text x="24" y="144" fill="#e6edf3" font-size="13">Rendering</text>
-<rect x="250" y="133" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="133" width="292" height="14" rx="7" fill="#d29922"/>
-<text x="652" y="144" fill="#d29922" font-size="13" font-weight="600">75%</text>
-<text x="24" y="178" fill="#e6edf3" font-size="13">Animation &amp; physics</text>
-<rect x="250" y="167" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="167" width="292" height="14" rx="7" fill="#d29922"/>
-<text x="652" y="178" fill="#d29922" font-size="13" font-weight="600">75%</text>
-<text x="24" y="212" fill="#e6edf3" font-size="13">Combat</text>
-<rect x="250" y="201" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="201" width="324" height="14" rx="7" fill="#d29922"/>
-<text x="652" y="212" fill="#d29922" font-size="13" font-weight="600">83%</text>
-<text x="24" y="246" fill="#e6edf3" font-size="13">AI</text>
-<rect x="250" y="235" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="235" width="261" height="14" rx="7" fill="#f85149"/>
-<text x="652" y="246" fill="#f85149" font-size="13" font-weight="600">67%</text>
-<text x="24" y="280" fill="#e6edf3" font-size="13">UI &amp; screens</text>
-<rect x="250" y="269" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="269" width="234" height="14" rx="7" fill="#f85149"/>
-<text x="652" y="280" fill="#f85149" font-size="13" font-weight="600">60%</text>
-<text x="24" y="314" fill="#e6edf3" font-size="13">Quests &amp; progress</text>
-<rect x="250" y="303" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="303" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="314" fill="#3fb950" font-size="13" font-weight="600">100%</text>
-<text x="24" y="348" fill="#e6edf3" font-size="13">Audio</text>
-<rect x="250" y="337" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="337" width="261" height="14" rx="7" fill="#f85149"/>
-<text x="652" y="348" fill="#f85149" font-size="13" font-weight="600">67%</text>
-<text x="24" y="382" fill="#e6edf3" font-size="13">Save &amp; input</text>
-<rect x="250" y="371" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="371" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="382" fill="#3fb950" font-size="13" font-weight="600">100%</text>
-<text x="24" y="416" fill="#e6edf3" font-size="13">Localization</text>
-<rect x="250" y="405" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="405" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="416" fill="#3fb950" font-size="13" font-weight="600">100%</text>
-<text x="24" y="450" fill="#e6edf3" font-size="13">Harness &amp; verification</text>
-<rect x="250" y="439" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
-<rect x="250" y="439" width="390" height="14" rx="7" fill="#3fb950"/>
-<text x="652" y="450" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<text x="736" y="58" fill="#8b949e" font-size="12" text-anchor="end">overall (all checklist items)</text>
+<text x="24" y="130" fill="#e6edf3" font-size="13">Assets &amp; archives</text>
+<rect x="250" y="119" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="119" width="390" height="14" rx="7" fill="#3fb950"/>
+<text x="652" y="130" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<text x="24" y="164" fill="#e6edf3" font-size="13">Rendering</text>
+<rect x="250" y="153" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="153" width="292" height="14" rx="7" fill="#d29922"/>
+<text x="652" y="164" fill="#d29922" font-size="13" font-weight="600">75%</text>
+<text x="24" y="198" fill="#e6edf3" font-size="13">Animation &amp; physics</text>
+<rect x="250" y="187" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="187" width="292" height="14" rx="7" fill="#d29922"/>
+<text x="652" y="198" fill="#d29922" font-size="13" font-weight="600">75%</text>
+<text x="24" y="232" fill="#e6edf3" font-size="13">Combat</text>
+<rect x="250" y="221" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="221" width="324" height="14" rx="7" fill="#d29922"/>
+<text x="652" y="232" fill="#d29922" font-size="13" font-weight="600">83%</text>
+<text x="24" y="266" fill="#e6edf3" font-size="13">AI</text>
+<rect x="250" y="255" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="255" width="261" height="14" rx="7" fill="#f85149"/>
+<text x="652" y="266" fill="#f85149" font-size="13" font-weight="600">67%</text>
+<text x="24" y="300" fill="#e6edf3" font-size="13">UI &amp; screens</text>
+<rect x="250" y="289" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="289" width="234" height="14" rx="7" fill="#f85149"/>
+<text x="652" y="300" fill="#f85149" font-size="13" font-weight="600">60%</text>
+<text x="24" y="334" fill="#e6edf3" font-size="13">Quests &amp; progress</text>
+<rect x="250" y="323" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="323" width="390" height="14" rx="7" fill="#3fb950"/>
+<text x="652" y="334" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<text x="24" y="368" fill="#e6edf3" font-size="13">Audio</text>
+<rect x="250" y="357" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="357" width="261" height="14" rx="7" fill="#f85149"/>
+<text x="652" y="368" fill="#f85149" font-size="13" font-weight="600">67%</text>
+<text x="24" y="402" fill="#e6edf3" font-size="13">Save &amp; input</text>
+<rect x="250" y="391" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="391" width="390" height="14" rx="7" fill="#3fb950"/>
+<text x="652" y="402" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<text x="24" y="436" fill="#e6edf3" font-size="13">Localization</text>
+<rect x="250" y="425" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="425" width="390" height="14" rx="7" fill="#3fb950"/>
+<text x="652" y="436" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<text x="24" y="470" fill="#e6edf3" font-size="13">Harness &amp; verification</text>
+<rect x="250" y="459" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="459" width="390" height="14" rx="7" fill="#3fb950"/>
+<text x="652" y="470" fill="#3fb950" font-size="13" font-weight="600">100%</text>
+<line x1="24" y1="492" x2="736" y2="492" stroke="#30363d"/>
+<text x="24" y="508" fill="#e6edf3" font-size="13" font-weight="700">overall (all items)</text>
+<rect x="250" y="497" width="390" height="14" rx="7" fill="#161b22" stroke="#30363d"/>
+<rect x="250" y="497" width="312" height="14" rx="7" fill="#d29922"/>
+<text x="652" y="508" fill="#d29922" font-size="13" font-weight="700">80%</text>
 </svg>
