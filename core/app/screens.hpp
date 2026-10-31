@@ -486,6 +486,12 @@ public:
         std::string title;     // stages.xml Title lang key (JS `Lc.k6` — the
                                // `Rr` info-panel title, L2103)
         std::string preview;   // stages.xml Preview, stem after the last '.'
+        // JS `Rr.ZL` L87490-87491: `a = Ye.qI(a.olb)` — the Preview attr with
+        // its FIRST '.' turned into '/' ("preview_bosses.lynx" ->
+        // "preview_bosses/lynx"), i.e. the ATLAS FRAME (`Wu.Cb(a)`). The port
+        // drew a standalone `map/images/<stem>` texture instead, a different
+        // crop (the oracle's frame is 400x200 from `preview_bosses`).
+        std::string preview_frame;
                                // (JS `Lc.olb` -> `Me.CT` `res/map/images/
                                // <stem>.img`, L2105/L2111)
         std::string zone;      // the stages.xml Zone Name (JS `st`)

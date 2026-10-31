@@ -896,6 +896,12 @@ bool App::init(const std::string& res_root, const std::string& save_path,
         // list resolve their frames here (`EnchantmentBleeding`, ...).
         load_ui_atlas_bundle_impl(*this, ui, "enchantments");
         load_ui_atlas_bundle_impl(*this, mp, "buttons");
+        // Map battle previews (JS Rr.ZL L87490-87495: Wu.qg(E.get(cz(a))) +
+        // Wu.Cb(a) -> the frame preview_bosses/<boss> / preview_main/<zone>
+        // / preview_pvp/<..>, 400x200 frames of an 800x1400 page).
+        load_ui_atlas_bundle_impl(*this, mp, "preview_bosses");
+        load_ui_atlas_bundle_impl(*this, mp, "preview_main");
+        load_ui_atlas_bundle_impl(*this, mp, "preview_pvp");
         // Virtual-gamepad art (Joystick*, btn_punch_*, btn_kick_*): loaded
         // at boot (Dojo wave) so the Dojo hub pad resolves on frame 1.
         // Before, only the FightScreen ctor loaded it, so the hub pad was

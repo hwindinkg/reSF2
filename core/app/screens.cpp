@@ -5750,6 +5750,11 @@ std::vector<MapScreen::ZoneTab> load_zone_map(App& app) {
                     const std::string pv = battle.attribute("Preview").value();
                     const std::size_t pdot = pv.find_last_of('.');
                     n.preview = (pdot == std::string::npos) ? pv : pv.substr(pdot + 1);
+                    // `Ye.qI` (L1354): only the FIRST '.' becomes '/' — that is
+                    // the atlas frame name (`preview_bosses/lynx`).
+                    n.preview_frame = pv;
+                    const std::size_t fdot = n.preview_frame.find('.');
+                    if (fdot != std::string::npos) n.preview_frame[fdot] = '/';
                 }
                 n.zone = z.name;
                 n.location = battle.attribute("Location").value();
@@ -12672,7 +12677,36 @@ bool load_map_preview(App& app, const std::string& stem, int* out_w, int* out_h)
     return false;
 }
 
-void draw_map_preview(App& app, const std::string& stem, float x, float y, float w) {
+void draw_map_preview(App& app, const std::string& stem, const std::string& frame,
+                      float x, float y, float w) {
+    // JS `Rr.ZL` L87490-87495: `a = Ye.qI(a.olb); this.Wu.qg(E.get(cz(a)));
+    // this.Wu.Cb(a)` — the preview is the ATLAS FRAME `preview_bosses/<stem>`
+    // (400x200, `res/map/preview_bosses.<hash>.json`), drawn by `Rr.layout`
+    // L87367 `this.Wu.la((c - 2*d) / this.Wu.fa.x)` — width-driven, so the
+    // height is `w * fa.y/fa.x`. The port used the standalone
+    // `map/images/<stem>` texture (768x384, a different crop: the warrior came
+    // out ~1.3x larger and clipped at the panel edge).
+    if (!frame.empty()) {
+        sf2::data::atlas_frame pfr;
+        int ptw = 0, pth = 0;
+        unsigned int pgl = 0;
+        if (app.get_atlas_frame(frame, &pfr, &ptw, &pth, &pgl)) {
+            const float fw = pfr.source_w > 0 ? static_cast<float>(pfr.source_w)
+                                              : static_cast<float>(pfr.w);
+            const float fh = pfr.source_h > 0 ? static_cast<float>(pfr.source_h)
+                                              : static_cast<float>(pfr.h);
+            if (fw > 0.0f && fh > 0.0f) {
+                app.draw_atlas_rect(frame, x, y, w, w * fh / fw, 1.0f);
+                return;
+            }
+        } else {
+            static std::set<std::string> logged;
+            if (logged.insert(frame).second) {
+                std::fprintf(stdout, "[map] preview frame missing: %s\n", frame.c_str());
+                std::fflush(stdout);
+            }
+        }
+    }
     int src_w = 0, src_h = 0;
     if (!load_map_preview(app, stem, &src_w, &src_h) || src_w <= 0 || src_h <= 0) return;
     const float kSrcW = static_cast<float>(src_w);  // JS `fa.x` = image header width
@@ -12857,7 +12891,7 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // `f = 10 + title_h + 20`, scaled to the content width.
     float f = 10.0f + title_h + 20.0f;
     const float pv_w = cw - 2.0f * d;
-    draw_map_preview(app, node->preview, cx + d, cy + f, pv_w);
+    draw_map_preview(app, node->preview, node->preview_frame, cx + d, cy + f, pv_w);
     f += pv_w * 0.5f + 20.0f;  // `Wu.qa()` = pv_w * (200/400)
     // Body `pk` rect (L2102): `gb(d, f, d+(c-2*d), f+(e-f))`.
     const float body_x = cx + d;
