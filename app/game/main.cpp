@@ -1666,7 +1666,11 @@ struct QuestVerifyDriver {
                                      "[qverify] 0-gold armed press (money forced "
                                      "to 0)\n");
                         std::fflush(stdout);
-                        tap(app, 934, 460);  // the `M8` price plate
+                        {
+                            float pcx = 934.0f, pcy = 460.0f;
+                            sf2::app::shop_price_center(app, 0, pcx, pcy);
+                            tap(app, static_cast<int>(pcx), static_cast<int>(pcy));
+                        }  // the `M8` price plate
                         break;
                     case 2:
                         shop_buy_phase = 3;
@@ -1680,7 +1684,11 @@ struct QuestVerifyDriver {
                         break;
                     default:
                         shop_buy_phase = 4;
-                        tap(app, 934, 460);  // the real buy
+                        {
+                            float pcx = 934.0f, pcy = 460.0f;
+                            sf2::app::shop_price_center(app, 0, pcx, pcy);
+                            tap(app, static_cast<int>(pcx), static_cast<int>(pcy));
+                        }  // the real buy
                         break;
                 }
             }
