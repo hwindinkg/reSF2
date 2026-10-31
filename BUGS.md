@@ -3492,3 +3492,37 @@ bbox неба: оракул (988,159)-(1222,288) · порт (990,159)-(1221,288
   false, `Lr` никогда не создаёт `Hl`. Оракульный `results_lose` это
   подтверждает: OK + МАГАЗИН, без RETRY. Пункт README закрыт как недостижимый
   (реализовывать нечего).
+
+### QA-31.10 — строка `shopUpgrade{star}{N}` в магазине (закрыто)
+
+`Ne.Qqb` L93659-93682: `kW` -> `shopMaking`, `tra` -> `shopOrder`, иначе при
+`k9 && p.o.qC` берётся `$e.Qi` (следующий тир), `Y6a()` даёт `{index, type}`;
+для `type == 1` строка `shopUpgrade{img::star}{index}` с заменой
+`<image>star</image>` -> `<image s=0.9 y=-0.2>star</image>`, иначе
+`shopUpgrade{}{index}`. `Y6a()` L13721-13744 считает строки шаблона с
+`level == item.level && Tc < next.Tc && Tc > ml.Tg` (+1 при `ml.xf == item.xf`);
+у отгруженных `<Upgrades>` нет атрибутов `Level`/`UpgradeLevel`
+(`<Upgrades Name="Armor_Bonus" ItemType="Armor">`), поэтому все сравнения дают
+`undefined` -> false, `b` остаётся 0, `type = 1`, `index = this.xf` = `Level`
+предмета.
+
+Сделано: ветка статуса (`k9 = re.Zcb` L94799-94804 = `has_rows && !maxed`,
+`$e != null` = предмет в сейве, `qC = show_upgrades_`), сборка через `loc()`
+(он уже конвертирует `img::star` в инлайн `<image>` и подставляет `{0}`/`{1}`)
+с последующей заменой на `<image s=0.9 y=-0.2>star</image>`; строка рисуется
+JS-метрикой (`Ne.ba` L93271-93278: `c = a*0.2`, `Sb.Fa(a,c); Sb.ua(c);
+Sb.D(d); Sb.mk()`) через новый `measure_rich_line` (обёртка вырезает инлайн
+картинки при любом выравнивании кроме Left, поэтому rich-строку центрируем
+вручную); раскладка панели теперь по JS-последовательности `d` (заголовок ->
+статус -> статы) — раньше статус рисовался на фиксированном `+0.27*cw` ВНУТРИ
+статов и наезжал на полосу второй строки.
+
+Замер (`--shop-upgrade-probe`: сейв получает ARMOR_ROBE тира 200 и игрока
+уровня 10, `ShowUpgrades` принудительно, открывается Armor/ARMOR_ROBE):
+```
+[shopstatus] item=ARMOR_ROBE has=1 nItems=6 lvl=10 qC=1 tier=200 rows=1
+             maxed=0 next=1 -> 'УЛУЧШЕНИЕ <image s=0.9 y=-0.2>star</image> 2'
+[upgprobe] open=1 status='УЛУЧШЕНИЕ <image s=0.9 y=-0.2>star</image> 2' star=1
+```
+Кадр `.harness/shop_upgrade2.png`: «УЛУЧШЕНИЕ ★ 2» между заголовком «Роба» и
+двумя строками статов, без наложения.
