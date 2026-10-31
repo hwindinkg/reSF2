@@ -3320,3 +3320,32 @@ shop_price_center: 934.6,485.2   (старый клик 460.1 = ровно по�
 Кадр `.harness/buy_dialog.png`: «КУПИТЬ» / «Вы уверены, что хотите купить это
 за 🪙 50?» / ОТМЕНА + КУПИТЬ. Пробники, которые доводят покупку
 (`--quest-verify-buy`, `--flow-verify`), теперь жмут плашку подтверждения.
+
+### QA-31.10 — каллауты замирают на добивающем ударе (закрыто)
+
+JS: добивающий удар стреляет `ql` событие 0 -> `ca.Jfb` L15556 -> `Ar.Ew(true)`
+-> `Sf.Ew` -> `lk.Ew` -> `Gr.Ew(a)` L85443 (`this.Hqa = a`), после чего
+`Gr.azb` L85505-85534 пропускает `Ix.move` И `--count` для всех элементов,
+кроме плашки типа 4 (hot ground) — `Gr.l_a` L85499
+(`if (a.HEa) return true; return !this.Hqa;`). Плашки остаются на экране
+замороженными и потом продолжают движение.
+
+Сделано: `FightController::finish_blow_active()` = `ca.pW` / `ca.yt` /
+владелец заморозки `cu` (`finish_blow_pending_ || slowmo_on_ ||
+finish_frozen_`); `tick_callouts` пропускает слайд/счёт для не-тип-4, пока он
+взведён; гейт отрисовки больше не скрывает плашки в этом окне (они заморожены,
+а не скрыты: `Gr.Ew` ставит только флаг скрытия).
+
+Замер (`--kick-ko`, `[callout-life]` — теперь логируется каждый элемент):
+```
+[callout-life] side=0 type=1 born_f=4499 last_f=4740 span_frames=241
+[callout-life] side=0 type=1 born_f=4223 last_f=4341 span_frames=118
+```
+то есть плашка, рождённая на добивающем ударе, живёт 241 кадр вместо 118 —
+123 кадра заморозки, что совпадает с 120-кадровым хит-станом
+(`[fx] finishing blow armed (F2099 ... stun=120 frames)`).
+`SF2_TRACE_CALLOUT=1` печатает латч каждые 30 кадров:
+```
+[callout] f=4500 freeze=1 (pending=0 slowmo=1 frozen=1) p=1 e=0
+[callout] f=4530 freeze=1 (pending=0 slowmo=0 frozen=1) p=1 e=0
+```
