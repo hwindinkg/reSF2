@@ -3442,3 +3442,30 @@ this.zq.D(a / 2 + this.PL.qa() + this.scroll.Af.height);
   (L85802-85810: законченный бой, не Stranger, для Survival только
   `FightSurvival`), `bza` его показывает. Пункт README переформулирован точно
   («RETRY plate missing; STORE done») и остаётся False.
+
+### QA-31.10 — превью боя на карте берётся из атласа `preview_bosses` (закрыто)
+
+`Rr.ZL` L87490-87495:
+```
+a = Ye.qI(a.olb);            // "preview_bosses.lynx" -> "preview_bosses/lynx"
+this.Wu.qg(E.get(cz(a)));    // страница атласа
+this.Wu.Cb(a);               // КАДР
+```
+и `Rr.layout` L87367 масштабирует `la((c - 2*d) / this.Wu.fa.x)` — по ширине,
+высота = `w * fa.y/fa.x` (кадр 400x200).
+
+Порт рисовал отдельную текстуру `res/map/images/<stem>` (768x384) — другой
+кроп: воин выходил ~1.3x крупнее и обрезался у края панели (замер аудита).
+
+- загрузка при старте: `preview_bosses`, `preview_main`, `preview_pvp` рядом с
+  `buttons` (`[app] atlas .../preview_bosses: 800x1400 ... 14 frames`);
+- `MapScreen::Node::preview_frame` хранит `Ye.qI`-форму атрибута `Preview`
+  (только ПЕРВАЯ '.' -> '/'), `draw_map_preview` рисует этот кадр атласа
+  `w x w*fa.y/fa.x`; отдельная картинка осталась фолбэком для stem'а без кадра.
+
+Замер (`--fidelity-tour`, `port_matrix/map_zone1.png` против оракула):
+```
+лучшее выравнивание кропа превью: (dx, dy) = (0, 0), невязка 4.87 (люма)
+bbox неба: оракул (988,159)-(1222,288) · порт (990,159)-(1221,288)
+```
+(до правки порт был ~1.3x приближен внутри того же бокса и обрезан у края).
