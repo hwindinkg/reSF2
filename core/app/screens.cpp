@@ -20338,6 +20338,93 @@ int ShopScreen::probe_scroll_select(App& app, int tab, int row) {
 // (`p.o.Tb >= a.jp()`; else `v.Bv(a,2)` = the "not enough" notice). The timed
 // `Ec` branch (`d=Pa.y2a(a)`) leaves the grant flag unset, so the `$o` equip
 // is skipped for a not-yet-delivered order.
+// JS `Xc.$hb` L39348-39356 + `ph` L81749-81872: the price-plate press opens
+// the type-350 confirmation dialog instead of charging.
+bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
+    WarriorSave bw;
+    try {
+        bw = app.save().load();
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (!shop_detail_buy_available(bit, bw.level)) {
+        std::fprintf(stdout, "[shop] Zdb %s: purchase DISABLED (no dialog)\n",
+                     bit.name.c_str());
+        std::fflush(stdout);
+        return false;
+    }
+    // JS `transaction` L93372: `if (c > d) { v.Bv(this.Aa, f); } else {
+    // Xc.$hb(...) }` — the FUNDS are validated BEFORE the dialog opens; a
+    // shortfall shows the "not enough" notice and never opens it.
+    const std::int64_t price =
+        ruby ? shop_effective_bonus(app, bit) : shop_effective_price(app, bit);
+    const std::int64_t have = ruby ? bw.bonus : bw.money;
+    if (have < price) {
+        std::fprintf(stdout,
+                     "[shop] Pi confirm Pa.iwa v.Bv(a,2): NOT ENOUGH %s for %s "
+                     "(need %lld, have %lld) -> no dialog\n",
+                     ruby ? "RUBIES" : "MONEY", bit.name.c_str(),
+                     static_cast<long long>(price), static_cast<long long>(have));
+        std::fflush(stdout);
+        log_purchase_fired("PurchaseUnsuccessful",
+                           app.quest_engine().purchase_unsuccessful(app, bit.name,
+                                                                   ruby ? 1 : 2));
+        return false;
+    }
+    buy_item_ = bit;
+    buy_dlg_ = std::make_shared<EngineDialog>();
+    buy_dlg_->type = "Regular";
+    buy_dlg_->title = loc(app, "dlgBuyTitle", "Purchase");
+    // `ph.$A` L81838-81840: `dlgBuyMessage` + a second line
+    // `dlgCurrencyQuestion{img::<gold|ruby>}{price}`.
+    std::string body = loc(app, "dlgBuyMessage", "Are you sure you want to buy this?");
+    body += "\n<image>";
+    body += ruby ? "ruby" : "gold";
+    body += "</image> ";
+    body += shop_format_number(price);
+    body += "?";
+    buy_dlg_->lines.push_back(body);
+    buy_dlg_->line_buttons.push_back(std::string());
+    // The plate row needs a ROW (`line_actions`) and slot actions.
+    QuestAction noop;
+    noop.tag = "NoOp";
+    buy_dlg_->line_actions.push_back({});
+    buy_dlg_->button_actions.push_back(noop);  // Right (`Rb`, `shopBuy`)
+    buy_dlg_->left_.actions.push_back(noop);   // Left (`CANCEL`)
+    buy_dlg_->left_.text = loc(app, "CANCEL", "CANCEL");
+    buy_dlg_->left_.color = "Dark";
+    buy_dlg_->button_text = loc(app, "shopBuy", "BUY");
+    buy_dlg_->button_color = "White";
+    buy_dlg_->has_right_button = true;
+    buy_confirm_ = true;
+    std::fprintf(stdout, "[shop] Xc.$hb -> dlgBuy %s (%s %lld)\n", bit.name.c_str(),
+                 ruby ? "ruby" : "gold", static_cast<long long>(price));
+    std::fflush(stdout);
+    return true;
+}
+
+bool ShopScreen::buy_confirm_accept(App& app) {
+    buy_confirm_ = false;
+    if (buy_item_.name.empty()) return false;
+    return purchase_price_plate(app, buy_item_);
+}
+
+bool ShopScreen::buy_confirm_plates(App& app, float& ok_x, float& ok_y, float& cancel_x,
+                                    float& cancel_y) {
+    if (!buy_confirm_ || buy_dlg_ == nullptr) return false;
+    const QuestDialogRow row = quest_dialog_row(app, *buy_dlg_);
+    for (int i = 0; i < row.count; ++i) {
+        if (row.plates[i].slot == 1) {
+            ok_x = row.plates[i].cx;
+            ok_y = row.plates[i].cy;
+        } else if (row.plates[i].slot == 0) {
+            cancel_x = row.plates[i].cx;
+            cancel_y = row.plates[i].cy;
+        }
+    }
+    return row.count > 0;
+}
+
 bool ShopScreen::purchase_price_plate(App& app, const CatalogItem& bit) {
     WarriorSave bw;
     try {
@@ -21068,6 +21155,27 @@ void ShopScreen::update_impl(float dt) {
     // queued and resurface as the head on the NEXT screen (the Map would show
     // the stale Shop dialog instead of the Lynx one).
     if (quest_modal_consume(app())) return;
+    // The type-350 BUY confirmation (`ph`) is `Wb`'s top dialog: its plates own
+    // the input while it is up (`od.EF` row -> `He.dhb`: Left = CANCEL,
+    // Right = `shopBuy` -> `ZYa` -> `Pa.iwa`).
+    if (buy_confirm_) {
+        const App::PointerState& bp = app().pointer();
+        if (bp.pressed && buy_dlg_ != nullptr) {
+            const int slot = quest_dialog_button_hit_index(app(), *buy_dlg_, bp.x, bp.y);
+            if (slot == 1) {
+                buy_confirm_accept(app());
+                try {
+                    seen_ = app().save().load();
+                } catch (const std::exception&) {
+                }
+            } else if (slot == 0) {
+                std::fprintf(stdout, "[shop] dlgBuy CANCEL\n");
+                std::fflush(stdout);
+                buy_confirm_cancel();
+            }
+        }
+        return;
+    }
     const App::PointerState& p = app().pointer();
     try {
         const WarriorSave w = app().save().load();
@@ -21503,10 +21611,11 @@ void ShopScreen::update_impl(float dt) {
                         }
                     }
                 }
-            } else if (hit_gem) {
-                purchase_gem_price_plate(app(), pit);
             } else {
-                purchase_price_plate(app(), pit);
+                // JS `Xc.$hb` L39348-39356 (from `Ne.ZYa`/`Eh` -> `transaction`):
+                // the price plate opens the type-350 CONFIRMATION dialog; the
+                // money is only deducted by its callback (`ZYa` -> `Pa.iwa`).
+                open_buy_confirm(app(), pit, hit_gem);
             }
             // JS `Ao.Qg` (L574833): the `M8`/`pVa` price plate press ends with
             // `Sb.F().kk(!1)` + `this.sa()`, which resumes the parked
@@ -21577,6 +21686,8 @@ void ShopScreen::update_impl(float dt) {
 }
 
 void ShopScreen::render_impl(App& app) {
+    // (the BUY confirmation is drawn at the END of this function, over the
+    // shop surface, exactly like the `Wb` overlay `ph`.)
     sf2::render::Renderer& ren = app.renderer();
     // --- Backdrop: the destination `dojo_shop` art (`Pi.Qa`, L439) ---------
     // JS `Oa extends ma` (L2285): `this.Ad = new Pi` (L2291) and `Ea` calls
@@ -22265,6 +22376,12 @@ void ShopScreen::render_impl(App& app) {
     // Sensei/tutorial dialog modal over the shop (the tutorial's
     // `tutorial_buy_knives` beat, `He` L1042; see update_impl).
     draw_quest_modal(app, ren, app.screens().top() == this);
+    // JS `Wb` overlay: the type-350 BUY confirmation (`ph`, L81749-81872) — the
+    // title `dlgBuyTitle`, the body `dlgBuyMessage` + the currency question, and
+    // the `shopBuy`/`CANCEL` plates. Drawn last so it covers the shop surface.
+    if (buy_confirm_ && buy_dlg_ != nullptr) {
+        draw_od280_dialog(app, ren, *buy_dlg_, DialogAnim{});
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -60,6 +60,23 @@ namespace {
 
 using namespace sf2::app;  // kScreen* ids + the App/SaveSystem types
 
+// The shop's BUY is a two-step flow in the JS: the price plate opens the
+// type-350 confirmation (`Xc.$hb` L39348-39356 -> `Wb.openDialog(350, kv)`), and
+// only the dialog's `shopBuy` plate charges (`ZYa` -> `Pa.iwa`). The probes that
+// drive a purchase press the price plate and then this helper presses the
+// confirmation's primary plate, exactly like the player.
+static bool click_shop_buy_confirm(App& app) {
+    Screen* t = app.screens().top();
+    if (t == nullptr || t->id() != kScreenShop) return false;
+    ShopScreen* sh = static_cast<ShopScreen*>(t);
+    if (!sh->buy_confirm_open()) return false;
+    float ox = 0.0f, oy = 0.0f, cx = 0.0f, cy = 0.0f;
+    if (!sh->buy_confirm_plates(app, ox, oy, cx, cy)) return false;
+    app.inject_click(ox, oy);
+    return true;
+}
+
+
 void print_usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [res_root] [save_path] [--headless N] [--autoclick] [--headless-loop] [--windowed|--hidden]\n"
@@ -1688,7 +1705,11 @@ struct QuestVerifyDriver {
                             float pcx = 934.0f, pcy = 460.0f;
                             sf2::app::shop_price_center(app, 0, pcx, pcy);
                             tap(app, static_cast<int>(pcx), static_cast<int>(pcy));
-                        }  // the real buy
+                        }  // the price plate -> the `dlgBuy` confirmation
+                        for (int k = 0; k < 6; ++k) tick(app);
+                        if (click_shop_buy_confirm(app)) {
+                            for (int k = 0; k < 8; ++k) tick(app);
+                        }
                         break;
                 }
             }
@@ -1940,6 +1961,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // is inert (`za.AT` L82553-82563 sets `Nf=false`; `db.aa` L77256-77281 only
     // handles presses inside `if (this.Nf)`), while another row navigates.
     bool nav_probe = false;
+    // --buy-confirm-probe: the shop BUY is a two-step flow (`Xc.$hb` L39348-39356
+    // -> `Wb.openDialog(350, kv)`; only `ZYa` -> `Pa.iwa` charges).
+    bool buy_confirm_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2244,6 +2268,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             perk_probe = true;
         } else if (arg == "--nav-probe") {
             nav_probe = true;
+        } else if (arg == "--buy-confirm-probe") {
+            buy_confirm_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5364,6 +5390,79 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (buy_confirm_probe) {
+        // --- `--buy-confirm-probe`: the two-step BUY -------------------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+        int checks = 0, fails = 0;
+        const auto check = [&](bool ok, const char* what) {
+            ++checks;
+            if (!ok) ++fails;
+            std::fprintf(stdout, "[buyprobe] %-58s %s\n", what, ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        // find WEAPON_KNIVES in the catalog
+        sf2::app::CatalogItem knives;
+        bool found = false;
+        for (const sf2::app::CatalogItem& ci : sf2::app::load_full_catalog(app)) {
+            if (ci.name == "WEAPON_KNIVES") {
+                knives = ci;
+                found = true;
+                break;
+            }
+        }
+        check(found, "catalog has WEAPON_KNIVES");
+        // the baseline save ships with 0 gold; give the probe enough to buy
+        std::int64_t money0 = 0;
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            if (w.money < 10000) {
+                w.money = 10000;
+                app.save().save(w);
+            }
+            money0 = app.save().load().money;
+        } catch (const std::exception&) {
+        }
+        const bool opened = found && shop != nullptr && shop->open_buy_confirm(app, knives);
+        std::int64_t money1 = 0;
+        try {
+            money1 = app.save().load().money;
+        } catch (const std::exception&) {
+        }
+        check(opened && shop->buy_confirm_open(), "the price plate opens the dlgBuy dialog");
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            for (int i = 0; i < 3; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            app.capture_png(shot);
+            std::fprintf(stdout, "[buyprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        check(money1 == money0, "the balance is UNCHANGED while the dialog is up");
+        const bool accepted = shop != nullptr && shop->buy_confirm_accept(app);
+        std::int64_t money2 = 0;
+        bool owned = false;
+        try {
+            const sf2::app::WarriorSave w = app.save().load();
+            money2 = w.money;
+            for (const auto& oi : w.items) {
+                if (oi.name == "WEAPON_KNIVES") owned = true;
+            }
+        } catch (const std::exception&) {
+        }
+        check(accepted && money2 < money1, "the confirm plate charges the price");
+        check(owned, "the confirm plate grants the item");
+        std::fprintf(stdout, "[buyprobe] RESULT %d/%d -> %s\n", checks - fails, checks,
+                     fails == 0 ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return fails == 0 ? 0 : 1;
     } else if (nav_probe) {
         // --- `--nav-probe`: the `za` nav press rules -------------------------
         glfwHideWindow(app.renderer().window());
@@ -7717,6 +7816,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 app.inject_click(pcx, pcy);  // the `M8` plate centre
             }
             tick(14);
+            // The price plate opened the `dlgBuy` confirmation (`Xc.$hb`); press
+            // its `shopBuy` plate — that is what charges (`ZYa` -> `Pa.iwa`).
+            if (click_shop_buy_confirm(app)) tick(14);
             bool owned = false;
             try {
                 const sf2::app::WarriorSave nw = app.save().load();

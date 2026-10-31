@@ -1432,6 +1432,27 @@ private:
     // `Ne.Ehb` case 2 L2254 -> `bka(0, Aa.nn())` -> `Pa.EYa` L1228: the `pVa`
     // RubyButton buys with the Ruby/crystal balance (`p.o.fd`).
     bool purchase_gem_price_plate(App& app, const CatalogItem& bit);
+
+public:
+    // JS `Xc.$hb` L39348-39356: the price-plate press does NOT charge — it
+    // opens `Wb.openDialog(350, new kv(action, currency, price, cb, delivery))`
+    // (`ph extends od`, L81749-81872: title `dlgBuyTitle`, body `dlgBuyMessage`
+    // + `dlgCurrencyQuestion{icon}{price}?`, plates `shopBuy` / `CANCEL`); only
+    // the dialog callback (`ZYa` -> `Pa.iwa`) deducts money, saves and fires
+    // `QUEST_EVENT_PURCHASE`.
+    bool open_buy_confirm(App& app, const CatalogItem& bit, bool ruby = false);
+    bool buy_confirm_open() const { return buy_confirm_; }
+    // The confirm plate (probe/verify) — runs the deferred purchase.
+    bool buy_confirm_accept(App& app);
+    void buy_confirm_cancel() { buy_confirm_ = false; }
+    // [probe] the dialog's plate centres, so the driver presses what it drew.
+    bool buy_confirm_plates(App& app, float& ok_x, float& ok_y, float& cancel_x,
+                            float& cancel_y);
+
+private:
+    bool buy_confirm_ = false;
+    CatalogItem buy_item_;
+    std::shared_ptr<EngineDialog> buy_dlg_;
 };
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with
