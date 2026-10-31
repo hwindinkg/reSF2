@@ -1971,6 +1971,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --shop-upgrade-probe: the `Sb` `shopUpgrade{star}{N}` line (`Ne.Qqb`
     // L93665-93676) on an OWNED upgradeable item with `ShowUpgrades`.
     bool shop_upgrade_probe = false;
+    // --shop-delivery-probe: the `Tl` delivery countdown (`Ne.Ksb` L93581-93589
+    // -> `Xe.qfa(..., c ? 4 : 3)`, `Z.CTa = 86400`).
+    bool shop_delivery_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2281,6 +2284,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             disciple_probe = true;
         } else if (arg == "--shop-upgrade-probe") {
             shop_upgrade_probe = true;
+        } else if (arg == "--shop-delivery-probe") {
+            shop_delivery_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5401,6 +5406,58 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (shop_delivery_probe) {
+        // --- `--shop-delivery-probe`: the `Tl` countdown format --------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+        int fails = 0;
+        const auto run_case = [&](std::int64_t seconds, const char* want) {
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                bool have = false;
+                for (const auto& oi : w.items) {
+                    if (oi.name == "ARMOR_ROBE") have = true;
+                }
+                if (!have) {
+                    sf2::app::WarriorSave::OwnedItem oi;
+                    oi.name = "ARMOR_ROBE";
+                    oi.count = 1;
+                    oi.upgrade_level = 200;
+                    w.items.push_back(oi);
+                }
+                w.timers["ARMOR_ROBE"] = sf2::app::WarriorSave::wall_now() + seconds;
+                app.save().save(w);
+            } catch (const std::exception&) {
+            }
+            if (shop != nullptr) shop->open_at("Armor", "ARMOR_ROBE");
+            for (int i = 0; i < 6; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            const std::string got = shop != nullptr ? shop->countdown_text() : std::string();
+            const bool ok = !got.empty() && got.find(want) != std::string::npos;
+            if (!ok) ++fails;
+            std::fprintf(stdout, "[cdprobe] %llds -> '%s' (want %s) %s\n",
+                         static_cast<long long>(seconds), got.c_str(), want,
+                         ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+        };
+        run_case(90000, ":");   // >= 86400 -> D:HH:MM:SS (4 fields)
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[cdprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        run_case(3725, "01:02:05");  // < 86400 -> HH:MM:SS (3 fields)
+        std::fprintf(stdout, "[cdprobe] RESULT %s\n", fails == 0 ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        return fails == 0 ? 0 : 1;
     } else if (shop_upgrade_probe) {
         // --- `--shop-upgrade-probe`: the `Sb` upgrade label --------------------
         glfwHideWindow(app.renderer().window());

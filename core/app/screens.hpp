@@ -1284,6 +1284,9 @@ public:
     // MAKING / ORDER / `shopUpgrade{star}{N}`), so `--shop-upgrade-probe` can
     // assert the upgrade label without duplicating the logic.
     const std::string& status_text() const { return last_status_; }
+    // [probe] The delivery countdown string the last render drew (`Ne.Ksb`
+    // L93581-93589 -> `Xe.qfa`).
+    const std::string& countdown_text() const { return last_countdown_; }
 
     // [probe] `--settings-profile-shop-probe` (vi): drive the REAL `M8` price
     // plate (`Ne.ZYa` L2251 -> `Pa.iwa` L1228) for `it`, so the JS level/
@@ -1463,6 +1466,7 @@ public:
 private:
     bool buy_confirm_ = false;
     std::string last_status_;  // [probe] the `Sb` line of the last render
+    std::string last_countdown_;  // [probe] the `Tl` countdown of the last render
     CatalogItem buy_item_;
     std::shared_ptr<EngineDialog> buy_dlg_;
 };

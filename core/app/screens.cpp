@@ -21156,10 +21156,30 @@ std::string shop_stat_line(const CatalogItem& it) {
 
 // Delivery countdown text (mm:ss; wall-clock recompute per frame — Gb
 // Cla(now)+save semantics, no ticking needed).
-std::string shop_countdown(std::int64_t sec) {
+// JS `Xe.qfa` (L78816-78910) with the `Ne.Ksb` (L93581-93589) argument list:
+// the FIELD COUNT is `sec >= Z.CTa (86400) ? 4 : 3` (L103048), `ti.eAa`
+// (L4439-4447) splits it as `days = sec/86400`, `hours = sec/3600` (TOTAL
+// hours, not mod 24 — that is what the shipped code prints), minutes, seconds,
+// `k` = `ln("TimeDaysShort") + " "`, `h` = ":", every field zero-padded to 2.
+// The old port printed MM:SS.
+std::string shop_countdown(App& app, std::int64_t sec) {
     if (sec < 0) sec = 0;
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%02lld:%02lld", sec / 60, sec % 60);
+    const std::int64_t days = sec / 86400;
+    const std::int64_t hours = sec / 3600;
+    const std::int64_t mins = (sec % 3600) / 60;
+    const std::int64_t secs = sec % 60;
+    char buf[80];
+    if (sec >= 86400) {
+        std::snprintf(buf, sizeof(buf), "%02lld%s %02lld:%02lld:%02lld",
+                      static_cast<long long>(days),
+                      loc(app, "TimeDaysShort", "d").c_str(),
+                      static_cast<long long>(hours), static_cast<long long>(mins),
+                      static_cast<long long>(secs));
+    } else {
+        std::snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld",
+                      static_cast<long long>(hours), static_cast<long long>(mins),
+                      static_cast<long long>(secs));
+    }
     return std::string(buf);
 }
 
@@ -21450,7 +21470,7 @@ void ShopScreen::update_impl(float dt) {
             const std::int64_t left = kv.second - now;
             if (left > 0) {
                 std::fprintf(stdout, "[shop] delivery %s not ready (%s left)\n",
-                             kv.first.c_str(), shop_countdown(left).c_str());
+                             kv.first.c_str(), shop_countdown(app(), left).c_str());
                 std::fflush(stdout);
                 break;
             }
@@ -22258,8 +22278,17 @@ void ShopScreen::render_impl(App& app) {
             }
         }
         const float status_box_h = cw0 * 0.2f;  // `c = a*0.2` (L93272)
+        // `Tl` (`Ne.Ksb` L93581-93589) sits right AFTER `Sb` in the same
+        // running `d`, and the stat rows start below both.
+        std::string countdown_str;
+        if (making) {
+            const std::int64_t cd_left = sel_timer->second - shop_now;
+            if (cd_left > 0) countdown_str = shop_countdown(app, cd_left);
+        }
+        last_countdown_ = countdown_str;  // [probe] `--shop-delivery-probe`
         const float stat_y = cy0 + ch0 * 0.1f + tfont * 1.3f +
-                             (status.empty() ? 0.0f : status_box_h + cw0 * 0.01f);
+                             (status.empty() ? 0.0f : status_box_h + cw0 * 0.01f) +
+                             (countdown_str.empty() ? 0.0f : status_box_h + cw0 * 0.01f);
         // JS `Ne.refresh` L93198: for an OWNED item `Aa` becomes `$e.fw()`
         // (the current tier clone), so the VALUE is the tier's stat. The
         // compare `$e.Qi` (next tier) is drawn only under `qC && gW`.
@@ -22415,13 +22444,20 @@ void ShopScreen::render_impl(App& app) {
         // the remaining seconds of the SELECTED item's delivery, shown inside
         // the `bc` panel; hidden when `j7a()` == 0. `Xe.qfa` format -> the
         // port's `shop_countdown` (MM:SS).
-        if (making) {
-            const std::int64_t left = sel_timer->second - shop_now;
-            if (left > 0) {
-                const float tl_y = cy0 + ch0 * 0.1f + tfont * 1.3f + cw0 * 0.44f;
-                draw_ui_label(app, cx0, tl_y, cw0, cw0 * 0.16f, shop_countdown(left), 0.9f,
-                              UiAlign::Center, 0.184f, 0.145f, 0.106f);
-            }
+        if (!countdown_str.empty()) {
+            // `Ne.ba` L93289-93293 `Tl.Fa(a, c); Tl.ua(c); Tl.D(d); Tl.mk()`:
+            // `d` is right after the `Sb` line, and `mk()` fits the text.
+            const float tl_y = cy0 + ch0 * 0.1f + tfont * 1.3f +
+                               (status.empty() ? 0.0f : status_box_h + cw0 * 0.01f);
+            float tl_ua = cw0 * 0.2f / 100.0f;
+            const sf2::data::font* tf = app.menu_font();
+            const float tw = (tf != nullptr)
+                                 ? app.measure_text(*tf, countdown_str,
+                                                    tl_ua * ea_a1(app))
+                                 : 0.0f;
+            if (tw > cw0 && tw > 0.0f) tl_ua *= cw0 / tw;  // `mk()`
+            draw_ui_label(app, cx0, tl_y, cw0, status_box_h, countdown_str, tl_ua,
+                          UiAlign::Center, 0.184f, 0.145f, 0.106f, 1.0f, /*fit=*/true);
         }
         // Bottom price button `M8` = `GoldButton` (`EButtonGreen` + the
         // `p.o.Vf` gold icon), `Ne.Wub` L2254-2255 -> `c5(M8, Aa.jp())`. The
