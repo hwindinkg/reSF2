@@ -5515,6 +5515,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fprintf(stdout, "[creditsprobe] open=%d scroll=%.1f\n",
                      sf2::app::credits_view_open() ? 1 : 0,
                      static_cast<double>(sf2::app::credits_view_scroll()));
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            for (int i = 0; i < 3; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            app.capture_png(shot);
+            std::fprintf(stdout, "[creditsprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
         int frames = 0;
         while (sf2::app::credits_view_open() && frames < 6000) {
             glfwPollEvents();

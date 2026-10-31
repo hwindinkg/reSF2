@@ -537,6 +537,14 @@ private:
     int loader_logo_h_ = 0;
     int loader_bg_w_ = 0;
     int loader_bg_h_ = 0;
+
+public:
+    // `res/ui/loader/bg.jpg` (JS `E.get(817)`), the `ef.Qa` band art.
+    unsigned int loader_bg_texture() const { return loader_bg_tex_; }
+    int loader_bg_width() const { return loader_bg_w_; }
+    int loader_bg_height() const { return loader_bg_h_; }
+
+private:
     // Boot overlay countdown in fixed steps (0 = off; drawn when not headless).
     int boot_splash_frames_ = 0;
     int boot_splash_total_ = 0;

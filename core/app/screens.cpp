@@ -25353,8 +25353,65 @@ constexpr float kCreditsTextB = 0.4588235294117647f;
 
 void credits_draw(App& app, sf2::render::Renderer& ren) {
     if (!g_credits_open) return;
+    // `ef` ctor L77656 `Fc.Ed(-16777216, this.node.L)` — the opaque black base.
     const float dim[] = {0, 0, kViewW, 0, kViewW, kViewH, 0, 0, kViewW, kViewH, 0, kViewH};
     ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, 1.0f);
+    // `ef.Qa` (L77657-77664): TWO `E.get(817)` = `loader/bg.jpg` sprites, the
+    // second mirrored (`b.Hr(true)`), tiled `min(2, N.width/oYa/node.Eb)` times
+    // (L77684-77692) inside the `ef` node, which is scaled
+    // `la(min(1024, N.Eha) / (oea()*1.1))` (L77683) = 1024/1126 = 0.909 and
+    // centred on the screen (L77681-77682). The port drew only the flat black.
+    constexpr float kEfScale = 1024.0f / 1126.0f;  // 0.909
+    const float ef_cx = kViewW * 0.5f;
+    const float ef_cy = kViewH * 0.5f;
+    const unsigned int bg_tex = app.loader_bg_texture();
+    if (bg_tex != 0 && app.loader_bg_width() > 0 && app.loader_bg_height() > 0) {
+        const float bw = static_cast<float>(app.loader_bg_width()) * kEfScale;
+        const float bh = static_cast<float>(app.loader_bg_height()) * kEfScale;
+        // The node's top edge after the scale (content 1024 tall, centred).
+        const float band_cy = ef_cy - 1024.0f * kEfScale * 0.5f + bh * 0.5f;
+        const auto draw_bg = [&](float cx, bool mirror) {
+            sf2::scene::Sprite sp;
+            sp.texture_name = "loader_bg";
+            sp.frame_x = 0.0f;
+            sp.frame_y = 0.0f;
+            sp.frame_w = static_cast<float>(app.loader_bg_width());
+            sp.frame_h = static_cast<float>(app.loader_bg_height());
+            sp.tex_w = static_cast<float>(app.loader_bg_width());
+            sp.tex_h = static_cast<float>(app.loader_bg_height());
+            sp.source_w = static_cast<float>(app.loader_bg_width());
+            sp.source_h = static_cast<float>(app.loader_bg_height());
+            sp.solid = false;
+            sp.color_a = 1.0f;
+            sp.transform.set_pos(cx, band_cy);
+            sp.transform.set_scale((mirror ? -1.0f : 1.0f) * bw /
+                                       static_cast<float>(app.loader_bg_width()),
+                                   bh / static_cast<float>(app.loader_bg_height()));
+            sf2::render::Camera ui_cam;
+            ui_cam.center_x = kViewW * 0.5f;
+            ui_cam.center_y = kViewH * 0.5f;
+            ui_cam.zoom = 1.0f;
+            ui_cam.view_w = kViewW;
+            ui_cam.view_h = kViewH;
+            ui_cam.arena_h = kViewH;
+            ui_cam.arena_floor = 0.0f;
+            ui_cam.arena_center_x = kViewW * 0.5f;
+            app.renderer().draw_sprite(sp, ui_cam);
+        };
+        // `Qa.Rh(min(2, N.width/oYa/node.Eb))` (L77685-77686) with
+        // `oYa = 2*bg_w` (L77662): the normal/mirrored PAIR repeats until the
+        // band covers `min(2*oYa*Eb, view_w)` px, centred on the screen.
+        const float pair_w = bw * 2.0f;
+        const float want = std::min(2.0f * pair_w, kViewW);
+        const int pairs =
+            std::max(1, static_cast<int>(std::ceil(want / std::max(1.0f, pair_w))));
+        const float run_w = static_cast<float>(pairs) * pair_w;
+        const float start = ef_cx - run_w * 0.5f;
+        for (int i = 0; i < pairs; ++i) {
+            draw_bg(start + static_cast<float>(i) * pair_w + bw * 0.5f, false);
+            draw_bg(start + static_cast<float>(i) * pair_w + bw * 1.5f, true);
+        }
+    }
     // `xh`/`zx` (JS L77880-78012), all coordinates are DESIGN units inside the
     // `ef` node (`la(1024/1126)` = 0.909 about the screen centre), so the port
     // keeps the 1:1 design mapping the other dialogs use:
@@ -25363,23 +25420,35 @@ void credits_draw(App& app, sf2::render::Renderer& ren) {
     //         value `Fa(500,50)  C(20)   ua(50)`       (L77998-78000)
     //   pitch `a += d.height + 90` where `d.height` = the WRAPPED value height
     //         (L77904-77905), and the families title at `a + 60` (L77914).
+    // The content lives INSIDE the `ef` node, which `ef.layout` scales by
+    // `la(min(1024,N.Eha) / (oea()*1.1))` = 0.909 and centres on the screen
+    // (L77681-77683) — so every design coordinate and every `ua` is multiplied
+    // by that scale about the screen centre.
     const float cx0 = kViewW * 0.5f;
+    const float cy0 = kViewH * 0.5f;
+    const auto X = [&](float v) { return cx0 + (v - cx0) * kEfScale; };
+    const auto Y = [&](float v) { return cy0 + (v - cy0) * kEfScale; };
+    const auto W = [&](float v) { return v * kEfScale; };
     float y = 220.0f - g_credits_scroll;  // `a = 220` after the title
-    draw_ui_label(app, cx0 - 500.0f, 120.0f - g_credits_scroll - 60.0f, 1000.0f, 120.0f,
-                  loc(app, "credits", "CREDITS"), 1.2f, UiAlign::Center, kCreditsTextR,
-                  kCreditsTextG, kCreditsTextB, 1.0f, /*fit=*/false);
+    draw_ui_label(app, X(cx0 - 500.0f), Y(120.0f - g_credits_scroll - 60.0f),
+                  W(1000.0f), W(120.0f), loc(app, "credits", "CREDITS"),
+                  1.2f * kEfScale, UiAlign::Center, kCreditsTextR, kCreditsTextG,
+                  kCreditsTextB, 1.0f, /*fit=*/false);
     for (const CreditsRow& r : g_credits_rows) {
-        draw_ui_label(app, cx0 - 520.0f, y, 500.0f, 60.0f, r.name, 0.6f, UiAlign::Left,
-                      kCreditsTextR, kCreditsTextG, kCreditsTextB, 1.0f, /*fit=*/false);
+        draw_ui_label(app, X(cx0 - 520.0f), Y(y), W(500.0f), W(60.0f), r.name,
+                      0.6f * kEfScale, UiAlign::Left, kCreditsTextR, kCreditsTextG,
+                      kCreditsTextB, 1.0f, /*fit=*/false);
         // `d.height` = the wrapped value height at `ua(50)`, `Kc(0.7)`.
-        const float vh = measure_ui_wrapped(app, r.value, 500.0f, 0.5f, 0.7f);
-        draw_ui_wrapped(app, cx0 + 20.0f, y, 500.0f, vh, r.value, 0.5f, UiAlign::Left,
-                        kCreditsTextR, kCreditsTextG, kCreditsTextB, 0.7f);
-        y += vh + 90.0f;
+        const float vh = measure_ui_wrapped(app, r.value, W(500.0f), 0.5f * kEfScale, 0.7f);
+        draw_ui_wrapped(app, X(cx0 + 20.0f), Y(y), W(500.0f), vh, r.value,
+                        0.5f * kEfScale, UiAlign::Left, kCreditsTextR, kCreditsTextG,
+                        kCreditsTextB, 0.7f);
+        y += vh / kEfScale + 90.0f;  // `a += d.height + 90` in DESIGN units
     }
-    draw_ui_label(app, cx0 - 500.0f, y + 60.0f, 1000.0f, 120.0f,
-                  loc(app, "CreditsFamilies", "CREDITS"), 1.2f, UiAlign::Center,
-                  kCreditsTextR, kCreditsTextG, kCreditsTextB, 1.0f, /*fit=*/false);
+    draw_ui_label(app, X(cx0 - 500.0f), Y(y + 60.0f), W(1000.0f), W(120.0f),
+                  loc(app, "CreditsFamilies", "CREDITS"), 1.2f * kEfScale,
+                  UiAlign::Center, kCreditsTextR, kCreditsTextG, kCreditsTextB, 1.0f,
+                  /*fit=*/false);
 }
 
 SettingsRow settings_row_at(const SettingsLayout& s, double x, double y) {
