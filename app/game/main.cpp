@@ -10632,6 +10632,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             app.shutdown();
             return 1;
         }
+        // [trace] `--dump-pose N` arms the POSE trace here too. The plain
+        // `--fight` run never reaches a ragdoll, so a gravity measurement
+        // needs a KO: `--kick-ko` produces one, and its falling bones are the
+        // only place the sign of `xd.fDa` is observable from outside.
+        if (dump_pose_frames > 0) {
+            std::filesystem::create_directories("reference/traces");
+            fs->enable_pose_dump("reference/traces/native_pose.jsonl", dump_pose_frames);
+            std::fprintf(stdout,
+                         "[dump] pose trace armed (kick-ko): first %d fight frames -> "
+                         "reference/traces/native_pose.jsonl\n",
+                         dump_pose_frames);
+            std::fflush(stdout);
+        }
         // [probe] `--dump-state N` arms the state trace here too, so the
         // [dbg] AI-gate lines are available on a LIVE fight with the player
         // actually attacking (the plain `--fight` run has no input at all,

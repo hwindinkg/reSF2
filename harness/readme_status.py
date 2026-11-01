@@ -63,7 +63,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("gravity / impulses point UP instead of down (reported)", False),
+        ("gravity points DOWN: the KO fall drops from y -250.8 to -7.5 "
+         "(measured, `--kick-ko --dump-pose`); same sign as the JS", True),
     ]),
     ("Combat", [
         ("intervals, hit capsules, damage, block, shock", True),
