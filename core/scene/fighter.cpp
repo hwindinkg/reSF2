@@ -1688,6 +1688,13 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         render_offset_y_ = 0.0f;
         render_offset_valid_ = true;
         align_pivot_u_ = -1;
+        // [throw victim] Keep the fighter where it stood: `Dl.oL` anchors the
+        // clip to `parameters.position`, so the clip's absolute buffer values
+        // must NOT become the fighter's position (they are authored far away
+        // for the throw-victim clips).
+        align_absolute_ = true;
+        align_own_x_ = world_x_;
+        align_own_y_ = world_y_;
     } else if (move.align.has_align) {
         const int pv = model_.bone_by_name(move.align.pivot_part);
         // JS `x6` L21148-21150: `align.UE = model.w0(<Align><Pivot Part>)` —
@@ -3622,7 +3629,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             }
             trace_prev[this] = wx_now;
         }
-        world_x_ = px[anchor_u] + render_offset_ + j8_x_;
+        if (align_absolute_) {
+            // JS `Dl.oL(parameters.position)` (L24171-24199): the clip is
+            // anchored to the fighter's OWN position, so `pos = clip -
+            // clip[anchor] + own` (below) and the fighter does not ride the
+            // clip's absolute buffer coordinates.
+            world_x_ = align_own_x_;
+        } else {
+            world_x_ = px[anchor_u] + render_offset_ + j8_x_;
+        }
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
                          "[anchor] move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
@@ -3644,7 +3659,11 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // then floated by the clip's pivot travel (dojo `FistsStartStance-Left`
         // pivot y runs -135..-84 against a -93 spawn, i.e. +42..-9 world units
         // ≈ ±33 px at the fight zoom 1.3 — the reported float/twitch).
-        world_y_ = py[anchor_u] + render_offset_y_;
+        if (align_absolute_) {
+            world_y_ = align_own_y_;  // see the x branch above (`Dl.oL`)
+        } else {
+            world_y_ = py[anchor_u] + render_offset_y_;
+        }
         y = world_y_;
     }
 
@@ -4280,6 +4299,17 @@ void Fighter::debug_throw_probe(const char* tag) const {
     const char* mv = current_move_ != nullptr ? current_move_->name.c_str() : "-";
     const float clip_anchor =
         world_x_ - align_x_ - render_offset_ - j8_x_;
+    float bx0 = 0.0f, bx1 = 0.0f, by0 = 0.0f, by1 = 0.0f;
+    if (!pos_.empty()) {
+        bx0 = bx1 = pos_[0];
+        by0 = by1 = pos_[1];
+        for (std::size_t i = 0; i + 1 < pos_.size(); i += 2) {
+            bx0 = std::min(bx0, pos_[i]);
+            bx1 = std::max(bx1, pos_[i]);
+            by0 = std::min(by0, pos_[i + 1]);
+            by1 = std::max(by1, pos_[i + 1]);
+        }
+    }
     std::fprintf(stdout,
                  "[fk] %-6s mv=%-24s wx=%9.2f wy=%8.2f fk=%9.2f "
                  "align=(%8.2f,%7.2f,%7.2f) j8=%7.2f roff=(%8.2f,%7.2f) "
@@ -4291,6 +4321,9 @@ void Fighter::debug_throw_probe(const char* tag) const {
                  static_cast<double>(facing_),
                  static_cast<double>(clip_mirror_),
                  subframe_);
+    std::fprintf(stdout, "[fkdrawn] %-6s draw_x=%8.2f..%8.2f draw_y=%8.2f..%8.2f\n",
+                 tag, static_cast<double>(bx0), static_cast<double>(bx1),
+                 static_cast<double>(by0), static_cast<double>(by1));
     std::fflush(stdout);
 }
 

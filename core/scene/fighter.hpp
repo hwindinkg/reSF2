@@ -1423,6 +1423,18 @@ private:
     // `render_offset_`; 0 while no move plays.
     float render_offset_y_ = 0.0f;
     float prev_align_pivot_world_y_ = 0.0f;  // previous frame's world y of the Part
+    // [throw victim] JS `Dl.oL(a)` (L24171-24199) translates EVERY posed node by
+    // `a - node[anchor].ma`, i.e. it places the anchor bone at the fighter's OWN
+    // `parameters.position`; the clip's ABSOLUTE buffer values therefore cancel.
+    // A `<Position|Pivot Object="Animation"/>` align is absolute (`Te.Gub` L558
+    // leaves `d = 0`), and its clip data is authored far from the arena (the
+    // throw-victim clips sit around x -5263), so re-deriving the fighter's
+    // position from the buffer put the victim ~5000 units off screen. For these
+    // moves the fighter keeps the position it had when the clip seated and the
+    // render anchors the clip to it (`pos = clip - clip[anchor] + own`).
+    bool align_absolute_ = false;
+    float align_own_x_ = 0.0f;
+    float align_own_y_ = 0.0f;
     int align_pivot_u_ = -1;                 // `<Align><Pivot Part>` bone index (`UE`)
     // JS `Te.Mqb` (L23543): `currentNode = model.Va.all[align.UE]` where
     // `align.UE = model.w0(<Align><Pivot Part>)` (`x6` L21148-21150). The

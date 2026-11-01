@@ -72,14 +72,17 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("`end-stance-win` - the winner plays `Win_*`", True),
         ("`kick-ko`, `boss-hit-probe`, `disarm-ai`, `doublesweep`", True),
         ("`enemy-kit` / `equip-fight` - enemy and player weapons", True),
-        ("player throw: gate correct, probe cannot hold the range", False),
+        ("player throw resolves (`--verify-place`: ThrowThroughTheBack, "
+         "`Throwable` gate PASS) AND the victim is drawn on the thrower "
+         "(x 812..946 vs the thrower 793..963)", True),
         ("mid-fight disarm drops the weapon and rebuilds the move list (gate `disarm-ai`: 1 drop, 0 foreign starts)", True),
     ]),
     ("AI", [
         ("`enemy-move-audit` - the enemy must attack", True),
         ("Random tactic: `diff:challenge` / `boss-lynx` / `tournament` = 0", True),
         ("Gc pump driven by fired events (`Gc.Tu` -> `Su.dea` -> `DK`)", True),
-        ("Tabular/Survival: 0 divergences against the oracle", True),
+        ("Tabular/Survival: 0 divergences against the oracle (the 863 were "
+         "the throw victim's absolute-align placement; diff:survival 0 now)", True),
         ("`fk=9` (dodge) and `fk=10` (block) never fire in a live fight", False),
         ("Survival: one clean punch takes 6.2% of the enemy's HP (4 hits -> "
          "75% left) - no one-hit kill; gate `survival-hit`", True),

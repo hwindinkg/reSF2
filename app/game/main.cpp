@@ -8799,8 +8799,17 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // punchbag is `NotAnimation="1"` (stages.xml L12) and never plays a
             // move, so its interval set is empty and the `Throw` template's
             // `<CurrentInterval Player="Enemy" Name="Throwable"/>` gate can
-            // never pass. `Duel` (ZONE_1) is the shipped animated duel.
-            pb.battle_name = fight_battle.empty() ? std::string("Duel") : fight_battle;
+            // never pass.
+            // NOT `Duel`: its `<Rules>` open with `<RandomRule Refresh=
+            // "EachFight">` (stages.xml L917) that equips one of eight WEAPONS
+            // (`[rules] RandomRule EachFight: 8 candidates -> WEAPON_KNIVES`),
+            // and both throw moves carry the `Unarmed` template
+            // (`ThrowSuplex` L42745 `Template="2key|Throw|Back|Unarmed|..."`),
+            // so an ARMED player can never resolve a throw - that was the real
+            // reason the probe printed `hold=<none-worked>` (not the distance:
+            // the candidate list read BatonsSlash/KnivesSlash, i.e. an armed
+            // move list). `BOSS_LYNX` has an animated AI and no RandomRule.
+            pb.battle_name = fight_battle.empty() ? std::string("Tournament") : fight_battle;
             pb.zone = fight_zone.empty() ? std::string("ZONE_1") : fight_zone;
             pb.location = "dojo";
             pb.has_result = false;
@@ -8931,13 +8940,23 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     fs->place_fighters(px2, er ? px2 + 60.0f : px2 - 60.0f);
                     fs->inject_game_key(9, true);   // Punch Tap (control 9)
                     fs->inject_game_key(9, false);
+                    // Frame A resolves + QUEUES the pick, frame B seats it (the
+                    // same two-frame shape the DoubleSweep verify uses); the
+                    // old single frame read the move BEFORE it started, so a
+                    // resolved throw showed up only in `player_decision()`.
+                    app.run_one_frame();
+                    thr_dec = fs->player_decision();
                     app.run_one_frame();
                     thr_mv1 = fs->player_current_move();
-                    thr_dec = fs->player_decision();
                     thr_last = fs->player_last_decision();
                     fs->inject_game_key(hold_key[h], false);
-                    thr_ok = (thr_mv1 == "ThrowSuplex" ||
-                              thr_mv1 == "ThrowThroughTheBack");
+                    // ANY `Throw*` proves the `<CurrentInterval Player="Enemy"
+                    // Name="Throwable"/>` gate + the `Unarmed` template: the
+                    // family is `ThrowForward` (`2key|Throw|Forward|Unarmed`,
+                    // moves.xml L42363), `ThrowThroughTheBack` (L42552) and
+                    // `ThrowSuplex` (L42745); the old test accepted only two of
+                    // the three and reported a resolved throw as a FAIL.
+                    thr_ok = thr_mv1.rfind("Throw", 0) == 0;
                     if (thr_ok) {
                         thr_label = std::string(hold_label[h]) +
                                     (er ? " enemyRIGHT(Wl>0)" : " enemyLEFT(Wl<0)");
@@ -8963,6 +8982,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                                      fs->enemy_world_x(), fs->enemy_facing());
                         for (int vf = 0; vf < 48; ++vf) {
                             app.run_one_frame();
+                            if (vf == 6) {
+                                if (const char* s = std::getenv("SF2_THROW_SHOT")) {
+                                    app.capture_png(s);
+                                    std::fprintf(stdout, "[throwshot] %s\n", s);
+                                    std::fflush(stdout);
+                                }
+                            }
                             if (vf < 8 || (vf % 8) == 0) fs->debug_throw_probe("T");
                             std::fprintf(stdout,
                                          "[victim] t=%d thrower='%s' x=%.1f f=%+.0f "

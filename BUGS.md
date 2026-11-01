@@ -3975,3 +3975,57 @@ Punch-тапом, пока враг не потеряет HP.
 
 Пробник закреплён гейтом `survival-hit` (fast + full) — при «одноударном
 убийстве» гейт краснеет.
+
+### QA-01.11 — БРОСОК: пробник починен, и найдена настоящая причина 863 расхождений Survival (ИСПРАВЛЕНО)
+
+**1. Почему пробник «не держал радиус».** `--verify-place` грузил бой `Duel`, а
+у `Duel` первые `<Rules>` — три `<RandomRule Refresh="EachFight">`
+(stages.xml L917), которые выдают игроку СЛУЧАЙНОЕ ОРУЖИЕ
+(`[rules] RandomRule EachFight: 8 candidates -> WEAPON_KNIVES`). Оба броска несут
+шаблон `Unarmed` (`ThrowSuplex` L42745 `Template="2key|Throw|Back|Unarmed|..."`,
+`ThrowThroughTheBack` L42552, `ThrowForward` L42363), поэтому вооружённый игрок
+не может зарезолвить бросок вообще — в логе решения были `KnivesSlash@110,
+KnivesHeavySlash@120`. Радиус тут ни при чём.
+
+Правки пробника:
+- бой по умолчанию `Tournament`/`BOSS_LYNX` (анимированный ИИ, без `RandomRule`) → игрок остаётся `Fists`;
+- `SF2_AI_ENEMY_OFF=1` (probe-only, `fight.cpp`) — враг пропускает AI-апдейт и стоит в idle, у которого есть интервал `Throwable` (`moves.xml` L29), иначе бот успевал бросить игрока ПЕРВЫМ (в старом прогоне проба начиналась с игрока в `ThrowThroughTheBackV` при x=-72);
+- чтение мува на СЛЕДУЮЩЕМ кадре после тапа (решение сначала кьюится, клип садится через кадр), как в DoubleSweep-пробе;
+- принимается любой `Throw*` (их три, а не два).
+
+Замер:
+```
+[place] THROW BackHold+PunchTap gap=60: 'StanceIdle'->'ThrowThroughTheBack'
+        hold=Forward(3) enemyLEFT(Wl<0) PASS
+```
+
+**2. Настоящий баг, который пробник вытащил: жертва броска рисовалась за
+экраном.** `[fk]`/`[fkdrawn]` на кадрах броска:
+```
+thrower  draw_x =  793.03.. 962.78
+victim   draw_x = -4311.75..-4177.87     <- за экраном, ~5000 юнитов
+```
+Причина: JS `Dl.oL(a)` (L24171-24199) транслирует ВСЕ узлы на
+`a - node[anchor].ma`, т.е. сажает якорь в СВОЮ `parameters.position` — абсолютные
+координаты клипа сокращаются. Порт же брал `world_x = clip[anchor] + offset`, а у
+клипов жертвы (`throw_through_the_back_v` и т.п.) данные авторизованы далеко от
+арены (`--dump-clip throw_through_the_back_v`: кость 0 = -5263, диапазон
+-7294..-4295), поэтому жертва уезжала за экран.
+
+Фикс (`fighter.cpp`/`fighter.hpp`): для АБСОЛЮТНОГО align
+(`<Position|Pivot Object="Animation"/>`) боец сохраняет свою позицию на старте
+клипа (`align_absolute_`/`align_own_*`) и рендер якорит клип к ней:
+`pos = clip - clip[anchor] + own`. Для обычных мувов формула тождественна
+прежней (`clip[anchor] + offset == own`), поэтому ничего не сдвинулось.
+
+Замер после фикса:
+```
+thrower  draw_x = 793.03..962.78
+victim   draw_x = 812.31..946.19     <- на бросающем, как в JS
+```
+**Побочный (и главный) результат: `diff:survival` 863 -> 0.** Эти 863
+расхождения и были уезжающей жертвой: в Survival ИИ постоянно бросает игрока, и
+каждый бросок уводил позу на тысячи юнитов от оракула. Baseline обновлён
+(`--update-baseline --only diff:survival`, improvement). Остальные диффы не
+двинулись: `diff:boss-lynx`, `diff:dojo-demo`, `diff:tournament`,
+`diff:challenge`, `diff:dojo-move` — exit 0.

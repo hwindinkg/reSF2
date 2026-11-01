@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-01T18:18:31",
+    "updated": "2026-11-01T19:39:54",
     "mode": "only"
   },
   "gates": {
@@ -119,10 +119,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:survival": {
-      "metric": 863,
-      "commit": "aba9afab",
-      "reason": "survival enemy identity: the JS resolves the row roster 3x (VS intro + cl.pmb/cl.qmb) off the Da.rL() wall-clock seed, and y8a re-draws on a NoDoubles hit instead of advancing; the port now replays that, so the wave-0 enemy is Generic_1 idx 1 (Ninja_Man_Knuckles) like the oracle. 1957 -> 863",
-      "date": "2026-10-22T20:54:42"
+      "metric": 0,
+      "commit": "37695427",
+      "reason": "the throw victim keeps its own position (JS Dl.oL L24171): the absolute-align clips no longer drag the victim 5000u off screen - 863 -> 0",
+      "date": "2026-11-01T19:39:54"
     },
     "diff:challenge": {
       "metric": 0,

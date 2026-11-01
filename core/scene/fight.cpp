@@ -8542,7 +8542,16 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // so `update()` must run in every phase and gate the decision internally
     // via `st.phase_fight`. Gating the whole call left the round-intro move
     // starts draw-free — the boss-lynx roulette read the stream 9 draws early.
-    if (me.ai != nullptr) {
+    // [probe, authorised] `SF2_AI_ENEMY_OFF=1`: the ENEMY skips its AI update,
+    // so it stays in its idle stance - which carries the `Throwable` interval
+    // (`moves.xml` L29 `<Interval Name="Throwable"/>`) - and a probe can
+    // exercise the PLAYER's input -> move resolution without the bot closing in
+    // and throwing the player first (the throw probe used to start with the
+    // player already in `ThrowThroughTheBackV` at x=-72). Probe-only: the
+    // skipped call also owns the `Da.pg` draws of the model-EVENT handlers, so
+    // this must never be set for a trace diff.
+    const bool ai_off = !me.is_player && std::getenv("SF2_AI_ENEMY_OFF") != nullptr;
+    if (me.ai != nullptr && !ai_off) {
         sf2::scene::AiFightState st;
         st.phase_fight = (phase_ == fight_phase::fight);
         st.current_move = me.fighter.current_move();
