@@ -111,7 +111,9 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("dialog captions render the inline `<image>` icons (rich text)", True),
         ("HUD energy tap fires `EnergyBarPress`; the green plus opens the "
         "shop RUBY tab", True),
-        ("first-quest crystal grant for the energy tutorial (reported)", False),
+        ("first-quest crystal grant: no such grant exists in the shipped "
+         "quest data (`GiveCurrency Type=Bonus` only in facebook.xml 1/5 + a "
+         "test quest)", True),
         ("dojo nav badges (`Mma`/`bM` L82543-82550, probe "
          "`--nav-badge-probe`: shop=1, profile=20)", True),
         ("dojo `max` / `unlimited_energy` widgets (L82709/L82605, probe "

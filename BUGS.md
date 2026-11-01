@@ -3849,3 +3849,24 @@ PROFILE = перки в состоянии «цель обучения» (раз
 ```
 Кадр `.harness/nav_badge.png`: «1» на ряду SHOP и «20» на ряду PROFILE,
 остальные ряды без бейджей.
+
+### QA-01.11 — «первый квест даёт кристаллы на энергию»: снято как не-баг
+
+Проверка по ВСЕМ отгруженным quest-XML: `<GiveCurrency>` встречается ровно
+четыре раза —
+```
+facebook.xml:18                       <GiveCurrency Type="Bonus" Value="1" />
+facebook.xml:78                       <GiveCurrency Type="Bonus" Value="5" />
+promotions_from_first_session.xml:54  <GiveCurrency Type="Gold" Value="_FirstGemPurchaseBonus" />
+test_quests.xml:117                   <GiveCurrency Type="Bonus" Value="500" />
+```
+то есть кристаллы (`Bonus`) в данных дают ТОЛЬКО награды за привязку Facebook
+(1 и 5) и тестовый квест; `promotions_from_first_session` даёт ЗОЛОТО, а не
+кристаллы. В `quest_extensions/energy.xml` кристаллов нет вовсе — только
+`<BuyItem Name="Energy_Refill" Currency="Ruby">` (покупка восполнения).
+
+Значит «первый раз должны дать кристаллы на восполнение энергии» — не правило
+клиентских данных: это либо серверный грант, либо награда за FB-привязку.
+Порт при этом `GiveCurrency`/`TakeCurrency` ИСПОЛНЯЕТ (`quest_engine.cpp`:
+`Gold` -> `money`, `Bonus` -> `bonus`, иначе `currencies[Type]`), т.е. если бы
+такое правило было в данных, оно бы сработало.
