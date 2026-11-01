@@ -1024,6 +1024,9 @@ struct ModTickCtx {
     bool* col_by_side[2] = {nullptr, nullptr};  // hq.S vZ restore
     std::function<void(int, float)> set_timescale;  // fq.Kvb revert
     std::function<void(int)> reset_color;  // Mp.Qs revert (location color)
+    // `JNa` revert for ModInvisibility (type 15): `cLa(a, true)` -> `hpb` ->
+    // `w5(model, true)` = the model node's `setActive(true)`.
+    std::function<void(int, bool)> set_visible;
     float* ly_by_side[2] = {nullptr, nullptr};
     float* qz_by_side[2] = {nullptr, nullptr};
     // Called per expiry (natural or `qw` flush) for the slot-14 publish.
@@ -1065,6 +1068,8 @@ inline void revert_mod(const ModState& m, int side, ModTickCtx& ctx,
         *ctx.col_by_side[m.col_side] = true;  // `hq.S(a,true)`
     } else if (m.kind == "ChangeModelColor" && ctx.reset_color) {
         ctx.reset_color(side);  // `Mp.Qs(a,true)` -> location color
+    } else if (m.kind == "ModInvisibility" && ctx.set_visible) {
+        ctx.set_visible(side, true);  // `cLa(a,true)` -> `w5(model,true)`
     }
     if (log) {
         if (m.kind == "StealMagicMod" || m.kind == "SlowModel" ||

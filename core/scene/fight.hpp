@@ -2156,6 +2156,17 @@ public:
     // either facing. `Ae.Wl` (`Vi.SBa` L704) = sign(enemy_x - me_x); placing
     // the enemy LEFT makes `Wl < 0`, the mirrored-requirement branch of
     // `vm.he` L749 (`a.keys.S1||a.Wl>0 ? this.xn : this.TDa`).
+    // [probe] Fire the `ModInvisibility` perk action through the SAME
+    // `exec_action` path the perk bus uses (`PERK_INVISIBILITY` ->
+    // `ModInvisibility` -> `cLa`/`hpb`/`w5`), so the install -> hide -> tick ->
+    // `JNa` revert chain runs on a LIVE fight.
+    void debug_mod_invisibility(int owner_side, const std::string& name, int frames);
+
+    // [probe] Fire `PERK_BOSS_WIDOW_SHIELDING`'s slave action (`ModAttributes
+    // Name="Shielding" DamageFactor="-16000" Frames="600" Player="Enemy"`) via
+    // the real dispatcher, so the boss shield can be measured on a live fight.
+    void debug_shield(int owner_side);
+
     void debug_place_fighters(float me_x, float enemy_x) {
         player_.fighter.teleport(me_x, player_.fighter.world_y());
         enemy_.fighter.teleport(enemy_x, enemy_.fighter.world_y());

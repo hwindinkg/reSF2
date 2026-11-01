@@ -216,6 +216,10 @@ public:
     // render). Used by the headless-loop driver in app/game/main.cpp.
     void run_one_frame();
 
+    // [probe] Render one frame WITHOUT stepping the simulation, so a probe can
+    // capture the SAME frame twice (e.g. `--invis-probe`'s visible/hidden A/B).
+    void render_frame_probe() { render_frame(); }
+
     void shutdown();
 
     // --- shared resources (screens draw through these) --------------------

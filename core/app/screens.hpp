@@ -845,6 +845,12 @@ public:
     // [probe] Throw diagnostics (`--verify-place`): prints both fighters'
     // align/Fk/root state for the throw-victim decomposition.
     void debug_throw_probe(const char* tag) const;
+    // [probe] `--invis-probe`: drive the invisibility perk's action on a side.
+    void debug_invis(int side, const std::string& name, int frames);
+    // [probe] `--shield-probe`: install the boss shield (DamageFactor) mod.
+    void debug_shield(int owner_side);
+    // [probe] The enemy model's draw flag (`wd.isVisible`).
+    bool enemy_visible() const;
     int player_move_frame() const;
     // [probe] Round-transition frame log hooks (JS `XF` L370): the whole 3-D
     // view's visibility (`camera_.visible`, the M2 round-transition hide) and

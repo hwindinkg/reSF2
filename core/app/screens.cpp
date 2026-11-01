@@ -15086,6 +15086,18 @@ float FightScreen::enemy_world_x() const {
 }
 
 // [probe] Throw diagnostics (--verify-place): the thrower + victim align/Fk.
+bool FightScreen::enemy_visible() const {
+    return fight_ != nullptr && fight_->enemy().fighter.visible();
+}
+
+void FightScreen::debug_shield(int owner_side) {
+    if (fight_ != nullptr) fight_->debug_shield(owner_side);
+}
+
+void FightScreen::debug_invis(int side, const std::string& name, int frames) {
+    if (fight_ != nullptr) fight_->debug_mod_invisibility(side, name, frames);
+}
+
 void FightScreen::debug_throw_probe(const char* tag) const {
     if (fight_ == nullptr) return;
     fight_->player().fighter.debug_throw_probe(tag);
@@ -17000,20 +17012,27 @@ void FightScreen::render_impl(App& app) {
     // Dla L1599 (translate.z=). The batch preserves submission order, so draw
     // the whole enemy node FIRST (capsules+mesh, z=-.001) then the whole
     // player node (z=0) on top.
-    draw_capsules(fight_->enemy().fighter.model(), fight_->enemy().fighter.positions(),
-                  fight_->enemy().fighter.model_offset_x(),
-                  fight_->enemy().fighter.model_offset_y(),
-                  fight_->enemy().fighter.color_r(), fight_->enemy().fighter.color_g(),
-                  fight_->enemy().fighter.color_b());
-    ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
-                       fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
-    draw_capsules(fight_->player().fighter.model(), fight_->player().fighter.positions(),
-                  fight_->player().fighter.model_offset_x(),
-                  fight_->player().fighter.model_offset_y(),
-                  fight_->player().fighter.color_r(), fight_->player().fighter.color_g(),
-                  fight_->player().fighter.color_b());
-    ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
-                       fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
+    // JS `wd.isVisible` (the model node's `setActive`): an INVISIBLE fighter is
+    // not drawn at all — the invisibility perk (`PERK_INVISIBILITY` ->
+    // `ModInvisibility` -> `w5`) deactivates the node, it does not fade it.
+    if (fight_->enemy().fighter.visible()) {
+        draw_capsules(fight_->enemy().fighter.model(), fight_->enemy().fighter.positions(),
+                      fight_->enemy().fighter.model_offset_x(),
+                      fight_->enemy().fighter.model_offset_y(),
+                      fight_->enemy().fighter.color_r(), fight_->enemy().fighter.color_g(),
+                      fight_->enemy().fighter.color_b());
+        ren.draw_triangles(ev.data(), ev.size() / 2, fight_->enemy().fighter.color_r(),
+                           fight_->enemy().fighter.color_g(), fight_->enemy().fighter.color_b());
+    }
+    if (fight_->player().fighter.visible()) {
+        draw_capsules(fight_->player().fighter.model(), fight_->player().fighter.positions(),
+                      fight_->player().fighter.model_offset_x(),
+                      fight_->player().fighter.model_offset_y(),
+                      fight_->player().fighter.color_r(), fight_->player().fighter.color_g(),
+                      fight_->player().fighter.color_b());
+        ren.draw_triangles(pv.data(), pv.size() / 2, fight_->player().fighter.color_r(),
+                           fight_->player().fighter.color_g(), fight_->player().fighter.color_b());
+    }
     // [child models] JS `wd.vd` (the `<CreatePlayer>` spawns): each live child
     // is a full model (`ih extends wd`) drawn with the SAME capsule-strip +
     // mesh path as a fighter, at the spawner's layer. Drawn after both

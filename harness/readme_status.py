@@ -64,6 +64,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
+        ("kusarigama: the sickle/rope bone chain and the weapon binding are "
+         "unverified - needs a per-frame live-game capture (QA-29.10 #4)", False),
+        ("boss perks: the shield scales damage to 2^-1.6 = 0.3299 (measured "
+         "0.3299; gate `boss-shield`) and invisibility stops the model being "
+         "drawn (15369 px vanish at the same frame; gate `boss-invis`); "
+         "teleport/assistants are JS-dead (`BossAbilityState` never fires, no "
+         "ability anim in the `.dat` pool)", True),
         ("gravity points DOWN: the KO fall drops from y -250.8 to -7.5 "
          "(measured, `--kick-ko --dump-pose`); same sign as the JS", True),
     ]),
@@ -88,6 +95,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "block decisions when the player attacks", True),
         ("Survival: one clean punch takes 6.2% of the enemy's HP (4 hits -> "
          "75% left) - no one-hit kill; gate `survival-hit`", True),
+        ("ranged/magic: the AI never picks `RangedPlayer`/`MagicPlayer` from "
+         "the `.dat` animation pool (QA-29.10 #6)", False),
     ]),
     ("UI & screens", [
         ("fight HUD: bars, portraits, names, style meter", True),
@@ -126,6 +135,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "`--nav-badge-probe`: shop=1, profile=20)", True),
         ("dojo `max` / `unlimited_energy` widgets (L82709/L82605, probe "
          "`--za-widget-probe`)", True),
+        ("Titan bodyguards: wrong location and no roster scrolling "
+         "(QA-29.10 #7)", False),
         ("dojo bar fill clips the full-width sprite (`Uf.kB` L83275, probe "
          "`--za-energy-probe`: segment pitch preserved at Power=2)", True),
     ]),
@@ -150,7 +161,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("RU/EN, fighter names and the VS intro", True),
     ]),
     ("Harness & verification", [
-        ("31 gates, `--full` exit 0", True),
+        ("34 gates, `--full` exit 0", True),
         ("oracle runner + `compare_state` / `compare_audio` / `ui_diff`", True),
         ("`--replay` drives one script on both sides", True),
         ("debug overlay 1-4 (AI/world/session + a perf panel with the FPS "

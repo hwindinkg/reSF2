@@ -763,6 +763,17 @@ public:
     int interval_type(const std::string& name) const;
     // JS `wd.Nbb` (L514): `qYa()!=null` = a Block interval (`da.yD(5)`)
     // is active at the current frame.
+    // JS `wd.isVisible` + `Te.Pf` (L15764): the MODEL NODE's visibility. The
+    // `ModInvisibility` perk action (`cLa` L53847 -> `hpb` L16005 -> `w5`
+    // L35783 `e.model.go.setActive(b)`) and the `Invisible` interval type 7
+    // (`wA`/`vA` L15700/L15709) switch it OFF, and `Pf` switches it back ON at
+    // every clip start. A hidden model is not drawn at all (the JS deactivates
+    // the node, it does not fade it).
+    bool visible() const { return visible_; }
+    void set_visible(bool v);
+    // `Te.yD(7)`: an `Invisible` interval of the current clip is active.
+    bool has_invisible_interval() const;
+
     bool has_block() const;
     // JS `Te.hT(5)` (L554): remove ALL active Block intervals (strike()
     // pre-break when `g.DDa`, L509; `Cgb` post-hit when !block, L394-397).
@@ -1568,6 +1579,11 @@ private:
     std::set<std::string> active_intervals_;
     // The (name, `G0` type) pairs behind `active_intervals_` — JS `Te.xj`.
     std::vector<std::pair<std::string, int>> active_interval_list_;
+    // JS `wd.isVisible` (model-node visibility). See `visible()`.
+    bool visible_ = true;
+    // The previous frame's `Invisible`-interval state (`wA`/`vA` fire on the
+    // START/END of a type-7 interval, not every frame).
+    bool invisible_interval_prev_ = false;
     // Clip-end snapshot of the above (JS `Ae.xb` at the `AnimationEnd` pass).
     std::vector<std::pair<std::string, int>> ended_intervals_; // active interval names (JS `Te.xj`)
     // --- move-frame action dispatch (JS `Te.Lwa` / `Te.CZa`) --------------

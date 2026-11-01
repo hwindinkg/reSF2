@@ -643,6 +643,10 @@ PARSERS = {
     # turn the player into a one-hit killer (reported bug).
     "survhit": p_kv_result("survhit"),
     "evade_ib": p_evade_ib,
+    # The boss perks: the shield's ModAttributes (the measured 2^-1.6 damage
+    # nerf) and the invisibility action (the model stops being drawn).
+    "invis": p_kv_result("invis"),
+    "shieldperk": p_kv_result("shield"),
 }
 
 
@@ -688,6 +692,12 @@ FLAG_GATES: list[Gate] = [
     # 60 for the whole fight.
     Gate("evade-ib", "gate", ("full",), "--evade-probe", 300, parser="evade_ib",
          env={"SF2_TRACE_AI_QUICK": "1"}),
+    # `PERK_INVISIBILITY` -> `ModInvisibility`: the perked model must stop being
+    # DRAWN (the A/B capture at the same rendered frame loses 15369 px).
+    Gate("boss-invis", "gate", ("full",), "--invis-probe", 300, parser="invis"),
+    # `PERK_BOSS_WIDOW_SHIELDING` -> `ModAttributes DamageFactor=-16000`:
+    # a punch must drop to 2^-1.6 = 0.3299 of its damage.
+    Gate("boss-shield", "gate", ("full",), "--shield-probe", 300, parser="shieldperk"),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
     # The winner's EndStance `Win_<weapon>` animation (bug Q): `--kick-ko`
     # fights to a KO, so the phase-3 pick must resolve and start the win clip.

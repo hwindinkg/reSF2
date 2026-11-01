@@ -5014,6 +5014,34 @@ static bool is_combat_action(const std::string& t) {
     return t == "SetHit" || t == "Lifesteal" || t == "DisableInterval";
 }
 
+// [probe] `--shield-probe` entry: the Widow shield action (`perks.xml:2380`),
+// executed by the real dispatcher (`fight.cpp:exec_action`).
+void FightController::debug_shield(int owner_side) {
+    sf2::scene::PerkTrigger t;
+    t.perk = "PERK_BOSS_WIDOW_SHIELDING";
+    sf2::scene::PerkAction a;
+    a.type = "ModAttributes";
+    a.str["Name"] = "Shielding";
+    a.num["DamageFactor"] = -16000.0;
+    a.num["Frames"] = 600.0;
+    a.ob = 2;  // `Player="Enemy"` = the OTHER side (JS `Ma.e6a`)
+    exec_action(t, a, owner_side, 0);
+}
+
+// [probe] `--invis-probe` entry: the invisibility perk's action, executed by
+// the real dispatcher (`fight.cpp:exec_action`).
+void FightController::debug_mod_invisibility(int owner_side,
+                                             const std::string& name,
+                                             int frames) {
+    sf2::scene::PerkTrigger t;
+    t.perk = "PERK_INVISIBILITY";
+    sf2::scene::PerkAction a;
+    a.type = "ModInvisibility";
+    a.str["Name"] = name;
+    a.num["Frames"] = static_cast<double>(frames);
+    exec_action(t, a, owner_side, 0);
+}
+
 // Target side for an action (`Ma.e6a`): Ob==1 → owner, Ob==2 → foe.
 static int action_side(int owner_side, const sf2::scene::PerkAction& a) {
     return a.ob == 2 ? 1 - (owner_side & 1) : (owner_side & 1);
@@ -5224,6 +5252,14 @@ void FightController::exec_action(const sf2::scene::PerkTrigger& t,
     } else if (type == "ModIcon" || type == "ModInvisibility" || type == "ModFlag") {
         // ModFlag (Sp, 178 shipped uses): named persistent mod (mirrors
         // ModIcon) so Blocker/RockOn/Icon-family ModExists chains work.
+        // ModInvisibility (JS `Vp`, type 15, L57773) is MORE than a mod: its
+        // fire path is `cLa` (L53847) -> `hpb` (L16005) -> `w5` (L35783)
+        // `e.model.go.setActive(false)` — the whole model node is switched off,
+        // so the fighter stops being drawn; `JNa` (`cLa(a,true)`) restores it
+        // when the mod expires (and `Te.Pf` L15764 re-shows it on a clip start).
+        if (type == "ModInvisibility") {
+            (owner_side == 0 ? player_ : enemy_).fighter.set_visible(false);
+        }
         sf2::scene::ModState m;
         m.name = str("Name").empty() ? type : str("Name");
         m.namespc = str("Namespace");
@@ -5711,6 +5747,10 @@ sf2::scene::ModTickCtx FightController::mod_tick_ctx() {
         } else {
             enemy_.fighter.set_color(fighter_color_);
         }
+    };
+    // `JNa`/`cLa` revert of ModInvisibility: show the model node again.
+    ctx.set_visible = [this](int s, bool v) {
+        (s == 0 ? player_ : enemy_).fighter.set_visible(v);
     };
     return ctx;
 }

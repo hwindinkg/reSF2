@@ -697,6 +697,28 @@ bool Fighter::has_invuln() const {
     return false;
 }
 
+// JS `wd.isVisible` / `Te.Pf` L15764: `if (!a.model.isVisible) { ...
+// qh.w5(a.model.oa, true); a.model.isVisible = true }` - a clip start SHOWS the
+// model again; the invisibility perk/mod then hides it again on the next tick.
+void Fighter::set_visible(bool v) {
+    if (visible_ == v) return;
+    visible_ = v;
+    if (std::getenv("SF2_TRACE_VIS") != nullptr) {
+        std::fprintf(stdout, "[vis] visible=%d move=%s\n", v ? 1 : 0,
+                     current_move_ != nullptr ? current_move_->name.c_str() : "-");
+        std::fflush(stdout);
+    }
+}
+
+// JS `Te.yD(7)` (L553): an `Invisible` interval (type 7) of the CURRENT clip is
+// active - `wA` (L15700) hides the model node, `vA` (L15709) restores it.
+bool Fighter::has_invisible_interval() const {
+    for (const std::pair<std::string, int>& p : active_interval_list_) {
+        if (p.second == 7) return true;
+    }
+    return false;
+}
+
 // JS `Te.hT(5)` (L554, reverse loop): drop every active Block interval.
 void Fighter::clear_block() { clear_intervals(5, ""); }
 
@@ -1356,6 +1378,11 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // post-end `Xh += 3` step).
     vn_pending_ = false;
     current_move_ = &move;
+    // JS `Te.Pf` L15764: `if (!a.model.isVisible) { ...qh.w5(a.model.oa, true);
+    // a.model.isVisible = true }` - the animation-start handler un-hides a model
+    // the invisibility perk/mod had switched off. That is why a cloaked boss
+    // reappears for the strike and vanishes again on the next perk tick.
+    set_visible(true);
     // JS `Te.Skb` (L280074): `this.Pe && this.gh("EAnimationInterruptedEvent",
     // a)` — a new clip interrupting a still-active one. `Pe` is the animator's
     // "a clip is playing" latch; the port's previous `current_move_` is the
@@ -2553,6 +2580,14 @@ void Fighter::advance_step() {
             active_intervals_.insert(key);
             active_interval_list_.emplace_back(key, iv.type);
         }
+    }
+    // JS `wA`/`vA` (L15700/L15709) fire on the START/END of an `Invisible`
+    // interval (type 7): hide the model node on start, restore it on end. Only
+    // the TRANSITION acts - re-showing every frame would undo the perk mod.
+    const bool invisible_now = has_invisible_interval();
+    if (invisible_now != invisible_interval_prev_) {
+        invisible_interval_prev_ = invisible_now;
+        set_visible(!invisible_now);
     }
 
     // Root motion (JS `Te.eda` L556 + `Te.j8`/`DM`/`aV` L546/564).
