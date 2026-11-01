@@ -1024,6 +1024,13 @@ static bool offer_live(const EngineItemOffer& o) {
            QuestEngine::now_seconds() < static_cast<double>(o.end_time);
 }
 
+// `yf.TP`: the live discount percent for `item`.
+int QuestEngine::offer_discount_percent(const std::string& item) const {
+    const EngineItemOffer* o = offer_for(item);
+    if (o == nullptr || !offer_live(*o)) return 0;
+    return o->percent;
+}
+
 std::int64_t QuestEngine::offer_price(const std::string& item, std::int64_t base) const {
     const EngineItemOffer* o = offer_for(item);
     if (o == nullptr || !offer_live(*o)) return base;

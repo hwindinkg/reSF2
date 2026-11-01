@@ -22146,6 +22146,46 @@ void ShopScreen::render_impl(App& app) {
             // `a.type!=I.Bu/I.Vr/I.Ox/I.Hm` (Free/Seal/Consumable/
             // RaidConsumable, @1272119-1272177) and `!a.Zz` (`Zz` = the
             // `ConsumableProduct` attr, @164715).
+            // JS `ns.j5` L95673-95682: the `-N%` discount stripe (frame
+            // `y.tM` = "pieces/Stripe", shop atlas 248, 765x114) plus a
+            // `-{yf.TP}%` label, drawn on the cell's bottom strip (`jw`,
+            // L95608 `jw.D(ce.y - 40)`) at the strip's left end. Conditions:
+            // `!ConsumableProduct` (`!a.Zz`), a LIVE offer with `percent > 0`,
+            // not a RealMoneyItem (`type != I.wk`). The JS also hides it for an
+            // item already received from an offer (`p.o.$4a(name) != null`,
+            // the `Ioa` list) — the port does not model `Ioa`.
+            {
+                const int disc = app.quest_engine().offer_discount_percent(it.name);
+                if (disc > 0 && !it.consumable_product && it.type != "RealMoneyItem") {
+                    sf2::data::atlas_frame sfr;
+                    int stw = 0, sth = 0;
+                    unsigned int sgl = 0;
+                    if (app.get_atlas_frame("pieces/Stripe", &sfr, &stw, &sth, &sgl)) {
+                        const float sw = sfr.source_w > 0 ? static_cast<float>(sfr.source_w)
+                                                          : static_cast<float>(sfr.w);
+                        const float sh = sfr.source_h > 0 ? static_cast<float>(sfr.source_h)
+                                                          : static_cast<float>(sfr.h);
+                        const float dw = sh > 0.0f ? fr_h * (sw / sh) : fr_h;
+                        try_draw_atlas_button(app, "pieces/Stripe", cell.J, jw_top, dw,
+                                              fr_h, 1.0f, /*fill=*/true, false,
+                                              /*top_left=*/true);
+                        const std::string dtxt = "-" + std::to_string(disc) + "%";
+                        draw_ui_label(app, cell.J, jw_top + fr_h * 0.12f, dw,
+                                      fr_h * 0.76f, dtxt, fr_h * 0.5f / 100.0f,
+                                      UiAlign::Center, 0.066f, 0.030f, 0.020f);
+                        static bool logged_disc = false;
+                        if (!logged_disc) {
+                            logged_disc = true;
+                            std::fprintf(stdout,
+                                         "[shop] discount stripe %s -%d%% (pieces/Stripe "
+                                         "%.0fx%.0f)\n",
+                                         it.name.c_str(), disc, static_cast<double>(dw),
+                                         static_cast<double>(fr_h));
+                            std::fflush(stdout);
+                        }
+                    }
+                }
+            }
             const bool tb_show = owned && it.type != "Free" && it.type != "Seal" &&
                                  it.type != "Consumable" &&
                                  it.type != "RaidConsumable";
@@ -22645,9 +22685,58 @@ void ShopScreen::render_impl(App& app) {
                           0.145f * avail_a, 0.106f * avail_a);
         };
         int slot = 0;
-        if (gems > 0) draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
+        // JS `Ne.Op` L93467-93488 dispatches by the item TYPE:
+        //   I.Ox  (Consumable)                -> the `kUa` ruby plate (`Tub`)
+        //   I.Bu  (Free)                      -> the `PV` caption plate
+        //   I.Hm/I.sB (RaidConsumable/Pack)   -> nothing
+        //   I.wk  (RealMoneyItem)             -> the PAYMENT plate `Asa`
+        //                                        (`mvb` L93528-93541: caption
+        //                                        `<Hp> <TK>`, e.g. "2.99 USD")
+        //   default                           -> `M8` + `pVa` (`Wub`, below)
+        // The port always drew the gold/ruby pair, so a RealMoneyItem chest
+        // (Price=0, BonusPrice=0) got NO plate at all.
+        const bool real_money = sel_it->type == "RealMoneyItem";
+        const bool tapjoy = real_money && sel_it->subtype == "TapJoy";
+        const bool raid_row = sel_it->type == "RaidConsumable" ||
+                              sel_it->type == "RaidItemPack";
+        if (real_money && !raid_row) {
+            const float py = byy0;
+            if (!(load_sliced_atlas(app) &&
+                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, avail_a))) {
+                draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f * avail_a,
+                                 0.62f * avail_a, 0.30f * avail_a, false);
+            }
+            // `mvb`: `Asa.V(`${Hp} ${TK}`)`; `Hp` is the `<RealPrice>` minus its
+            // leading symbol (L13120 `substr(xr, 1)`), `TK` the currency
+            // ("USD" by default, L13121/13129). A TapJoy row shows the plain
+            // caption `uU` instead.
+            std::string cap;
+            if (tapjoy) {
+                cap = loc(app, sel_it->offer_text, sel_it->offer_text);
+            } else {
+                std::string rp = sel_it->offer_real_price;
+                if (!rp.empty()) rp = rp.substr(1);  // drop the "$"/symbol
+                if (!rp.empty() && rp.find(' ') != std::string::npos) {
+                    rp = rp.substr(0, rp.find(' '));
+                }
+                cap = rp.empty() ? "0.00" : rp;
+                cap += " USD";
+            }
+            draw_ui_label(app, cx0, py - 15.0f, cw0, 30.0f, cap, 0.9f, UiAlign::Center,
+                          0.184f * avail_a, 0.145f * avail_a, 0.106f * avail_a);
+            static bool logged_pay = false;
+            if (!logged_pay) {
+                logged_pay = true;
+                std::fprintf(stdout, "[shop] Ne.Op payment plate %s: '%s' (real='%s')\n",
+                             sel_it->name.c_str(), cap.c_str(),
+                             sel_it->offer_real_price.c_str());
+                std::fflush(stdout);
+            }
+        } else if (!raid_row && gems > 0) {
+            draw_price_plate(slot++, "ruby", gems);  // `pVa` (L2254)
+        }
         int gold_slot = -1;
-        if (gold > 0) {                                        // `M8` (L2254)
+        if (!real_money && !raid_row && gold > 0) {            // `M8` (L2254)
             gold_slot = slot;
             draw_price_plate(slot, "gold", gold);
         }

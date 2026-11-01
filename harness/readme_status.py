@@ -95,8 +95,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("shop: ruby purchase auto-upgrade (`Pa.gI` L51178-51199, probe "
          "`--ruby-upgrade-probe`)", True),
         ("shop: tab badges (`ss` L94726-94730)", False),
-        ("shop: discount stripe (`ns.j5` L95673-95682)", False),
-        ("shop: tab-5 payment buttons (`Ne.Op` L93467-93488)", False),
+        ("shop: discount stripe (`ns.j5` L95673-95682, probe "
+         "`--shop-discount-probe`)", True),
+        ("shop: payment plate for RealMoneyItem rows (`Ne.Op` "
+         "L93467-93488, probe `--shop-payment-probe`)", True),
         ("shop: price ink ~1.45x the oracle (menu-font `ua` calibration)", False),
         ("results: `<Reward><Item>` drops are granted (probe: the save owns "
          "`drop_name_blueseal`)", True),

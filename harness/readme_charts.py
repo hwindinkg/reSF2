@@ -38,14 +38,14 @@ def esc(s: str) -> str:
     return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def systems() -> list[tuple[str, int]]:
-    """(system, percent) from the shared checklist."""
+def systems() -> list[tuple[str, int, int, int]]:
+    """(system, percent, passed, total) from the shared checklist."""
     sys.path.insert(0, str(ROOT / "harness"))
     import readme_status  # noqa: WPS433 - same directory
     out = []
     for name, items in readme_status.SYSTEMS:
         ok = sum(1 for _, v in items if v)
-        out.append((name, round(100 * ok / max(1, len(items)))))
+        out.append((name, round(100 * ok / max(1, len(items))), ok, len(items)))
     return out
 
 
@@ -64,46 +64,132 @@ def colour(pct: int) -> str:
     return RED
 
 
-def progress_svg(rows: list[tuple[str, int]], overall: int) -> str:
-    w, row_h, top = 760, 34, 116
-    h = top + row_h * (len(rows) + 1) + 24
-    label_w = 250
-    bar_w = w - label_w - 120
+def blend(c1: str, c2: str, t: float) -> str:
+    """Mix two `#rrggbb` colours (t=0 -> c1, t=1 -> c2)."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def squarify(areas: list[float], x: float, y: float, w: float,
+             h: float) -> list[tuple[float, float, float, float]]:
+    """Squarified treemap (Bruls et al.); the rects keep the input order."""
+    n = len(areas)
+    if n == 0 or w <= 0 or h <= 0:
+        return []
+    # the values are ITEM COUNTS: scale them to the rect's area first
+    tot = sum(areas)
+    if tot <= 0:
+        return []
+    k = (w * h) / tot
+    areas = [a * k for a in areas]
+    order = sorted(range(n), key=lambda i: -areas[i])
+    rects: list[tuple[float, float, float, float]] = [(0.0, 0.0, 0.0, 0.0)] * n
+
+    def worst(row: list[float], side: float) -> float:
+        s_ = sum(row)
+        if s_ <= 0 or side <= 0:
+            return float("inf")
+        rmax, rmin = max(row), min(row)
+        if rmin <= 0:
+            return float("inf")
+        return max(side * side * rmax / (s_ * s_), (s_ * s_) / (side * side * rmin))
+
+    i = 0
+    while i < n:
+        row: list[tuple[int, float]] = []
+        if w >= h:
+            while i < n:
+                cand = row + [(order[i], areas[order[i]])]
+                if row and worst([a for _, a in cand], h) > worst([a for _, a in row], h):
+                    break
+                row = cand
+                i += 1
+            total = sum(a for _, a in row)
+            cw = total / h if h > 0 else 0.0
+            cy = y
+            for idx, a in row:
+                rh = a / cw if cw > 0 else 0.0
+                rects[idx] = (x, cy, cw, rh)
+                cy += rh
+            x += cw
+            w -= cw
+        else:
+            while i < n:
+                cand = row + [(order[i], areas[order[i]])]
+                if row and worst([a for _, a in cand], w) > worst([a for _, a in row], w):
+                    break
+                row = cand
+                i += 1
+            total = sum(a for _, a in row)
+            rh = total / w if w > 0 else 0.0
+            cx = x
+            for idx, a in row:
+                cwd = a / rh if rh > 0 else 0.0
+                rects[idx] = (cx, y, cwd, rh)
+                cx += cwd
+            y += rh
+            h -= rh
+    return rects
+
+
+def progress_svg(rows: list[tuple[str, int, int, int]], overall: int) -> str:
+    # TREEMAP: one rectangle per system, its AREA proportional to that
+    # system's checklist item count, its colour the readiness band. The
+    # headline number is the same item-weighted overall as the README.
+    w, head, body_h, legend_h = 760, 76, 400, 46
+    h = head + body_h + legend_h
+    area_x, area_y, area_w = 24.0, float(head), w - 48.0
+    areas = [float(n) for _, _, _, n in rows]
+    rects = squarify(areas, area_x, area_y, area_w, float(body_h))
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
          f'viewBox="0 0 {w} {h}" font-family="Segoe UI,Ubuntu,sans-serif">',
          f'<rect width="{w}" height="{h}" rx="10" fill="{BG}"/>',
          f'<text x="24" y="34" fill="{TEXT}" font-size="20" '
          f'font-weight="600">Readiness by system</text>',
-         f'<text x="24" y="58" fill="{MUTED}" font-size="12">'
-         f'generated from the gate baseline + the checklist in '
-         f'harness/readme_status.py</text>',
+         f'<text x="24" y="56" fill="{MUTED}" font-size="12">'
+         f'treemap: tile area = checklist items in that system; colour = readiness '
+         f'(harness/readme_status.py)</text>',
          f'<text x="{w-24}" y="40" fill="{colour(overall)}" font-size="26" '
          f'font-weight="700" text-anchor="end">{overall}%</text>',
          f'<text x="{w-24}" y="58" fill="{MUTED}" font-size="12" '
          f'text-anchor="end">overall (all checklist items)</text>']
-    y = top
-    for name, pct in rows:
+    for (name, pct, ok, total), (rx, ry, rw, rh) in zip(rows, rects):
+        if rw <= 0 or rh <= 0:
+            continue
         c = colour(pct)
-        p.append(f'<text x="24" y="{y+14}" fill="{TEXT}" font-size="13">{esc(name)}</text>')
-        p.append(f'<rect x="{label_w}" y="{y+3}" width="{bar_w}" height="14" '
-                 f'rx="7" fill="{PANEL}" stroke="{GRID}"/>')
-        p.append(f'<rect x="{label_w}" y="{y+3}" width="{max(2, round(bar_w*pct/100))}" '
-                 f'height="14" rx="7" fill="{c}"/>')
-        p.append(f'<text x="{label_w+bar_w+12}" y="{y+14}" fill="{c}" font-size="13" '
-                 f'font-weight="600">{pct}%</text>')
-        y += row_h
-    # the overall row: the SAME number as the heading/README (all items at
-    # once), so the bars and the headline can never read as different metrics
-    c = colour(overall)
-    p.append(f'<line x1="24" y1="{y+2}" x2="{w-24}" y2="{y+2}" stroke="{GRID}"/>')
-    p.append(f'<text x="24" y="{y+18}" fill="{TEXT}" font-size="13" '
-             f'font-weight="700">overall (all items)</text>')
-    p.append(f'<rect x="{label_w}" y="{y+7}" width="{bar_w}" height="14" '
-             f'rx="7" fill="{PANEL}" stroke="{GRID}"/>')
-    p.append(f'<rect x="{label_w}" y="{y+7}" width="{max(2, round(bar_w*overall/100))}" '
-             f'height="14" rx="7" fill="{c}"/>')
-    p.append(f'<text x="{label_w+bar_w+12}" y="{y+18}" fill="{c}" font-size="13" '
-             f'font-weight="700">{overall}%</text>')
+        fill = blend(BG, c, 0.18)
+        p.append(f'<g><title>{esc(name)}: {ok}/{total} ({pct}%)</title>')
+        p.append(f'<rect x="{rx + 2:.1f}" y="{ry + 2:.1f}" width="{max(1.0, rw - 4):.1f}" '
+                 f'height="{max(1.0, rh - 4):.1f}" rx="6" fill="{fill}" '
+                 f'stroke="{blend(BG, c, 0.45)}"/>')
+        p.append(f'<rect x="{rx + 2:.1f}" y="{ry + 2:.1f}" width="{max(1.0, rw - 4):.1f}" '
+                 f'height="3" rx="1.5" fill="{c}"/>')
+        if rw >= 92 and rh >= 44:
+            short = name if len(name) <= 22 else name[:21] + "…"
+            p.append(f'<text x="{rx + 10:.1f}" y="{ry + 24:.1f}" fill="{TEXT}" '
+                     f'font-size="12" font-weight="600">{esc(short)}</text>')
+            p.append(f'<text x="{rx + 10:.1f}" y="{ry + 42:.1f}" fill="{c}" '
+                     f'font-size="15" font-weight="700">{pct}%</text>')
+            p.append(f'<text x="{rx + 10 + 46:.1f}" y="{ry + 42:.1f}" fill="{MUTED}" '
+                     f'font-size="11">{ok}/{total}</text>')
+        elif rw >= 52 and rh >= 26:
+            p.append(f'<text x="{rx + rw * 0.5:.1f}" y="{ry + rh * 0.5 + 6:.1f}" '
+                     f'fill="{c}" font-size="14" font-weight="700" '
+                     f'text-anchor="middle">{pct}%</text>')
+        p.append('</g>')
+    # legend + the item-weighted overall strip (the same number as the README)
+    ly = head + body_h + 18
+    lx = 24.0
+    for label, c in (("≥95% done", GREEN), ("70-94%", YELLOW), ("<70%", RED)):
+        p.append(f'<rect x="{lx:.0f}" y="{ly - 9:.0f}" width="12" height="12" rx="3" '
+                 f'fill="{blend(BG, c, 0.35)}" stroke="{c}"/>')
+        p.append(f'<text x="{lx + 18:.0f}" y="{ly + 1:.0f}" fill="{MUTED}" '
+                 f'font-size="12">{esc(label)}</text>')
+        lx += 108
+    p.append(f'<text x="{w-24}" y="{ly + 1:.0f}" fill="{MUTED}" font-size="12" '
+             f'text-anchor="end">{sum(t for *_, t in rows) - sum(o for *_, o, _ in rows)} '
+             f'open of {sum(t for *_, t in rows)} items</text>')
     p.append("</svg>")
     return "\n".join(p)
 
@@ -262,10 +348,10 @@ def main() -> int:
     series = commits_per_day()
     (DOCS / "history.svg").write_text(history_svg(series, metric_history(g)),
                                        encoding="utf-8")
-    table = ["<table><tr><th>system</th><th>readiness</th></tr>"]
-    for name, pct in rows:
-        table.append(f'<tr><td>{esc(name)}</td><td class="n" '
-                     f'style="color:{colour(pct)}">{pct}%</td></tr>')
+    table = ["<table><tr><th>system</th><th>readiness</th><th>items</th></tr>"]
+    for name, pct, ok, total in rows:
+        table.append(f'<tr><td>{esc(name)}</td><td class="n">'
+                     f'{pct}%</td><td class="n">{ok}/{total}</td></tr>')
     table.append(f'<tr><td><b>overall</b></td><td class="n">'
                  f'<b style="color:{colour(overall)}">{overall}%</b></td></tr></table>')
     (DOCS / "index.html").write_text(

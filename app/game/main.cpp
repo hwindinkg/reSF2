@@ -1984,6 +1984,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // `Power=2` must keep the 5-segment pitch, not squeeze all segments into
     // 40% of the bar.
     bool za_energy_probe = false;
+    // --shop-discount-probe: the cell's `-N%` stripe (`ns.j5` L95673-95682).
+    bool shop_discount_probe = false;
+    // --shop-payment-probe: the type-dispatched price plate (`Ne.Op`
+    // L93467-93488) - a RealMoneyItem row shows the PAYMENT plate with the
+    // real price caption (`mvb` L93528-93541), not the gold/ruby pair.
+    bool shop_payment_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2302,6 +2308,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             za_widget_probe = true;
         } else if (arg == "--za-energy-probe") {
             za_energy_probe = true;
+        } else if (arg == "--shop-discount-probe") {
+            shop_discount_probe = true;
+        } else if (arg == "--shop-payment-probe") {
+            shop_payment_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5422,6 +5432,57 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (shop_payment_probe) {
+        // --- `--shop-payment-probe`: the Ne.Op payment plate ---------------
+        glfwHideWindow(app.renderer().window());
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+        const bool opened = shop != nullptr && shop->open_at("Ruby", std::string());
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        std::fprintf(stdout, "[payprobe] tab=%d open=%d\n",
+                     shop != nullptr ? shop->tab() : -1, opened ? 1 : 0);
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[payprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return opened ? 0 : 1;
+    } else if (shop_discount_probe) {
+        // --- `--shop-discount-probe`: the `-N%` cell stripe -------------------
+        glfwHideWindow(app.renderer().window());
+        // `Pn.S` L1064: a 25 % live offer on a plain Weapon row.
+        app.quest_engine().apply_discount(app, "WEAPON_KNIVES", 25, true, 600);
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+        const bool opened = shop != nullptr && shop->open_at("Weapon", "WEAPON_KNIVES");
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const int pct = app.quest_engine().offer_discount_percent("WEAPON_KNIVES");
+        std::fprintf(stdout, "[discprobe] open=%d percent=%d -> %s\n", opened ? 1 : 0,
+                     pct, pct == 25 ? "PASS (offer live)" : "FAIL");
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[discprobe] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return pct == 25 ? 0 : 1;
     } else if (za_energy_probe) {
         // --- `--za-energy-probe`: the `EFilled` clip --------------------------
         glfwHideWindow(app.renderer().window());

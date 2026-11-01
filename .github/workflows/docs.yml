@@ -1,0 +1,46 @@
+name: docs
+
+# Dashboard freshness check.
+#
+# The README status block and the GitHub Pages dashboard (docs/progress.svg
+# treemap, docs/history.svg, docs/index.html) are GENERATED:
+#   python harness/readme_status.py        # README block + both charts + index
+#   python harness/gates.py --check-readme # exit 1 when the block is stale
+#
+# This workflow does NOT commit: the repository rule is that main moves only
+# through `harness/push.py` (it uses the saved OAuth token so no credential
+# window ever opens) and no working branches are created. An auto-commit bot
+# would race those pushes. Instead CI regenerates the dashboard in a scratch
+# checkout and fails the run if the committed README/docs are out of date, so
+# drift is caught on the push that introduced it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # readme_charts reads `git log` for history.svg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Regenerate the README block + docs/
+        run: python harness/readme_status.py
+
+      - name: Fail when the committed dashboard is stale
+        run: |
+          if ! git diff --exit-code -- README.md docs/; then
+            echo "::error::README/docs are stale - run 'python harness/readme_status.py' and commit the result"
+            exit 1
+          fi
+
+      - name: Check the status block separately
+        run: python harness/gates.py --check-readme

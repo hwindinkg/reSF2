@@ -1252,6 +1252,10 @@ public:
     const EngineItemOffer* offer_for(const std::string& item) const;
     std::int64_t offer_price(const std::string& item, std::int64_t base) const;
     int offer_bonus_price(const std::string& item, int base) const;
+    // `yf.TP` (`K.T(<Offer Percent>)`, L44593/L44605): the LIVE discount
+    // percent for `item`, 0 when no offer is active. `ns.j5` L95673-95682 uses
+    // it for the cell's `-N%` stripe.
+    int offer_discount_percent(const std::string& item) const;
     std::size_t offer_count() const { return offers_.size(); }
     // JS `p.Dc` (`Math.round(Hb.instance.getTime())`, L178): the game clock in
     // SECONDS — the SAME `quest_now()` the offer deadlines use. Public so the
