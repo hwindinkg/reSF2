@@ -1990,6 +1990,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // L93467-93488) - a RealMoneyItem row shows the PAYMENT plate with the
     // real price caption (`mvb` L93528-93541), not the gold/ruby pair.
     bool shop_payment_probe = false;
+    // --shop-tab-badge-probe: the `Dg` badge on the shop tab strip
+    // (`ss.getCounterValue` L94764 + `Eg.GU` L77829 + `Dg.lk` L77711).
+    bool shop_tab_badge_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2312,6 +2315,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             shop_discount_probe = true;
         } else if (arg == "--shop-payment-probe") {
             shop_payment_probe = true;
+        } else if (arg == "--shop-tab-badge-probe") {
+            shop_tab_badge_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5432,6 +5437,54 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (shop_tab_badge_probe) {
+        // --- `--shop-tab-badge-probe`: the tab `Dg` badge --------------------
+        glfwHideWindow(app.renderer().window());
+        // `eMa` L6879: a row counts when the player OWNS it and its required
+        // level equals the player's -> seed such a weapon at level 1.
+        std::string seed;
+        int seeded_level = 0;
+        for (const sf2::app::CatalogItem& ci : sf2::app::load_full_catalog(app)) {
+            if (ci.type != "Weapon" || ci.hidden) continue;
+            if (ci.level != 1) continue;
+            seed = ci.name;
+            seeded_level = ci.level;
+            break;
+        }
+        try {
+            sf2::app::WarriorSave w = app.save().load();
+            w.level = 1;
+            bool have = false;
+            for (const auto& oi : w.items) {
+                if (oi.name == seed) have = true;
+            }
+            if (!have && !seed.empty()) {
+                sf2::app::WarriorSave::OwnedItem oi;
+                oi.name = seed;
+                oi.count = 1;
+                w.items.push_back(oi);
+            }
+            app.save().save(w);
+        } catch (const std::exception&) {
+        }
+        app.screens().push(make_screen(app.screens(), kScreenShop));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const sf2::app::WarriorSave wv = app.save().load();
+        const int n0 = sf2::app::shop_tab_new_count(app, wv, 0);
+        std::fprintf(stdout,
+                     "[tabbadge] seed=%s level=%d -> weapons tab count=%d -> %s\n",
+                     seed.c_str(), seeded_level, n0, n0 > 0 ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[tabbadge] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return n0 > 0 ? 0 : 1;
     } else if (shop_payment_probe) {
         // --- `--shop-payment-probe`: the Ne.Op payment plate ---------------
         glfwHideWindow(app.renderer().window());

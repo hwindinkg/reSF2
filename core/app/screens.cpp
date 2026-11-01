@@ -19920,6 +19920,26 @@ ShopLayout shop_layout(int tab) {
 // the `xc(600)` literal. (The old comment mislabelled it "fa.x (2x
 // sourceSize)" — fa.x is 300; the 600 is `Y.za()` after `xc(600)`.)
 constexpr float kBtnBbDefaultWidth = 600.0f;  // `Bb` ctor `xc(600)` L1841
+// JS `ss.getCounterValue` L94764-94766: `p.items.T5a(Cj.zxb(tab))` = the
+// number of catalog rows of that tab's type with the `yj` ("new") flag. `yj` is
+// set by `eMa` L6879-6883 (`a.Ir(true)`) for an ACTIVE row the player owns whose
+// required level equals the player's, and cleared by `hnb` L6884-6892 when the
+// pack is toggled; the port has no `yj` state, so the same predicate is
+// evaluated on the fly (the toggle-clear is the only unmodelled part).
+int shop_tab_new_count(App& app, const WarriorSave& w, int tab) {
+    if (tab < 0 || tab >= kShopTabCount) return 0;
+    const std::string type = kShopTabs[tab].type;
+    int n = 0;
+    for (const CatalogItem& ci : load_full_catalog(app)) {
+        if (ci.type != type) continue;
+        if (ci.hidden) continue;           // `isActive`
+        if (!w.has_item(ci.name)) continue;  // `p.o.HJ(a.lock)`
+        if (ci.level != w.level) continue;   // `b == a.xf`
+        ++n;
+    }
+    return n;
+}
+
 // The rect is the plate's VISIBLE FACE, calibrated to the oracle `shop_tab1`
 // (bright-face bbox 184x48 at x 195..379, y 175..223 for the shipped panel
 // width 195). The `btnWhite` frame is 300x222 with transparent margins, so the
@@ -21994,6 +22014,26 @@ void ShopScreen::render_impl(App& app) {
             bool drawn = false;
             if (art != nullptr) {
                 drawn = try_draw_atlas_button(app, art, cx, tl.cy, tl.btn_w, tl.btn_h, 1.0f);
+            }
+            // JS `ss` ctor L94723-94730 + `Eg.GU` L77829-77836 + `Dg.lk`
+            // L77711-77721: each tab button carries a `Dg` badge (icon
+            // `notification_circle`, or `notification_ellipse` for >= 10) at
+            // `badge.C(node.ya - 13); badge.D(node.ra - 12); badge.ba(65)`,
+            // its count from `getCounterValue` (`p.items.T5a(type)`).
+            const int badge_n = shop_tab_new_count(app, seen_, t);
+            if (badge_n > 0) {
+                const float bsz = tl.btn_h * 0.34f;
+                const float bx = cx + tl.btn_w * 0.30f;
+                const float by = tl.cy - tl.btn_h * 0.30f;
+                const char* bframe = badge_n < 10 ? "notification_circle"
+                                                  : "notification_ellipse";
+                if (!try_draw_atlas_button(app, bframe, bx, by, bsz, bsz, 1.0f)) {
+                    draw_flat_button(app, "", bx, by, bsz * 0.9f, bsz * 0.9f, 0.85f, 0.2f,
+                                     0.2f, false);
+                }
+                draw_ui_label(app, bx - bsz * 0.5f, by - bsz * 0.28f, bsz, bsz * 0.6f,
+                              std::to_string(badge_n), bsz * 0.55f / 100.0f,
+                              UiAlign::Center, 1.0f, 1.0f, 1.0f);
             }
             if (!drawn) {
                 draw_flat_button(app, kShopTabs[t].label, cx, tl.cy, tl.btn_w, tl.btn_h,

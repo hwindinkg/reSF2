@@ -2,7 +2,7 @@
 <rect width="760" height="522" rx="10" fill="#0d1117"/>
 <text x="24" y="34" fill="#e6edf3" font-size="20" font-weight="600">Readiness by system</text>
 <text x="24" y="56" fill="#8b949e" font-size="12">treemap: tile area = checklist items in that system; colour = readiness (harness/readme_status.py)</text>
-<text x="736" y="40" fill="#d29922" font-size="26" font-weight="700" text-anchor="end">80%</text>
+<text x="736" y="40" fill="#d29922" font-size="26" font-weight="700" text-anchor="end">82%</text>
 <text x="736" y="58" fill="#8b949e" font-size="12" text-anchor="end">overall (all checklist items)</text>
 <g><title>Assets &amp; archives: 5/5 (100%)</title>
 <rect x="411.2" y="78.0" width="177.6" height="124.6" rx="6" fill="#162f21" stroke="#245d31"/>
@@ -39,12 +39,12 @@
 <text x="279.1" y="318.0" fill="#f85149" font-size="15" font-weight="700">67%</text>
 <text x="325.1" y="318.0" fill="#8b949e" font-size="11">4/6</text>
 </g>
-<g><title>UI &amp; screens: 15/21 (71%)</title>
+<g><title>UI &amp; screens: 16/21 (76%)</title>
 <rect x="26.0" y="78.0" width="241.1" height="396.0" rx="6" fill="#302919" stroke="#664e1c"/>
 <rect x="26.0" y="78.0" width="241.1" height="3" rx="1.5" fill="#d29922"/>
 <text x="34.0" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">UI &amp; screens</text>
-<text x="34.0" y="118.0" fill="#d29922" font-size="15" font-weight="700">71%</text>
-<text x="80.0" y="118.0" fill="#8b949e" font-size="11">15/21</text>
+<text x="34.0" y="118.0" fill="#d29922" font-size="15" font-weight="700">76%</text>
+<text x="80.0" y="118.0" fill="#8b949e" font-size="11">16/21</text>
 </g>
 <g><title>Quests &amp; progress: 4/4 (100%)</title>
 <rect x="411.2" y="342.3" width="133.6" height="131.7" rx="6" fill="#162f21" stroke="#245d31"/>
@@ -84,5 +84,5 @@
 <text x="150" y="495" fill="#8b949e" font-size="12">70-94%</text>
 <rect x="240" y="485" width="12" height="12" rx="3" fill="#5f2728" stroke="#f85149"/>
 <text x="258" y="495" fill="#8b949e" font-size="12">&lt;70%</text>
-<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">12 open of 61 items</text>
+<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">11 open of 61 items</text>
 </svg>

@@ -94,7 +94,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "(`shop_tab1`: 175..223, was 187..211)", True),
         ("shop: ruby purchase auto-upgrade (`Pa.gI` L51178-51199, probe "
          "`--ruby-upgrade-probe`)", True),
-        ("shop: tab badges (`ss` L94726-94730)", False),
+        ("shop: tab badges (`ss.getCounterValue` L94764 + `Eg.GU` + `Dg.lk`, "
+         "probe `--shop-tab-badge-probe`)", True),
         ("shop: discount stripe (`ns.j5` L95673-95682, probe "
          "`--shop-discount-probe`)", True),
         ("shop: payment plate for RealMoneyItem rows (`Ne.Op` "
