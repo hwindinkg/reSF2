@@ -2,15 +2,15 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-31%20%C2%B7%2029%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-32%20%C2%B7%2030%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 97%
+### Readiness: 98%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-59 of 61 checklist items; every gap below is documented in BUGS.md.
+60 of 61 checklist items; every gap below is documented in BUGS.md.
 
-Gates with a baseline: **31** (29 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
+Gates with a baseline: **32** (30 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
@@ -18,16 +18,16 @@ Gates with a baseline: **31** (29 at 0 divergences, 2 known non-zero) · referen
 | **Rendering** | 🟩 | 100% | 4/4 | - |
 | **Animation & physics** | 🟩 | 100% | 4/4 | - |
 | **Combat** | 🟩 | 100% | 6/6 | - |
-| **AI** | 🟨 | 83% | 5/6 | `fk=9` (dodge) and `fk=10` (block) never fire in a live fight |
+| **AI** | 🟩 | 100% | 6/6 | - |
 | **UI & screens** | 🟩 | 100% | 21/21 | - |
 | **Quests & progress** | 🟩 | 100% | 4/4 | - |
 | **Audio** | 🟥 | 67% | 2/3 | SFX while the scene is hidden during a round change |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 97% | 59/61 | - |
+| **overall** | 🟩 | 98% | 60/61 | - |
 
-The `overall` row is every checklist item at once (59 of 61); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (60 of 61); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
@@ -49,8 +49,8 @@ The `overall` row is every checklist item at once (59 of 61); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48014 | 18 |
-| `core/scene` | 39477 | 35 |
-| `app/game` | 11711 | 1 |
+| `core/scene` | 39507 | 35 |
+| `app/game` | 11762 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (59 of 61); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **109145** | |
+| **total** | **109226** | |
 <!-- STATUS:END -->

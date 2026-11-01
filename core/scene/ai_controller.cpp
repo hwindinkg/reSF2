@@ -1761,6 +1761,19 @@ void AiController::eval_slots() {
         evade_rolls_[i].gz = weight_curve_eval(tactic_->evades[i].chance, feat_);
         evade_rolls_[i].na =
             evade_rolls_[i].t4 < static_cast<double>(evade_rolls_[i].gz);
+        // [probe, authorised] `SF2_TRACE_AI_QUICK=1`: the evade slot roll, so a
+        // slot that can never fire (`gz == 0`) is distinguishable from bad luck.
+        if (std::getenv("SF2_TRACE_AI_QUICK") != nullptr) {
+            std::fprintf(stdout,
+                         "[ev] i=%zu names=%zu t4=%.6f gz=%.6f na=%d name='%s'\n",
+                         i, tactic_->evades[i].names.size(),
+                         evade_rolls_[i].t4,
+                         static_cast<double>(evade_rolls_[i].gz),
+                         evade_rolls_[i].na ? 1 : 0,
+                         tactic_->evades[i].names.empty()
+                             ? "" : tactic_->evades[i].names[0].c_str());
+            std::fflush(stdout);
+        }
     }
 }
 
@@ -1869,11 +1882,20 @@ void AiController::evade_ib(const AiFightState& st) {
          d < tactic_->evades.size() && d < evade_rolls_.size(); ++d) {
         if (!evade_rolls_[d].na) continue;
         bool hit = false;
+        // [probe, authorised] `SF2_TRACE_AI_QUICK=1`: why a FIRING evade slot
+        // still yields no `IB` (the `V1` rejection of every candidate).
+        std::string first_why;
+        int resolved_total = 0;
         for (const std::string& n : tactic_->evades[d].names) {
             const std::vector<const MoveDef*> group = resolve_candidate(n, *moves_);
+            resolved_total += static_cast<int>(group.size());
             for (const MoveDef* m : group) {
                 std::string why;
-                if (v1(*m, foe, &why)) {
+                if (!v1(*m, foe, &why)) {
+                    if (first_why.empty()) first_why = m->name + ":" + why;
+                    continue;
+                }
+                {
                     hit = true;
                     if (std::getenv("SF2_TRACE_AI_QUICK") != nullptr) {
                         std::fprintf(stdout,
@@ -1888,6 +1910,14 @@ void AiController::evade_ib(const AiFightState& st) {
                 }
             }
             if (hit) break;
+        }
+        if (std::getenv("SF2_TRACE_AI_QUICK") != nullptr && !hit) {
+            std::fprintf(stdout,
+                         "[ibslot] f=%d slot=%zu names=%zu resolved=%d "
+                         "first_reject='%s'\n",
+                         st.fight_frame, d, tactic_->evades[d].names.size(),
+                         resolved_total, first_why.c_str());
+            std::fflush(stdout);
         }
         if (hit) {
             IB_ = true;

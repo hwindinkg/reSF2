@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-01T19:39:54",
+    "updated": "2026-11-01T20:38:17",
     "mode": "only"
   },
   "gates": {
@@ -189,6 +189,12 @@
       "commit": "5ccdb3f1",
       "reason": "new gate: one clean Survival punch must not kill (measured -6.2% of max)",
       "date": "2026-11-01T18:18:31"
+    },
+    "evade-ib": {
+      "metric": 0,
+      "commit": "53b62d4b",
+      "reason": "new gate: the AI's throw-evasion (IB -> fk=9) must fire with the gap held at 60 (16 firings measured)",
+      "date": "2026-11-01T20:38:17"
     }
   }
 }

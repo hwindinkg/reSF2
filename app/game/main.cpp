@@ -1998,6 +1998,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --survival-hit-probe: one CLEAN player hit in a Survival fight - the
     // reported "one hit kills the enemy" (Eclipse DamageFactor 4000).
     bool survival_hit_probe = false;
+    // --evade-probe: hold the gap at 60 for the whole fight so the AI's evade
+    // slots (`<EvadeChance Animation="Throw">` -> IB -> fk=9) get their chance
+    // at a throw distance; counts the `[ib]`/`fk=9` evidence.
+    bool evade_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2326,6 +2330,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             nav_badge_probe = true;
         } else if (arg == "--survival-hit-probe") {
             survival_hit_probe = true;
+        } else if (arg == "--evade-probe") {
+            evade_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5446,6 +5452,51 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (evade_probe) {
+        // --- `--evade-probe`: the AI's throw-evasion (`IB` -> `fk=9`) --------
+        // `tactic_settings.xml`: `<EvadeChance Animation="Throw" Base="0.02">`
+        // -> `Pqb` L25500-25515 sets `IB` when a FIRING evade slot resolves to
+        // a move the OPPONENT's `de.V1` accepts; `fk=9` follows at L25538-25552.
+        // The earlier measurement ran with the fighters hundreds of units apart,
+        // where the candidate's `<Distance Max="100">` can never pass, so the gap
+        // is held at 60 here.
+        glfwHideWindow(app.renderer().window());
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Survival";
+            pb.zone = "ZONE_1";
+            pb.location = "bamboo_grove";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned("Fists");
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[evadeprobe] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        for (int g = 0; g < 20000 && app.screens().current_id() == kScreenFight &&
+                        fs->fight_frame() < 140;
+             ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        int frames = 0;
+        for (int f = 0; f < 2000 && app.screens().current_id() == kScreenFight; ++f) {
+            const float px = fs->player_world_x();
+            fs->place_fighters(px, px + 60.0f);
+            glfwPollEvents();
+            app.run_one_frame();
+            ++frames;
+        }
+        std::fprintf(stdout, "[evadeprobe] held the gap at 60 for %d frames\n",
+                     frames);
+        std::fflush(stdout);
+        return 0;
     } else if (survival_hit_probe) {
         // --- `--survival-hit-probe`: clean hits in Survival ------------------
         // `stages.xml` L819-882: the Survival fight is 1 round, HealthRecovery

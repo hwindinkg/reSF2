@@ -519,6 +519,13 @@ def p_kick_ko(text: str) -> tuple[int, str]:
     return (0 if m.group(1) == "WIN" else 1), m.group(1)
 
 
+def p_evade_ib(text: str) -> tuple[int, str]:
+    """`--evade-probe` + `SF2_TRACE_AI_QUICK`: how often the AI's throw-evasion
+    (`<EvadeChance Animation="Throw">` -> `IB` -> `fk=9`) actually fires."""
+    n = len(re.findall(r"^\[ib\] slot=\d+ names=\d+ -> IB=1$", text, re.M))
+    return (0 if n >= 5 else 5 - n), "%d IB firings (need >= 5)" % n
+
+
 def p_kv_result(tag: str):
     """`[tag] RESULT k=PASS ... -> PASS` (n/a = not part of this run)."""
 
@@ -635,6 +642,7 @@ PARSERS = {
     # DamageFactor="-4000" ApplyTo="Player"/>` / `4000 ApplyTo="Bot"` must not
     # turn the player into a one-hit killer (reported bug).
     "survhit": p_kv_result("survhit"),
+    "evade_ib": p_evade_ib,
 }
 
 
@@ -675,6 +683,11 @@ FLAG_GATES: list[Gate] = [
     # enemy at 75% after four).
     Gate("survival-hit", "gate", ("fast", "full"), "--survival-hit-probe", 180,
          parser="survhit"),
+    # The AI's throw evasion (`fk=9`): the evade slot only resolves when the
+    # candidate's `<Distance Max="100">` passes, so the probe holds the gap at
+    # 60 for the whole fight.
+    Gate("evade-ib", "gate", ("full",), "--evade-probe", 300, parser="evade_ib",
+         env={"SF2_TRACE_AI_QUICK": "1"}),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
     # The winner's EndStance `Win_<weapon>` animation (bug Q): `--kick-ko`
     # fights to a KO, so the phase-3 pick must resolve and start the win clip.
