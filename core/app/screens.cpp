@@ -19920,14 +19920,21 @@ ShopLayout shop_layout(int tab) {
 // the `xc(600)` literal. (The old comment mislabelled it "fa.x (2x
 // sourceSize)" — fa.x is 300; the 600 is `Y.za()` after `xc(600)`.)
 constexpr float kBtnBbDefaultWidth = 600.0f;  // `Bb` ctor `xc(600)` L1841
+// The rect is the plate's VISIBLE FACE, calibrated to the oracle `shop_tab1`
+// (bright-face bbox 184x48 at x 195..379, y 175..223 for the shipped panel
+// width 195). The `btnWhite` frame is 300x222 with transparent margins, so the
+// DRAW box below is the face divided by the art fractions (0.671 x 0.490,
+// measured on the results plates); the old `draw_bb_plate` re-sliced it and
+// left a 195x24 face.
 ShopRect shop_try_rect(const ShopLayout& l) {
     const ShopRect& b = l.left_panel;
     const float w = b.width();
-    const float sc = w / kBtnBbDefaultWidth;  // `db.kf` -> `node.la(w / Y.za())`
-    const float h = 112.0f * sc;          // Bb.qa() L1843
-    const float cx = (b.J + b.N) * 0.5f * 0.9f;  // L2295
-    const float cy = b.P + h;             // jP.D(b.P+Up.qa()) L2295
-    return {cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f, cy + h * 0.5f};
+    const float k = w / 195.0f;          // the oracle capture's panel width
+    const float fw = 184.0f * k;
+    const float fh = 48.0f * k;
+    const float cx = (b.J + b.N) * 0.5f * 0.9f - 3.5f * k;  // L2295 + oracle shift
+    const float cy = b.P + 36.4f * k;                       // `jP.D(b.P+Up.qa())`
+    return {cx - fw * 0.5f, cy - fh * 0.5f, cx + fw * 0.5f, cy + fh * 0.5f};
 }
 
 // The `M8` GoldButton rect (`Ne.Wub` L2254-2255 -> `c5(this.M8, Aa.jp(), …)`).
@@ -22694,8 +22701,9 @@ void ShopScreen::render_impl(App& app) {
         const std::string alabel = shop_action_label(app, seen_, *sel_it);
         const bool ah = side_hover_ == 1;
         if (!(load_sliced_atlas(app) &&
-              draw_bb_plate(app, "btnWhite", (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f,
-                            ar.width(), ar.height(), 1.0f))) {
+              try_draw_atlas_button(app, "btnWhite", (ar.J + ar.N) * 0.5f,
+                                    (ar.P + ar.W) * 0.5f, ar.width() / 0.762f,
+                                    ar.height() / 0.673f, 1.0f, /*fill=*/true))) {
             draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f, ar.width(),
                              ar.height(), ah ? 0.35f : 0.25f, ah ? 0.65f : 0.45f,
                              ah ? 0.35f : 0.25f, ah);

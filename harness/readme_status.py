@@ -90,8 +90,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("battle-over HP bars latch at the KO (`Br.IFa` L83648; the `NA` heal "
          "is not animated)", True),
         ("shop: TRY plate only on tabs 0-4/6 (`h\$a` L95320)", True),
-        ("shop: TRY plate face 195x24 vs the oracle 184x48 (`btnWhite` "
-         "margins)", False),
+        ("shop: TRY plate face matches the oracle's 48 px height "
+         "(`shop_tab1`: 175..223, was 187..211)", True),
         ("shop: ruby purchase auto-upgrade (`Pa.gI` L51178-51199, probe "
          "`--ruby-upgrade-probe`)", True),
         ("shop: tab badges (`ss` L94726-94730)", False),
