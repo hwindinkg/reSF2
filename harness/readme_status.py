@@ -104,7 +104,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          True),
         ("results: `<Reward><Item>` drops are granted (probe: the save owns "
          "`drop_name_blueseal`)", True),
-        ("map: a completed battle still offers FIGHT", False),
+        ("map: FIGHT stays offered on a completed battle — JS-exact "
+         "(`eJ()==1` -> `Sr`, `Cyb` shows `tj` unconditionally)", True),
         ("shop: solver state on the preview start", False),
         ("dialog captions render the inline `<image>` icons (rich text)", True),
         ("HUD energy tap fires `EnergyBarPress`; the green plus opens the "

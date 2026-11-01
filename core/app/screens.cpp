@@ -13411,6 +13411,16 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // `Pb(c*.2)` = `la(c*.2/112)`), i.e. a plain non-uniform stretch — NOT the
     // 9-slice `draw_bb_plate` path (which squashed the 222-tall art into the
     // 55.8 px box and left a 27 px visible face where the oracle's is 55).
+    // JS keeps this plate for a COMPLETED battle: `Rr` L87431-87439 picks the
+    // body by `f = a.eJ()` (L58590-58602: 1 = every fight completed, 3 = in
+    // progress, else 2) and `f == 1 || f == 3` still builds `new Sr(a, po)` —
+    // the roster body — whose `tj` plate `Cyb` L87496-87498 shows
+    // unconditionally (`tj.V(""); tj.X(true)`). So "a completed battle still
+    // offers FIGHT" is the JS behaviour, not a port bug (capture
+    // `map_zone1`: oracle and port both show «В БОЙ!»).
+    // UNMODELLED (data-dependent, no oracle frame): for a fight with NAMED
+    // opponents (`Cyb` L87499-87504 `a.dEa()` -> `startFightFor{img::<icon>}
+    // {<name>}`) the caption changes; the port always draws `startFight`.
     bool btn_drawn = false;
     if (load_sliced_atlas(app)) {
         btn_drawn = try_draw_atlas_button(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h,
