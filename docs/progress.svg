@@ -5,76 +5,76 @@
 <text x="736" y="40" fill="#3fb950" font-size="26" font-weight="700" text-anchor="end">95%</text>
 <text x="736" y="58" fill="#8b949e" font-size="12" text-anchor="end">overall (all checklist items)</text>
 <g><title>Assets &amp; archives: 5/5 (100%)</title>
-<rect x="588.6" y="78.0" width="145.4" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="588.6" y="78.0" width="145.4" height="3" rx="1.5" fill="#3fb950"/>
-<text x="596.6" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">Assets &amp; archives</text>
-<text x="596.6" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
-<text x="642.6" y="118.0" fill="#8b949e" font-size="11">5/5</text>
+<rect x="590.9" y="78.0" width="143.1" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="590.9" y="78.0" width="143.1" height="3" rx="1.5" fill="#3fb950"/>
+<text x="598.9" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">Assets &amp; archives</text>
+<text x="598.9" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="644.9" y="118.0" fill="#8b949e" font-size="11">5/5</text>
 </g>
 <g><title>Rendering: 4/4 (100%)</title>
-<rect x="409.4" y="224.7" width="134.4" height="122.7" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="409.4" y="224.7" width="134.4" height="3" rx="1.5" fill="#3fb950"/>
-<text x="417.4" y="246.7" fill="#e6edf3" font-size="12" font-weight="600">Rendering</text>
-<text x="417.4" y="264.7" fill="#3fb950" font-size="15" font-weight="700">100%</text>
-<text x="463.4" y="264.7" fill="#8b949e" font-size="11">4/4</text>
+<rect x="414.4" y="224.7" width="132.3" height="122.7" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="414.4" y="224.7" width="132.3" height="3" rx="1.5" fill="#3fb950"/>
+<text x="422.4" y="246.7" fill="#e6edf3" font-size="12" font-weight="600">Rendering</text>
+<text x="422.4" y="264.7" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="468.4" y="264.7" fill="#8b949e" font-size="11">4/4</text>
 </g>
 <g><title>Animation &amp; physics: 5/6 (83%)</title>
-<rect x="267.0" y="293.4" width="138.4" height="180.6" rx="6" fill="#302919" stroke="#664e1c"/>
-<rect x="267.0" y="293.4" width="138.4" height="3" rx="1.5" fill="#d29922"/>
-<text x="275.0" y="315.4" fill="#e6edf3" font-size="12" font-weight="600">Animation &amp; physics</text>
-<text x="275.0" y="333.4" fill="#d29922" font-size="15" font-weight="700">83%</text>
-<text x="321.0" y="333.4" fill="#8b949e" font-size="11">5/6</text>
+<rect x="263.3" y="306.6" width="147.0" height="167.4" rx="6" fill="#302919" stroke="#664e1c"/>
+<rect x="263.3" y="306.6" width="147.0" height="3" rx="1.5" fill="#d29922"/>
+<text x="271.3" y="328.6" fill="#e6edf3" font-size="12" font-weight="600">Animation &amp; physics</text>
+<text x="271.3" y="346.6" fill="#d29922" font-size="15" font-weight="700">83%</text>
+<text x="317.3" y="346.6" fill="#8b949e" font-size="11">5/6</text>
 </g>
 <g><title>Combat: 6/6 (100%)</title>
-<rect x="409.4" y="78.0" width="175.2" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="409.4" y="78.0" width="175.2" height="3" rx="1.5" fill="#3fb950"/>
-<text x="417.4" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">Combat</text>
-<text x="417.4" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
-<text x="463.4" y="118.0" fill="#8b949e" font-size="11">6/6</text>
+<rect x="414.4" y="78.0" width="172.5" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="414.4" y="78.0" width="172.5" height="3" rx="1.5" fill="#3fb950"/>
+<text x="422.4" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">Combat</text>
+<text x="422.4" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="468.4" y="118.0" fill="#8b949e" font-size="11">6/6</text>
 </g>
-<g><title>AI: 6/7 (86%)</title>
-<rect x="267.0" y="78.0" width="138.4" height="211.4" rx="6" fill="#302919" stroke="#664e1c"/>
-<rect x="267.0" y="78.0" width="138.4" height="3" rx="1.5" fill="#d29922"/>
-<text x="275.0" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">AI</text>
-<text x="275.0" y="118.0" fill="#d29922" font-size="15" font-weight="700">86%</text>
-<text x="321.0" y="118.0" fill="#8b949e" font-size="11">6/7</text>
+<g><title>AI: 7/8 (88%)</title>
+<rect x="263.3" y="78.0" width="147.0" height="224.6" rx="6" fill="#302919" stroke="#664e1c"/>
+<rect x="263.3" y="78.0" width="147.0" height="3" rx="1.5" fill="#d29922"/>
+<text x="271.3" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">AI</text>
+<text x="271.3" y="118.0" fill="#d29922" font-size="15" font-weight="700">88%</text>
+<text x="317.3" y="118.0" fill="#8b949e" font-size="11">7/8</text>
 </g>
 <g><title>UI &amp; screens: 21/22 (95%)</title>
-<rect x="26.0" y="78.0" width="237.0" height="396.0" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="26.0" y="78.0" width="237.0" height="3" rx="1.5" fill="#3fb950"/>
+<rect x="26.0" y="78.0" width="233.3" height="396.0" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="26.0" y="78.0" width="233.3" height="3" rx="1.5" fill="#3fb950"/>
 <text x="34.0" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">UI &amp; screens</text>
 <text x="34.0" y="118.0" fill="#3fb950" font-size="15" font-weight="700">95%</text>
 <text x="80.0" y="118.0" fill="#8b949e" font-size="11">21/22</text>
 </g>
 <g><title>Quests &amp; progress: 4/4 (100%)</title>
-<rect x="409.4" y="351.3" width="134.4" height="122.7" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="409.4" y="351.3" width="134.4" height="3" rx="1.5" fill="#3fb950"/>
-<text x="417.4" y="373.3" fill="#e6edf3" font-size="12" font-weight="600">Quests &amp; progress</text>
-<text x="417.4" y="391.3" fill="#3fb950" font-size="15" font-weight="700">100%</text>
-<text x="463.4" y="391.3" fill="#8b949e" font-size="11">4/4</text>
+<rect x="414.4" y="351.3" width="132.3" height="122.7" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="414.4" y="351.3" width="132.3" height="3" rx="1.5" fill="#3fb950"/>
+<text x="422.4" y="373.3" fill="#e6edf3" font-size="12" font-weight="600">Quests &amp; progress</text>
+<text x="422.4" y="391.3" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="468.4" y="391.3" fill="#8b949e" font-size="11">4/4</text>
 </g>
 <g><title>Audio: 3/3 (100%)</title>
-<rect x="656.5" y="224.7" width="77.5" height="157.2" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="656.5" y="224.7" width="77.5" height="3" rx="1.5" fill="#3fb950"/>
-<text x="695.2" y="309.3" fill="#3fb950" font-size="14" font-weight="700" text-anchor="middle">100%</text>
+<rect x="657.7" y="224.7" width="76.3" height="157.2" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="657.7" y="224.7" width="76.3" height="3" rx="1.5" fill="#3fb950"/>
+<text x="695.8" y="309.3" fill="#3fb950" font-size="14" font-weight="700" text-anchor="middle">100%</text>
 </g>
 <g><title>Save &amp; input: 3/3 (100%)</title>
-<rect x="547.7" y="385.9" width="138.7" height="88.1" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="547.7" y="385.9" width="138.7" height="3" rx="1.5" fill="#3fb950"/>
-<text x="555.7" y="407.9" fill="#e6edf3" font-size="12" font-weight="600">Save &amp; input</text>
-<text x="555.7" y="425.9" fill="#3fb950" font-size="15" font-weight="700">100%</text>
-<text x="601.7" y="425.9" fill="#8b949e" font-size="11">3/3</text>
+<rect x="550.6" y="385.9" width="136.5" height="88.1" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="550.6" y="385.9" width="136.5" height="3" rx="1.5" fill="#3fb950"/>
+<text x="558.6" y="407.9" fill="#e6edf3" font-size="12" font-weight="600">Save &amp; input</text>
+<text x="558.6" y="425.9" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="604.6" y="425.9" fill="#8b949e" font-size="11">3/3</text>
 </g>
 <g><title>Localization: 1/1 (100%)</title>
-<rect x="690.4" y="385.9" width="43.6" height="88.1" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="690.4" y="385.9" width="43.6" height="3" rx="1.5" fill="#3fb950"/>
+<rect x="691.2" y="385.9" width="42.8" height="88.1" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="691.2" y="385.9" width="42.8" height="3" rx="1.5" fill="#3fb950"/>
 </g>
 <g><title>Harness &amp; verification: 4/4 (100%)</title>
-<rect x="547.7" y="224.7" width="104.7" height="157.2" rx="6" fill="#162f21" stroke="#245d31"/>
-<rect x="547.7" y="224.7" width="104.7" height="3" rx="1.5" fill="#3fb950"/>
-<text x="555.7" y="246.7" fill="#e6edf3" font-size="12" font-weight="600">Harness &amp; verification</text>
-<text x="555.7" y="264.7" fill="#3fb950" font-size="15" font-weight="700">100%</text>
-<text x="601.7" y="264.7" fill="#8b949e" font-size="11">4/4</text>
+<rect x="550.6" y="224.7" width="103.1" height="157.2" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="550.6" y="224.7" width="103.1" height="3" rx="1.5" fill="#3fb950"/>
+<text x="558.6" y="246.7" fill="#e6edf3" font-size="12" font-weight="600">Harness &amp; verification</text>
+<text x="558.6" y="264.7" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="604.6" y="264.7" fill="#8b949e" font-size="11">4/4</text>
 </g>
 <rect x="24" y="485" width="12" height="12" rx="3" fill="#1e4c2b" stroke="#3fb950"/>
 <text x="42" y="495" fill="#8b949e" font-size="12">≥95% done</text>
@@ -82,5 +82,5 @@
 <text x="150" y="495" fill="#8b949e" font-size="12">70-94%</text>
 <rect x="240" y="485" width="12" height="12" rx="3" fill="#5f2728" stroke="#f85149"/>
 <text x="258" y="495" fill="#8b949e" font-size="12">&lt;70%</text>
-<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">3 open of 65 items</text>
+<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">3 open of 66 items</text>
 </svg>

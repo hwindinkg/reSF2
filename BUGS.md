@@ -4135,3 +4135,34 @@ ratio = 0.3299   (2^(-16000*0.0001) = 2^-1.6 = 0.32988)
 (ассистенты) спавнит модель и проигрывает цепочку клипов, но в JS это
 полноценный боец (`ih extends wd`), а в порте — presentation-only (отдельный
 пункт, не этот).
+
+### QA-01.11 — RANGED/MAGIC ИИ (QA-29.10 #6): пул кандидатов = данные JS
+
+Замер на живом бою `BOSS_LYNX` Fight 6 (`tactic='Lynx_Ranged'`, тактика
+объявляет `<Animation Name="RangedPlayer" Base="800">` и `MagicPlayer`),
+`SF2_TRACE_PICK=1` + `SF2_TRACE_TACTIC=1`, 700 кадров с атакующим игроком:
+
+```
+[pick] sum=4228.3 ... StepForward/StepBack/BackRoll/HighKick/SwordsHeavySlash ...
+Ranged в кандидатах рулетки: 0        Magic: 0
+[tactic] 210 distinct animations: ... RangedShurikenWeapon RangedKunaiWeapon
+         RangedHeavyWeapon MagicBombStart MagicWaveStart ... (0 записей `*Player`)
+```
+
+То есть таблица тактики `.dat` (которую читает и JS — `Z0()[0..2]`,
+BUGS QA-30.10) содержит ТОЛЬКО анимации снарядов/оружия
+(`RangedShurikenWeapon`), но НИ ОДНОЙ родительской `*Player`-анимации
+(`RangedShurikenPlayer`, `MindThrowPlayer`, `InvisibilityCloakPlayer`).
+Кандидаты рулетки строятся из этих же строк, поэтому ни порт, ни эталон не
+могут выбрать каст — это НЕ расхождение.
+
+Прошлое утверждение «после снятия фильтра `TacticWeapon` в `[pick]` появились
+`RangedShurikenPlayer`/`RangedKunaiPlayer`» на текущем билде НЕ
+воспроизводится: в `[pick]` ни одного `Ranged*`.
+
+ОСТАЁТСЯ (нужен эталон живой игры): в настоящей игре босс всё же бросает
+сюрикены. Шипнутый JS это объяснить не может — путь способностей
+(`EnableBossAbility` -> `wd.$vb` L21519 -> `Pi.dS` L16211) начинается с
+`debugger;`, а `<BossAbilityState>` (`nm.he` L31260) возвращает только `Not`.
+Значит либо серверный/скриптовый путь, либо другая ветка, которой нет в
+данных; нужен покадровый трейс живой игры (как для кусаригамы).

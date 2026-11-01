@@ -8,7 +8,7 @@
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-62 of 65 checklist items; every gap below is documented in BUGS.md.
+63 of 66 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **34** (32 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -18,16 +18,16 @@ Gates with a baseline: **34** (32 at 0 divergences, 2 known non-zero) · referen
 | **Rendering** | 🟩 | 100% | 4/4 | - |
 | **Animation & physics** | 🟨 | 83% | 5/6 | kusarigama: the sickle/rope bone chain and the weapon binding are unverified - needs a per-frame live-game capture (QA-29.10 #4) |
 | **Combat** | 🟩 | 100% | 6/6 | - |
-| **AI** | 🟨 | 86% | 6/7 | ranged/magic: the AI never picks `RangedPlayer`/`MagicPlayer` from the `.dat` animation pool (QA-29.10 #6) |
+| **AI** | 🟨 | 88% | 7/8 | live game: boss ranged/magic and abilities (shurikens, invisibility cast, summons) need a per-frame LIVE trace - the shipped JS ability path is a `debugger` stub, so the data cannot settle it |
 | **UI & screens** | 🟩 | 95% | 21/22 | Titan bodyguards: wrong location and no roster scrolling (QA-29.10 #7) |
 | **Quests & progress** | 🟩 | 100% | 4/4 | - |
 | **Audio** | 🟩 | 100% | 3/3 | - |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 95% | 62/65 | - |
+| **overall** | 🟩 | 95% | 63/66 | - |
 
-The `overall` row is every checklist item at once (62 of 65); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (63 of 66); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 

@@ -95,8 +95,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "block decisions when the player attacks", True),
         ("Survival: one clean punch takes 6.2% of the enemy's HP (4 hits -> "
          "75% left) - no one-hit kill; gate `survival-hit`", True),
-        ("ranged/magic: the AI never picks `RangedPlayer`/`MagicPlayer` from "
-         "the `.dat` animation pool (QA-29.10 #6)", False),
+        ("ranged/magic: the `.dat` candidate pool is the SAME data both sides "
+         "read (210 animations, 0 `*Player` entries; measured "
+         "`SF2_TRACE_TACTIC`), so neither side can pick a cast - JS-exact "
+         "(QA-29.10 #6)", True),
+        ("live game: boss ranged/magic and abilities (shurikens, invisibility "
+         "cast, summons) need a per-frame LIVE trace - the shipped JS ability "
+         "path is a `debugger` stub, so the data cannot settle it", False),
     ]),
     ("UI & screens", [
         ("fight HUD: bars, portraits, names, style meter", True),
