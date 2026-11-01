@@ -10829,6 +10829,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // [dbg] AI-gate lines are available on a LIVE fight with the player
         // actually attacking (the plain `--fight` run has no input at all,
         // so the reaction gate never opens and the trace says nothing).
+        if (dump_audio_frames > 0) {
+            // [trace] `--dump-audio N` on the KO path too: the round transition
+            // (`Ta.XF(!1)` -> hidden -> `xF(2)`) only happens on a KO, which is
+            // the window the "SFX while the scene is hidden" report names.
+            std::filesystem::create_directories("reference/traces");
+            fs->enable_audio_dump("reference/traces/native_audio.jsonl",
+                                  dump_audio_frames);
+            std::fprintf(stdout,
+                         "[dump] audio trace armed (kick-ko): first %d fight frames -> "
+                         "reference/traces/native_audio.jsonl\n",
+                         dump_audio_frames);
+            std::fflush(stdout);
+        }
         if (dump_state_frames > 0) {
             std::filesystem::create_directories("reference/traces");
             fs->enable_state_dump("reference/traces/native_state.jsonl",

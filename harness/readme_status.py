@@ -138,7 +138,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
     ("Audio", [
         ("bus, voice pool (2 loops + 16 one-shots), de-dup", True),
         ("music/fades, settings clicks", True),
-        ("SFX while the scene is hidden during a round change", False),
+        ("no SFX while the scene is hidden on a round change (0 plays in "
+         "the 129-frame hidden window F1939..F2067; 144 plays elsewhere)", True),
     ]),
     ("Save & input", [
         ("`save-fields-probe`, save round-trip", True),

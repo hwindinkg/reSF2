@@ -10379,11 +10379,15 @@ void FightController::dump_audio_frame() {
         std::fprintf(audio_dump_file_, "%s\"%s\"", i == 0 ? "" : ",",
                      stops[i].c_str());
     }
+    // `vis` = JS `Ta.XF` (the 3-D view's `isVisible`, see `set_scene_visible`).
+    // Probe metadata only: `compare_audio.py` reads an explicit field list, so
+    // an extra key never shifts the differential. It marks the round-transition
+    // window (`Ta.XF(!1)` ... `xF(2)`), where the report says SFX leak.
     std::fprintf(audio_dump_file_,
-                 "],\"sfx\":%d,\"music\":%d,\"music_track\":\"%s\"}\n",
+                 "],\"sfx\":%d,\"music\":%d,\"music_track\":\"%s\",\"vis\":%d}\n",
                  au.sfx_bus_gain() > 0.0f ? 1 : 0,
                  au.music_bus_gain() > 0.0f ? 1 : 0,
-                 au.music_track().c_str());
+                 au.music_track().c_str(), camera_.visible ? 1 : 0);
 
     if (++audio_dump_written_ >= audio_dump_frames_) {
         std::fclose(audio_dump_file_);
