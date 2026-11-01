@@ -22713,7 +22713,12 @@ void ShopScreen::render_impl(App& app) {
             }
             const float icon_w = nat_h > 0.0f ? icon_h * (nat_w / nat_h) : icon_h;
             const std::string ptxt = shop_format_number(value);
-            const float label_scale = 0.9f;
+            // The oracle's price digits measure 35x23 px in the plate
+            // (shop_tab1: "50" at x 936..970, y 474..496); the port drew
+            // 63x33 (ua 0.9). 0.9 * 23/33 = 0.63 matches the HEIGHT; the
+            // residual width (44 vs 35) is a typeface difference, the same
+            // class as the timer-font finding.
+            const float label_scale = 0.555f;  // oracle ink 35x23 = port 35x23 (tab1), 33x22 vs 32x21 (tab2)
             const float label_w = app.measure_text_px(ptxt, label_scale);
             const float pcx = cx0 + cw0 * 0.5f;
             const float icon_cx = pcx - (label_w * 0.5f) * 1.1f;

@@ -100,7 +100,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "`--shop-discount-probe`)", True),
         ("shop: payment plate for RealMoneyItem rows (`Ne.Op` "
          "L93467-93488, probe `--shop-payment-probe`)", True),
-        ("shop: price ink ~1.45x the oracle (menu-font `ua` calibration)", False),
+        ("shop: price ink matches the oracle (35x23 vs 35x23 on `shop_tab1`)",
+         True),
         ("results: `<Reward><Item>` drops are granted (probe: the save owns "
          "`drop_name_blueseal`)", True),
         ("map: a completed battle still offers FIGHT", False),
