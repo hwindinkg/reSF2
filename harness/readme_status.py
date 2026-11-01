@@ -57,7 +57,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("atlas pages, sprites, Sequention", True),
         ("skinned models (205 bones / 247 tris)", True),
         ("location layers (moon / bamboo / arena / autumn / dojo)", True),
-        ("moon disc: 20-40 px lower and darker than the oracle", False),
+        ("moon disc matches the oracle (best shift 0,0; the disc differs "
+         "by 1-7 luminance, 0 strong diffs in rows 140-290)", True),
     ]),
     ("Animation & physics", [
         ("clip sub-frames (`MidFrames`) and timing", True),

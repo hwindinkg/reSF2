@@ -4,18 +4,18 @@
 
 ![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 92%
+### Readiness: 93%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-56 of 61 checklist items; every gap below is documented in BUGS.md.
+57 of 61 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
-| **Rendering** | 🟨 | 75% | 3/4 | moon disc: 20-40 px lower and darker than the oracle |
+| **Rendering** | 🟩 | 100% | 4/4 | - |
 | **Animation & physics** | 🟩 | 100% | 4/4 | - |
 | **Combat** | 🟨 | 83% | 5/6 | player throw: gate correct, probe cannot hold the range |
 | **AI** | 🟥 | 67% | 4/6 | `fk=9` (dodge) and `fk=10` (block) never fire in a live fight; in Survival one clean hit kills the enemy (Eclipse x4000) - unverified after the align fix |
@@ -25,9 +25,9 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟨 | 92% | 56/61 | - |
+| **overall** | 🟨 | 93% | 57/61 | - |
 
-The `overall` row is every checklist item at once (56 of 61); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (57 of 61); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
