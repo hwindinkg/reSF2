@@ -631,6 +631,10 @@ PARSERS = {
     "dialog": p_dialog,
     "total_div": p_total_divergences,
     "ui_total": p_ui_total,
+    # `stages.xml` L819-882: the Survival fight's `<Attributes Eclipse="1"
+    # DamageFactor="-4000" ApplyTo="Player"/>` / `4000 ApplyTo="Bot"` must not
+    # turn the player into a one-hit killer (reported bug).
+    "survhit": p_kv_result("survhit"),
 }
 
 
@@ -667,6 +671,10 @@ FLAG_GATES: list[Gate] = [
     Gate("fidelity-tour", "gate", ("full",), "--fidelity-tour", 600, parser="fidelity:41"),
     Gate("headless-loop", "gate", ("full",), "--headless-loop", 700, parser="loop:13"),
     Gate("boss-hit-probe", "gate", ("full",), "--boss-hit-probe", 300, parser="boss_hit"),
+    # Survival: one clean punch must not kill (measured -6.2% of max per hit,
+    # enemy at 75% after four).
+    Gate("survival-hit", "gate", ("fast", "full"), "--survival-hit-probe", 180,
+         parser="survhit"),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
     # The winner's EndStance `Win_<weapon>` animation (bug Q): `--kick-ko`
     # fights to a KO, so the phase-3 pick must resolve and start the win clip.

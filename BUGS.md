@@ -3943,3 +3943,35 @@ facing и `JG`, — порт копирует те же компоненты (`p
 
 Тот же тест на паре `fight_attack`: небо тоже dy=0 (mean 6.78; больше — потому
 что в кадре разные позы бойцов и плашка HARD!).
+
+### QA-01.11 — «в Survival один чистый удар убивает врага (Eclipse x4000)»: снято как не-баг
+
+Запись была помечена как «не подтверждено после align-фикса». Проверено замером
+на живом бою: новый пробник `--survival-hit-probe` грузит настоящий бой
+`Survival` (`stages.xml` L819-882: 1 раунд, `HealthRecovery="0.1"`) и бьёт
+Punch-тапом, пока враг не потеряет HP.
+
+```
+[survhit] start: enemy hp=1.0000 player hp=1.0000 enemy_move='KnucklesStartStanceIdle'
+[survhit] hit 1 at f=73:  1.0000 -> 0.9378 (-0.0622, 6.2% of max) enemy_move='HighKneeUp'
+[survhit] hit 2 at f=115: 0.9378 -> 0.8755 (-0.0622, 6.2% of max) enemy_move='BackHandflip'
+[survhit] hit 3 at f=157: 0.8755 -> 0.8133 (-0.0622, 6.2% of max) enemy_move='HighKneeUp'
+[survhit] hit 4 at f=199: 0.8133 -> 0.7511 (-0.0622, 6.2% of max) enemy_move='LowKick'
+[survhit] RESULT hits=4 one_hit_kill=0 death_hit=-1 enemy hp left=0.7511 -> PASS
+```
+Четыре ЧИСТЫХ удара (враг в это время в атаке, не в блоке) дают по 6.22% от
+максимума; после четырёх остаётся 75% — убийство требует ~16 попаданий.
+Одного удара не хватает.
+
+Про «Eclipse x4000»: в правилах боя действительно стоят
+`<Attributes Eclipse="1" DamageFactor="-4000" ApplyTo="Player"/>` и
+`DamageFactor="4000" ApplyTo="Bot"/>` (L880-881), но это НЕ «x4000»: множитель
+проходит через `2^(df*0.0001)` (`damage.cpp:151`) = **0.757x** игроку и
+**1.32x** боту. Атрибут `Eclipse` у ПРАВИЛ JS-парсер вообще не читает
+(`attributes.get("Eclipse")` встречается только в `AttributesAlign` L7811,
+у воина L9996 и в сохранении L12840) — правила применяются всегда, и порт
+делает то же самое (`rules_apply_round_effects`, `FightRuleKind::attributes`,
+`apply_to == 2` = бот).
+
+Пробник закреплён гейтом `survival-hit` (fast + full) — при «одноударном
+убийстве» гейт краснеет.

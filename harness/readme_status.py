@@ -81,7 +81,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("Gc pump driven by fired events (`Gc.Tu` -> `Su.dea` -> `DK`)", True),
         ("Tabular/Survival: 0 divergences against the oracle", True),
         ("`fk=9` (dodge) and `fk=10` (block) never fire in a live fight", False),
-        ("in Survival one clean hit kills the enemy (Eclipse x4000) - unverified after the align fix", False),
+        ("Survival: one clean punch takes 6.2% of the enemy's HP (4 hits -> "
+         "75% left) - no one-hit kill; gate `survival-hit`", True),
     ]),
     ("UI & screens", [
         ("fight HUD: bars, portraits, names, style meter", True),

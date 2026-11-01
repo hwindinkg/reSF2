@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-10-23T09:41:54",
+    "updated": "2026-11-01T18:18:31",
     "mode": "only"
   },
   "gates": {
@@ -183,6 +183,12 @@
       "commit": "c7c17fd9",
       "reason": "new gate: the PLAYER's move-list subtype/stance must follow the equipped Weapon slot (JS ra.Hza L684-685 + Fd L808). RED before the fix: the subtype was the constant 'Fists' (137 fists moves even with WEAPON_KNIVES equipped, the reported bug); GREEN now: subtype=Knives, KnivesStartStance present, 140 moves.",
       "date": "2026-10-23T09:41:54"
+    },
+    "survival-hit": {
+      "metric": 0,
+      "commit": "5ccdb3f1",
+      "reason": "new gate: one clean Survival punch must not kill (measured -6.2% of max)",
+      "date": "2026-11-01T18:18:31"
     }
   }
 }

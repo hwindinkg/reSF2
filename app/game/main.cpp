@@ -1995,6 +1995,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     bool shop_tab_badge_probe = false;
     // --nav-badge-probe: the `za` nav-row badges (`Mma`/`bM` L82543-82550).
     bool nav_badge_probe = false;
+    // --survival-hit-probe: one CLEAN player hit in a Survival fight - the
+    // reported "one hit kills the enemy" (Eclipse DamageFactor 4000).
+    bool survival_hit_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2321,6 +2324,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             shop_tab_badge_probe = true;
         } else if (arg == "--nav-badge-probe") {
             nav_badge_probe = true;
+        } else if (arg == "--survival-hit-probe") {
+            survival_hit_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5441,6 +5446,104 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (survival_hit_probe) {
+        // --- `--survival-hit-probe`: clean hits in Survival ------------------
+        // `stages.xml` L819-882: the Survival fight is 1 round, HealthRecovery
+        // 0.1, and its `<Rules>` carry
+        //   <Attributes Eclipse="1" DamageFactor="-4000" ApplyTo="Player"/>
+        //   <Attributes Eclipse="1" DamageFactor="4000"  ApplyTo="Bot"/>
+        // (the JS rules parser never reads the `Eclipse` attribute - only
+        // `AttributesAlign`, the warrior and the save do - so both rules always
+        // apply; `DamageFactor` maps through `2^(df*0.0001)` in
+        // `damage.cpp:151`, i.e. -4000 -> 0.757x, +4000 -> 1.32x).
+        // The report: a single clean player hit kills the enemy outright.
+        glfwHideWindow(app.renderer().window());
+        {
+            PendingBattle& pb = app.pending_battle();
+            pb.battle_name = "Survival";
+            pb.zone = "ZONE_1";
+            pb.location = "bamboo_grove";
+            pb.has_result = false;
+            pb.reward_money = 0;
+            pb.reward_exp = 0;
+            pb.owned = loadout_owned("Fists");
+        }
+        app.screens().push(make_screen(app.screens(), kScreenFight));
+        app.set_headless_frames(1);
+        auto* fs = static_cast<sf2::app::FightScreen*>(app.screens().top());
+        if (fs == nullptr) {
+            std::fprintf(stderr, "[survhit] no fight screen\n");
+            app.shutdown();
+            return 1;
+        }
+        for (int g = 0; g < 20000 && app.screens().current_id() == kScreenFight &&
+                        fs->fight_frame() < 140;
+             ++g) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const float hp_max = fs->enemy_hp();
+        std::fprintf(stdout,
+                     "[survhit] start: enemy hp=%.4f player hp=%.4f enemy_move='%s'\n",
+                     static_cast<double>(hp_max),
+                     static_cast<double>(fs->player_hp()),
+                     fs->enemy_current_move().c_str());
+        std::fflush(stdout);
+        float before = hp_max;
+        int hits = 0;
+        bool died = false;
+        int death_hit = -1;
+        for (int f = 0; f < 6000 && app.screens().current_id() == kScreenFight; ++f) {
+            glfwPollEvents();
+            const float px = fs->player_world_x();
+            const float ex = fs->enemy_world_x();
+            if (std::fabs(ex - px) > 30.0f) {
+                const float side = (ex >= px) ? 1.0f : -1.0f;
+                fs->place_fighters(px, px + side * 24.0f);
+            }
+            const std::string my_move = fs->player_current_move();
+            const bool player_idle =
+                my_move.empty() || my_move.find("Idle") != std::string::npos;
+            if (player_idle && (f % 6) == 0) {
+                fs->inject_game_key(9, true);   // Punch tap
+                fs->inject_game_key(9, false);
+            }
+            app.run_one_frame();
+            const float now = fs->enemy_hp();
+            if (now < before - 0.0001f) {
+                ++hits;
+                std::fprintf(stdout,
+                             "[survhit] hit %d at f=%d: %.4f -> %.4f (-%.4f, "
+                             "%.1f%% of max) enemy_move='%s'\n",
+                             hits, f, static_cast<double>(before),
+                             static_cast<double>(now),
+                             static_cast<double>(before - now),
+                             static_cast<double>(100.0 * (before - now) /
+                                                 std::max(0.0001f, hp_max)),
+                             fs->enemy_current_move().c_str());
+                std::fflush(stdout);
+                before = now;
+                if (now <= 0.0001f) {
+                    died = true;
+                    death_hit = hits;
+                    break;
+                }
+                if (hits >= 4) break;
+            }
+        }
+        const bool surv_ok = hits > 0 && !died;
+        std::fprintf(stdout,
+                     "[survhit] RESULT hits=%d one_hit_kill=%d death_hit=%d "
+                     "enemy hp left=%.4f -> %s\n",
+                     hits, hits == 1 && died ? 1 : 0, death_hit,
+                     static_cast<double>(before), surv_ok ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[survhit] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return surv_ok ? 0 : 1;
     } else if (nav_badge_probe) {
         // --- `--nav-badge-probe`: the nav-row badges --------------------------
         glfwHideWindow(app.renderer().window());
