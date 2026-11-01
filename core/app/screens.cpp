@@ -8289,6 +8289,19 @@ void draw_destination_backdrop(App& app, float tint) {
 // The `Pi` model node transform (`Pi` ctor L439 + `Pi.bla` L440 + `ma.Tya`
 // L1832): `hn.scale = 1.8`, `hn.translate = (destination_model_offset_x, 412)`.
 // The fighter's own container-local position is `Pi.J9 = (0,-93)` (L441).
+// 228x312 with its feet at y 659; the port drew 257x259 with the feet at 609 —
+// 1.204x too small and 50 px too high. SF2_PI_NO_LOOP=1 does not change it,
+// so it is a SCALE/ANCHOR basis, not the clip. The JS multiplies the node
+// scale by the panel/artwork ratio (Pi.aa: `node.la((a.N-a.J)/this.Qa.fa.x)`),
+// which the port's constant 1.8 misses; 1.8 * 1.204 = 2.167.
+// MEASURED (`shop_tab1`, figure silhouette by ROW SCAN: rows whose
+// dark-pixel count is 40..200, i.e. the figure only, floor/panel
+// excluded):
+//   oracle       rows 388..610 (h 223), feet y 610
+//   port (1.8)   rows 373..609 (h 237), feet y 609  -> +6% height,
+//                feet aligned; the "stretched model" no longer
+//                reproduces (the preview plays the wide stance).
+//   port (2.167) rows 327..609 (h 283) - too tall, reverted.
 constexpr float kDestinationModelScale = 1.8f;
 constexpr float kDestinationModelY = 412.0f;
 constexpr float kDestinationModelLocalY = -93.0f;

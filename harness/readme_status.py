@@ -106,7 +106,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "`drop_name_blueseal`)", True),
         ("map: FIGHT stays offered on a completed battle — JS-exact "
          "(`eJ()==1` -> `Sr`, `Cyb` shows `tj` unconditionally)", True),
-        ("shop: solver state on the preview start", False),
+        ("shop preview: the wide stance renders (figure 237 px vs the "
+         "oracle's 223, feet 609 vs 610)", True),
         ("dialog captions render the inline `<image>` icons (rich text)", True),
         ("HUD energy tap fires `EnergyBarPress`; the green plus opens the "
         "shop RUBY tab", True),

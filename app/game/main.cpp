@@ -5496,7 +5496,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
         auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
         const bool opened = shop != nullptr && shop->open_at("Ruby", std::string());
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 120; ++i) {
             glfwPollEvents();
             app.run_one_frame();
         }
