@@ -1993,6 +1993,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --shop-tab-badge-probe: the `Dg` badge on the shop tab strip
     // (`ss.getCounterValue` L94764 + `Eg.GU` L77829 + `Dg.lk` L77711).
     bool shop_tab_badge_probe = false;
+    // --nav-badge-probe: the `za` nav-row badges (`Mma`/`bM` L82543-82550).
+    bool nav_badge_probe = false;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -2317,6 +2319,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             shop_payment_probe = true;
         } else if (arg == "--shop-tab-badge-probe") {
             shop_tab_badge_probe = true;
+        } else if (arg == "--nav-badge-probe") {
+            nav_badge_probe = true;
         } else if (arg == "--settings-profile-shop-probe") {
             settings_profile_shop_probe = true;
         } else if (arg == "--equip-probe" && i + 1 < argc) {
@@ -5437,6 +5441,59 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return all ? 0 : 1;
+    } else if (nav_badge_probe) {
+        // --- `--nav-badge-probe`: the nav-row badges --------------------------
+        glfwHideWindow(app.renderer().window());
+        const bool seed = std::getenv("SF2_NO_SEED") == nullptr;
+        if (seed) {
+            std::string weapon;
+            for (const sf2::app::CatalogItem& ci : sf2::app::load_full_catalog(app)) {
+                if (ci.type == "Weapon" && !ci.hidden && ci.level == 1) {
+                    weapon = ci.name;
+                    break;
+                }
+            }
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                w.level = 1;
+                bool have = false;
+                for (const auto& oi : w.items) {
+                    if (oi.name == weapon) have = true;
+                }
+                if (!have && !weapon.empty()) {
+                    sf2::app::WarriorSave::OwnedItem oi;
+                    oi.name = weapon;
+                    oi.count = 1;
+                    w.items.push_back(oi);
+                }
+                app.save().save(w);
+            } catch (const std::exception&) {
+            }
+        }
+        app.screens().push(make_screen(app.screens(), kScreenDojo));
+        app.set_headless_frames(1);
+        for (int i = 0; i < 6; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        // the nav column is COLLAPSED in the hub - expand it so the badges show
+        sf2::app::set_za_nav_open(true);
+        for (int i = 0; i < 40; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        int counts[5] = {0, 0, 0, 0, 0};
+        sf2::app::za_nav_badge_counts(app, counts);
+        std::fprintf(stdout,
+                     "[navbadge] seed=%d shop=%d profile=%d map=%d dojo=%d settings=%d\n",
+                     seed ? 1 : 0, counts[2], counts[3], counts[1], counts[0], counts[4]);
+        std::fflush(stdout);
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            app.capture_png(shot);
+            std::fprintf(stdout, "[navbadge] shot %s\n", shot);
+            std::fflush(stdout);
+        }
+        return (seed ? (counts[2] > 0) : true) ? 0 : 1;
     } else if (shop_tab_badge_probe) {
         // --- `--shop-tab-badge-probe`: the tab `Dg` badge --------------------
         glfwHideWindow(app.renderer().window());

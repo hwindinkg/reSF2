@@ -2142,6 +2142,10 @@ bool run_quest_dialog_selfcheck(App& app);
 // Prints one `[sps]` line per assertion and returns the FAIL count.
 int run_shell_probe(App& app);
 
+// `za.Mma`/`za.bM` (L82543-82550): the five nav-row badge counts (the SHOP row
+// = `p.items.tCa()`, the PROFILE row = the four "new" counters).
+void za_nav_badge_counts(App& app, int* out);
+
 // [probe] ss.getCounterValue (L94764): the new-item count a shop tab badge shows.
 int shop_tab_new_count(App& app, const WarriorSave& w, int tab);
 

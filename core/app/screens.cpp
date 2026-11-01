@@ -10792,7 +10792,11 @@ void DojoScreen::render_impl(App& app) {
         // column) — the JS `ma.D1` chrome on every shell screen
         // (PORT_AUDIT_UI §2.1). Replaces the invented draw_dojo_hud_bar
         // (its hard-coded coords are PORT_AUDIT_UI §3 item 5).
-        draw_za_chrome(app, kScreenDojo);
+        {
+        int za_badges[kZaNavCount] = {0, 0, 0, 0, 0};
+        za_nav_badge_counts(app, za_badges);
+        draw_za_chrome(app, kScreenDojo, za_badges);
+    }
         // Sensei hint panel: REMOVED (invention). The JS `Ib` bar (L1905-1912)
         // is shown ONLY while a `Notification` is queued (`Ib.Qhb` L1907 posts
         // it; `Ib.aa` L1905 counts `ReadTime` down and `OZa` L1908 collapses
@@ -13741,7 +13745,11 @@ void MapScreen::render_impl(App& app) {
                           0.5f, UiAlign::Left, 0.0f, 0.0f, 0.0f);
         }
     }
-    draw_za_chrome(app, kScreenMap);
+    {
+        int za_badges[kZaNavCount] = {0, 0, 0, 0, 0};
+        za_nav_badge_counts(app, za_badges);
+        draw_za_chrome(app, kScreenMap, za_badges);
+    }
     // The `Rr` info panel (JS `Ya.Zq = Qo(Rr)` L2125) draws last, over the
     // `Vr` strip and the `Ur` bar (the oracle panel overlaps both).
     const Node* sel = nullptr;
@@ -22894,7 +22902,11 @@ void ShopScreen::render_impl(App& app) {
     // the collapsed header and NO `gk.background` 0.5-black dim (measured: the
     // oracle shop right-wall backdrop is ~0.7x the hub, not 0.5x). Same
     // force-collapsed draw as the Map/Profile (L5078/L9345).
-    draw_za_chrome(app, kScreenShop);
+    {
+        int za_badges[kZaNavCount] = {0, 0, 0, 0, 0};
+        za_nav_badge_counts(app, za_badges);
+        draw_za_chrome(app, kScreenShop, za_badges);
+    }
     // Sensei/tutorial dialog modal over the shop (the tutorial's
     // `tutorial_buy_knives` beat, `He` L1042; see update_impl).
     draw_quest_modal(app, ren, app.screens().top() == this);
@@ -25828,7 +25840,11 @@ void EquipmentScreen::render_impl(App& app) {
     }
     // Shared `za` chrome (JS `ma.D1`): topPanel + widgets + vertical nav.
     // Collapsed on arrival (oracle `profile_tab*` shows the `МЕНО` header).
-    draw_za_chrome(app, kScreenProfile);
+    {
+        int za_badges[kZaNavCount] = {0, 0, 0, 0, 0};
+        za_nav_badge_counts(app, za_badges);
+        draw_za_chrome(app, kScreenProfile, za_badges);
+    }
     // NO BACK node. JS `vb` (L2189-2201) is a tabbed screen (`cs` tabs only)
     // and the misc `Arrow` frame (`y.sRa="Arrow"`, L1267875) is referenced ONLY
     // by `he` (the `MenuBtnFlashing` hint arrow, L1191092) — never by the
@@ -28869,5 +28885,47 @@ std::string dialog_line_text_for_test(App& app, const std::string& raw) {
 
 // Screen-independent overlays (the XP hint), drawn after every screen.
 void draw_ui_overlays(App& app) { draw_xp_hint(app); }
+
+// JS `za.Mma` L82543-82548 (the PROFILE nav row) and `za.bM` L82550 (the SHOP
+// row): the five `Le` nav buttons carry a `Dg` badge fed by
+//   profile = `p.o.co.uCa() + p.o.yi.rCa() + p.o.sCa() + p.o.vCa()`
+//             (perks available to learn + new achievements + new moves +
+//              new seals - the `yj`/`aE` "new" markers)
+//   shop    = `p.items.tCa()` (catalog rows with the `yj` flag)
+// The port models neither `yj` nor `aE`, so the SAME predicates are evaluated
+// on the fly (see `shop_tab_new_count`): the SHOP row sums the per-tab counts,
+// the PROFILE row counts perks in the "learn target" state plus unlocked
+// achievements whose reward is still unclaimed (both are the closest modelled
+// equivalents of `n5a()`/`rCa()`); moves/seals contribute 0.
+void za_nav_badge_counts(App& app, int* out /* kZaNavCount */) {
+    for (int i = 0; i < kZaNavCount; ++i) out[i] = 0;
+    WarriorSave w;
+    try {
+        w = app.save().load();
+    } catch (const std::exception&) {
+        return;
+    }
+    int shop_n = 0;
+    for (int tab = 0; tab < kShopTabCount; ++tab) shop_n += shop_tab_new_count(app, w, tab);
+    out[2] = shop_n;  // SHOP row (`bM`)
+    int prof_n = 0;
+    {
+        // `uCa()` = perks available (`id.ht().n5a() - KS.Oa.length`): distinct
+        // perk names whose tree row is a learn target (`state == 0`).
+        std::set<std::string> avail;
+        for (const EquipmentScreen::PerkRow& r : load_perk_tree(app, w)) {
+            if (r.state == 0) avail.insert(r.name);
+        }
+        prof_n += static_cast<int>(avail.size());
+    }
+    {
+        // `rCa()` = achievements with the "new" marker; the modelled analogue
+        // is an unlocked achievement whose reward is still unclaimed.
+        for (const EquipmentScreen::AchievRow& r : load_achievements(app, w)) {
+            if (r.reward_available) ++prof_n;
+        }
+    }
+    out[3] = prof_n;  // PROFILE row (`Mma`)
+}
 
 } // namespace sf2::app

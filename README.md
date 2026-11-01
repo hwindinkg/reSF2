@@ -4,11 +4,11 @@
 
 ![gates](https://img.shields.io/badge/gates-30%20%C2%B7%2027%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 87%
+### Readiness: 89%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-53 of 61 checklist items; every gap below is documented in BUGS.md.
+54 of 61 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -19,15 +19,15 @@ Gates with a baseline: **30** (27 at 0 divergences, 3 known non-zero) · referen
 | **Animation & physics** | 🟨 | 75% | 3/4 | gravity / impulses point UP instead of down (reported) |
 | **Combat** | 🟨 | 83% | 5/6 | player throw: gate correct, probe cannot hold the range |
 | **AI** | 🟥 | 67% | 4/6 | `fk=9` (dodge) and `fk=10` (block) never fire in a live fight; in Survival one clean hit kills the enemy (Eclipse x4000) - unverified after the align fix |
-| **UI & screens** | 🟨 | 90% | 19/21 | first-quest crystal grant for the energy tutorial (reported); dojo nav badges (`Mma`/`bM` L82543-82550) - need the per-item `new` flag (`yj`/`aE`) the save does not model |
+| **UI & screens** | 🟩 | 95% | 20/21 | first-quest crystal grant for the energy tutorial (reported) |
 | **Quests & progress** | 🟩 | 100% | 4/4 | - |
 | **Audio** | 🟥 | 67% | 2/3 | SFX while the scene is hidden during a round change |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟨 | 87% | 53/61 | - |
+| **overall** | 🟨 | 89% | 54/61 | - |
 
-The `overall` row is every checklist item at once (53 of 61); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (54 of 61); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
@@ -48,9 +48,9 @@ The `overall` row is every checklist item at once (53 of 61); a system row count
 
 | Module | Lines | Files |
 |---|---:|---:|
-| `core/app` | 47952 | 18 |
+| `core/app` | 48014 | 18 |
 | `core/scene` | 39423 | 35 |
-| `app/game` | 11512 | 1 |
+| `app/game` | 11569 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (53 of 61); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **108830** | |
+| **total** | **108949** | |
 <!-- STATUS:END -->

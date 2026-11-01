@@ -112,8 +112,8 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("HUD energy tap fires `EnergyBarPress`; the green plus opens the "
         "shop RUBY tab", True),
         ("first-quest crystal grant for the energy tutorial (reported)", False),
-        ("dojo nav badges (`Mma`/`bM` L82543-82550) - need the per-item `new` "
-         "flag (`yj`/`aE`) the save does not model", False),
+        ("dojo nav badges (`Mma`/`bM` L82543-82550, probe "
+         "`--nav-badge-probe`: shop=1, profile=20)", True),
         ("dojo `max` / `unlimited_energy` widgets (L82709/L82605, probe "
          "`--za-widget-probe`)", True),
         ("dojo bar fill clips the full-width sprite (`Uf.kB` L83275, probe "
