@@ -70,6 +70,13 @@ inline constexpr int kEvIntervalEnd = 13;
 inline constexpr int kEvModExpires = 14;
 inline constexpr int kEvAreaEnter = 15;
 inline constexpr int kEvAreaExit = 16;
+// Model/fighter event `<Events><KeyPressed/></Events>`. The bus numbering above
+// has no slot for it (the port never raised it), but the AI's `Gc` pump needs
+// it: `hJa` (JS L20661-20683) injects a SYNTHETIC KeyPressed and the next
+// `Gc.ia`/`EZa` pass decides. `gc_type` maps this slot to the `Gc` type 2
+// (KeyPressed), the same value `js_event_type("KeyPressed")` already returns
+// for the MOVE side.
+inline constexpr int kEvKeyPressed = 17;
 
 inline int event_type_by_name(const std::string& n) {
     if (n == "RoundStageStart") return kEvRoundStage;
@@ -88,6 +95,7 @@ inline int event_type_by_name(const std::string& n) {
     if (n == "ModExpires") return kEvModExpires;
     if (n == "AreaEnter") return kEvAreaEnter;
     if (n == "AreaExit") return kEvAreaExit;
+    if (n == "KeyPressed") return kEvKeyPressed;
     return 0;
 }
 

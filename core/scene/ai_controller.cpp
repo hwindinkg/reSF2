@@ -2024,6 +2024,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
             case 12: return 12;
             case 13: return 13;
             case 14: return 16;  // ModExpires
+            case 17: return 2;   // KeyPressed (the `Gc` numbering)
             default: return 0;   // Style/Combo/Area* -> not a Gc event
         }
     };
@@ -2823,14 +2824,20 @@ std::string AiController::update(const AiFightState& st) {
         // JS `wd.Anb` (L499): the Random-tactic DECISION (`hJa`) is phase-2
         // gated (`Je==2`); the event blocks above already ran.
         if (!st.phase_fight) return "";
-        // [experiment] `SF2_HJA_GC=1`: make the Random-tactic `dsb`/`hJa` point
-        // go through the JS pump (`hJa` L20661-20683 only injects the synthetic
-        // `<KeyPressed/>`; the next `Gc.ia`/`EZa` pass decides) instead of
-        // picking directly in `update_random`.
+        // JS `hJa` (L20661-20683) does NOT pick: it injects the synthetic
+        // `<KeyPressed/>` (`this.Vb.data = null; ca.Ka().Vgb(this.Vb)`) and the
+        // next `Gc.ia`/`EZa` pass decides. Model exactly that: push a
+        // KeyPressed event into the state handed to the pump and let
+        // `gc_frame` (this port's `Gc` pass) resolve.
         static const bool hja_gc = std::getenv("SF2_HJA_GC") != nullptr;
+        static const bool hja_pump = std::getenv("SF2_HJA_PUMP") != nullptr;
         if (hja_gc) {
-            const std::string gc = gc_frame(st);
-            return gc;
+            return gc_frame(st);
+        }
+        if (hja_pump) {
+            AiFightState st2 = st;
+            st2.my_event_types.push_back({17, "KeyPressed"});  // kEvKeyPressed
+            return gc_frame(st2);
         }
         return update_random(st);
     }
