@@ -403,12 +403,13 @@
         var side = deSide(or.fight, this) || "X";
         or.lastDecider = side;
         var entry = {
-          m: "Pqb", side: side, f: frameNo(),
+          t: "ai", m: "Pqb", side: side, f: frameNo(),
           fk: num(this.fk), aqa: num(this.aqa),
           ret: moveLabel(r),
           cand: (this.ld && typeof this.ld.length === "number") ? this.ld.length : null
         };
         pushTrace(entry);
+        emit(entry);
         // [harness] also EMIT it: `pushTrace` only fills the in-page
         // `window.__trace` ring, so the AI decision rows never reached
         // `console.log` and could not be compared with the port's `[pick]`.
@@ -626,10 +627,11 @@
                 try { refs.enn = Math.round(a.jb.oa.Ic("NPivot").ma.x * 100) / 100; } catch (e) { /* ignore */ }
                 try { refs.mn = Math.round(a.oa.Ic("NPivot").ma.x * 100) / 100; } catch (e) { /* ignore */ }
                 var entry = {
-                  m: "Gc.jL", side: side, f: frameNo(),
+                  t: "ai", m: "Gc.jL", side: side, f: frameNo(),
                   cand: names, n: b.length, chosen: chosen, refs: refs
                 };
                 pushTrace(entry);
+                emit(entry);
                 emit(entry);
                 or.lastRandom[side] = entry;
                 if (chosen != null) {

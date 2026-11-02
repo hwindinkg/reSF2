@@ -64,13 +64,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama + enemy AI: the tactics gate and `hcb` are both "
-         "JS-exact (measured), but the oracle's AI DECISION record is "
-         "unavailable - `trace_stats` shows `deCount=2` yet `Pqb:0`/`ia:0`, "
-         "and emitting the rows breaks state extraction (diff:boss-lynx "
-         "0 -> 2416, reverted); the port's enemy attacks at f=162 where the "
-         "oracle's does at f=379; scenario `diff:kusarigama` reproduces it; "
-         "not gated yet", False),
+        ("kusarigama + enemy AI: the oracle's decision rows are now traced "
+         "(`t:\"ai\"`, `diff:boss-lynx` stays 0) and the two sides match "
+         "frame-for-frame at a +129 offset EXCEPT one spurious early decision "
+         "in the port (f=161 `KnivesSpinningSlash`; the oracle decides first "
+         "at its f=333) - a single-decision bug, not a systemic AI "
+         "difference; `diff:kusarigama` reproduces it; not gated yet", False),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "

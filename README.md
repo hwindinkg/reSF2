@@ -16,7 +16,7 @@ Gates with a baseline: **37** (35 at 0 divergences, 2 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: the tactics gate and `hcb` are both JS-exact (measured), but the oracle's AI DECISION record is unavailable - `trace_stats` shows `deCount=2` yet `Pqb:0`/`ia:0`, and emitting the rows breaks state extraction (diff:boss-lynx 0 -> 2416, reverted); the port's enemy attacks at f=162 where the oracle's does at f=379; scenario `diff:kusarigama` reproduces it; not gated yet |
+| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: the oracle's decision rows are now traced (`t:"ai"`, `diff:boss-lynx` stays 0) and the two sides match frame-for-frame at a +129 offset EXCEPT one spurious early decision in the port (f=161 `KnivesSpinningSlash`; the oracle decides first at its f=333) - a single-decision bug, not a systemic AI difference; `diff:kusarigama` reproduces it; not gated yet |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
