@@ -902,6 +902,19 @@ bool AiController::v1(const MoveDef& m, const AiFightState& st,
         std::string ttrace;
         if (!eval_move_conditions(m.tactics, ctx, &ttrace)) {
             if (why != nullptr) *why = "tactics:" + ttrace;
+            // [probe, authorised] `SF2_TRACE_V1=1`: why a candidate's
+            // `<<Tactics>>` gate rejected it, with the operands.
+            if (std::getenv("SF2_TRACE_V1") != nullptr && st.fight_frame >= 0 &&
+                st.fight_frame <= 200) {
+                std::fprintf(stdout,
+                             "[v1] f=%d %s TACTICS-REJECT %s dist_x=%.1f "
+                             "my=(%.1f,%.1f) foe=(%.1f,%.1f)\n",
+                             st.fight_frame, m.name.c_str(), ttrace.c_str(),
+                             static_cast<double>(ctx.dist_x),
+                             static_cast<double>(st.my_x), 0.0,
+                             static_cast<double>(st.enemy_x), 0.0);
+                std::fflush(stdout);
+            }
             return false;
         }
     }

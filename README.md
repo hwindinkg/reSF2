@@ -16,7 +16,7 @@ Gates with a baseline: **37** (35 at 0 divergences, 2 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: with the weapon equipped the two sides are identical up to fight frame 161, then the port's enemy attacks (`KnivesSpinningSlash`) while the oracle's stays idle - the AI's decision on the kusarigama stance differs; scenario `diff:kusarigama` reproduces it (the report's +130 offset is an alignment artifact); not gated yet |
+| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: the tactics gate itself is fine (10 measured `Distance` rejections at f=161), but `Pqb` DECIDES in the port (`ai_branch=6`, `KnivesSpinningSlash`) while the oracle's `fk` stays -1 for the whole fight (`ai_branch=-1`, `chosen_move=None` in all 7288 oracle rows) - the `hcb` no-decision gate is the next suspect; scenario `diff:kusarigama` reproduces it; not gated yet |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -49,7 +49,7 @@ The `overall` row is every checklist item at once (66 of 67); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48158 | 18 |
-| `core/scene` | 39652 | 35 |
+| `core/scene` | 39665 | 35 |
 | `app/game` | 12172 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (66 of 67); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **109925** | |
+| **total** | **109938** | |
 <!-- STATUS:END -->

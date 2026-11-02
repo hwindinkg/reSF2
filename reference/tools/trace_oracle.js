@@ -409,6 +409,10 @@
           cand: (this.ld && typeof this.ld.length === "number") ? this.ld.length : null
         };
         pushTrace(entry);
+        // [harness] also EMIT it: `pushTrace` only fills the in-page
+        // `window.__trace` ring, so the AI decision rows never reached
+        // `console.log` and could not be compared with the port's `[pick]`.
+        emit(entry);
         or.lastPqb[side] = entry;
         if (entry.ret != null) or.lastMove[side] = entry.ret;
       } catch (e) { /* ignore */ }
@@ -626,6 +630,7 @@
                   cand: names, n: b.length, chosen: chosen, refs: refs
                 };
                 pushTrace(entry);
+                emit(entry);
                 or.lastRandom[side] = entry;
                 if (chosen != null) {
                   or.lastMove[side] = chosen;
