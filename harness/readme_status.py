@@ -64,7 +64,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama + enemy AI: the oracle's decision rows are now traced "
+        ("kusarigama + enemy AI: root cause localized - the port's Random "
+         "path picks a move directly (`br:\"random/hJa\"`, `fk=6`) on the "
+         "idle-clip END, where JS `hJa` only injects a synthetic KeyPressed "
+         "and `EZa` admits no candidate for type 10 (port's own `gc_frame`: "
+         "`matched=0 kept=0`); the oracle's decision rows are now traced "
          "(`t:\"ai\"`, `diff:boss-lynx` stays 0) and the two sides match "
          "frame-for-frame at a +129 offset EXCEPT one spurious early decision "
          "in the port (f=161 `KnivesSpinningSlash`; the oracle decides first "

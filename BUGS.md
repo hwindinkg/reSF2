@@ -2522,6 +2522,35 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
     оракул:              333 TwoFootJumpKick, 442 Sweep, 456 DoubleSweep,
              523 KnivesLowSlash, ...
     ```
+    ПРИЧИНА НАЙДЕНА (02.11, `[dbg]` строка f=161 целиком):
+    ```
+    {"f":161,"ai_branch":6,"fk":6,"wb":1,"chosen":"KnivesSpinningSlash",
+     "br":"random/hJa","hcb":0,"play":1,"mf":24,"mv":"KnivesStartStanceIdle",
+     "eh":0,"wait":0}
+    ```
+    то есть лишнее решение выдаёт **Random-путь порта** (`br:"random/hJa"`,
+    `dbg_.fk = 6` — стадия `<AnimationWeights>`), который возвращает мув
+    НАПРЯМУЮ. В JS `hJa` (L20661-20683) мув НЕ выбирает: он только льёт
+    синтетический `<KeyPressed/>` (`this.Vb.data=null; ca.Ka().Vgb(this.Vb)`),
+    а следующий `Gc`/`EZa` пропускает типы событий 1..6 и на КОНЕЦ клипа
+    (type 10) не даёт кандидатов — что подтверждает собственный `gc_frame`
+    порта на том же кадре: `[gc] f=161 playing=1 types=[14] matched=0 kept=0`.
+    Т.е. порт «додумывает» решение там, где JS лишь дёргает помпу.
+    КОНКРЕТНЫЙ КАНДИДАТ (трейс `SF2_TRACE_PICK=1 SF2_TRACE_PKBT=1`):
+    ```
+    [pkbt] f=161 pick=KnivesSpinningSlash sig=[Punch:Tap,Back:Hold] d=1:
+           KnivesSpinningSlash(p=120,s=[Punch:Tap,Back:Hold])
+    ```
+    т.е. в Random-путь попал РОВНО ОДИН кандидат — `KnivesSpinningSlash`, у
+    которого `<Conditions><Keys>` требуют Punch Tap + Back Hold (ввод, которого
+    ИИ не делал). Фильтр этого пути вызывает `v1(..., mode=2)` = «только
+    tactics-условия, БЕЗ `<Conditions>`», а `gc_frame` в том же кадре собрал
+    `types=[14] matched=0 kept=0` — то есть ДВА параллельных сборщика
+    кандидатов расходятся: `gc_frame` на конце клипа не даёт никого (как JS), а
+    Random-путь даёт `KnivesSpinningSlash`.
+    Фикс = свести Random-путь на те же бакеты событий, что `gc_frame` (или
+    отключить его прямой выбор там, где `gc_frame` вернул 0). Это правка
+    подсистемы, её надо прогонять через все 7 дифф-сценариев.
     Сдвиг ровно **+129**: 204<->333, 313<->442, 324<->453(456), 397<->526(523) —
     то есть выравнивание +130, которое я раньше объявил артефактом, ВЕРНО, и
     весь бой совпадает КРОМЕ ОДНОГО лишнего решения порта на f=161
