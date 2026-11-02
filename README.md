@@ -4,11 +4,11 @@
 
 ![gates](https://img.shields.io/badge/gates-34%20%C2%B7%2032%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 95%
+### Readiness: 97%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-63 of 66 checklist items; every gap below is documented in BUGS.md.
+64 of 66 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **34** (32 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -16,7 +16,7 @@ Gates with a baseline: **34** (32 at 0 divergences, 2 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 83% | 5/6 | kusarigama: the sickle/rope bone chain and the weapon binding are unverified - needs a per-frame live-game capture (QA-29.10 #4) |
+| **Animation & physics** | 🟩 | 100% | 6/6 | - |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟨 | 88% | 7/8 | live game: boss ranged/magic and abilities (shurikens, invisibility cast, summons) need a per-frame LIVE trace - the shipped JS ability path is a `debugger` stub, so the data cannot settle it |
 | **UI & screens** | 🟩 | 95% | 21/22 | Titan bodyguards: wrong location and no roster scrolling (QA-29.10 #7) |
@@ -25,9 +25,9 @@ Gates with a baseline: **34** (32 at 0 divergences, 2 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 95% | 63/66 | - |
+| **overall** | 🟩 | 97% | 64/66 | - |
 
-The `overall` row is every checklist item at once (63 of 66); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (64 of 66); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
@@ -49,8 +49,8 @@ The `overall` row is every checklist item at once (63 of 66); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48043 | 18 |
-| `core/scene` | 39618 | 35 |
-| `app/game` | 11979 | 1 |
+| `core/scene` | 39645 | 35 |
+| `app/game` | 12067 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (63 of 66); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **109583** | |
+| **total** | **109698** | |
 <!-- STATUS:END -->

@@ -4057,6 +4057,33 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // `start_move_impl` (`mirror_swap_`). The old per-frame post-solve swap
     // here (re-derived from `prev_x_`) is removed.
 
+    // [probe, authorised] `SF2_TRACE_CHAIN=1`: the KUSARIGAMA's cloth chain
+    // (`KusarigamaChain-Node29/31/33/…`, 11 nodes with Cloth="1" and mass
+    // 0.001 in `mdl_weapon_kusarigama`) must MOVE relative to the hand: the
+    // rope is a cloth chain in the shipped data, not a rigid mesh. Prints the
+    // first/last chain node's world x/y every 4th frame.
+    if (std::getenv("SF2_TRACE_CHAIN") != nullptr && current_clip_ != nullptr) {
+        static const int kA = model_.bone_by_name("KusarigamaChain-Node29");
+        static const int kB = model_.bone_by_name("KusarigamaChain-Node39");
+        static int tick = 0;
+        if (kA >= 0 && kB >= 0 &&
+            static_cast<std::size_t>(kB) * 2 + 1 < pos_.size() &&
+            (tick++ % 4) == 0) {
+            std::fprintf(stdout,
+                         "[chain] A=(%.1f,%.1f) B=(%.1f,%.1f) span=%.1f\n",
+                         static_cast<double>(pos_[static_cast<std::size_t>(kA) * 2]),
+                         static_cast<double>(pos_[static_cast<std::size_t>(kA) * 2 + 1]),
+                         static_cast<double>(pos_[static_cast<std::size_t>(kB) * 2]),
+                         static_cast<double>(pos_[static_cast<std::size_t>(kB) * 2 + 1]),
+                         static_cast<double>(
+                             std::hypot(pos_[static_cast<std::size_t>(kB) * 2] -
+                                            pos_[static_cast<std::size_t>(kA) * 2],
+                                        pos_[static_cast<std::size_t>(kB) * 2 + 1] -
+                                            pos_[static_cast<std::size_t>(kA) * 2 + 1])));
+            std::fflush(stdout);
+        }
+    }
+
     // [F1] World placement: the fighter's (x, y) anchors the model's PivotNode
     //    bone at (x, y) — JS `Dl.oL` (L577) offsets every bone so the anchor's
     //    `ma` lands on the placement point (`pos = ma - ma[anchor] + anchor`).

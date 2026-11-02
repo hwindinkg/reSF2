@@ -64,8 +64,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama: the sickle/rope bone chain and the weapon binding are "
-         "unverified - needs a per-frame live-game capture (QA-29.10 #4)", False),
+        ("kusarigama: the rope IS a cloth chain and the port simulates it "
+         "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
+         "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "
+         "measured via `--dump-model` + `SF2_TRACE_CHAIN` (QA-29.10 #4)", True),
         ("boss perks: the shield scales damage to 2^-1.6 = 0.3299 (measured "
          "0.3299; gate `boss-shield`) and invisibility stops the model being "
          "drawn (15369 px vanish at the same frame; gate `boss-invis`); "

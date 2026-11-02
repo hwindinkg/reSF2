@@ -2424,6 +2424,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --shield-probe: the boss shield perk's ModAttributes(DamageFactor) - one
     // punch before vs after the shield is installed.
     bool shield_probe = false;
+    // --dump-model NAME: print a model's bone list + attributes + the triangles'
+    // skin bindings (used to settle the kusarigama's node/rope question from
+    // the shipped data instead of guessing).
+    std::string dump_model;
     // --settings-profile-shop-probe: the Settings Credits row, the Moves-tab
     // selection and the shop RUBY-tab sale badge (screens.cpp run_shell_probe).
     bool settings_profile_shop_probe = false;
@@ -3306,6 +3310,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // attacker's active Window / active parts / overlap / `<Hit>`
             // window / outcome). Simulation-neutral.
             sf2::scene::set_hit_audit_global(true);
+        } else if (arg == "--dump-model" && i + 1 < argc) {
+            dump_model = argv[++i];
         } else if (arg == "--dump-clip" && i + 1 < argc) {
             dump_clip = argv[++i];
         } else if (arg == "--dump-pose") {
@@ -3479,7 +3485,89 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const bool is_dir = std::filesystem::is_directory(rr, ec);
         // The shipped res carries the packed XML archive + the default save;
         // any of these proves the root is a real game asset tree.
-        const bool has_assets = std::filesystem::exists(rr / "xml.9e0b4b10.dat", ec) ||
+        if (!dump_model.empty()) {
+        // `app.cpp`'s `load_archive`/`find_entry` are file-static there, so use
+        // the data layer directly.
+        auto load_arch = [](const std::string& path) {
+            std::ifstream in(path, std::ios::binary | std::ios::ate);
+            if (!in) throw std::runtime_error("cannot open " + path);
+            const std::streamsize n = in.tellg();
+            std::vector<std::uint8_t> cbuf(static_cast<std::size_t>(n));
+            in.seekg(0);
+            in.read(reinterpret_cast<char*>(cbuf.data()), n);
+            const std::vector<std::uint8_t> dec = sf2::data::zstd_decompress(cbuf);
+            return sf2::data::xml_archive_parse(dec.data(), dec.size());
+        };
+        // Print one models.*.dat entry: every bone (name, bind position, the
+        // `Cloth`/`Fixed`/`Shock`/`Weak` flags), the capsule/edge counts and
+        // every triangle's skin bindings (child bone names + weights). This is
+        // how the kusarigama's "rope" question is answered from DATA: if every
+        // triangle binds to the same hand bone there is no cloth chain at all.
+        try {
+            const std::vector<sf2::data::archive_entry> models =
+                load_arch(res_root + "/models.473fd74f.dat");
+            const sf2::data::archive_entry* e = nullptr;
+            for (const sf2::data::archive_entry& en : models) {
+                if (en.name == dump_model) e = &en;
+            }
+            if (e == nullptr) {
+                std::fprintf(stderr, "[model] '%s' not found (%zu entries)\n",
+                             dump_model.c_str(), models.size());
+                return 1;
+            }
+            const sf2::scene::Model m =
+                sf2::scene::model_parse(e->data.data(), e->data.size());
+            std::fprintf(stdout, "[model] %s bones=%zu tris=%zu capsules=%zu edges=%zu\n",
+                         dump_model.c_str(), m.bones.size(), m.tris.size(),
+                         m.capsules.size(), m.edges.size());
+            for (std::size_t b = 0; b < m.bones.size(); ++b) {
+                const sf2::scene::Bone& bo = m.bones[b];
+                std::fprintf(stdout,
+                             "[model]   bone %3zu %-22s bind=(%8.2f,%8.2f,%8.2f) "
+                             "cloth=%d fixed=%d shock=%d weak=%d coll=%d mass=%.3f\n",
+                             b, bo.name.c_str(), static_cast<double>(bo.x),
+                             static_cast<double>(bo.y), static_cast<double>(bo.z),
+                             bo.cloth ? 1 : 0, bo.fixed ? 1 : 0, bo.shock ? 1 : 0,
+                             bo.weak ? 1 : 0, bo.collisible ? 1 : 0,
+                             static_cast<double>(bo.mass));
+            }
+            // triangles: which bones the mesh is skinned to
+            std::map<std::string, int> bind_counts;
+            for (const sf2::scene::Tri& t : m.tris) {
+                bind_counts[t.n1]++;
+                bind_counts[t.n2]++;
+                bind_counts[t.n3]++;
+            }
+            // MacroNode children: the macro's position is the WEIGHTED average
+            // of these nodes (`Yc.FIa`), so a mesh bound to a macro that mixes
+            // the hand node with cloth-chain nodes would visibly swing.
+            std::fprintf(stdout, "[model] macros=%zu\n", m.macro_children.size());
+            for (const auto& kv : m.macro_children) {
+                std::fprintf(stdout, "[model]   macro %-24s children=%zu:", kv.first.c_str(),
+                             kv.second.child_names.size());
+                for (std::size_t c = 0; c < kv.second.child_names.size(); ++c) {
+                    std::fprintf(stdout, " %s(%.2f)", kv.second.child_names[c].c_str(),
+                                 static_cast<double>(c < kv.second.weights.size()
+                                                         ? kv.second.weights[c]
+                                                         : 0.0f));
+                }
+                std::fprintf(stdout, "\n");
+            }
+            std::fprintf(stdout, "[model] skin bindings (%zu distinct):\n",
+                         bind_counts.size());
+            for (const auto& kv : bind_counts) {
+                std::fprintf(stdout, "[model]   %-22s %d\n", kv.first.c_str(),
+                             kv.second);
+            }
+            std::fflush(stdout);
+        } catch (const std::exception& ex) {
+            std::fprintf(stderr, "[model] error: %s\n", ex.what());
+            return 1;
+        }
+        return 0;
+    }
+
+    const bool has_assets = std::filesystem::exists(rr / "xml.9e0b4b10.dat", ec) ||
                                 std::filesystem::exists(rr / "users_default.b7da2019.xml", ec) ||
                                 std::filesystem::exists(rr / "ui", ec);
         if (!is_dir || !has_assets) {
