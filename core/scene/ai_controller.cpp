@@ -2823,6 +2823,15 @@ std::string AiController::update(const AiFightState& st) {
         // JS `wd.Anb` (L499): the Random-tactic DECISION (`hJa`) is phase-2
         // gated (`Je==2`); the event blocks above already ran.
         if (!st.phase_fight) return "";
+        // [experiment] `SF2_HJA_GC=1`: make the Random-tactic `dsb`/`hJa` point
+        // go through the JS pump (`hJa` L20661-20683 only injects the synthetic
+        // `<KeyPressed/>`; the next `Gc.ia`/`EZa` pass decides) instead of
+        // picking directly in `update_random`.
+        static const bool hja_gc = std::getenv("SF2_HJA_GC") != nullptr;
+        if (hja_gc) {
+            const std::string gc = gc_frame(st);
+            return gc;
+        }
         return update_random(st);
     }
 

@@ -2586,6 +2586,21 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
     4. Прогон: `diff:kusarigama` (ожидаем 0) + все 7 диффов + `enemy-move-audit`
        + `--fast`/`--full`; только затем убрать `kusarigama` из
        `UNGATED_SCENARIOS` и выставить baseline.
+    ЗАМЕРЫ 02.11 (все три — env-гейты, по умолчанию ВЫКЛ, поведение не меняется):
+    ```
+    SF2_RANDOM_REQUIRE_EVENT=1            -> 1223 (первое f=249/379)
+    SF2_RANDOM_REQUIRE_EVENT+SF2_GC_PUMP  -> 1223 (помпа не работает для
+                                            Random-тактик: `tactic_->type==2`)
+    SF2_HJA_GC=1 (Random -> gc_frame)     -> 1223 (gc_frame без fired-событий
+                                            возвращает пустой `gc_stored_`)
+    ```
+    ВЫВОД: маршрут не переключить, пока в порте НЕТ модели события `KeyPressed`:
+    `event_type_by_name` (trigger.hpp:74-92) вообще не знает такого имени, а
+    `gc_type` (ai_controller.cpp:2014-2029) не умеет вернуть тип 2 — значит
+    `fired` в `gc_frame` никогда не содержит KeyPressed, и помпа не может
+    решить. Поэтому рефактор начинается не с `dsb`, а с ТАБЛИЦЫ событий:
+    добавить `KeyPressed -> 2` в `event_type_by_name`/`gc_type`, научить
+    `my_event_types` нести это событие, и только потом переключать `dsb`.
     Учесть: событие, положенное в `frame_events`, ИИ увидит на СЛЕДУЮЩЕМ кадре
     (`ai_events_prev_` копируется после апдейта) — если это даст сдвиг на кадр,
     потребуется положить событие ДО построения `st.my_event_types` (порядок
