@@ -64,12 +64,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama + enemy AI: the tactics gate itself is fine (10 measured "
-         "`Distance` rejections at f=161), but `Pqb` DECIDES in the port "
-         "(`ai_branch=6`, `KnivesSpinningSlash`) while the oracle's `fk` stays "
-         "-1 for the whole fight (`ai_branch=-1`, `chosen_move=None` in all "
-         "7288 oracle rows) - the `hcb` no-decision gate is the next suspect; "
-         "scenario `diff:kusarigama` reproduces it; not gated yet", False),
+        ("kusarigama + enemy AI: the tactics gate and `hcb` are both "
+         "JS-exact (measured), but the oracle's AI DECISION record is "
+         "unavailable - `trace_stats` shows `deCount=2` yet `Pqb:0`/`ia:0`, "
+         "and emitting the rows breaks state extraction (diff:boss-lynx "
+         "0 -> 2416, reverted); the port's enemy attacks at f=162 where the "
+         "oracle's does at f=379; scenario `diff:kusarigama` reproduces it; "
+         "not gated yet", False),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "
