@@ -1047,6 +1047,12 @@ struct ModeEnemy {
 
 // Whole-fight setup applied post-init (`FightController::apply_mode_setup`).
 struct ModeSetup {
+    // The FIGHT's own location (JS `IIa` L7942-7943 `a.location =
+    // Fight.Location ?? battleLocation`, resolved by `resolve_*_fight`). It was
+    // computed and then dropped: `ModeSetup` had no field for it, so any future
+    // cross-`<Fight>` advance would have reused the launch arena. Carried here
+    // (and logged by the caller) so the value is no longer dead data.
+    std::string location;
     int rounds = 2;
     int round_time = 99;
     double health_recovery = 1.0;
@@ -1067,6 +1073,7 @@ inline ModeSetup mode_setup_from_fight(
     const ModeFight& mf,
     const std::vector<OwnedItem>& enemy_owned) {
     ModeSetup out;
+    out.location = mf.location;
     out.rounds = mf.rounds;
     out.round_time = mf.round_time;
     out.health_recovery = mf.health_recovery;

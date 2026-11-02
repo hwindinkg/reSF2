@@ -14636,6 +14636,11 @@ FightScreen::FightScreen(ScreenManager& mgr, const std::string& battle_name,
                              setup.enemy_damage_factor, setup.no_bullets ? 1 : 0,
                              static_cast<long long>(setup.reward.money),
                              static_cast<long long>(setup.reward.exp));
+                if (!setup.location.empty()) {
+                    std::fprintf(stdout, "[mode] fight location='%s'\n",
+                                 setup.location.c_str());
+                    std::fflush(stdout);
+                }
                 std::fflush(stdout);
             } else {
                 std::fprintf(stdout, "[mode] %s: no resolved row (battle='%s')\n",
