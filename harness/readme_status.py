@@ -142,8 +142,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "`--nav-badge-probe`: shop=1, profile=20)", True),
         ("dojo `max` / `unlimited_energy` widgets (L82709/L82605, probe "
          "`--za-widget-probe`)", True),
-        ("Titan bodyguards: wrong location and no roster scrolling "
-         "(QA-29.10 #7)", False),
+        ("Titan bodyguards: the roster scroll and the per-fight location are "
+         "both measured working (all 6 `C3_BOSS_TITAN` entries centre at "
+         "x=640, delta 0.00; `<Fight Location>` applied). The reported wrong "
+         "BACKGROUND still needs the operator's screenshot (QA-29.10 #7)",
+         False),
         ("dojo bar fill clips the full-width sprite (`Uf.kB` L83275, probe "
          "`--za-energy-probe`: segment pitch preserved at Power=2)", True),
     ]),

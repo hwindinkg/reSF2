@@ -2303,6 +2303,56 @@ static int run_shop_tab_badge_probe(App& app) {
     return n0 > 0 ? 0 : 1;
 }
 
+static int run_roster_probe(App& app) {
+    // Freeze the `jk` roster on the map screen at the requested state and print
+    // where the SELECTED entry lands (it must be the canvas centre 640).
+    glfwHideWindow(app.renderer().window());
+    app.screens().push(make_screen(app.screens(), kScreenMap));
+    app.set_headless_frames(1);
+    int st = 3;
+    if (const char* e = std::getenv("SF2_ROSTER_STATE")) st = std::atoi(e);
+    sf2::app::set_force_boss_state(st);
+    int only = -1;
+    if (const char* e = std::getenv("SF2_ROSTER_INDEX")) only = std::atoi(e);
+    float max_delta = 0.0f;
+    int checked = 0;
+    int n_entries = -1;
+    for (int idx = 0; idx <= 24; ++idx) {
+        if (n_entries >= 0 && idx >= n_entries) break;
+        if (only >= 0 && idx != only) continue;
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%d", idx);
+        _putenv_s("SF2_ROSTER_INDEX", buf);
+        // re-arm: force off drops the frozen machine, force on rebuilds it
+        sf2::app::set_force_boss_roster(false);
+        for (int i = 0; i < 2; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        sf2::app::set_force_boss_roster(true);
+        for (int i = 0; i < 8; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const float d = sf2::app::boss_roster_sel_delta();
+        if (n_entries < 0) n_entries = sf2::app::boss_roster_entry_count();
+        if (std::fabs(d) > std::fabs(max_delta)) max_delta = d;
+        ++checked;
+        if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+            if (idx == only) {
+                app.capture_png(shot);
+                std::fprintf(stdout, "[roster] shot %s\n", shot);
+                std::fflush(stdout);
+            }
+        }
+    }
+    std::fprintf(stdout, "[roster] RESULT indices=%d max_delta=%.2f -> %s\n",
+                 checked, static_cast<double>(max_delta),
+                 std::fabs(max_delta) < 0.51f ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return std::fabs(max_delta) < 0.51f ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     std::string res_root = "reference/www/res";
     std::string save_path = "reference/saves/save.xml";
@@ -2424,6 +2474,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // --shield-probe: the boss shield perk's ModAttributes(DamageFactor) - one
     // punch before vs after the shield is installed.
     bool shield_probe = false;
+    // --roster-probe: the boss-intro roster (`jk`) frozen at a SELECTED index,
+    // so the scroll to a later entry can be measured (`SF2_ROSTER_BATTLE` /
+    // `SF2_ROSTER_INDEX` / `SF2_ROSTER_STATE`).
+    bool roster_probe = false;
     // --dump-model NAME: print a model's bone list + attributes + the triangles'
     // skin bindings (used to settle the kusarigama's node/rope question from
     // the shipped data instead of guessing).
@@ -2659,6 +2713,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         {"--evade-probe", &evade_probe},
         {"--invis-probe", &invis_probe},
         {"--shield-probe", &shield_probe},
+        {"--roster-probe", &roster_probe},
         {"--kick-ko", &kick_ko_probe},
         {"--auto-attack", &auto_attack},
     };
@@ -3310,6 +3365,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // attacker's active Window / active parts / overlap / `<Hit>`
             // window / outcome). Simulation-neutral.
             sf2::scene::set_hit_audit_global(true);
+        } else if (arg == "--roster-probe") {
+            roster_probe = true;
         } else if (arg == "--dump-model" && i + 1 < argc) {
             dump_model = argv[++i];
         } else if (arg == "--dump-clip" && i + 1 < argc) {
@@ -9120,6 +9177,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
         }
         return probe_failures == 0 ? 0 : 1;
+    } else if (roster_probe) {
+        return run_roster_probe(app);
     } else if (verify_place) {
         // ------------------------------------------------------------------
         // `--verify-place <me_x> <enemy_x>`: the proof hooks for the two

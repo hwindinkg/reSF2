@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-01T22:36:09",
+    "updated": "2026-11-02T10:28:55",
     "mode": "only"
   },
   "gates": {
@@ -207,6 +207,12 @@
       "commit": "bb0bf87f",
       "reason": "new gates: the invisibility perk hides the model and the boss shield scales damage to 2^-1.6 (both measured)",
       "date": "2026-11-01T22:36:09"
+    },
+    "boss-roster-scroll": {
+      "metric": 0,
+      "commit": "df3a3066",
+      "reason": "new gate: the boss roster scrolls so the selected entry is centred (6/6 entries, delta 0.00)",
+      "date": "2026-11-02T10:28:55"
     }
   }
 }

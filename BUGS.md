@@ -2433,6 +2433,25 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
     `neural_network` на всех 6 боях (это данные, не порт).
   Значит «неверная локация» либо из ДРУГОГО потока запуска (нужен ваш скриншот,
   из какого экрана), либо это вопрос арта/превью, а не логики выбора локации.
+  - «нет прокрутки росписи» — ОПРОВЕРГНУТО замером 02.11. Захват `act_boss`
+    всегда звал `roster_.start(entries, 0)` (`screens.cpp`), поэтому НИ ОДИН
+    кадр не проверял прокрутку к позднему бою. Добавлены
+    `SF2_ROSTER_BATTLE`/`SF2_ROSTER_INDEX`/`SF2_ROSTER_STATE` и пробник
+    `--roster-probe`, который прогоняет ВСЕ индексы и печатает, где оказался
+    выбранный портрет (центр холста = 640):
+    ```
+    [roster] entries=6 index=0 state=3 scroll_x= 640.00 sel_cx=640.00 delta=+0.00
+    [roster] entries=6 index=1 state=3 scroll_x= 357.60 sel_cx=640.00 delta=+0.00
+    [roster] entries=6 index=2 state=3 scroll_x=  75.20 sel_cx=640.00 delta=+0.00
+    [roster] entries=6 index=3 state=3 scroll_x=-207.20 sel_cx=640.00 delta=+0.00
+    [roster] entries=6 index=4 state=3 scroll_x=-489.60 sel_cx=640.00 delta=+0.00
+    [roster] entries=6 index=5 state=3 scroll_x=-842.60 sel_cx=640.00 delta=+0.00
+    [roster] RESULT indices=6 max_delta=0.00 -> PASS
+    ```
+    (последний шаг 353 вместо 282.4 — это авторский `+0.2g` у последней строки,
+    JS `jk.init` L2067-2070). Кадр `.harness/roster5b.png`: Титан в центре,
+    пройденные телохранители слева со штрихом `botCompleted`.
+    Гейт `boss-roster-scroll`.
 - живая игра: сюрикены/касты босса (в шипнутом JS путь способностей —
   `debugger;`, данные не отвечают) — нужен покадровый трейс живой игры.
 

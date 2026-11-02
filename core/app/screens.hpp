@@ -245,6 +245,10 @@ struct BossRosterEntry {
 // resting selection (`act_boss`), 1 = mid horizontal scroll-in.
 bool force_boss_roster();
 void set_force_boss_roster(bool on);
+// [probe] the frozen roster's selected-entry offset from the canvas centre.
+float boss_roster_sel_delta();
+// [probe] the last armed roster's entry count (`--roster-probe` sweep).
+int boss_roster_entry_count();
 // The frozen `jk` pose the forced roster holds (3/4 = `act_boss`, 1 = mid
 // scroll-in for the extra capture step).
 void set_force_boss_state(int state);

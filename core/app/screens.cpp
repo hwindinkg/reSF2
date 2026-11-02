@@ -11629,6 +11629,11 @@ bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {   
     return false;
 }
 
+// [probe] The last frozen roster's selected-entry offset from the canvas centre
+// (`--roster-probe` sweeps every index and reads it in-process).
+float g_roster_sel_delta = 0.0f;
+int g_roster_entries = 0;
+
 void MapScreen::update_impl(float dt) {
     // Fidelity-tour boss-roster capture: arm the `jk` machine frozen at the
     // requested pose (3/4 = the `act_boss` resting selection, 1 = mid
@@ -11637,14 +11642,42 @@ void MapScreen::update_impl(float dt) {
         roster_forced_ = true;
         if (!roster_.started || roster_.state != force_boss_state()) {
             std::vector<BossRosterEntry> entries;
-            if (zone_sel_ >= 0 && static_cast<std::size_t>(zone_sel_) < zones_.size()) {
+            // [probe] `SF2_ROSTER_BATTLE=<name>`: take the roster from THAT
+            // battle (any zone), so a probe can drive a ladder with more than
+            // one entry (`C3_BOSS_TITAN`, 6 fights) without the map.
+            const char* want_battle = std::getenv("SF2_ROSTER_BATTLE");
+            bool picked = false;
+            if (want_battle != nullptr) {
+                for (const ZoneTab& z : zones_) {
+                    for (const Node& n : z.nodes) {
+                        if (n.name != want_battle) continue;
+                        entries = boss_roster_entries(app(), n);
+                        picked = true;
+                        break;
+                    }
+                    if (picked) break;
+                }
+            }
+            if (!picked && zone_sel_ >= 0 &&
+                static_cast<std::size_t>(zone_sel_) < zones_.size()) {
                 for (const Node& n : zones_[zone_sel_].nodes) {
-                    if (n.type != "BOSSES" && n.type != "BOSSES_REPLAYABLE") continue;
+                    if (n.type != "BOSSES" && n.type != "BOSSES_REPLAYABLE" &&
+                        n.type != "FINAL_BATTLE_TITAN") {
+                        continue;
+                    }
                     entries = boss_roster_entries(app(), n);
                     break;
                 }
             }
-            roster_.start(std::move(entries), 0);
+            // [probe] `SF2_ROSTER_INDEX=<i>`: the SELECTED entry. The capture
+            // hook always passed 0, so nothing ever exercised the scroll to a
+            // later entry - the "the roster does not scroll" symptom.
+            int forced_index = 0;
+            if (const char* ri = std::getenv("SF2_ROSTER_INDEX")) {
+                forced_index = std::atoi(ri);
+                if (forced_index < 0) forced_index = 0;
+            }
+            roster_.start(std::move(entries), forced_index);
             const int want = force_boss_state();
             int guard = 0;
             while (roster_.state < want && roster_.active() && ++guard < 100000) {
@@ -11656,6 +11689,25 @@ void MapScreen::update_impl(float dt) {
                 roster_.time *= 0.5f;  // mid-tween: the row is part-scrolled
                 roster_.row_alpha = 1.0f;
             }
+            // [probe] the MEASUREMENT: the selected entry must sit at the
+            // canvas centre (the draw pass uses `scroll_x + entry_x(i)`).
+            float sel_cx = -1.0f;
+            if (roster_.index >= 0 &&
+                static_cast<std::size_t>(roster_.index) < roster_.entries.size()) {
+                sel_cx = roster_.scroll_x + roster_.entry_x(roster_.index);
+            }
+            std::fprintf(stdout,
+                         "[roster] entries=%zu index=%d state=%d scroll_x=%.2f "
+                         "entry_x(sel)=%.2f sel_cx=%.2f want=%.2f delta=%+.2f\n",
+                         roster_.entries.size(), roster_.index, roster_.state,
+                         static_cast<double>(roster_.scroll_x),
+                         static_cast<double>(roster_.entry_x(roster_.index)),
+                         static_cast<double>(sel_cx),
+                         static_cast<double>(BossRosterScroll::kCentre),
+                         static_cast<double>(sel_cx - BossRosterScroll::kCentre));
+            g_roster_sel_delta = sel_cx - BossRosterScroll::kCentre;
+            g_roster_entries = static_cast<int>(roster_.entries.size());
+            std::fflush(stdout);
         }
         return;
     }
@@ -13478,6 +13530,11 @@ int g_force_boss_state = 3;
 }  // namespace
 
 bool force_boss_roster() { return g_force_boss_roster; }
+// [probe] The last frozen roster's selected-entry offset from the canvas
+// centre (`--roster-probe` sweeps every index and needs it in-process).
+float boss_roster_sel_delta() { return g_roster_sel_delta; }
+int boss_roster_entry_count() { return g_roster_entries; }
+
 void set_force_boss_roster(bool on) { g_force_boss_roster = on; }
 void set_force_boss_state(int state) { g_force_boss_state = state; }
 int force_boss_state() { return g_force_boss_state; }

@@ -647,6 +647,7 @@ PARSERS = {
     # nerf) and the invisibility action (the model stops being drawn).
     "invis": p_kv_result("invis"),
     "shieldperk": p_kv_result("shield"),
+    "roster": p_kv_result("roster"),
 }
 
 
@@ -698,6 +699,10 @@ FLAG_GATES: list[Gate] = [
     # `PERK_BOSS_WIDOW_SHIELDING` -> `ModAttributes DamageFactor=-16000`:
     # a punch must drop to 2^-1.6 = 0.3299 of its damage.
     Gate("boss-shield", "gate", ("full",), "--shield-probe", 300, parser="shieldperk"),
+    # The boss-intro roster (`jk`) must SCROLL so the selected entry is centred
+    # (`bQ.C(scrollX)` + `i*g*.8`): swept over every entry of C3_BOSS_TITAN.
+    Gate("boss-roster-scroll", "gate", ("full",), "--roster-probe", 300,
+         parser="roster", env={"SF2_ROSTER_BATTLE": "C3_BOSS_TITAN"}),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
     # The winner's EndStance `Win_<weapon>` animation (bug Q): `--kick-ko`
     # fights to a KO, so the phase-3 pick must resolve and start the win clip.
