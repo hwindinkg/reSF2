@@ -2569,6 +2569,27 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
     льёт `<KeyPressed/>` в `Tu`, и решает СЛЕДУЮЩИЙ проход `Gc.ia`/`EZa`.
     Полный фикс = перевести `dsb` на очередь событий (а не звать Random-путь
     напрямую) и проверить все 7 диффов; это уже переделка подсистемы.
+
+    ПЛАН РЕФАКТОРА (записан, чтобы следующий заход начинался сразу с дела):
+    1. `AiFightState` (ai.hpp): добавить `std::function<void(int slot,
+       const std::string& name)> push_event;` — ИИ просит положить событие в
+       очередь. Привязать в `fight.cpp` рядом с `st.my_event_types` (L8937) к
+       `bus_.frame_events` (тот же буфер, что читает `ai_events_prev_`
+       L10019), с ПРАВИЛЬНЫМ slot для `KeyPressed` (`gc_type`/`js_event_type`
+       должны дать тип 2).
+    2. `ai_controller.cpp:2826` (Random-тактика, путь `dsb`): вместо
+       `return update_random(st);` — `if (st.push_event) st.push_event(slot,
+       "KeyPressed"); return "";` (JS `hJa` L20661-20683 ничего не решает).
+    3. `update_random`: включить требование пришедшего `KeyPressed`
+       (сейчас за env `SF2_RANDOM_REQUIRE_EVENT`) ПО УМОЛЧАНИЮ; `gc_frame`
+       (L2774) сделать штатной помпой без env `SF2_GC_PUMP`.
+    4. Прогон: `diff:kusarigama` (ожидаем 0) + все 7 диффов + `enemy-move-audit`
+       + `--fast`/`--full`; только затем убрать `kusarigama` из
+       `UNGATED_SCENARIOS` и выставить baseline.
+    Учесть: событие, положенное в `frame_events`, ИИ увидит на СЛЕДУЮЩЕМ кадре
+    (`ai_events_prev_` копируется после апдейта) — если это даст сдвиг на кадр,
+    потребуется положить событие ДО построения `st.my_event_types` (порядок
+    блоков в `fight.cpp` 8937 и 8948).
     Сдвиг ровно **+129**: 204<->333, 313<->442, 324<->453(456), 397<->526(523) —
     то есть выравнивание +130, которое я раньше объявил артефактом, ВЕРНО, и
     весь бой совпадает КРОМЕ ОДНОГО лишнего решения порта на f=161
