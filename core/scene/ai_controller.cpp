@@ -3095,6 +3095,25 @@ std::string AiController::update_random(const AiFightState& st,
     // `<KeyPressed/>` slot. Candidates are MY OWN moves whose Events carry
     // type 2 and whose conditions (`f.Yz(b,null,g)`, `v1`) pass; all carry
     // `eb=true` (the `Vkb` event), so `DK(c=false)` puts them in `d`.
+    // [FIX kusarigama diff] JS `hJa` (L20661-20683) does NOT decide: it only
+    // pushes the synthetic `<KeyPressed/>` into `Gc.Tu` (`ca.Ka().Vgb(Vb)`),
+    // and the NEXT `Gc.ia` pass (`EZa`) builds candidates from the events that
+    // ACTUALLY fired. The port called this path directly on the clip end and
+    // admitted every `<Events><KeyPressed/>` move, so on an idle-clip END it
+    // resolved a move (`KnivesSpinningSlash`) the JS never considers - the
+    // port's own `gc_frame` reports `types=[14] matched=0 kept=0` on that very
+    // frame. Unify: the Random path also requires a fired type-2 event.
+    static const bool require_event =
+        std::getenv("SF2_RANDOM_REQUIRE_EVENT") != nullptr;
+    if (require_event) {
+        bool key_fired = false;
+        for (const auto& ev : st.my_event_types) {
+            // the bus numbering: slot 2 = EveryFrame, so match by NAME and the
+            // `gc_type` mapping used by `gc_frame` (1/2 -> KeyPressed family).
+            if (ev.name == "KeyPressed" || ev.slot == 3) key_fired = true;
+        }
+        if (!key_fired) return "";
+    }
     std::vector<const MoveDef*> cands;
     if (st.my_moves != nullptr) {
         for (const MoveDef* m : *st.my_moves) {

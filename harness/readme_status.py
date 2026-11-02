@@ -64,7 +64,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama + enemy AI: root cause localized - the port's Random "
+        ("kusarigama + enemy AI: the spurious f=161 decision is measured - "
+         "gating the Random path on a fired `KeyPressed` event "
+         "(`SF2_RANDOM_REQUIRE_EVENT=1`, default off) drops the diff "
+         "1394 -> 1223 and moves the first divergence to f=249/379, where the "
+         "port now MISSES the oracle's decision: `dsb` must inject the event "
+         "instead of calling the Random path directly. Root cause localized - "
          "path picks a move directly (`br:\"random/hJa\"`, `fk=6`) on the "
          "idle-clip END, where JS `hJa` only injects a synthetic KeyPressed "
          "and `EZa` admits no candidate for type 10 (port's own `gc_frame`: "
