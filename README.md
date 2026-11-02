@@ -16,7 +16,7 @@ Gates with a baseline: **37** (35 at 0 divergences, 2 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: with the weapon equipped the oracle and the port diverge from the first block reaction (1394 divergences, nat f=248 `HighBlockHeavy` vs the oracle's stance) - scenario `diff:kusarigama` reproduces it; not gated yet |
+| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: with the weapon equipped the two sides are identical up to fight frame 161, then the port's enemy attacks (`KnivesSpinningSlash`) while the oracle's stays idle - the AI's decision on the kusarigama stance differs; scenario `diff:kusarigama` reproduces it (the report's +130 offset is an alignment artifact); not gated yet |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |

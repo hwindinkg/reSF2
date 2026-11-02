@@ -64,10 +64,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama + enemy AI: with the weapon equipped the oracle and the "
-         "port diverge from the first block reaction (1394 divergences, nat "
-         "f=248 `HighBlockHeavy` vs the oracle's stance) - scenario "
-         "`diff:kusarigama` reproduces it; not gated yet", False),
+        ("kusarigama + enemy AI: with the weapon equipped the two sides are "
+         "identical up to fight frame 161, then the port's enemy attacks "
+         "(`KnivesSpinningSlash`) while the oracle's stays idle - the AI's "
+         "decision on the kusarigama stance differs; scenario "
+         "`diff:kusarigama` reproduces it (the report's +130 offset is an "
+         "alignment artifact); not gated yet", False),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "
