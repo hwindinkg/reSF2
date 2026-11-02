@@ -2303,6 +2303,45 @@ static int run_shop_tab_badge_probe(App& app) {
     return n0 > 0 ? 0 : 1;
 }
 
+static int run_map_launch_probe(App& app) {
+    // The env `SF2_MAP_LAUNCH=<battle>` makes MapScreen::update_impl press that
+    // node through the real `start_battle` path (roster gate + pending
+    // location), which is what the FIGHT plate does.
+    glfwHideWindow(app.renderer().window());
+    app.screens().push(make_screen(app.screens(), kScreenMap));
+    app.set_headless_frames(1);
+    int frames = 6;
+    if (const char* e = std::getenv("SF2_ML_FRAMES")) frames = std::atoi(e);
+    for (int i = 0; i < frames && app.screens().current_id() != kScreenFight; ++i) {
+        glfwPollEvents();
+        app.run_one_frame();
+    }
+    // The roster (`jk`) takes 4.6 s (state 4 -> `launch_battle`), so after
+    // enough frames the pending battle must carry the FIGHT's location.
+    std::fprintf(stdout,
+                 "[maplaunch] after %d frames: screen=%d pb.location=%s "
+                 "pb.battle=%s\n",
+                 frames, static_cast<int>(app.screens().current_id()),
+                 app.pending_battle().location.c_str(),
+                 app.pending_battle().battle_name.c_str());
+    // The gate: the boss ladder must arm the `jk` roster AND launch the fight
+    // with the FIGHT's own location (C3_BOSS_TITAN fight 1 = `skyport`, while
+    // the battle says `neural_network`).
+    const std::string ml_loc = app.pending_battle().location;
+    const bool ml_ok = app.screens().current_id() == kScreenFight &&
+                       ml_loc == "skyport";
+    std::fprintf(stdout, "[maplaunch] RESULT screen=%d location=%s -> %s\n",
+                 static_cast<int>(app.screens().current_id()), ml_loc.c_str(),
+                 ml_ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    if (const char* shot = std::getenv("SF2_DRAG_SHOT")) {
+        app.capture_png(shot);
+        std::fprintf(stdout, "[maplaunch] shot %s\n", shot);
+        std::fflush(stdout);
+    }
+    return 0;
+}
+
 static int run_roster_probe(App& app) {
     // Freeze the `jk` roster on the map screen at the requested state and print
     // where the SELECTED entry lands (it must be the canvas centre 640).
@@ -2478,6 +2517,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // so the scroll to a later entry can be measured (`SF2_ROSTER_BATTLE` /
     // `SF2_ROSTER_INDEX` / `SF2_ROSTER_STATE`).
     bool roster_probe = false;
+    // --map-launch-probe: press a map node exactly like the FIGHT plate
+    // (`SF2_MAP_LAUNCH=<battle>`), so the boss-roster gate and the pending
+    // location run through the real map path.
+    bool map_launch_probe = false;
     // --dump-model NAME: print a model's bone list + attributes + the triangles'
     // skin bindings (used to settle the kusarigama's node/rope question from
     // the shipped data instead of guessing).
@@ -2714,6 +2757,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         {"--invis-probe", &invis_probe},
         {"--shield-probe", &shield_probe},
         {"--roster-probe", &roster_probe},
+        {"--map-launch-probe", &map_launch_probe},
         {"--kick-ko", &kick_ko_probe},
         {"--auto-attack", &auto_attack},
     };
@@ -9177,6 +9221,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
         }
         return probe_failures == 0 ? 0 : 1;
+    } else if (map_launch_probe) {
+        return run_map_launch_probe(app);
     } else if (roster_probe) {
         return run_roster_probe(app);
     } else if (verify_place) {

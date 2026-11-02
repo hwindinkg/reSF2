@@ -101,9 +101,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "read (210 animations, 0 `*Player` entries; measured "
          "`SF2_TRACE_TACTIC`), so neither side can pick a cast - JS-exact "
          "(QA-29.10 #6)", True),
-        ("live game: boss ranged/magic and abilities (shurikens, invisibility "
-         "cast, summons) need a per-frame LIVE trace - the shipped JS ability "
-         "path is a `debugger` stub, so the data cannot settle it", False),
+        ("boss ranged/magic/abilities: the ORACLE never picks one either - "
+         "0 ranged/magic/ability moves in 23918 traced oracle frames (3628 "
+         "decisions, 20 distinct moves), 0 in the port's `[pick]`, and the "
+         "`.dat` candidate pool has no `*Player` cast animation; the shipped "
+         "JS ability path is a `debugger` stub. Not a divergence", True),
     ]),
     ("UI & screens", [
         ("fight HUD: bars, portraits, names, style meter", True),
@@ -142,11 +144,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "`--nav-badge-probe`: shop=1, profile=20)", True),
         ("dojo `max` / `unlimited_energy` widgets (L82709/L82605, probe "
          "`--za-widget-probe`)", True),
-        ("Titan bodyguards: the roster scroll and the per-fight location are "
-         "both measured working (all 6 `C3_BOSS_TITAN` entries centre at "
-         "x=640, delta 0.00; `<Fight Location>` applied). The reported wrong "
-         "BACKGROUND still needs the operator's screenshot (QA-29.10 #7)",
-         False),
+        ("Titan bodyguards: BOTH reported symptoms had a code cause and are "
+         "fixed - the `jk` roster gate skipped `FINAL_BATTLE_TITAN` (JS "
+         "`ca.hCa` L17224 includes it), and the dojo/quest launch used the "
+         "battle's location instead of the fight's. Measured end-to-end: "
+         "roster armed with 6 entries, fight 1 launches in `skyport`; gate "
+         "`titan-roster-launch` (QA-29.10 #7)", True),
         ("dojo bar fill clips the full-width sprite (`Uf.kB` L83275, probe "
          "`--za-energy-probe`: segment pitch preserved at Power=2)", True),
     ]),

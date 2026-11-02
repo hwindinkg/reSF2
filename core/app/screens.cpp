@@ -10318,7 +10318,17 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
     // `ZONE_1|BOSS_LYNX|1`, quests.xml L265).
     pb.fight_triple = triple;
     pb.zone = zone;
-    pb.location = location.empty() ? "bamboo_grove" : location;
+    // JS `IIa` L7942-7943: the FIGHT's `Location` overrides the battle's
+    // (`a.location = Fight.Location ?? battleLocation`). This path used the
+    // BATTLE's location only, so a quest-driven fight in a battle whose
+    // `<Fight>` overrides the arena (e.g. `C3_BOSS_TITAN` 1-5 -> `skyport`)
+    // rendered `neural_network`. `pending_fight_ordinal` is the 0-based ladder
+    // index from the triple's `|<n>` tail.
+    const std::string q_fight_loc =
+        battle_fight_location(battle, zone, pending_fight_ordinal(app()));
+    pb.location = !q_fight_loc.empty()
+                      ? q_fight_loc
+                      : (location.empty() ? "bamboo_grove" : location);
     pb.enemy_name = battle;
     pb.has_result = false;
     pb.player_won = false;
@@ -11337,7 +11347,13 @@ void MapScreen::start_battle(const Node& n) {
     // `FightBosses`/`FightBossesReplayable`/`FightFinalTitan`, so the gate is
     // "boss type AND more than one `<Fight>`"; every other battle takes the
     // direct branch. This is the ONE gate both real entries share.
-    if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE") {
+    // FIX (measured `--maplaunch-probe`): `ca.hCa` L17224 arms the `jk` scroll
+    // for `FightFinalTitan` TOO, but the gate only listed the two `FightBosses`
+    // types, so `C3_BOSS_TITAN` (Type=FINAL_BATTLE_TITAN) never played the
+    // opponent scroll - the reported "the Titan bodyguards roster does not
+    // scroll" (there was no roster at all).
+    if (n.type == "BOSSES" || n.type == "BOSSES_REPLAYABLE" ||
+        n.type == "FINAL_BATTLE_TITAN") {
         std::vector<BossRosterEntry> entries = boss_roster_entries(app(), n);
         if (entries.size() > 1) {
             act_node_ = n;
@@ -11635,6 +11651,36 @@ float g_roster_sel_delta = 0.0f;
 int g_roster_entries = 0;
 
 void MapScreen::update_impl(float dt) {
+    // [probe] `SF2_MAP_LAUNCH=<battle>`: press the node exactly like the FIGHT
+    // plate does (`start_battle`), so the roster gate and the pending location
+    // are exercised through the REAL map path (not a probe shortcut).
+    if (const char* want = std::getenv("SF2_MAP_LAUNCH")) {
+        if (want[0] != '\0' && !map_launch_done_) {
+            map_launch_done_ = true;
+            for (std::size_t zi = 0; zi < zones_.size() && !map_launch_done_found_;
+                 ++zi) {
+                for (const Node& n : zones_[zi].nodes) {
+                    if (n.name != want) continue;
+                    zone_sel_ = static_cast<int>(zi);
+                    map_launch_done_found_ = true;
+                    start_battle(n);
+                    std::fprintf(stdout,
+                                 "[maplaunch] battle=%s type=%s roster=%d "
+                                 "pb.location=%s\n",
+                                 n.name.c_str(), n.type.c_str(),
+                                 roster_.active() ? 1 : 0,
+                                 app().pending_battle().location.c_str());
+                    std::fflush(stdout);
+                    break;
+                }
+            }
+            if (!map_launch_done_found_) {
+                std::fprintf(stdout, "[maplaunch] battle '%s' not found\n", want);
+                std::fflush(stdout);
+            }
+            return;
+        }
+    }
     // Fidelity-tour boss-roster capture: arm the `jk` machine frozen at the
     // requested pose (3/4 = the `act_boss` resting selection, 1 = mid
     // scroll-in) and freeze the map (no taps/launches) while it is forced.

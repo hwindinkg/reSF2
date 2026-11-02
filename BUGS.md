@@ -2433,6 +2433,26 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
     `neural_network` на всех 6 боях (это данные, не порт).
   Значит «неверная локация» либо из ДРУГОГО потока запуска (нужен ваш скриншот,
   из какого экрана), либо это вопрос арта/превью, а не логики выбора локации.
+  - ПРИЧИНЫ НАЙДЕНЫ И ИСПРАВЛЕНЫ 02.11 (оба симптома были кодом, не артом):
+    * «нет прокрутки росписи»: гейт `jk` (`screens.cpp`) пускал только
+      `BOSSES`/`BOSSES_REPLAYABLE`, хотя JS `ca.hCa` L17224 включает и
+      `FightFinalTitan`. `C3_BOSS_TITAN` имеет `Type=FINAL_BATTLE_TITAN`, т.е.
+      роспись НЕ ВООРУЖАЛАСЬ вообще (нечего было прокручивать). Добавлен тип —
+      замер: `[map] FIGHT -> jk roster armed (6 entries)`.
+    * «неверная локация»: путь боя из КВЕСТА/додзё
+      (`DojoScreen::launch_quest_fight`, `screens.cpp:10321`) брал ЛОКАЦИЮ
+      БАТЛА и игнорировал `<Fight Location>` (JS `IIa` L7942-7943). Теперь
+      применяется `battle_fight_location(...)` по ординалу из трипла.
+      Замер сквозной через РЕАЛЬНЫЙ путь карты (`--map-launch-probe`):
+      ```
+      [map] FIGHT -> jk roster armed (6 entries, first C3_BOSS_TITAN)
+      [fight] location scene (skyport): 14 layers, arena 1936x512
+      [maplaunch] after 420 frames: screen=6 pb.location=skyport pb.battle=C3_BOSS_TITAN
+      ```
+    Гейт `titan-roster-launch`. Побочно (из аудита): `ModeSetup` считает
+    пер-боевую локацию и ВЫБРАСЫВАЕТ её (`modes.hpp:933-936` -> `1066-1106`);
+    сегодня безвредно (внутрибоевой advance не переходит на другой `<Fight>`),
+    латентный баг — записан.
   - «нет прокрутки росписи» — ОПРОВЕРГНУТО замером 02.11. Захват `act_boss`
     всегда звал `roster_.start(entries, 0)` (`screens.cpp`), поэтому НИ ОДИН
     кадр не проверял прокрутку к позднему бою. Добавлены
@@ -2452,8 +2472,22 @@ armed-панель `Pi` (`buy_armed_ >= 0`) вызывает `complete_guided("S
     JS `jk.init` L2067-2070). Кадр `.harness/roster5b.png`: Титан в центре,
     пройденные телохранители слева со штрихом `botCompleted`.
     Гейт `boss-roster-scroll`.
-- живая игра: сюрикены/касты босса (в шипнутом JS путь способностей —
-  `debugger;`, данные не отвечают) — нужен покадровый трейс живой игры.
+- сюрикены/касты босса — ЗАКРЫТО 02.11 замером ОРАКУЛА (не догадкой).
+  Прогнал эталон (`OracleShell --query "...&battle=BOSS_LYNX"
+  --input-script state_ai_attack_survival.txt`) и разобрал его собственный
+  трейс решений (`[ORACLE] {"chosen_move": ...}` в `reference/traces/console.log`):
+  ```
+  oracle rows = 23918, с решением = 3628, различных мувов = 20
+  ranged/magic/ability-like (Ranged|Magic|Ability|Invisib|Teleport|Summon|
+  Cloak|Bomb|Wave|Shuriken|Kunai|Arrow|Blaster|Saw) — НОЛЬ совпадений
+  ```
+  То есть ЭТАЛОН сам ни разу не выбрал ranged/magic/способность. У порта в
+  `[pick]` тоже 0 (замер выше), пул `.dat` не содержит `*Player`-анимаций каста
+  (210 анимаций, 0 записей), а путь `EnableBossAbility -> Pi.dS` в шипнутом JS —
+  заглушка `debugger;`. Значит это НЕ расхождение порта с JS.
+  Остаточная неопределённость: в живой игре босс сюрикены всё же бросает —
+  но этого пути нет ни в данных, ни в веб-сборке, он вне эталона (серверный
+  или скриптовый).
 
 ### QA-29.10 — итог захода (замеры)
 

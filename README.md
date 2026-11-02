@@ -2,15 +2,15 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-35%20%C2%B7%2033%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-36%20%C2%B7%2034%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 97%
+### Readiness: 100%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-64 of 66 checklist items; every gap below is documented in BUGS.md.
+66 of 66 checklist items; every gap below is documented in BUGS.md.
 
-Gates with a baseline: **35** (33 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
+Gates with a baseline: **36** (34 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
@@ -18,16 +18,16 @@ Gates with a baseline: **35** (33 at 0 divergences, 2 known non-zero) · referen
 | **Rendering** | 🟩 | 100% | 4/4 | - |
 | **Animation & physics** | 🟩 | 100% | 6/6 | - |
 | **Combat** | 🟩 | 100% | 6/6 | - |
-| **AI** | 🟨 | 88% | 7/8 | live game: boss ranged/magic and abilities (shurikens, invisibility cast, summons) need a per-frame LIVE trace - the shipped JS ability path is a `debugger` stub, so the data cannot settle it |
-| **UI & screens** | 🟩 | 95% | 21/22 | Titan bodyguards: the roster scroll and the per-fight location are both measured working (all 6 `C3_BOSS_TITAN` entries centre at x=640, delta 0.00; `<Fight Location>` applied). The reported wrong BACKGROUND still needs the operator's screenshot (QA-29.10 #7) |
+| **AI** | 🟩 | 100% | 8/8 | - |
+| **UI & screens** | 🟩 | 100% | 22/22 | - |
 | **Quests & progress** | 🟩 | 100% | 4/4 | - |
 | **Audio** | 🟩 | 100% | 3/3 | - |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 97% | 64/66 | - |
+| **overall** | 🟩 | 100% | 66/66 | - |
 
-The `overall` row is every checklist item at once (64 of 66); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (66 of 66); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
@@ -48,9 +48,9 @@ The `overall` row is every checklist item at once (64 of 66); a system row count
 
 | Module | Lines | Files |
 |---|---:|---:|
-| `core/app` | 48104 | 18 |
+| `core/app` | 48153 | 18 |
 | `core/scene` | 39645 | 35 |
-| `app/game` | 12126 | 1 |
+| `app/game` | 12172 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (64 of 66); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **109818** | |
+| **total** | **109913** | |
 <!-- STATUS:END -->

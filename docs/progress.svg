@@ -2,7 +2,7 @@
 <rect width="760" height="522" rx="10" fill="#0d1117"/>
 <text x="24" y="34" fill="#e6edf3" font-size="20" font-weight="600">Readiness by system</text>
 <text x="24" y="56" fill="#8b949e" font-size="12">treemap: tile area = checklist items in that system; colour = readiness (harness/readme_status.py)</text>
-<text x="736" y="40" fill="#3fb950" font-size="26" font-weight="700" text-anchor="end">97%</text>
+<text x="736" y="40" fill="#3fb950" font-size="26" font-weight="700" text-anchor="end">100%</text>
 <text x="736" y="58" fill="#8b949e" font-size="12" text-anchor="end">overall (all checklist items)</text>
 <g><title>Assets &amp; archives: 5/5 (100%)</title>
 <rect x="590.9" y="78.0" width="143.1" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
@@ -32,19 +32,19 @@
 <text x="422.4" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
 <text x="468.4" y="118.0" fill="#8b949e" font-size="11">6/6</text>
 </g>
-<g><title>AI: 7/8 (88%)</title>
-<rect x="263.3" y="78.0" width="147.0" height="224.6" rx="6" fill="#302919" stroke="#664e1c"/>
-<rect x="263.3" y="78.0" width="147.0" height="3" rx="1.5" fill="#d29922"/>
+<g><title>AI: 8/8 (100%)</title>
+<rect x="263.3" y="78.0" width="147.0" height="224.6" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="263.3" y="78.0" width="147.0" height="3" rx="1.5" fill="#3fb950"/>
 <text x="271.3" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">AI</text>
-<text x="271.3" y="118.0" fill="#d29922" font-size="15" font-weight="700">88%</text>
-<text x="317.3" y="118.0" fill="#8b949e" font-size="11">7/8</text>
+<text x="271.3" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="317.3" y="118.0" fill="#8b949e" font-size="11">8/8</text>
 </g>
-<g><title>UI &amp; screens: 21/22 (95%)</title>
+<g><title>UI &amp; screens: 22/22 (100%)</title>
 <rect x="26.0" y="78.0" width="233.3" height="396.0" rx="6" fill="#162f21" stroke="#245d31"/>
 <rect x="26.0" y="78.0" width="233.3" height="3" rx="1.5" fill="#3fb950"/>
 <text x="34.0" y="100.0" fill="#e6edf3" font-size="12" font-weight="600">UI &amp; screens</text>
-<text x="34.0" y="118.0" fill="#3fb950" font-size="15" font-weight="700">95%</text>
-<text x="80.0" y="118.0" fill="#8b949e" font-size="11">21/22</text>
+<text x="34.0" y="118.0" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="80.0" y="118.0" fill="#8b949e" font-size="11">22/22</text>
 </g>
 <g><title>Quests &amp; progress: 4/4 (100%)</title>
 <rect x="414.4" y="351.3" width="132.3" height="122.7" rx="6" fill="#162f21" stroke="#245d31"/>
@@ -82,5 +82,5 @@
 <text x="150" y="495" fill="#8b949e" font-size="12">70-94%</text>
 <rect x="240" y="485" width="12" height="12" rx="3" fill="#5f2728" stroke="#f85149"/>
 <text x="258" y="495" fill="#8b949e" font-size="12">&lt;70%</text>
-<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">2 open of 66 items</text>
+<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">0 open of 66 items</text>
 </svg>

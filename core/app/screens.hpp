@@ -617,6 +617,9 @@ private:
     // when it turns off the frozen roster is dropped so the REAL flow (or the
     // live map) re-arms cleanly instead of ticking the stale frozen pose.
     bool roster_forced_ = false;
+    // [probe] SF2_MAP_LAUNCH one-shot latch + found flag.
+    bool map_launch_done_ = false;
+    bool map_launch_done_found_ = false;
     // The `qo` focus-refresh marker (JS `Ya.Uw` L2129): the last
     // `SetMapFocus Battle=` the quest engine applied. A focus landing AFTER
     // this screen was constructed (the StoryTutorialBossFight SceneLoaded

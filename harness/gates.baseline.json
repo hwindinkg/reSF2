@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-02T10:28:55",
+    "updated": "2026-11-02T16:28:26",
     "mode": "only"
   },
   "gates": {
@@ -213,6 +213,12 @@
       "commit": "df3a3066",
       "reason": "new gate: the boss roster scrolls so the selected entry is centred (6/6 entries, delta 0.00)",
       "date": "2026-11-02T10:28:55"
+    },
+    "titan-roster-launch": {
+      "metric": 0,
+      "commit": "d7b2b406",
+      "reason": "new gate: the FINAL_BATTLE_TITAN roster arms and fight 1 launches in skyport",
+      "date": "2026-11-02T16:28:26"
     }
   }
 }

@@ -648,6 +648,7 @@ PARSERS = {
     "invis": p_kv_result("invis"),
     "shieldperk": p_kv_result("shield"),
     "roster": p_kv_result("roster"),
+    "maplaunch": p_kv_result("maplaunch"),
 }
 
 
@@ -703,6 +704,12 @@ FLAG_GATES: list[Gate] = [
     # (`bQ.C(scrollX)` + `i*g*.8`): swept over every entry of C3_BOSS_TITAN.
     Gate("boss-roster-scroll", "gate", ("full",), "--roster-probe", 300,
          parser="roster", env={"SF2_ROSTER_BATTLE": "C3_BOSS_TITAN"}),
+    # The Titan ladder (`Type=FINAL_BATTLE_TITAN`) must arm the `jk` roster
+    # (`ca.hCa` L17224 includes `FightFinalTitan`) and launch fight 1 in the
+    # FIGHT's location (`skyport`), not the battle's (`neural_network`).
+    Gate("titan-roster-launch", "gate", ("full",), "--map-launch-probe", 300,
+         parser="maplaunch",
+         env={"SF2_MAP_LAUNCH": "C3_BOSS_TITAN", "SF2_ML_FRAMES": "420"}),
     Gate("kick-ko", "gate", ("full",), "--kick-ko", 300, parser="kick_ko"),
     # The winner's EndStance `Win_<weapon>` animation (bug Q): `--kick-ko`
     # fights to a KO, so the phase-3 pick must resolve and start the win clip.
