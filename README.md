@@ -2,21 +2,21 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-36%20%C2%B7%2034%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-37%20%C2%B7%2035%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 100%
+### Readiness: 99%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-66 of 66 checklist items; every gap below is documented in BUGS.md.
+66 of 67 checklist items; every gap below is documented in BUGS.md.
 
-Gates with a baseline: **36** (34 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
+Gates with a baseline: **37** (35 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟩 | 100% | 6/6 | - |
+| **Animation & physics** | 🟨 | 86% | 6/7 | kusarigama + enemy AI: with the weapon equipped the oracle and the port diverge from the first block reaction (1394 divergences, nat f=248 `HighBlockHeavy` vs the oracle's stance) - scenario `diff:kusarigama` reproduces it; not gated yet |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -25,9 +25,9 @@ Gates with a baseline: **36** (34 at 0 divergences, 2 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 100% | 66/66 | - |
+| **overall** | 🟩 | 99% | 66/67 | - |
 
-The `overall` row is every checklist item at once (66 of 66); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (66 of 67); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 

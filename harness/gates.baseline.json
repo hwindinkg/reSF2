@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-02T16:28:26",
+    "updated": "2026-11-02T18:54:49",
     "mode": "only"
   },
   "gates": {
@@ -219,6 +219,12 @@
       "commit": "d7b2b406",
       "reason": "new gate: the FINAL_BATTLE_TITAN roster arms and fight 1 launches in skyport",
       "date": "2026-11-02T16:28:26"
+    },
+    "diff:titan-ladder": {
+      "metric": 0,
+      "commit": "fe966deb",
+      "reason": "new gate: C3_BOSS_TITAN fight 1 (skyport) state+pose match the oracle, 0 divergences",
+      "date": "2026-11-02T18:54:49"
     }
   }
 }

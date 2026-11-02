@@ -270,6 +270,34 @@
 								wantBattle + "| (CurrentZone " + wantZone + ")");
 						}
 					} catch (e2) { console.log("[SEED] battle override err " + e2); }
+					// STATE-HARNESS equipment selector: `?equip=<ItemName>` puts
+					// that WEAPON in the seeded warrior's Weapon slot (the same
+					// two places the game reads: the `<Warrior Weapon>` attr and
+					// the equipped `<Item Equipped="1" Name="Fists">` row), so a
+					// scenario can diff a weapon-specific model - the kusarigama's
+					// cloth chain - against the port's `--equip-probe`.
+					try {
+						var qe = new URLSearchParams(window.location.search);
+						var wantEquip = qe.get("equip");
+						if (wantEquip) {
+							var rawE = atob(SEED);
+							var bytesE = new Uint8Array(rawE.length);
+							for (var ei = 0; ei < rawE.length; ++ei) bytesE[ei] = rawE.charCodeAt(ei);
+							var xlenE = bytesE[0] | (bytesE[1] << 8) | (bytesE[2] << 16) | (bytesE[3] << 24);
+							var xmlE = new TextDecoder().decode(bytesE.subarray(4, 4 + xlenE));
+							xmlE = xmlE.replace(/Weapon="[^"]*"/, 'Weapon="' + wantEquip + '"');
+							xmlE = xmlE.replace(/Name="Fists"/g, 'Name="' + wantEquip + '"');
+							var encE = new TextEncoder().encode(xmlE);
+							var outE = new Uint8Array(4 + encE.length);
+							outE[0] = encE.length & 255; outE[1] = (encE.length >> 8) & 255;
+							outE[2] = (encE.length >> 16) & 255; outE[3] = (encE.length >> 24) & 255;
+							outE.set(encE, 4);
+							var binE = "";
+							for (var ke = 0; ke < outE.length; ++ke) binE += String.fromCharCode(outE[ke]);
+							SEED = btoa(binE);
+							console.log("[SEED] equipment override -> " + wantEquip);
+						}
+					} catch (e3) { console.log("[SEED] equipment override err " + e3); }
 					seedOraclePacks(SEED);
 					console.log("[SEED] post-tutorial savegame installed (Tutorial=END)");
 				} catch (e) { console.log("[SEED] err " + e); }

@@ -798,6 +798,40 @@ SCENARIOS: dict[str, dict] = {
                 "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
         timeout_s=420,
     ),
+    # KUSARIGAMA: the same fight on both sides with the weapon equipped, so the
+    # weapon's cloth chain (`mdl_weapon_kusarigama`: 11 `Cloth="1"` nodes) is
+    # diffed against the oracle's own render of the same JS, not against a
+    # hand-held live capture. Oracle: `?equip=WEAPON_KUSARIGAMA` patches the
+    # seeded warrior (`reference/runner/index.html`); native: the real save path
+    # (`--loadout SAVE --equip-probe`).
+    "kusarigama": dict(
+        # BOSS_LYNX (a FIXED opponent): the tournament's `<Groups>` pool picks
+        # the opponent from the shared RNG stream, and the seed patch that adds
+        # `?equip=` shifts it, so the two sides fought DIFFERENT warriors
+        # (measured: oracle axe/throw enemy vs port DoubleSweep enemy). A fixed
+        # boss keeps the enemy identical and isolates the player's weapon.
+        oracle=["--query", "postTutorial=1&skipFightNone=1&maxFrames=6000"
+                "&battle=BOSS_LYNX&equip=WEAPON_KUSARIGAMA",
+                "--input-script", "reference/tools/state_boss_lynx.txt",
+                "--timeout-ms", "60000"],
+        native=["--fight", "--battle", "BOSS_LYNX", "--zone", "ZONE_1",
+                "--fight-ordinal", "0", "--location", "moon",
+                "--loadout", "SAVE", "--equip-probe", "WEAPON_KUSARIGAMA",
+                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+        timeout_s=420,
+    ),
+    # C3_BOSS_TITAN fight 1: the ladder whose `<Fight Location="skyport">`
+    # overrides the battle's `neural_network` (JS `IIa` L7942-7943).
+    "titan-ladder": dict(
+        oracle=["--query", "postTutorial=1&skipFightNone=1&maxFrames=6000"
+                "&battle=C3_BOSS_TITAN&battleZone=ZONE_7",
+                "--input-script", "reference/tools/state_tournament.txt",
+                "--timeout-ms", "60000"],
+        native=["--fight", "--battle", "C3_BOSS_TITAN", "--zone", "ZONE_7",
+                "--fight-ordinal", "0", "--location", "skyport",
+                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+        timeout_s=420,
+    ),
     "challenge": dict(
         oracle=["--query", "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Challenge&battleZone=ZONE_2",
                 "--input-script", "reference/tools/state_challenge.txt",
@@ -817,10 +851,18 @@ SCENARIOS: dict[str, dict] = {
     ),
 }
 
+# `kusarigama` is deliberately NOT gated yet: with the weapon equipped the
+# enemy AI's `V1` conditions (which read the OPPONENT's animations) change, and
+# the two sides diverge from the first block reaction (measured: 1394
+# divergences, first at nat f=248 / ora f=378 where the port's player blocks
+# `HighBlockHeavy` and the oracle stays in its stance). The scenario definition
+# stays here so the follow-up has a one-command reproduction.
+UNGATED_SCENARIOS = {"kusarigama"}
+
 DIFF_GATES: list[Gate] = [
     Gate(f"diff:{name}", "diff", ("full",), scenario=name,
          timeout_s=SCENARIOS[name]["timeout_s"], parser="total_div")
-    for name in SCENARIOS
+    for name in SCENARIOS if name not in UNGATED_SCENARIOS
 ]
 
 
