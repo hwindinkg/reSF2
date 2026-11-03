@@ -2068,7 +2068,8 @@ std::string AiController::gc_frame(const AiFightState& st) {
         }
         return false;
     };
-    if (fired.empty()) return gc_stored_;
+    static const bool gc_every = std::getenv("SF2_GC_EVERY") != nullptr;
+    if (fired.empty()) return gc_every ? std::string() : gc_stored_;
     // [probe] SF2_TRACE_GC=1: the fired types + what the buckets keep.
     static const bool trace_gc = std::getenv("SF2_TRACE_GC") != nullptr;
     if (trace_gc) {
@@ -2857,6 +2858,20 @@ std::string AiController::update(const AiFightState& st) {
             // `hJa`: inject only. The pump picks it up next frame.
             key_press_pending_ = true;
             return "";
+        }
+        static const bool gc_every = std::getenv("SF2_GC_EVERY") != nullptr;
+        if (gc_every) {
+            // The pump runs on EVERY fighter update (JS `Gc.ia`), and only
+            // sees a candidate set when an event fired - in most frames it
+            // finds nothing and returns empty. The synthetic KeyPressed is the
+            // `hJa` latch from the PREVIOUS frame (`Bnb` at the start of the
+            // next `wd.ia`).
+            AiFightState st2 = st;
+            if (key_press_pending_) {
+                st2.my_event_types.push_back({17, "KeyPressed"});  // kEvKeyPressed
+                key_press_pending_ = false;
+            }
+            return gc_frame(st2);
         }
         return update_random(st);
     }
