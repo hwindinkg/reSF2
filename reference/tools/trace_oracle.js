@@ -537,6 +537,39 @@
     } catch (e) { /* ignore */ }
   }
 
+  /* One-shot shape probe: the hook installers kept failing because the class
+   * methods live on the INSTANCE (or deeper), not on `prototype`. Emit the
+   * real shape once so the wrappers can be aimed correctly. */
+  function ensureShapeDiag(fight) {
+    if (or.shapeDiag) return;
+    var out = { t: "shape" };
+    try {
+      out.pb = fight.pb ? Object.keys(fight.pb).slice(0, 30) : null;
+      out.yb = fight.yb ? Object.keys(fight.yb).slice(0, 30) : null;
+      var de = fight.pb && fight.pb.nf;
+      out.nfType = de == null ? "null" : typeof de;
+      if (de) {
+        out.nfKeys = Object.keys(de).slice(0, 40);
+        out.nfPqb = typeof de.Pqb;
+        out.nfFk = typeof de.fk;
+        var p = Object.getPrototypeOf(de);
+        out.protoPqb = p ? typeof p.Pqb : "no-proto";
+        out.protoKeys = p ? Object.getOwnPropertyNames(p).slice(0, 40) : null;
+      }
+      var da = fight.pb && fight.pb.da;
+      out.daType = da == null ? "null" : typeof da;
+      if (da) {
+        out.daKeys = Object.keys(da).slice(0, 40);
+        var dp = Object.getPrototypeOf(da);
+        out.daProtoCZa = dp ? typeof dp.CZa : "no-proto";
+      }
+    } catch (e) {
+      out.err = String(e);
+    }
+    emit(out);
+    or.shapeDiag = true;
+  }
+
   function ensureDeHooks(fight) {
     /* Once the de PROTOTYPE is wrapped, every de instance is covered, so no
      * scan is needed. (The old per-instance BFS scan missed the real fight's
@@ -1707,6 +1740,7 @@
     or.fight = fight;
     ensureFightHooks(fight);
     ensureDeHooks(fight);
+  ensureShapeDiag(fight);
     ensureRandomHooks(fight);
     ensureIbHooks(fight);
     if (!or.headerDone) {
