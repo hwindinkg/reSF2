@@ -851,13 +851,13 @@ SCENARIOS: dict[str, dict] = {
     ),
 }
 
-# `kusarigama` is deliberately NOT gated yet: with the weapon equipped the
-# enemy AI's `V1` conditions (which read the OPPONENT's animations) change, and
-# the two sides diverge from the first block reaction (measured: 1394
-# divergences, first at nat f=248 / ora f=378 where the port's player blocks
-# `HighBlockHeavy` and the oracle stays in its stance). The scenario definition
-# stays here so the follow-up has a one-command reproduction.
-UNGATED_SCENARIOS = {"kusarigama"}
+# Every scenario is gated. `kusarigama` joined once its root cause was fixed:
+# the intro plate is raised only when BOTH fighters finished an `EndsStage="1"`
+# move (JS `kg` L15777 -> `wd.OCa`), so the FIGHT plate now restarts at F178 and
+# the round goes live at F248 — the oracle's own timing (+130 trace offset).
+# That took the diff from 1394 to a stable 159 (the remainder starts at
+# nat f=301 / ora f=431, a 2.4-unit sep_x drift and the hit that follows it).
+UNGATED_SCENARIOS: set[str] = set()
 
 DIFF_GATES: list[Gate] = [
     Gate(f"diff:{name}", "diff", ("full",), scenario=name,

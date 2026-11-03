@@ -9366,7 +9366,9 @@ void FightController::intro_stance_end_tick(FightFighter& f) {
         return;
     }
     if (f.fighter.move_end_count() == f.intro_end_count) return;
-    f.intro_ended = true;
+    // JS `eIa`/`OCa` (L21004/L21167): only an `EndsStage="1"` move end lights
+    // this fighter's `pR` (`OCa` is `pR` for a normal fighter).
+    if (f.fighter.last_end_ends_stage()) f.intro_ended = true;
     if (battle_.type == "FightNone") {
         // JS `kg` L15781-15783: `this.xF(2)` — phase 2 immediately, the plate
         // is display-only for the dummy viewer (one end only; the dummy's
@@ -9380,9 +9382,15 @@ void FightController::intro_stance_end_tick(FightFighter& f) {
             enter_fight();
         }
     } else {
-        // JS `Am()` (L16722) -> `ha.Zy()` -> `Cr.Zy` (L84236): raise the plate
-        // on the FIRST stance end; every later end restarts `Sc` (`fu(1.166)`),
-        // so the LAST end wins (the plate expires 1.166 s after it).
+        // JS `kg` L15777: `if (this.eu == 1 && a)` with
+        // `a = a.model.OCa() && b != null && b.OCa()` — the plate is raised /
+        // restarted only once BOTH fighters' last ended move had
+        // `EndsStage="1"` (`pR`). The port raised it on the FIRST end of
+        // either fighter, so the intro plate expired 1.166 s after the EARLIER
+        // stance end: with the kusarigama the enemy's stance ends at F91 while
+        // the player's runs to F178, so the port went live at F161 and the
+        // oracle at F248 (measured).
+        if (!(player_.intro_ended && enemy_.intro_ended)) return;
         start_stance_done_ = true;
         banner_show(banner_kind::fight, kJsBannerHoldSeconds,
                     banner_action::begin_fight, false);

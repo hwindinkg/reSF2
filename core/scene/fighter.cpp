@@ -2641,6 +2641,10 @@ void Fighter::advance_step() {
         }
         ended_move_ = current_move_;
         ++move_end_count_;  // clip-end edge (the EndStance gate)
+        // JS `wd.eIa` L21006-21007: `if (a.yda) this.pR = a.yda` — remember the
+        // ended move's `EndsStage` for the intro plate's `OCa()` test.
+        last_end_ends_stage_ =
+            current_move_ != nullptr && current_move_->ends_stage;
         // JS `Te.KNa` (L548) sets `Pe=false` but does NOT clear `Ua`/`Xh`/`xj`:
         // `da.Ua.name`/`da.Xh`/`da.xj` keep reporting the JUST-ENDED clip
         // until the next move starts (`Te.Skb` -> `etb`). Keep them for the

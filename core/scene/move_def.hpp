@@ -629,6 +629,14 @@ struct MoveDef {
     // ordinary playing clip (`Nd.nk` stays false). 14 shipped moves carry
     // `Physics="1"` (PhysicalFall/PhysicalGroundHit/RootHit is NOT one).
     bool physics = false;
+    // JS `l.yda` (L30067: `u.ka(k.attributes.get("EndsStage"))`) — the move ENDS
+    // the round stage it belongs to. `wd.eIa` (L21004) copies it into `pR`
+    // whenever an animation stops, and `wd.OCa()` (L21167) then reads
+    // `pR || !QD`. The intro's `kg` handler (L15777) gates the FIGHT plate on
+    // `a.model.OCa() && opponent.OCa()`, i.e. the plate only restarts once BOTH
+    // fighters have finished an `EndsStage="1"` move - which is why the
+    // kusarigama round goes live at the LATER of the two stance ends.
+    bool ends_stage = false;
     // JS `l.bha` (L362257/L362348): `NoWallRepulsion != null && (bha = ka(..))`,
     // then `WallRepulsion != null && (bha = !ka(..))`. Consumed ONLY by
     // `Te.Iub` (the per-frame wall-repulsion clip shift): `if(!this.Ua.bha||a)`

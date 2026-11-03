@@ -650,6 +650,10 @@ public:
     // Event`). The EndStance gate uses the edge to know the KO/lying chain (or
     // the `Loss_fall`/`Win_Fists` clip) has finished.
     int move_end_count() const { return move_end_count_; }
+    // JS `wd.pR` (set in `eIa` L21007 from `move.yda`): the LAST ended move had
+    // `EndsStage="1"`. `OCa()` (L21167) is `pR || !QD`, and for a normal
+    // fighter (`QD` = no `NotAnimation` attr = true) that is exactly `pR`.
+    bool last_end_ends_stage() const { return last_end_ends_stage_; }
     // JS `Te.M2` — the anim controller's MODEL-LIFETIME move-frame counter,
     // NOT a per-move quantity. `Te.ia` (L22797) opens with `this.M2++` (run
     // on EVERY `da.ia()` tick, `Pe` or not), and `Xqb` (L23245-23250) seats
@@ -1296,6 +1300,8 @@ private:
     int interrupt_count_ = 0;
     // Incremented when a clip ends (`ended_move_` set in `advance_step`).
     int move_end_count_ = 0;
+    // `move.yda` of the move that just ended (`wd.pR`).
+    bool last_end_ends_stage_ = false;
     // JS `Vu` (mu L249972) — the pending hit-reaction latch (`lrb`/`eob`).
     Reaction reaction_;
     // JS `wd.Cn` (tu L297387) + `wd.lU` (the strike-time clock).

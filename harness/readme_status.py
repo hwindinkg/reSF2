@@ -64,21 +64,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama + enemy AI: the spurious f=161 decision is measured - "
-         "gating the Random path on a fired `KeyPressed` event "
-         "(`SF2_RANDOM_REQUIRE_EVENT=1`, default off) drops the diff "
-         "1394 -> 1223 and moves the first divergence to f=249/379, where the "
-         "port now MISSES the oracle's decision: `dsb` must inject the event "
-         "instead of calling the Random path directly. Root cause localized - "
-         "path picks a move directly (`br:\"random/hJa\"`, `fk=6`) on the "
-         "idle-clip END, where JS `hJa` only injects a synthetic KeyPressed "
-         "and `EZa` admits no candidate for type 10 (port's own `gc_frame`: "
-         "`matched=0 kept=0`); the oracle's decision rows are now traced "
-         "(`t:\"ai\"`, `diff:boss-lynx` stays 0) and the two sides match "
-         "frame-for-frame at a +129 offset EXCEPT one spurious early decision "
-         "in the port (f=161 `KnivesSpinningSlash`; the oracle decides first "
-         "at its f=333) - a single-decision bug, not a systemic AI "
-         "difference; `diff:kusarigama` reproduces it; not gated yet", False),
+        ("kusarigama: the intro plate is JS-exact now (raised only when BOTH "
+         "fighters finish an `EndsStage=1` move, `kg` L15777/`OCa`), so phase 2 "
+         "starts at F248 like the oracle and `diff:kusarigama` fell 1394 -> 159 "
+         "(gated, baseline 159); the remainder starts at nat f=301 / ora f=431 "
+         "with a 2.4-unit `sep_x` drift and the hit that follows it", False),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "
