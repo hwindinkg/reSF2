@@ -2808,38 +2808,11 @@ std::string AiController::update(const AiFightState& st) {
         // INCLUDING a loop restart of the same move, so the serial is required.
         // (The oracle `hja` log re-arms `tG0=0` at the idle loop restarts: run 2
         // at state f=374 AND 387, run 3 at f=373/386.)
-        // [experiment] `SF2_TG_MOVE_ONLY=1`: JS `wd.x3` (L20990) arms the
-        // opponent's `tG` on `EStartAnimationEvent`. The oracle's `hja` trace
-        // shows `tG` reaching 0 only ONCE before its first decision (f=378,
-        // `tG 0 -> -1`) - not on every idle-loop restart, which is what the
-        // port's clip-serial test does (the kusarigama run arms it at f=161).
-        // JS `x3` arms on `EStartAnimationEvent` = a CLIP START (`Te.Skb`
-        // L22984 -> `Te.x3` L23097). The CLIP-START SERIAL (`Te.Skb` count,
-        // `st.enemy_clip_starts`) is therefore the only faithful term; the old
-        // `enemy_move`/`enemy_anim` proxies fired on state that Skb never
-        // reports (an idle-loop frame tick changed the anim label), arming
-        // `tG` where the JS arms nothing.
-        // [probe] `SF2_TRACE_TG=1` prints which term arms, so the proxy case
-        // is visible rather than guessed.
-        static const bool tg_proxy = std::getenv("SF2_TG_PROXY") != nullptr;
-        static const bool trace_tg = std::getenv("SF2_TRACE_TG") != nullptr;
-        const bool serial_fired = st.enemy_clip_starts != last_random_opp_clip_;
-        const bool move_fired = st.enemy_move != last_random_opp_move_;
-        const bool anim_fired = st.enemy_anim != last_random_opp_anim_;
-        const bool arm_now = tg_proxy ? (serial_fired || move_fired || anim_fired)
-                                      : serial_fired;
-        if (trace_tg && (serial_fired || move_fired || anim_fired)) {
-            std::fprintf(stdout,
-                         "[tg] f=%d arm=%d serial=%d(%d) move=%d anim=%d "
-                         "opp_move=%s\n",
-                         st.fight_frame, arm_now ? 1 : 0, serial_fired ? 1 : 0,
-                         st.enemy_clip_starts,
-                         move_fired ? 1 : 0, anim_fired ? 1 : 0,
-                         st.enemy_move != nullptr ? st.enemy_move->name.c_str()
-                                                  : "-");
-            std::fflush(stdout);
+        if (st.enemy_clip_starts != last_random_opp_clip_ ||
+            st.enemy_move != last_random_opp_move_ ||
+            st.enemy_anim != last_random_opp_anim_) {
+            tG_ = 0;
         }
-        if (arm_now) tG_ = 0;
         last_random_opp_clip_ = st.enemy_clip_starts;
         last_random_opp_move_ = st.enemy_move;
         last_random_opp_anim_ = st.enemy_anim;

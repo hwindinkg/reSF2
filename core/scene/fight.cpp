@@ -9355,6 +9355,7 @@ void FightController::intro_stance_end_tick(FightFighter& f) {
                      f.fighter.playing() ? 1 : 0);
         std::fflush(stdout);
     }
+    if (f.intro_ended) return;
     if (f.intro_move == nullptr) {
         // The stance clip starts on the SECOND phase-1 frame (the
         // `RoundStageStart` bus dispatch lags `xF(1)`), so latch it then.
@@ -9365,7 +9366,6 @@ void FightController::intro_stance_end_tick(FightFighter& f) {
         return;
     }
     if (f.fighter.move_end_count() == f.intro_end_count) return;
-    f.intro_end_count = f.fighter.move_end_count();
     f.intro_ended = true;
     if (battle_.type == "FightNone") {
         // JS `kg` L15781-15783: `this.xF(2)` — phase 2 immediately, the plate
