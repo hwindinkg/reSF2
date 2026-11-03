@@ -2808,9 +2808,23 @@ std::string AiController::update(const AiFightState& st) {
         // INCLUDING a loop restart of the same move, so the serial is required.
         // (The oracle `hja` log re-arms `tG0=0` at the idle loop restarts: run 2
         // at state f=374 AND 387, run 3 at f=373/386.)
-        if (st.enemy_clip_starts != last_random_opp_clip_ ||
-            st.enemy_move != last_random_opp_move_ ||
-            st.enemy_anim != last_random_opp_anim_) {
+        // [experiment] `SF2_TG_MOVE_ONLY=1`: JS `wd.x3` (L20990) arms the
+        // opponent's `tG` on `EStartAnimationEvent`. The oracle's `hja` trace
+        // shows `tG` reaching 0 only ONCE before its first decision (f=378,
+        // `tG 0 -> -1`) - not on every idle-loop restart, which is what the
+        // port's clip-serial test does (the kusarigama run arms it at f=161).
+        static const bool tg_move_only =
+            std::getenv("SF2_TG_MOVE_ONLY") != nullptr;
+        if (tg_move_only) {
+            const bool opp_move_started =
+                st.enemy_move != last_random_opp_move_ &&
+                st.enemy_move != nullptr &&
+                st.enemy_move->name.find("Idle") == std::string::npos &&
+                st.enemy_move->name.find("Stance") == std::string::npos;
+            if (opp_move_started) tG_ = 0;
+        } else if (st.enemy_clip_starts != last_random_opp_clip_ ||
+                   st.enemy_move != last_random_opp_move_ ||
+                   st.enemy_anim != last_random_opp_anim_) {
             tG_ = 0;
         }
         last_random_opp_clip_ = st.enemy_clip_starts;
