@@ -9337,7 +9337,24 @@ void FightController::release_intro() {
 // `FightNone` (the dojo dummy viewer) skips the plate entirely: `xF(2)` runs
 // directly on the first end (`Da.type == "FightNone"` branch, L15781-15783).
 void FightController::intro_stance_end_tick(FightFighter& f) {
-    if (f.intro_ended) return;
+    // [probe] `SF2_TRACE_INTRO=1`: the intro-plate gate operands. JS `kg`
+    // (L15772) restarts the plate on EVERY animation end of EITHER fighter
+    // while `eu==1` and both satisfy `OCa()`, so the comparison needs the
+    // per-fighter latch state.
+    static const bool trace_intro = std::getenv("SF2_TRACE_INTRO") != nullptr;
+    if (trace_intro) {
+        std::fprintf(stdout,
+                     "[intro] F%d %-5s intro_ended=%d move=%s end_count=%d "
+                     "latched_end=%d playing=%d\n",
+                     frame_, f.is_player ? "Me" : "Enemy",
+                     f.intro_ended ? 1 : 0,
+                     f.fighter.current_move() != nullptr
+                         ? f.fighter.current_move()->name.c_str()
+                         : "-",
+                     f.fighter.move_end_count(), f.intro_end_count,
+                     f.fighter.playing() ? 1 : 0);
+        std::fflush(stdout);
+    }
     if (f.intro_move == nullptr) {
         // The stance clip starts on the SECOND phase-1 frame (the
         // `RoundStageStart` bus dispatch lags `xF(1)`), so latch it then.
@@ -9348,6 +9365,7 @@ void FightController::intro_stance_end_tick(FightFighter& f) {
         return;
     }
     if (f.fighter.move_end_count() == f.intro_end_count) return;
+    f.intro_end_count = f.fighter.move_end_count();
     f.intro_ended = true;
     if (battle_.type == "FightNone") {
         // JS `kg` L15781-15783: `this.xF(2)` — phase 2 immediately, the plate
