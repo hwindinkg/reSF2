@@ -637,6 +637,12 @@ public:
     // The per-frame decision (JS `de.ia` L592-594). Returns the chosen
     // move name, or "" when no move should start this frame.
     std::string update(const AiFightState& st);
+
+    // JS `Te.Skb` -> `x3`/`Bnb` (L22984/L20946): the synthetic
+    // `<KeyPressed/>` that `hJa` injects is consumed by the pump at the START
+    // of the NEXT fighter update (`Bnb` -> `NS` -> `Skb`), not on the frame
+    // that injected it. This latch carries it across that one frame.
+    bool key_press_pending_ = false;
     // [experiment] The `Gc` pump frame (JS `Bg.ia` -> `Bx` + `Gnb` -> `Rwa`/
     // `EZa` -> `dxa`/`DK`): rebuilds the KeyPressed bucket, picks the
     // max-`priority` group with one uniform `uf.sja` draw and STORES it

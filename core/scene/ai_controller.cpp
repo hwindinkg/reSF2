@@ -2714,6 +2714,20 @@ std::string AiController::update(const AiFightState& st) {
         }
     }
     if (tactic_ == nullptr || moves_ == nullptr) return "";
+    // [experiment] `SF2_HJA_CADENCE=1`: JS `hJa` only injects the synthetic
+    // `<KeyPressed/>`; the pump consumes it at the START of the NEXT fighter
+    // update (`Bnb` L20946 `-> NS -> Skb`). Reproduce that one-frame cadence.
+    static const bool hja_cadence =
+        std::getenv("SF2_HJA_CADENCE") != nullptr;
+    if (hja_cadence && key_press_pending_) {
+        key_press_pending_ = false;
+        if (st.phase_fight) {
+            AiFightState st2 = st;
+            st2.my_event_types.push_back({17, "KeyPressed"});  // kEvKeyPressed
+            const std::string picked = gc_frame(st2);
+            if (!picked.empty()) return picked;
+        }
+    }
     sf2::scene::DaPrng::trace_frame() = st.fight_frame;
     // An injected source overrides the owned DaPrng stream (ai_demo uses
     // mt19937); otherwise ALL draws come from `prng_` in JS call order.
@@ -2838,6 +2852,11 @@ std::string AiController::update(const AiFightState& st) {
             AiFightState st2 = st;
             st2.my_event_types.push_back({17, "KeyPressed"});  // kEvKeyPressed
             return gc_frame(st2);
+        }
+        if (hja_cadence) {
+            // `hJa`: inject only. The pump picks it up next frame.
+            key_press_pending_ = true;
+            return "";
         }
         return update_random(st);
     }
