@@ -6432,6 +6432,18 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
             }
         }
     }
+    // [probe] `SF2_TRACE_HITTEST=1`: how often the geometry loop actually runs.
+    // The capgeom probe showed `capsule_capsule_overlap` entered only twice in a
+    // 750-frame fight although 4 parts x 295 target capsules are expected, so
+    // the early return that skips the loop has to be visible.
+    if (std::getenv("SF2_TRACE_HITTEST") != nullptr) {
+        std::fprintf(stderr,
+                     "[ht] ff=%d atk=%s move=%s mf=%d gy=%zu targets=%zu "
+                     "atkcap=%zu\n",
+                     frame_, atk.name.c_str(), move.name.c_str(), frame,
+                     gy.size(), def.body.capsules.size(),
+                     atk.body.capsules.size());
+    }
     // JS `Cl.ia` (L566-567): `dW` latches ONLY on a successful test --
     // `if(this.W1a(...)) return this.dW=c,!0` (and the `!c.aEa` early
     // return). Latching before the geometry (as this port did) gives the

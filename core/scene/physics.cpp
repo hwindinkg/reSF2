@@ -196,14 +196,18 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
     // their operands. A pair whose segment distance is inside the radii sum but
     // whose four checks all fail is a false negative in the predicate.
     if (std::getenv("SF2_TRACE_CAPGEOM") != nullptr) {
+        // Re-evaluate the second check in isolation: if this returns true while
+        // `c2` above is false, the two calls disagree on identical arguments.
+        Vec3 seq = x8;
+        const bool again = in_capsule(f2v, c, l, b, seq, d, e);
         std::fprintf(stderr,
                      "[capgeom] atk=%s tgt=%s c=%.4f n=%+.4f f2=%+.4f q=%+.4f "
-                     "r=%+.4f c1=%d c2=%d c3=%d c4=%d\n",
+                     "r=%+.4f c1=%d c2=%d c3=%d c4=%d again=%d\n",
                      atk.name.c_str(), tgt.name.c_str(),
                      static_cast<double>(c), static_cast<double>(n),
                      static_cast<double>(f2v), static_cast<double>(q),
                      static_cast<double>(r), c1 ? 1 : 0, c2 ? 1 : 0, c3 ? 1 : 0,
-                     c4 ? 1 : 0);
+                     c4 ? 1 : 0, again ? 1 : 0);
     }
     if (c1) {
         out.n = a; out.o = o1; out.point = a; out.hit = true; return true;
