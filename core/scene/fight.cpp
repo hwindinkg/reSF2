@@ -6399,7 +6399,13 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
         return false;  // dW == c: already CONNECTED
     }
     // JS `Te.rw` (L560) + `xqb` (L553): the mirrored AttackingParts swap.
-    const bool rw = atk.fighter.mirror_swap();
+    // [experiment] `SF2_HIT_NOSWAP=1`: test the AUTHORED AttackingParts (no
+    // `_1`/`_2` mirror swap). JS `xqb` (L553) swaps only when `rw` is set, and
+    // the port's `rw` at the kusarigama sample may be the wrong side - the
+    // audit shows it testing `Edge18_1 -> Edge18_2` (far hand) with a +29-unit
+    // miss while the JS resolves a hit at that sample.
+    static const bool hit_noswap = std::getenv("SF2_HIT_NOSWAP") != nullptr;
+    const bool rw = hit_noswap ? false : atk.fighter.mirror_swap();
     // JS `xqb` (L553) + its caller (L552): `GY` is the UNION of the resolved
     // AttackingParts capsules over EVERY active type-4 interval, not just the
     // `yD(4)` pick. The caller loops `for(...){let d=c[b];++b; d.type==4 &&
@@ -6525,12 +6531,50 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                         best_name = tgt.name.c_str();
                     }
                 }
+                // The early-outs inside `capsule_capsule_overlap` are line
+                // tests; when the proxy distance says the pair overlaps but
+                // the predicate says no, print the four signed line distances
+                // so the rejecting branch is identifiable.
+                float dn = 0.0f, df2 = 0.0f, dq = 0.0f, dr = 0.0f;
+                for (const auto& tgt : def.body.capsules) {
+                    if (!tgt.collidable) continue;
+                    if (tgt.name != best_name) continue;
+                    // Normalised signed perpendicular distance to the line
+                    // through `a -> b` (the same quantity `line_of` gives the
+                    // predicate, computed locally to keep it out of the header).
+                    auto sdist = [](const sf2::scene::Vec3& a0,
+                                    const sf2::scene::Vec3& b0,
+                                    const sf2::scene::Vec3& p0) {
+                        const float vx = b0.x - a0.x, vy = b0.y - a0.y;
+                        const float len = std::sqrt(vx * vx + vy * vy);
+                        if (len < 1e-6f) return 0.0f;
+                        return ((p0.x - a0.x) * vy - (p0.y - a0.y) * vx) / len;
+                    };
+                    dn = sdist(ac->r1, ac->r2, tgt.p1);
+                    df2 = sdist(ac->r1, ac->r2, tgt.p2);
+                    dq = sdist(tgt.r1, tgt.r2, ac->p1);
+                    dr = sdist(tgt.r1, tgt.r2, ac->p2);
+                    break;
+                }
+                // Re-run the predicate on the closest pair: `pred=1` here while
+                // the loop above reported a miss means the loop's call and this
+                // one disagree (stale `ch`/latch), not the geometry.
+                int pred = -1;
+                for (const auto& tgt : def.body.capsules) {
+                    if (!tgt.collidable) continue;
+                    if (tgt.name != best_name) continue;
+                    sf2::scene::CapsuleHit tmp;
+                    pred = sf2::scene::capsule_capsule_overlap(*ac, tgt, tmp) ? 1 : 0;
+                    break;
+                }
                 std::fprintf(stdout,
-                             "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
+                             "[hitaudit] F%d ff=%d atk=%s move=%s mf=%d gate=1 "
                              "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
                              "part=%s->%s NO-OVERLAP margin=%+.4f d=%.4f "
-                             "rr=%.4f cap=%s\n",
-                             frame, atk.name.c_str(), move.name.c_str(), frame,
+                             "rr=%.4f cap=%s n=%+.3f f2=%+.3f q=%+.3f r=%+.3f "
+                             "pred=%d\n",
+                             frame, frame_, atk.name.c_str(), move.name.c_str(),
+                             frame,
                              std::max(d->start, move.first_frame),
                              atk.fighter.interval_last(*d),
                              d->hit_name_at(frame).c_str(),
@@ -6538,7 +6582,10 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                              g.edge.c_str(), g.ename.c_str(),
                              static_cast<double>(best),
                              static_cast<double>(best_d),
-                             static_cast<double>(best_rr), best_name);
+                             static_cast<double>(best_rr), best_name,
+                             static_cast<double>(dn), static_cast<double>(df2),
+                             static_cast<double>(dq), static_cast<double>(dr),
+                             pred);
                 std::fflush(stdout);
             }
         }

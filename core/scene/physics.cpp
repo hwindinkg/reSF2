@@ -96,6 +96,26 @@ bool seg_seg_hit(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d,
 // success path below writes it, so per-call zeroing == per-W1a zeroing).
 bool in_capsule(float a, float b, const Line2& l, const Vec3& d, Vec3& e,
                 const Vec3& f, const Vec3& g) {
+    // [probe] `SF2_TRACE_CAPGEOM=1`: the internals of the endpoint-vs-capsule
+    // test, so a check that returns false while |a| <= b is visible with the
+    // projection and both endpoint distances.
+    static const bool trace_capgeom = std::getenv("SF2_TRACE_CAPGEOM") != nullptr;
+    if (trace_capgeom) {
+        const bool within = std::fabs(a) <= b;
+        const float px = d.x - a * l.a;
+        const float py = d.y - a * l.b;
+        const bool rx = in_range(px, f.x, g.x) || in_range(px, g.x, f.x);
+        const bool ry = in_range(py, f.y, g.y) || in_range(py, g.y, f.y);
+        std::fprintf(stderr,
+                     "[incap] a=%+.4f b=%.4f within=%d proj=(%.3f,%.3f) "
+                     "rx=%d ry=%d dF2=%.4f dG2=%.4f b2=%.4f\n",
+                     static_cast<double>(a), static_cast<double>(b),
+                     within ? 1 : 0, static_cast<double>(px),
+                     static_cast<double>(py), rx ? 1 : 0, ry ? 1 : 0,
+                     static_cast<double>(sq(d.x - f.x) + sq(d.y - f.y)),
+                     static_cast<double>(sq(d.x - g.x) + sq(d.y - g.y)),
+                     static_cast<double>(b * b));
+    }
     if (std::fabs(a) <= b) {
         e.x = d.x - a * l.a;
         e.y = d.y - a * l.b;
@@ -168,16 +188,33 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
     // mis-splits the knockback between the endpoint bodies and deforms the
     // mesh.
     Vec3 o1 = x8, o2 = x8, o3 = x8, o4 = x8;
-    if (in_capsule(n, c, l, a, o1, d, e)) {
+    const bool c1 = in_capsule(n, c, l, a, o1, d, e);
+    const bool c2 = in_capsule(f2v, c, l, b, o2, d, e);
+    const bool c3 = in_capsule(q, c, k, d, o3, a, b);
+    const bool c4 = in_capsule(r, c, k, e, o4, a, b);
+    // [probe] `SF2_TRACE_CAPGEOM=1`: the four endpoint-vs-capsule outcomes with
+    // their operands. A pair whose segment distance is inside the radii sum but
+    // whose four checks all fail is a false negative in the predicate.
+    if (std::getenv("SF2_TRACE_CAPGEOM") != nullptr) {
+        std::fprintf(stderr,
+                     "[capgeom] atk=%s tgt=%s c=%.4f n=%+.4f f2=%+.4f q=%+.4f "
+                     "r=%+.4f c1=%d c2=%d c3=%d c4=%d\n",
+                     atk.name.c_str(), tgt.name.c_str(),
+                     static_cast<double>(c), static_cast<double>(n),
+                     static_cast<double>(f2v), static_cast<double>(q),
+                     static_cast<double>(r), c1 ? 1 : 0, c2 ? 1 : 0, c3 ? 1 : 0,
+                     c4 ? 1 : 0);
+    }
+    if (c1) {
         out.n = a; out.o = o1; out.point = a; out.hit = true; return true;
     }
-    if (in_capsule(f2v, c, l, b, o2, d, e)) {
+    if (c2) {
         out.n = b; out.o = o2; out.point = b; out.hit = true; return true;
     }
-    if (in_capsule(q, c, k, d, o3, a, b)) {
+    if (c3) {
         out.n = d; out.o = d; out.point = d; out.hit = true; return true;
     }
-    if (in_capsule(r, c, k, e, o4, a, b)) {
+    if (c4) {
         out.n = e; out.o = e; out.point = e; out.hit = true; return true;
     }
     return false;
