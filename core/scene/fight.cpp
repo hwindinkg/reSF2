@@ -4745,15 +4745,6 @@ void FightController::sample_enemy_idle() {
                               // here is the candidate fix for that f=0 gap.
                               /*tick_ragdoll=*/
                               std::getenv("SF2_DUMMY_RAGDOLL") != nullptr);
-        if (std::getenv("SF2_TRACE_ENEMYIDLE") != nullptr) {
-            std::fprintf(stdout,
-                         "[idle] F%d after wx=%.3f wy=%.3f pos0=(%.3f,%.3f)\n",
-                         frame_, static_cast<double>(enemy_.fighter.world_x()),
-                         static_cast<double>(enemy_.fighter.world_y()),
-                         static_cast<double>(enemy_.fighter.positions()[0]),
-                         static_cast<double>(enemy_.fighter.positions()[1]));
-            std::fflush(stdout);
-        }
         return;
     }
     sample_idle(enemy_);
