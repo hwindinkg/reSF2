@@ -4738,7 +4738,13 @@ void FightController::sample_enemy_idle() {
         enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
                               enemy_.fighter.world_y(), enemy_.fighter.facing(),
                               /*interp=*/false, 0, 0, 0.0f,
-                              /*tick_ragdoll=*/false);
+                              // [experiment] `SF2_DUMMY_RAGDOLL=1`: the oracle's
+                              // dummy has already run its cloth/ragdoll solver
+                              // before the trace origin (its chain is deformed
+                              // up to 8.6 units at f=0), so ticking the solver
+                              // here is the candidate fix for that f=0 gap.
+                              /*tick_ragdoll=*/
+                              std::getenv("SF2_DUMMY_RAGDOLL") != nullptr);
         if (std::getenv("SF2_TRACE_ENEMYIDLE") != nullptr) {
             std::fprintf(stdout,
                          "[idle] F%d after wx=%.3f wy=%.3f pos0=(%.3f,%.3f)\n",
