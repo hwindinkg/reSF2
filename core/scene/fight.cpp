@@ -6331,6 +6331,29 @@ static std::string mirrored_edge_name(const std::string& n, bool rw) {
 // JS `ca.Enb` (L390) + `wd.tKa` -> `Fu.ia`: the attack check — the
 // attacker's active Attack-interval AttackingParts capsules vs the target's
 // collidable capsules.
+// [probe] Closest distance between two 2-D segments (x/y plane), used only by
+// the `--hit-audit` NO-OVERLAP line: it reports HOW FAR a swing was from
+// touching, so a boundary-case miss (a few hundredths of a unit) is
+// distinguishable from a real whiff.
+static float seg_seg_dist(float ax, float ay, float bx, float by,
+                          float cx, float cy, float dx, float dy) {
+    auto pt_seg = [](float px, float py, float x0, float y0, float x1,
+                     float y1) {
+        const float vx = x1 - x0, vy = y1 - y0;
+        const float wx = px - x0, wy = py - y0;
+        const float vv = vx * vx + vy * vy;
+        float t = vv > 1e-12f ? (wx * vx + wy * vy) / vv : 0.0f;
+        t = std::max(0.0f, std::min(1.0f, t));
+        const float qx = x0 + vx * t - px, qy = y0 + vy * t - py;
+        return std::sqrt(qx * qx + qy * qy);
+    };
+    const float d1 = pt_seg(ax, ay, cx, cy, dx, dy);
+    const float d2 = pt_seg(bx, by, cx, cy, dx, dy);
+    const float d3 = pt_seg(cx, cy, ax, ay, bx, by);
+    const float d4 = pt_seg(dx, dy, ax, ay, bx, by);
+    return std::min(std::min(d1, d2), std::min(d3, d4));
+}
+
 bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                                const sf2::scene::MoveDef& move, int frame,
                                sf2::scene::HitCapsule& hit_cap,
@@ -6483,16 +6506,39 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
                 }
             }
             if (hit_audit_ || hit_audit_global()) {
+                // Closest approach over the collidable targets: `margin` < 0
+                // would have been a hit, so a small positive margin means the
+                // swing missed by a hair (the JS's own capsule sample decides
+                // such a frame).
+                float best = 1e9f, best_d = 0.0f, best_rr = 0.0f;
+                const char* best_name = "-";
+                for (const auto& tgt : def.body.capsules) {
+                    if (!tgt.collidable) continue;
+                    const float dd = seg_seg_dist(ac->p1.x, ac->p1.y, ac->p2.x,
+                                                  ac->p2.y, tgt.p1.x, tgt.p1.y,
+                                                  tgt.p2.x, tgt.p2.y);
+                    const float rr = ac->radius + tgt.radius;
+                    if (dd - rr < best) {
+                        best = dd - rr;
+                        best_d = dd;
+                        best_rr = rr;
+                        best_name = tgt.name.c_str();
+                    }
+                }
                 std::fprintf(stdout,
                              "[hitaudit] F%d atk=%s move=%s mf=%d gate=1 "
                              "iv=[%d,%d] win=\"%s\" tgt=%zu rw=%d "
-                             "part=%s->%s NO-OVERLAP\n",
+                             "part=%s->%s NO-OVERLAP margin=%+.4f d=%.4f "
+                             "rr=%.4f cap=%s\n",
                              frame, atk.name.c_str(), move.name.c_str(), frame,
                              std::max(d->start, move.first_frame),
                              atk.fighter.interval_last(*d),
                              d->hit_name_at(frame).c_str(),
                              def.body.capsules.size(), rw ? 1 : 0,
-                             g.edge.c_str(), g.ename.c_str());
+                             g.edge.c_str(), g.ename.c_str(),
+                             static_cast<double>(best),
+                             static_cast<double>(best_d),
+                             static_cast<double>(best_rr), best_name);
                 std::fflush(stdout);
             }
         }
