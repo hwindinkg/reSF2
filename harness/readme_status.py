@@ -64,11 +64,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("kusarigama: the intro plate is JS-exact now (raised only when BOTH "
-         "fighters finish an `EndsStage=1` move, `kg` L15777/`OCa`), so phase 2 "
-         "starts at F248 like the oracle and `diff:kusarigama` fell 1394 -> 159 "
-         "(gated, baseline 159); the remainder starts at nat f=301 / ora f=431 "
-         "with a 2.4-unit `sep_x` drift and the hit that follows it", False),
+        ("kusarigama: `diff:kusarigama` is 0 (gated, baseline 0) after two "
+         "real fixes - the intro plate now needs BOTH fighters past an "
+         "`EndsStage=1` move (`kg` L15777/`OCa`, phase 2 at F248 like the "
+         "oracle, 1394 -> 159) and the collider's y-range test no longer "
+         "repeats its first disjunct (`in_capsule` reported NO-OVERLAP for a "
+         "pair whose projection was inside the segment, delaying the hit one "
+         "frame; 159 -> 0)", True),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "

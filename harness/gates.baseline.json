@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-03T23:49:56",
+    "updated": "2026-11-04T20:45:58",
     "mode": "only"
   },
   "gates": {
@@ -227,10 +227,10 @@
       "date": "2026-11-02T18:54:49"
     },
     "diff:kusarigama": {
-      "metric": 159,
-      "commit": "a516d83f",
-      "reason": "the intro plate now requires BOTH fighters past an EndsStage move (JS kg L15777/OCa): phase 2 at F248 like the oracle, diff 1394 -> 159 stable",
-      "date": "2026-11-03T23:49:56"
+      "metric": 0,
+      "commit": "fadf4846",
+      "reason": "fixed in_capsule's y-range test (it repeated the first disjunct, so a downward attacker span could never report the projection inside the segment): diff 159 -> 0",
+      "date": "2026-11-04T20:45:58"
     }
   }
 }

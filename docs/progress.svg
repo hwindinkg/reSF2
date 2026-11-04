@@ -2,7 +2,7 @@
 <rect width="760" height="522" rx="10" fill="#0d1117"/>
 <text x="24" y="34" fill="#e6edf3" font-size="20" font-weight="600">Readiness by system</text>
 <text x="24" y="56" fill="#8b949e" font-size="12">treemap: tile area = checklist items in that system; colour = readiness (harness/readme_status.py)</text>
-<text x="736" y="40" fill="#3fb950" font-size="26" font-weight="700" text-anchor="end">99%</text>
+<text x="736" y="40" fill="#3fb950" font-size="26" font-weight="700" text-anchor="end">100%</text>
 <text x="736" y="58" fill="#8b949e" font-size="12" text-anchor="end">overall (all checklist items)</text>
 <g><title>Assets &amp; archives: 5/5 (100%)</title>
 <rect x="593.1" y="78.0" width="140.9" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
@@ -18,12 +18,12 @@
 <text x="427.2" y="264.7" fill="#3fb950" font-size="15" font-weight="700">100%</text>
 <text x="473.2" y="264.7" fill="#8b949e" font-size="11">4/4</text>
 </g>
-<g><title>Animation &amp; physics: 6/7 (86%)</title>
-<rect x="259.8" y="291.3" width="155.4" height="182.7" rx="6" fill="#302919" stroke="#664e1c"/>
-<rect x="259.8" y="291.3" width="155.4" height="3" rx="1.5" fill="#d29922"/>
+<g><title>Animation &amp; physics: 7/7 (100%)</title>
+<rect x="259.8" y="291.3" width="155.4" height="182.7" rx="6" fill="#162f21" stroke="#245d31"/>
+<rect x="259.8" y="291.3" width="155.4" height="3" rx="1.5" fill="#3fb950"/>
 <text x="267.8" y="313.3" fill="#e6edf3" font-size="12" font-weight="600">Animation &amp; physics</text>
-<text x="267.8" y="331.3" fill="#d29922" font-size="15" font-weight="700">86%</text>
-<text x="313.8" y="331.3" fill="#8b949e" font-size="11">6/7</text>
+<text x="267.8" y="331.3" fill="#3fb950" font-size="15" font-weight="700">100%</text>
+<text x="313.8" y="331.3" fill="#8b949e" font-size="11">7/7</text>
 </g>
 <g><title>Combat: 6/6 (100%)</title>
 <rect x="419.2" y="78.0" width="169.9" height="142.7" rx="6" fill="#162f21" stroke="#245d31"/>
@@ -84,5 +84,5 @@
 <text x="150" y="495" fill="#8b949e" font-size="12">70-94%</text>
 <rect x="240" y="485" width="12" height="12" rx="3" fill="#5f2728" stroke="#f85149"/>
 <text x="258" y="495" fill="#8b949e" font-size="12">&lt;70%</text>
-<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">1 open of 67 items</text>
+<text x="736" y="495" fill="#8b949e" font-size="12" text-anchor="end">0 open of 67 items</text>
 </svg>

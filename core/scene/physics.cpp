@@ -94,6 +94,10 @@ bool seg_seg_hit(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d,
 // (f,g) or near an endpoint. Writes e whenever |a|<=b, even on range
 // failure (X8 dirt — harmless: X8/o$ is only read on success, and every
 // success path below writes it, so per-call zeroing == per-W1a zeroing).
+// [probe] the collider call currently being evaluated (`[capgeom]`/`[incap]`
+// lines carry it, so one call's four checks can be paired with its verdict).
+static int g_capcall = 0;
+
 bool in_capsule(float a, float b, const Line2& l, const Vec3& d, Vec3& e,
                 const Vec3& f, const Vec3& g) {
     // [probe] `SF2_TRACE_CAPGEOM=1`: the internals of the endpoint-vs-capsule
@@ -107,9 +111,9 @@ bool in_capsule(float a, float b, const Line2& l, const Vec3& d, Vec3& e,
         const bool rx = in_range(px, f.x, g.x) || in_range(px, g.x, f.x);
         const bool ry = in_range(py, f.y, g.y) || in_range(py, g.y, f.y);
         std::fprintf(stderr,
-                     "[incap] a=%+.4f b=%.4f within=%d proj=(%.3f,%.3f) "
+                     "[incap] seq=%d a=%+.4f b=%.4f within=%d proj=(%.3f,%.3f) "
                      "rx=%d ry=%d dF2=%.4f dG2=%.4f b2=%.4f\n",
-                     static_cast<double>(a), static_cast<double>(b),
+                     g_capcall, static_cast<double>(a), static_cast<double>(b),
                      within ? 1 : 0, static_cast<double>(px),
                      static_cast<double>(py), rx ? 1 : 0, ry ? 1 : 0,
                      static_cast<double>(sq(d.x - f.x) + sq(d.y - f.y)),
@@ -120,8 +124,18 @@ bool in_capsule(float a, float b, const Line2& l, const Vec3& d, Vec3& e,
         e.x = d.x - a * l.a;
         e.y = d.y - a * l.b;
         e.z = 0.0f;
+        // [FIX collider] The y test repeated the FIRST disjunct instead of
+        // trying the reversed order: `in_range(e.y, f.y, g.y) ||
+        // in_range(e.y, f.y, g.y)`. `in_range(a,b,c)` is `a>=b && a<=c`, so when
+        // the attacker's raw span goes DOWNWARD in y (`f.y > g.y`, i.e. the
+        // usual overhead swing) the test is false for every value and the
+        // projection-inside-segment case never returns true - the port then
+        // falls through to the endpoint distance and reports NO-OVERLAP for a
+        // pair whose boxes plainly overlap. Measured: `KnivesDoubleSlash` vs
+        // `EHead` at radii sum 14 with the projection inside the segment yielded
+        // false, delaying the hit by one frame.
         if ((in_range(e.x, f.x, g.x) || in_range(e.x, g.x, f.x)) &&
-            (in_range(e.y, f.y, g.y) || in_range(e.y, f.y, g.y))) {
+            (in_range(e.y, f.y, g.y) || in_range(e.y, g.y, f.y))) {
             return true;
         }
         return sq(d.x - f.x) + sq(d.y - f.y) <= b * b ||
@@ -143,6 +157,7 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
     Vec3 a = tgt.p1, b = tgt.p2;
     Vec3 d = atk.p1, e = atk.p2;
     float c = tgt.radius + atk.radius;
+    ++g_capcall;  // [probe] pairs the `[capgeom]`/`[incap]` lines of this call
     Vec3 w8{}, x8{};  // W8/X8 zeroed per call (W1a-equivalent, see above)
     out.hit = false;
     out.kd_null = false;
@@ -201,9 +216,9 @@ bool capsule_capsule_overlap(const HitCapsule& atk, const HitCapsule& tgt,
         Vec3 seq = x8;
         const bool again = in_capsule(f2v, c, l, b, seq, d, e);
         std::fprintf(stderr,
-                     "[capgeom] atk=%s tgt=%s c=%.4f n=%+.4f f2=%+.4f q=%+.4f "
+                     "[capgeom] seq=%d atk=%s tgt=%s c=%.4f n=%+.4f f2=%+.4f q=%+.4f "
                      "r=%+.4f c1=%d c2=%d c3=%d c4=%d again=%d\n",
-                     atk.name.c_str(), tgt.name.c_str(),
+                     g_capcall, atk.name.c_str(), tgt.name.c_str(),
                      static_cast<double>(c), static_cast<double>(n),
                      static_cast<double>(f2v), static_cast<double>(q),
                      static_cast<double>(r), c1 ? 1 : 0, c2 ? 1 : 0, c3 ? 1 : 0,
