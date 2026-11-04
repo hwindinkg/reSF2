@@ -4872,3 +4872,35 @@ diff:kusarigama:  159 -> 0   (368/368 кадров сопоставлены)
 Именно те два вспомогательных пробника (`--hit-audit` с `margin/d/rr/line
 distances` и `SF2_TRACE_CAPGEOM` с операндами `in_capsule`) и позволили увидеть
 опечатку.
+
+### QA-04.11 — DOJO: `diff:dojo-move` = 2 (манекен на 1.05 юнита ниже при спавне)
+
+Последний непустой дифф: `fighters.Enemy.y` (−109.166 vs −108.114, Δ1.052) и
+`fighters.sep_x` (282.956 vs 282.954, Δ0.002) — ОБА только на кадре f=0.
+
+**1. `sep_x` — не баг, а округление.** 0.002 юнита = разница float-представлений
+`|x1-x2|` на двух сторонах; допуск компаратора для этого поля строже.
+
+**2. `Enemy.y` — реальное расхождение спавна манекена, сужено замером.**
+Пробник `SF2_TRACE_ENEMYIDLE=1` (только диагностика) на пути FightNone:
+```
+[idle] F0 before wx=973.000 wy=-110.000 pivot=7 pos0=(0.000,0.000)
+[idle] F0 after  wx=973.000 wy=-110.000 pos0=(972.395,-200.380)
+```
+То есть порт ставит бойца верно (spawn `EnemyPositionY=-110` из
+`<ModelsViewer PlayerPositionY="-93" PlayerPositionX="690" EnemyPositionY="-110"
+EnemyPositionX="973"/>` в `dojo_params.b78df4b4.xml`), но к моменту дампа
+`world_y` уже равен −109.166 — его пересчитывает `sample()` из позы:
+у модели `mdl_skeleton_punching_bag` кость `NPivot` имеет bind y = **−109.01**
+(`--dump-model`: `bone 7 NPivot bind=(1.25,-109.01,-0.21)`), и порт берёт
+`world_y = py[NPivot] + render_offset_y`.
+У JS в этот момент `Fe().ma.y` = −108.114, хотя `parameters.position` для
+манекена — та же точка спавна, а `jX`/`Fe()` — обе `NPivot`
+(`v.wya = "NPivot"`, `internal_settings.xml` L128 `<PivotNode Name="NPivot"/>`).
+Значит JS кладёт NPivot не в bind-высоту, а на 1.886 выше точки спавна
+(манекен висит на крюке), а порт — на 0.834.
+Следующий шаг: снять у оракула `parameters.position.y` и `Fe().ma.y` для
+манекена (хук в трейсере) и понять, откуда берётся +1.886 — тогда порт сможет
+повторить посадку, и `diff:dojo-move` уйдёт в 0 (baseline сейчас 2).
+
+Дифф `diff:dojo-demo` показывает те же два поля и по той же причине.

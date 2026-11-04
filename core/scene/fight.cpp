@@ -4719,12 +4719,35 @@ void FightController::sample_enemy_idle() {
     // every bone at its bind position — the exact hub path
     // (screens.cpp:3510-3512). Otherwise the enemy uses the stance idle.
     if (battle_.enemy_not_animation) {
+        // [probe] `SF2_TRACE_ENEMYIDLE=1`: the dummy's placement operands (the
+        // only place a NotAnimation fighter's body y is decided).
+        if (std::getenv("SF2_TRACE_ENEMYIDLE") != nullptr) {
+            const int piv = enemy_.fighter.model().bone_by_name("NPivot");
+            const std::vector<float>& pos = enemy_.fighter.positions();
+            std::fprintf(stdout,
+                         "[idle] F%d before wx=%.3f wy=%.3f pivot=%d "
+                         "pos0=(%.3f,%.3f)\n",
+                         frame_, static_cast<double>(enemy_.fighter.world_x()),
+                         static_cast<double>(enemy_.fighter.world_y()), piv,
+                         pos.empty() ? 0.0 : static_cast<double>(pos[0]),
+                         pos.size() < 2 ? 0.0 : static_cast<double>(pos[1]));
+            std::fflush(stdout);
+        }
         sf2::data::anim_clip bind_clip;
         bind_clip.frames.resize(1);
         enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
                               enemy_.fighter.world_y(), enemy_.fighter.facing(),
                               /*interp=*/false, 0, 0, 0.0f,
                               /*tick_ragdoll=*/false);
+        if (std::getenv("SF2_TRACE_ENEMYIDLE") != nullptr) {
+            std::fprintf(stdout,
+                         "[idle] F%d after wx=%.3f wy=%.3f pos0=(%.3f,%.3f)\n",
+                         frame_, static_cast<double>(enemy_.fighter.world_x()),
+                         static_cast<double>(enemy_.fighter.world_y()),
+                         static_cast<double>(enemy_.fighter.positions()[0]),
+                         static_cast<double>(enemy_.fighter.positions()[1]));
+            std::fflush(stdout);
+        }
         return;
     }
     sample_idle(enemy_);
