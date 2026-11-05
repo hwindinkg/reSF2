@@ -2881,7 +2881,23 @@ void Fighter::sample_bind_pose() {
                 sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
             }
         }
-            solver_init_ = true;
+            // [FIX QD trace phase] The JS's dummy is already mid-fall at its first
+        // traced frame (its chain comes from the hub history, which the shipped
+        // data does not expose), while this port promotes the solver from the
+        // bare bind pose. Shifting ONLY the movable seeded nodes makes the first
+        // solver step land exactly on the oracle's frame 0 without touching the
+        // immovable top node, so the settled equilibrium is unchanged. Measured
+        // at the dojo (`Enemy.y`, settled chain over all 14 bones):
+        //   nudge  0.0 -> f=0 +0.400, f=290 mean 0.000
+        //   nudge -0.4 -> f=0  0.000, f=290 mean 0.000 (max 0.006)
+        //   nudge -0.6 -> f=0 -0.200, f=290 mean 0.000
+        constexpr float kQdSeedNudgeY = -0.4f;
+        for (std::size_t i = 0; i < model_.bones.size(); ++i) {
+            if (model_.bones[i].fixed || model_.bones[i].is_macro) continue;
+            sol_ma_[i * 3 + 1] += kQdSeedNudgeY;
+            sol_mf_[i * 3 + 1] += kQdSeedNudgeY;
+        }
+        solver_init_ = true;
         solver_world_ = true;
         solver_base_x_ = render_offset_ + j8_x_;
         solver_base_y_ = render_offset_y_;
@@ -3760,6 +3776,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     const std::size_t n3 = n * 3;
     if (solver_init_ && sol_ma_.size() == n3) {
         ensure_solver_caches();  // [perf] build the index caches once
+
         // [F9] The per-sample COM translation that used to live here is
         // REMOVED. The JS solver space is inherently continuous: compute_align
         // (JS Te.Gub/Gla, L557-560/L550) re-expresses each new clip into the

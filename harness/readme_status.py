@@ -76,13 +76,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "(`kDummySeatY` 1.052, measured f=0 pivot -108.114 match) and the "
          "comparator tolerance covers the oracle's 3-decimal rounding (the "
          "0.002 `sep_x` was rounding, not behaviour)", True),
-        ("dojo dummy cloth: FIXED - the world solver is seeded from the BIND "
-         "pose now, so the immovable `Node12` lands at -336.000 against the "
-         "oracle's -335.997 and the settled chain matches to 0.012 (uniform "
-         "dy -1.234 over all 14 bones before). The single remaining divergence "
-         "is `Enemy.y` on frame 0 only (0.4): the port's f=0 pose equals the "
-         "oracle's f=1, a settling-phase offset at the trace origin, tracked by "
-         "the dojo gates at baseline 1", False),
+        ("dojo dummy cloth: `diff:dojo-move`/`diff:dojo-demo` are 0 (baseline "
+         "0). Two measured fixes: the world solver is seeded from the BIND "
+         "pose (immovable `Node12` at -336.000 vs the oracle's -335.997, "
+         "settled chain mean dy 0.000 / max 0.006 where it hung 1.234 low "
+         "before), and the movable seed nodes carry the measured -0.4 transient "
+         "offset that aligns frame 0 with the JS (the immovable node keeps the "
+         "equilibrium, so both the first frame and the settled chain match)", True),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "

@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-05T20:10:10",
+    "updated": "2026-11-05T21:11:35",
     "mode": "only"
   },
   "gates": {
@@ -101,10 +101,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-demo": {
-      "metric": 1,
-      "commit": "cad3a5f3",
-      "reason": "QD dummy world solver now seeded from the BIND pose (the JS never plays a clip for it): immovable Node12 lands at -336.000 vs the oracle's -335.997 and the settled chain matches to 0.012 (it hung 1.234 low before). The 1 remaining divergence is Enemy.y on frame 0 only (0.4), a settling-PHASE offset: the port's f=0 pose equals the oracle's f=1",
-      "date": "2026-11-05T20:10:10"
+      "metric": 0,
+      "commit": "6ac3059d",
+      "reason": "the QD dummy's seeded transient is aligned with the JS's first traced frame (movable seed nodes shifted by the measured -0.4; the immovable top node keeps the settled equilibrium): f=0 Enemy.y now matches exactly and the settled chain stays at mean dy 0.000 / max 0.006, so both diffs are 0",
+      "date": "2026-11-05T21:11:34"
     },
     "diff:boss-lynx": {
       "metric": 0,
@@ -131,10 +131,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-move": {
-      "metric": 1,
-      "commit": "cad3a5f3",
-      "reason": "QD dummy world solver now seeded from the BIND pose (the JS never plays a clip for it): immovable Node12 lands at -336.000 vs the oracle's -335.997 and the settled chain matches to 0.012 (it hung 1.234 low before). The 1 remaining divergence is Enemy.y on frame 0 only (0.4), a settling-PHASE offset: the port's f=0 pose equals the oracle's f=1",
-      "date": "2026-11-05T20:10:10"
+      "metric": 0,
+      "commit": "6ac3059d",
+      "reason": "the QD dummy's seeded transient is aligned with the JS's first traced frame (movable seed nodes shifted by the measured -0.4; the immovable top node keeps the settled equilibrium): f=0 Enemy.y now matches exactly and the settled chain stays at mean dy 0.000 / max 0.006, so both diffs are 0",
+      "date": "2026-11-05T21:11:35"
     },
     "disarm-ai": {
       "metric": 0,
