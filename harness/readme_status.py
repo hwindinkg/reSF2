@@ -76,6 +76,14 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "(`kDummySeatY` 1.052, measured f=0 pivot -108.114 match) and the "
          "comparator tolerance covers the oracle's 3-decimal rounding (the "
          "0.002 `sep_x` was rounding, not behaviour)", True),
+        ("dojo dummy cloth: with the seat fixed (f=0 exact) the ragdoll "
+         "chain still hangs 1.234 units lower than the oracle's (fixed "
+         "`Node12` -337.231 vs -335.997 at the same pivot -108.114); a seat "
+         "sweep proves the two are independent (1.052 -> f0 exact, ragdoll "
+         "-1.23; 2.286 -> ragdoll exact, f0 +1.234). `Edge15 Node12-Node7` has "
+         "rest=25 against bind=37, so the equilibrium is a heavily-stretched "
+         "constraint residual; the state comparator skips `y` on ragdoll "
+         "frames, so no gate covers it yet", False),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "

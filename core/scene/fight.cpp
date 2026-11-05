@@ -555,6 +555,21 @@ void FightController::init_locks(
     camera_.arena_w = wall_min_ + wall_max_;
     camera_.start_x_ = (player_.fighter.world_x() + enemy_.fighter.world_x()) * 0.5f;
     camera_.start_y_ = (player_.fighter.world_y() + enemy_.fighter.world_y()) * 0.5f;
+    // [probe] `SF2_TRACE_CAM=1`: the spawn midpoint the camera starts from, with
+    // the two operands (the oracle's f=0 focus is this same midpoint).
+    if (std::getenv("SF2_TRACE_CAM") != nullptr) {
+        std::fprintf(stdout,
+                     "[cam] spawn Me=(%.3f,%.3f) Enemy=(%.3f,%.3f) "
+                     "start=(%.3f,%.3f) initialized=%d\n",
+                     static_cast<double>(player_.fighter.world_x()),
+                     static_cast<double>(player_.fighter.world_y()),
+                     static_cast<double>(enemy_.fighter.world_x()),
+                     static_cast<double>(enemy_.fighter.world_y()),
+                     static_cast<double>(camera_.start_x_),
+                     static_cast<double>(camera_.start_y_),
+                     camera_.initialized_ ? 1 : 0);
+        std::fflush(stdout);
+    }
     camera_.framing(player_.fighter.world_x(), player_.fighter.world_y(),
                     enemy_.fighter.world_x(), enemy_.fighter.world_y(), 1280.0f, 720.0f,
                     player_.fighter.world_x());

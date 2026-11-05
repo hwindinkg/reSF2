@@ -3632,6 +3632,30 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              bo.weak ? 1 : 0, bo.collisible ? 1 : 0,
                              static_cast<double>(bo.mass));
             }
+            // [tool] the solver's rest constraints: every edge with its
+            // authored rest length next to the BIND distance, so a stroke whose
+            // rest length disagrees with the shipped pose is visible (the cloth
+            // equilibrium hangs at the rest lengths, not at the bind spans).
+            for (const auto& ed : m.edges) {
+                const int i1 = m.bone_by_name(ed.end1);
+                const int i2 = m.bone_by_name(ed.end2);
+                float bind_d = -1.0f;
+                if (i1 >= 0 && i2 >= 0) {
+                    const float dx = m.bones[static_cast<std::size_t>(i1)].x -
+                                     m.bones[static_cast<std::size_t>(i2)].x;
+                    const float dy = m.bones[static_cast<std::size_t>(i1)].y -
+                                     m.bones[static_cast<std::size_t>(i2)].y;
+                    const float dz = m.bones[static_cast<std::size_t>(i1)].z -
+                                     m.bones[static_cast<std::size_t>(i2)].z;
+                    bind_d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                }
+                std::fprintf(stdout,
+                             "[model]   edge %-22s %s - %s rest=%.3f bind=%.3f "
+                             "coll=%d\n",
+                             ed.name.c_str(), ed.end1.c_str(), ed.end2.c_str(),
+                             static_cast<double>(ed.length),
+                             static_cast<double>(bind_d), ed.collisible ? 1 : 0);
+            }
             // triangles: which bones the mesh is skinned to
             std::map<std::string, int> bind_counts;
             for (const sf2::scene::Tri& t : m.tris) {
