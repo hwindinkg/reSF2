@@ -3666,7 +3666,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // MacroNode children: the macro's position is the WEIGHTED average
             // of these nodes (`Yc.FIa`), so a mesh bound to a macro that mixes
             // the hand node with cloth-chain nodes would visibly swing.
-            std::fprintf(stdout, "[model] macros=%zu\n", m.macro_children.size());
+            std::fprintf(stdout, "[model] macros=%zu com_children=%zu\n",
+                         m.macro_children.size(), m.com_children.size());
+            for (const int ci : m.com_children) {
+                const sf2::scene::Bone& cb = m.bones[static_cast<std::size_t>(ci)];
+                std::fprintf(stdout, "[model]   com %-22s mass=%.4f bind=(%.2f,%.2f)\n",
+                             cb.name.c_str(), static_cast<double>(cb.mass),
+                             static_cast<double>(cb.x), static_cast<double>(cb.y));
+            }
             for (const auto& kv : m.macro_children) {
                 std::fprintf(stdout, "[model]   macro %-24s children=%zu:", kv.first.c_str(),
                              kv.second.child_names.size());

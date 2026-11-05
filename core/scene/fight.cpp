@@ -10173,6 +10173,20 @@ void FightController::update(float dt) {
         cam_live_started_ = true;
         camera_.initialized_ = false;  // first-call snap to the spawn midpoint
     }
+    if (std::getenv("SF2_TRACE_COM") != nullptr) {
+        std::fprintf(stdout,
+                     "[com] F%d Me=(%.3f,%.3f) Enemy=(%.3f,%.3f) "
+                     "target=(%.3f,%.3f)\n",
+                     frame_, static_cast<double>(player_.fighter.com_x()),
+                     static_cast<double>(player_.fighter.com_y()),
+                     static_cast<double>(enemy_.fighter.com_x()),
+                     static_cast<double>(enemy_.fighter.com_y()),
+                     static_cast<double>((player_.fighter.com_x() +
+                                          enemy_.fighter.com_x()) * 0.5f),
+                     static_cast<double>((player_.fighter.com_y() +
+                                          enemy_.fighter.com_y()) * 0.5f));
+        std::fflush(stdout);
+    }
     camera_.framing(player_.fighter.com_x(), player_.fighter.com_y(),
                     enemy_.fighter.com_x(), enemy_.fighter.com_y(), 1280.0f, 720.0f,
                     pnx);
