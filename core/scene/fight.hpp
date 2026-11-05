@@ -2661,6 +2661,13 @@ private:
     FightLogLine last_log_;
     float wall_min_ = 80.0f, wall_max_ = 1880.0f, floor_y_ = 0.0f;
     FightCamera camera_;
+    // [FIX camera start - JS `ql` init] The JS camera is initialized at the
+    // FIRST live fight frame: at its f=0 the focus is exactly the spawn midpoint
+    // (measured 831.5,-101.5), while the port initialized the camera during
+    // setup and then chased through the pre-fight frames, so its first traced
+    // frame already read 830.800,-224.295 - 122 units low. Latch below re-arms
+    // the first-call snap once, when the fight goes live.
+    bool cam_live_started_ = false;
     FightHud hud_;
     float time_since_log_ = 0.0f;
 

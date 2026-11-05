@@ -10162,6 +10162,17 @@ void FightController::update(float dt) {
         float nx = 0.0f, ny = 0.0f;
         if (player_.fighter.node_world_xy(bn, false, nx, ny)) pnx = nx;
     }
+    // [FIX camera start - JS ql init] The JS camera is initialized at the
+    // FIRST live fight frame: its f=0 focus is exactly the spawn midpoint
+    // (measured 831.5,-101.5). The port initialized it during setup and then
+    // chased through the pre-fight frames, so its first traced frame already
+    // read 830.800,-224.295 - 122 units low. Re-arm the first-call snap when
+    // the fight goes live; with it the f=0 and f=1 focuses match the oracle
+    // (0.000 and 0.016) instead of 122.8 / 88.2.
+    if (!cam_live_started_ && phase_ != fight_phase::idle) {
+        cam_live_started_ = true;
+        camera_.initialized_ = false;  // first-call snap to the spawn midpoint
+    }
     camera_.framing(player_.fighter.com_x(), player_.fighter.com_y(),
                     enemy_.fighter.com_x(), enemy_.fighter.com_y(), 1280.0f, 720.0f,
                     pnx);

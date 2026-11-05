@@ -8,7 +8,7 @@
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-69 of 69 checklist items; every gap below is documented in BUGS.md.
+70 of 70 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -16,7 +16,7 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟩 | 100% | 9/9 | - |
+| **Animation & physics** | 🟩 | 100% | 10/10 | - |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -25,9 +25,9 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 100% | 69/69 | - |
+| **overall** | 🟩 | 100% | 70/70 | - |
 
-The `overall` row is every checklist item at once (69 of 69); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (70 of 70); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
@@ -49,7 +49,7 @@ The `overall` row is every checklist item at once (69 of 69); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48158 | 18 |
-| `core/scene` | 40048 | 35 |
+| `core/scene` | 40066 | 35 |
 | `app/game` | 12196 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (69 of 69); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **110345** | |
+| **total** | **110363** | |
 <!-- STATUS:END -->

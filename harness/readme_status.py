@@ -64,6 +64,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
+        ("camera start: the fight camera is initialized at the FIRST live frame "
+         "(JS `ql` init) instead of during setup - its f=0 focus is now exactly "
+         "the spawn midpoint (831.5,-101.5, delta 0.000) instead of 122.8 units "
+         "low, and f=1 matches to 0.016", True),
         ("kusarigama: `diff:kusarigama` is 0 (gated, baseline 0) after two "
          "real fixes - the intro plate now needs BOTH fighters past an "
          "`EndsStage=1` move (`kg` L15777/`OCa`, phase 2 at F248 like the "
