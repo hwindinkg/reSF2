@@ -64,6 +64,14 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
+        ("camera chase: `--compare-cam` compares the focus (1-unit tolerance) "
+         "and it still drifts - 190 `cx` / 58 `cy` frames on the dojo (mean "
+         "1.36 / 0.84, max 5.5 / 10.4) and ~270-460 per real fight. The start "
+         "matches exactly after the first-live-frame fix, so the residual is "
+         "the COM-based target (`Dl.v6` centroid) feeding the 0.15-gain chase; "
+         "it is off by default because the two sides record the smoothed chase "
+         "at slightly different points in a frame, which alone yields ~1 unit",
+         False),
         ("camera start: the fight camera is initialized at the FIRST live frame "
          "(JS `ql` init) instead of during setup - its f=0 focus is now exactly "
          "the spawn midpoint (831.5,-101.5, delta 0.000) instead of 122.8 units "

@@ -58,6 +58,14 @@ DEFAULT_OUT = os.path.join("reference", "traces", "state_gap_report.txt")
 # from that rounding. 0.0025 covers the round-trip with margin and stays far
 # below any behavioural difference (the fighters are ~200-350 units apart).
 FLOAT_TOL = 0.0025
+# The fight camera focus (`cam.cx/cy`) is a SMOOTHED position (the JS `ql`
+# chase, gain 0.15 + the 50-unit velocity clamp), so it lags the COM target and
+# amplifies any tiny target difference. Both sides emit it in world units; at
+# zoom 1.0 one world unit is 1 px, so a 1-unit band is the visible threshold.
+CAM_TOL = 1.0
+# Enabled by `--compare-cam` (see collect_fields): the focus is compared only
+# when the caller wants camera work, because the recording points differ.
+COMPARE_CAM = False
 
 # Fields emitted but NOT counted toward the divergence total, with the reason.
 # (A field is only informational when the two sides structurally CANNOT hold
@@ -358,6 +366,18 @@ def collect_fields(nf, of, swap):
     out["nf"] = (nf.get("nf"), of.get("nf"))
     out["timer"] = (nf.get("timer"), of.get("timer"))
     out["callouts"] = (nf.get("callouts"), of.get("callouts"))
+    # The fight camera focus (`fight.Ta.Go.ma` / the port's `go_x_/go_y_`) and
+    # the layer zoom: emitted by both traces. OFF by default - measured on every
+    # scenario, the two sides read the SMOOTHED chase at slightly different
+    # points inside their frame, which shows up as a ~1-unit systematic
+    # difference (means 0.7-1.4, max ~10 during fast transitions) even when the
+    # fight state is identical. `--compare-cam` enables it for camera work.
+    if COMPARE_CAM:
+        ncam = nf.get("cam") or {}
+        ocam = of.get("cam") or {}
+        out["cam.cx"] = (ncam.get("cx"), ocam.get("cx"))
+        out["cam.cy"] = (ncam.get("cy"), ocam.get("cy"))
+        out["cam.zoom"] = (ncam.get("zoom"), ocam.get("zoom"))
 
     pairs = [("Me", "Me", "Enemy"), ("Enemy", "Enemy", "Me")] if swap else \
             [("Me", "Me", "Me"), ("Enemy", "Enemy", "Enemy")]
@@ -563,6 +583,8 @@ def run(args):
                 # rounded to 4 decimals): compare with the same tolerance the
                 # hp fields use, so 1e-4 rounding never reads as a divergence.
                 ok = scalar_eq(nv, ov, FLOAT_TOL)
+            elif field in ("cam.cx", "cam.cy"):
+                ok = scalar_eq(nv, ov, CAM_TOL)
             else:
                 ok = nv == ov
             if not ok:
@@ -602,6 +624,10 @@ def run(args):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Compare native vs oracle FIGHT LOGIC state traces (Shadow Fight 2).")
+    ap.add_argument("--compare-cam", action="store_true",
+                    help="also compare the fight camera focus (cam.cx/cy/zoom); "
+                         "the two sides record the smoothed chase at slightly "
+                         "different points inside a frame")
     ap.add_argument("--native", default=DEFAULT_NATIVE)
     ap.add_argument("--oracle", default=DEFAULT_ORACLE)
     ap.add_argument("--out", default=DEFAULT_OUT)
@@ -622,6 +648,8 @@ def main(argv=None):
                          "number is absent, or when the oracle trace is missing "
                          "(default: always exit 0 for manual scenarios)")
     args = ap.parse_args(argv)
+    global COMPARE_CAM
+    COMPARE_CAM = bool(getattr(args, "compare_cam", False))
     return run(args)
 
 

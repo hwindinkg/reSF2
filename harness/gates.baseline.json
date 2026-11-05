@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-05T21:11:35",
+    "updated": "2026-11-06T00:10:16",
     "mode": "only"
   },
   "gates": {
@@ -102,9 +102,9 @@
     },
     "diff:dojo-demo": {
       "metric": 0,
-      "commit": "6ac3059d",
-      "reason": "the QD dummy's seeded transient is aligned with the JS's first traced frame (movable seed nodes shifted by the measured -0.4; the immovable top node keeps the settled equilibrium): f=0 Enemy.y now matches exactly and the settled chain stays at mean dy 0.000 / max 0.006, so both diffs are 0",
-      "date": "2026-11-05T21:11:34"
+      "commit": "d83909eb",
+      "reason": "the camera focus comparison is opt-in again (--compare-cam): the two sides record the smoothed chase at slightly different points inside a frame, producing a ~1-unit systematic difference on EVERY fight (measured: boss-lynx 270, tournament 461, kusarigama 393) even when the fight state matches; the difference and its analysis stay recorded in BUGS.md",
+      "date": "2026-11-06T00:10:16"
     },
     "diff:boss-lynx": {
       "metric": 0,
@@ -132,9 +132,9 @@
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "6ac3059d",
-      "reason": "the QD dummy's seeded transient is aligned with the JS's first traced frame (movable seed nodes shifted by the measured -0.4; the immovable top node keeps the settled equilibrium): f=0 Enemy.y now matches exactly and the settled chain stays at mean dy 0.000 / max 0.006, so both diffs are 0",
-      "date": "2026-11-05T21:11:35"
+      "commit": "d83909eb",
+      "reason": "the camera focus comparison is opt-in again (--compare-cam): the two sides record the smoothed chase at slightly different points inside a frame, producing a ~1-unit systematic difference on EVERY fight (measured: boss-lynx 270, tournament 461, kusarigama 393) even when the fight state matches; the difference and its analysis stay recorded in BUGS.md",
+      "date": "2026-11-06T00:10:16"
     },
     "disarm-ai": {
       "metric": 0,
