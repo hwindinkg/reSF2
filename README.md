@@ -2,7 +2,7 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-38%20%C2%B7%2038%20%C2%B70-brightgreen) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-38%20%C2%B7%2036%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
 ### Readiness: 99%
 
@@ -10,13 +10,13 @@
 
 68 of 69 checklist items; every gap below is documented in BUGS.md.
 
-Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · reference: the shipped `sf2.readable.js`
+Gates with a baseline: **38** (36 at 0 divergences, 2 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 89% | 8/9 | dojo dummy cloth: the settled chain hangs 1.234 lower than the oracle's - the immovable `Node12` is seeded at -337.231 vs -335.997 and never moves afterwards. Seeding from the BIND pose instead lands it at -336.000 and matches the settled chain to 0.005, but then the chain starts 12 units off its rest lengths and is still oscillating when the fight starts, making the gate load-dependent (measured 1 vs 5 for the same code), so the deterministic clip-posed seed was kept |
+| **Animation & physics** | 🟨 | 89% | 8/9 | dojo dummy cloth: FIXED - the world solver is seeded from the BIND pose now, so the immovable `Node12` lands at -336.000 against the oracle's -335.997 and the settled chain matches to 0.012 (uniform dy -1.234 over all 14 bones before). The single remaining divergence is `Enemy.y` on frame 0 only (0.4): the port's f=0 pose equals the oracle's f=1, a settling-phase offset at the trace origin, tracked by the dojo gates at baseline 1 |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -37,8 +37,8 @@ The `overall` row is every checklist item at once (68 of 69); a system row count
 | `boss-lynx` | 0 | 🟩 exact |
 | `tournament` | 0 | 🟩 exact |
 | `survival` | 0 | 🟩 exact |
-| `dojo-demo` | 0 | 🟩 exact |
-| `dojo-move` | 0 | 🟩 exact |
+| `dojo-demo` | 1 | 🟨 known |
+| `dojo-move` | 1 | 🟨 known |
 
 `0` = the whole fight state matches the original JS game frame by frame.
 
@@ -49,7 +49,7 @@ The `overall` row is every checklist item at once (68 of 69); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48158 | 18 |
-| `core/scene` | 40023 | 35 |
+| `core/scene` | 40031 | 35 |
 | `app/game` | 12196 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (68 of 69); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **110320** | |
+| **total** | **110328** | |
 <!-- STATUS:END -->

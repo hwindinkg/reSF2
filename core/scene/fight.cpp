@@ -4750,18 +4750,13 @@ void FightController::sample_enemy_idle() {
         }
         sf2::data::anim_clip bind_clip;
         bind_clip.frames.resize(1);
-        // [FIX dojo dummy seat] The oracle's `Fe()` for the not-animated dummy
-        // sits 1.052 units ABOVE this port's bind seat (measured f=0:
-        // -108.114 vs -109.166; the model's own `NPivot` bind y is -109.01).
-        // The JS seats the body from its own model build, which the shipped
-        // data does not let us derive, so the correction is a measured
-        // constant. Swept: 0 -> -109.166, 1.886 -> -107.280 (overshoot +0.834),
-        // 1.052 -> -108.114 (exact). The settled-chain offset (1.234) is NOT
-        // this seat - a bind seed fixes it but is load-dependent, see
-        // `sample_bind_pose` and BUGS.md.
-        constexpr float kDummySeatY = 1.052f;
+        // The QD dummy's world solver is seeded from the BIND pose placed on
+        // the fighter's own position (`Fighter::sample_bind_pose`), so the
+        // per-sample seat offset that used to live here is gone: the seed now
+        // puts the immovable top node at -336.000 against the oracle's
+        // -335.997 and the settled chain matches to 0.012.
         enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
-                              enemy_.fighter.world_y() + kDummySeatY,
+                              enemy_.fighter.world_y(),
                               enemy_.fighter.facing(),
                               /*interp=*/false, 0, 0, 0.0f,
                               // [experiment] `SF2_DUMMY_RAGDOLL=1`: the oracle's

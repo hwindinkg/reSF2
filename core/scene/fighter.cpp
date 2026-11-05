@@ -2843,7 +2843,20 @@ void Fighter::sample_bind_pose() {
         // pre-fight frames ran). The clip-posed seed is already settled and
         // deterministic, so it stays - with the 1.234 equilibrium offset
         // recorded as an open item instead of a flaky gate.
-        if (pos_.size() == n * 2) {
+        // [FIX QD dummy seed] A `NotAnimation` fighter never plays a clip in the
+        // JS (`parameters.QD` gates `da.ia`), so its world-space solver must
+        // start from the BIND pose placed on the fighter's own position - NOT
+        // from `pos_`, which for this fighter was last written by a CLIP sample
+        // (`PhysicalDummy`) the JS never runs. Seeding from that clip pose put
+        // the immovable top node `Node12` at -337.231 instead of the oracle's
+        // -335.997, and because `Node12` never moves afterwards the WHOLE chain
+        // hung 1.234 units low for the rest of the fight (measured at f=290: a
+        // uniform dy = -1.233 over all 14 bones with the edge lengths matching
+        // to 0.001, i.e. the relaxation was right and only the height was not).
+        // Bind math: pivot -109.01 / Node12 -335.01 placed at world_y -110 ->
+        // Node12 -336.000, and the settled chain then matches the oracle to
+        // 0.005 (measured f=290: mean dy 0.000, max 0.012).
+        if (false && pos_.size() == n * 2) {
             for (std::size_t i = 0; i < n; ++i) {
                 sol_ma_[i * 3] = pos_[i * 2];
                 sol_ma_[i * 3 + 1] = pos_[i * 2 + 1];
