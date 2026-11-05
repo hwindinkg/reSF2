@@ -52,7 +52,12 @@ from collections import Counter
 DEFAULT_NATIVE = os.path.join("reference", "traces", "native_state.jsonl")
 DEFAULT_ORACLE = os.path.join("reference", "traces", "oracle_state.jsonl")
 DEFAULT_OUT = os.path.join("reference", "traces", "state_gap_report.txt")
-FLOAT_TOL = 0.001
+# Position noise budget: the ORACLE trace rounds every coordinate to 3 decimals
+# (`r3` in trace.js) while the native dump uses 4, so a quantity built from TWO
+# coordinates (`sep_x = |x1 - x2|`) can differ by up to 2 * 5e-4 = 0.001 just
+# from that rounding. 0.0025 covers the round-trip with margin and stays far
+# below any behavioural difference (the fighters are ~200-350 units apart).
+FLOAT_TOL = 0.0025
 
 # Fields emitted but NOT counted toward the divergence total, with the reason.
 # (A field is only informational when the two sides structurally CANNOT hold

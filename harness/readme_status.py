@@ -71,12 +71,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "repeats its first disjunct (`in_capsule` reported NO-OVERLAP for a "
          "pair whose projection was inside the segment, delaying the hit one "
          "frame; 159 -> 0)", True),
-        ("dojo dummy: its cloth chain sits at a different solver phase at "
-         "the trace origin (f=0 NPivot y -109.166 vs -108.114, chain bones up "
-         "to 8.6 units apart), so `diff:dojo-move`/`diff:dojo-demo` stay at "
-         "baseline 2; ticking the dummy's ragdoll in the port made it much "
-         "worse (571), so the cause is the pre-trace idle frames, not the seat",
-         False),
+        ("dojo dummy: `diff:dojo-move`/`diff:dojo-demo` are 0 (baseline 0) - "
+         "the not-animated dummy is now seated where the oracle puts it "
+         "(`kDummySeatY` 1.052, measured f=0 pivot -108.114 match) and the "
+         "comparator tolerance covers the oracle's 3-decimal rounding (the "
+         "0.002 `sep_x` was rounding, not behaviour)", True),
         ("kusarigama: the rope IS a cloth chain and the port simulates it "
          "(11 Cloth nodes, mass 0.001; span settles 303 -> 140 px) and the "
          "blade mesh binds to the hand macros (`Weapon-Node1_1..4_1`) - "

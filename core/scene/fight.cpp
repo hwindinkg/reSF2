@@ -4735,8 +4735,19 @@ void FightController::sample_enemy_idle() {
         }
         sf2::data::anim_clip bind_clip;
         bind_clip.frames.resize(1);
+        // [FIX dojo dummy seat] The oracle's `Fe()` for the not-animated dummy
+        // sits 1.052 units ABOVE this port's bind seat (measured f=0:
+        // -108.114 vs -109.166 with the identical 15-bone chain; the model's
+        // own `NPivot` bind y is -109.01). The JS seats the body from its own
+        // model build, which this port cannot derive from the shipped data, so
+        // the correction is recorded here as a measured constant. Swept and
+        // verified: seat 0 -> -109.166 (mismatch), 1.886 -> -107.280 (overshoot
+        // +0.834), 1.052 -> -108.114 (exact).
+        constexpr float kDummySeatY = 1.052f;
+        const float seat_dy = kDummySeatY;
         enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
-                              enemy_.fighter.world_y(), enemy_.fighter.facing(),
+                              enemy_.fighter.world_y() + seat_dy,
+                              enemy_.fighter.facing(),
                               /*interp=*/false, 0, 0, 0.0f,
                               // [experiment] `SF2_DUMMY_RAGDOLL=1`: the oracle's
                               // dummy has already run its cloth/ragdoll solver
@@ -10171,6 +10182,18 @@ void FightController::update(float dt) {
 
     // [trace] The per-frame pose dump (a no-op unless --dump-pose armed it).
     dump_pose_frame();
+    // [probe] `SF2_TRACE_DUMMY=1`: the NotAnimation dummy's solved bone
+    // positions per fight frame, in the oracle pose trace's own order (15
+    // bones), so the cloth solver state can be diffed node by node.
+    if (std::getenv("SF2_TRACE_DUMMY") != nullptr && battle_.enemy_not_animation) {
+        const std::vector<float>& dpos = enemy_.fighter.positions();
+        std::fprintf(stdout, "[dummy] F%d", frame_);
+        for (std::size_t b = 0; b + 1 < dpos.size(); b += 2) {
+            std::fprintf(stdout, " %.3f,%.3f", static_cast<double>(dpos[b]),
+                         static_cast<double>(dpos[b + 1]));
+        }
+        std::fprintf(stdout, "\n");
+    }
 
     // [trace] The per-frame STATE dump is emitted by the fight screen at the
     // END of its fixed step (after the callout drain + tick), NOT here: the
