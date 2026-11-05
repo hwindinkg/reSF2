@@ -16,7 +16,7 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 89% | 8/9 | dojo dummy cloth: with the seat fixed (f=0 exact) the ragdoll chain still hangs 1.234 units lower than the oracle's (fixed `Node12` -337.231 vs -335.997 at the same pivot -108.114); a seat sweep proves the two are independent (1.052 -> f0 exact, ragdoll -1.23; 2.286 -> ragdoll exact, f0 +1.234). `Edge15 Node12-Node7` has rest=25 against bind=37, so the equilibrium is a heavily-stretched constraint residual; the state comparator skips `y` on ragdoll frames, so no gate covers it yet |
+| **Animation & physics** | 🟨 | 89% | 8/9 | dojo dummy cloth: the settled chain hangs 1.234 lower than the oracle's - the immovable `Node12` is seeded at -337.231 vs -335.997 and never moves afterwards. Seeding from the BIND pose instead lands it at -336.000 and matches the settled chain to 0.005, but then the chain starts 12 units off its rest lengths and is still oscillating when the fight starts, making the gate load-dependent (measured 1 vs 5 for the same code), so the deterministic clip-posed seed was kept |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -49,7 +49,7 @@ The `overall` row is every checklist item at once (68 of 69); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48158 | 18 |
-| `core/scene` | 40012 | 35 |
+| `core/scene` | 40023 | 35 |
 | `app/game` | 12196 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (68 of 69); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **110309** | |
+| **total** | **110320** | |
 <!-- STATUS:END -->

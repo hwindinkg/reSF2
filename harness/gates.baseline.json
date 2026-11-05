@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-05T00:56:14",
+    "updated": "2026-11-05T18:33:33",
     "mode": "only"
   },
   "gates": {
@@ -102,9 +102,9 @@
     },
     "diff:dojo-demo": {
       "metric": 0,
-      "commit": "b34676f9",
-      "reason": "the not-animated dojo dummy is now seated where the oracle puts it (kDummySeatY 1.052, measured -108.114 exactly) and the comparator tolerance covers the oracle's 3-decimal rounding; both diffs 2 -> 0",
-      "date": "2026-11-05T00:56:14"
+      "commit": "1973410b",
+      "reason": "reverted to the deterministic clip-posed QD seed: the bind seed matched the settled chain (0.005) but made the early frames load-dependent (the same gate measured 1 or 5), so the 1.234 equilibrium offset is recorded as an open checklist item instead of a flaky gate",
+      "date": "2026-11-05T18:33:33"
     },
     "diff:boss-lynx": {
       "metric": 0,
@@ -132,9 +132,9 @@
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "b34676f9",
-      "reason": "the not-animated dojo dummy is now seated where the oracle puts it (kDummySeatY 1.052, measured -108.114 exactly) and the comparator tolerance covers the oracle's 3-decimal rounding; both diffs 2 -> 0",
-      "date": "2026-11-05T00:56:14"
+      "commit": "1973410b",
+      "reason": "reverted to the deterministic clip-posed QD seed: the bind seed matched the settled chain (0.005) but made the early frames load-dependent (the same gate measured 1 or 5), so the 1.234 equilibrium offset is recorded as an open checklist item instead of a flaky gate",
+      "date": "2026-11-05T18:33:33"
     },
     "disarm-ai": {
       "metric": 0,

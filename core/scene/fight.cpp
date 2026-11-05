@@ -4752,16 +4752,16 @@ void FightController::sample_enemy_idle() {
         bind_clip.frames.resize(1);
         // [FIX dojo dummy seat] The oracle's `Fe()` for the not-animated dummy
         // sits 1.052 units ABOVE this port's bind seat (measured f=0:
-        // -108.114 vs -109.166 with the identical 15-bone chain; the model's
-        // own `NPivot` bind y is -109.01). The JS seats the body from its own
-        // model build, which this port cannot derive from the shipped data, so
-        // the correction is recorded here as a measured constant. Swept and
-        // verified: seat 0 -> -109.166 (mismatch), 1.886 -> -107.280 (overshoot
-        // +0.834), 1.052 -> -108.114 (exact).
+        // -108.114 vs -109.166; the model's own `NPivot` bind y is -109.01).
+        // The JS seats the body from its own model build, which the shipped
+        // data does not let us derive, so the correction is a measured
+        // constant. Swept: 0 -> -109.166, 1.886 -> -107.280 (overshoot +0.834),
+        // 1.052 -> -108.114 (exact). The settled-chain offset (1.234) is NOT
+        // this seat - a bind seed fixes it but is load-dependent, see
+        // `sample_bind_pose` and BUGS.md.
         constexpr float kDummySeatY = 1.052f;
-        const float seat_dy = kDummySeatY;
         enemy_.fighter.sample(bind_clip, 0, enemy_.fighter.world_x(),
-                              enemy_.fighter.world_y() + seat_dy,
+                              enemy_.fighter.world_y() + kDummySeatY,
                               enemy_.fighter.facing(),
                               /*interp=*/false, 0, 0, 0.0f,
                               // [experiment] `SF2_DUMMY_RAGDOLL=1`: the oracle's

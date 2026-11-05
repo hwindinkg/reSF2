@@ -2832,6 +2832,17 @@ void Fighter::sample_bind_pose() {
         const std::size_t n = model_.bones.size();
         sol_ma_.assign(n * 3, 0.0f);
         sol_mf_.assign(n * 3, 0.0f);
+        // [QD dummy seed - measured trade-off, see BUGS.md] Seeding this
+        // world-space solver from the BIND pose instead of `pos_` makes the
+        // immovable `Node12` land at -336.000 against the oracle's -335.997 and
+        // the SETTLED chain then matches to 0.005 (it hangs 1.234 low from the
+        // clip-posed seed this port uses). But the bind seed also starts the
+        // chain 12 units from its rest lengths, so it is still oscillating when
+        // the traced fight starts and the metric becomes load-dependent
+        // (measured: the same gate reports 1 or 5 depending on how many
+        // pre-fight frames ran). The clip-posed seed is already settled and
+        // deterministic, so it stays - with the 1.234 equilibrium offset
+        // recorded as an open item instead of a flaky gate.
         if (pos_.size() == n * 2) {
             for (std::size_t i = 0; i < n; ++i) {
                 sol_ma_[i * 3] = pos_[i * 2];
@@ -2857,7 +2868,7 @@ void Fighter::sample_bind_pose() {
                 sol_mf_[i * 3 + 2] = sol_ma_[i * 3 + 2];
             }
         }
-        solver_init_ = true;
+            solver_init_ = true;
         solver_world_ = true;
         solver_base_x_ = render_offset_ + j8_x_;
         solver_base_y_ = render_offset_y_;
