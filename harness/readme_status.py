@@ -78,11 +78,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "because they are the ONLY bones that deviate - every skeletal bone "
          "matches", True),
         ("cloth/chain divergence: measured and bounded but NOT fixed - the "
-         "player's `BODY-Node18` deviates up to 28.7 units, eight `HEAD-Node*` "
-         "nodes up to ~15, and the auxiliary Mass=0 `COM` node up to 222.7 "
-         "(unused: gameplay `To COM` reads the centroid, which matches to "
-         "0.001). Tracked by the pose gate's baseline (851 over-tolerance "
-         "frames) so a regression is caught", False),
+         "player's `BODY-Node*`/`HEAD-Node*` and the mass-0 `COM` node deviate "
+         "(pose gate 851, baseline). One non-JS branch was removed (the "
+         "`preview_mode_` snap in the edge relaxation; `yu.bFa` always uses the "
+         "other endpoint's mass share) - `--full` stays green, the pose metric "
+         "is unchanged because that branch is not active on the replay path. "
+         "Remaining candidates are recorded with file:line: `fha` gated on "
+         "`solver_world_`, the `COM` seat value, `Mass` default 1.0 vs 0", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "

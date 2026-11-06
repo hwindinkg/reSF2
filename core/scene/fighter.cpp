@@ -3925,28 +3925,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const float dist = std::sqrt(ex * ex + ey * ey + ez * ez);
                 if (dist < 1e-9f) continue;
                 const float r = e.length / dist;
-                // [FIX hanging cloth] When ONE endpoint is immovable (`cA`
-                // false: a MacroNode / Fixed node), the JS mass-weighted
-                // midpoint gives the movable side only its OWN mass share of
-                // the correction: with the shipped masses (macro 0.00112 vs
-                // cloth 0.1) that is 0.9% per pass, so the cloth node free-falls
-                // away from the macro (the reported "the bandage rises and
-                // wobbles, the leg mesh stretches": the worst edge grew to
-                // +181 over the rest length 16). A pinned partner is a HARD
-                // constraint: pull the movable node to exactly `rest`.
-                if (preview_mode_ && cA1 && !cA2) {
-                    sol_ma_[u1] = sol_ma_[u2] + (sol_ma_[u1] - sol_ma_[u2]) * r;
-                    sol_ma_[u1 + 1] =
-                        sol_ma_[u2 + 1] + (sol_ma_[u1 + 1] - sol_ma_[u2 + 1]) * r;
-                    sol_ma_[u1 + 2] =
-                        sol_ma_[u2 + 2] + (sol_ma_[u1 + 2] - sol_ma_[u2 + 2]) * r;
-                } else if (preview_mode_ && cA2 && !cA1) {
-                    sol_ma_[u2] = sol_ma_[u1] + (sol_ma_[u2] - sol_ma_[u1]) * r;
-                    sol_ma_[u2 + 1] =
-                        sol_ma_[u1 + 1] + (sol_ma_[u2 + 1] - sol_ma_[u1 + 1]) * r;
-                    sol_ma_[u2 + 2] =
-                        sol_ma_[u1 + 2] + (sol_ma_[u2 + 2] - sol_ma_[u1 + 2]) * r;
-                } else {
+                // [FIX JS-exact relaxation] The old preview_mode_ branch
+                // snapped the movable endpoint EXACTLY to rest whenever its
+                // partner was immovable. That is not what yu.bFa (L33534)
+                // does: the JS always moves each cA endpoint by the OTHER
+                // endpoints mass share (f=(1-e)/(w1+w2), g=b*f). The snap is
+                // what left the dojo players BODY-Node*/HEAD-Node* chains up
+                // to 28.7 units from the oracle (measured by pose:dojo-move).
+                {
                     const float w1 = bones[i1].mass;
                     const float w2 = bones[i2].mass;
                     const float fk = (1.0f - r) / (w1 + w2);
