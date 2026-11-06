@@ -71,11 +71,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
-        ("camera focus: the TARGET is now exact - the COM midpoint matches "
-         "`com.mid` to 0.001 after f=30 (it differed ~1.3 before the timeline "
-         "was 1:1), so the COM/pan input is right. The remaining `cam.cx/cy` "
-         "residual is the 0.15-gain chase itself (|dcx| mean 0.68 max 1.49, "
-         "|dcy| 0.18 max 0.91 after f=30); `--compare-cam` still shows it", False),
+        ("camera focus: FIXED and GATED - the JS `ql.dZa` starts with "
+         "`Go.sk(0)`, i.e. the focus node is a Verlet body whose `ma` is "
+         "EXTRAPOLATED by its velocity and `iq = Go.mf` is the pre-extrapolation "
+         "value; the port treated it as a plain variable. With the extrapolation "
+         "the focus matches frame for frame: `cam.cx/cy/zoom` are compared on "
+         "every diff scenario and all of them are 0 (dojo was 184 `cx` / 70 `cy` "
+         "frames over the 1-unit tolerance)", True),
         ("camera start: the fight camera is initialized at the FIRST live frame "
          "(JS `ql` init) instead of during setup - its f=0 focus is now exactly "
          "the spawn midpoint (831.5,-101.5, delta 0.000) instead of 122.8 units "

@@ -1415,6 +1415,9 @@ struct FightCamera {
     // target; Go/Jl = the smoothed focus, iq = the previous focus.
     bool initialized_ = false;
     float go_x_ = 0.0f, go_y_ = 0.0f;            // Go.ma (current focus)
+    // [FIX Go Verlet] the focus node two frames back (the mf the JS Go.sk(0)
+    // extrapolates from); go_prev_ is the previous frame (Go.mf).
+    float go_prev2_x_ = 0.0f, go_prev2_y_ = 0.0f;
     float go_prev_x_ = 0.0f, go_prev_y_ = 0.0f;  // iq/Go.mf (previous focus)
     float du_x_ = 0.0f, du_y_ = 0.0f;            // By/Du.ma (current target)
     float du_prev_x_ = 0.0f, du_prev_y_ = 0.0f;  // DO/Du.mf (previous target)

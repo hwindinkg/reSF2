@@ -135,6 +135,8 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     if (!cam.initialized_) {
         cam.du_prev_x_ = cam.go_x_ = cam.go_prev_x_ = cam.start_x_;
         cam.du_prev_y_ = cam.go_y_ = cam.go_prev_y_ = cam.start_y_;
+        cam.go_prev2_x_ = cam.start_x_;
+        cam.go_prev2_y_ = cam.start_y_;
         cam.du_x_ = cam.start_x_;
         cam.du_y_ = cam.start_y_;
         cam.initialized_ = true;
@@ -153,30 +155,43 @@ inline void framing_sya_impl(FightCamera& cam, float ax, float ay, float bx, flo
     cam.du_y_ = (ay + by) * 0.5f;
 
     // --- the smoothing (ql.dZa, exact) ----------------------------------
-    const float d_x = cam.du_x_ - cam.du_prev_x_;      // $X = By - DO
+    // [FIX Go is a Verlet node] dZa starts with 	his.Go.sk(0): the focus
+    // node is a Vc body, so its ma is EXTRAPOLATED by its velocity before
+    // the update (ma + (ma - mf)), and iq = Go.mf is the pre-extrapolation
+    // value. The port treated go as a plain variable (no extrapolation),
+    // which showed as a ~0.7-unit focus drift while the TARGET matched 0.001.
+    const float iq_x = cam.go_x_;                      // Go.mf = the old ma
+    const float iq_y = cam.go_y_;
+    const float jl_x = cam.go_x_ + (cam.go_x_ - cam.go_prev2_x_);  // sk(0)
+    const float jl_y = cam.go_y_ + (cam.go_y_ - cam.go_prev2_y_);
+    const float d_x = cam.du_x_ - cam.du_prev_x_;      //  = By - DO
     const float d_y = cam.du_y_ - cam.du_prev_y_;
-    const float b_y_x = cam.go_prev_x_ + d_x;          // bY = iq + $X
-    const float b_y_y = cam.go_prev_y_ + d_y;
-    float lo_x = (b_y_x - cam.go_x_) + (cam.du_x_ - cam.go_x_) * 0.15f;  // LO = aY + IO
-    float lo_y = (b_y_y - cam.go_y_) + (cam.du_y_ - cam.go_y_) * 0.15f;
+    const float b_y_x = iq_x + d_x;                    // bY = iq + 
+    const float b_y_y = iq_y + d_y;
+    float lo_x = (b_y_x - jl_x) + (cam.du_x_ - jl_x) * 0.15f;  // LO = aY + IO
+    float lo_y = (b_y_y - jl_y) + (cam.du_y_ - jl_y) * 0.15f;
     const float lo_len = std::sqrt(lo_x * lo_x + lo_y * lo_y);
     if (lo_len > 200.0f) {                             // |LO|>200 -> 200
         lo_x *= 200.0f / lo_len;
         lo_y *= 200.0f / lo_len;
     }
-    cam.go_x_ += lo_x;                                 // Jl += LO
-    cam.go_y_ += lo_y;
-    float vg_x = cam.go_x_ - cam.go_prev_x_;           // VG = Jl - iq
-    float vg_y = cam.go_y_ - cam.go_prev_y_;
+    float jl_new_x = jl_x + lo_x;                      // Jl += LO
+    float jl_new_y = jl_y + lo_y;
+    float vg_x = jl_new_x - iq_x;                      // VG = Jl - iq
+    float vg_y = jl_new_y - iq_y;
     const float vg_len = std::sqrt(vg_x * vg_x + vg_y * vg_y);
     if (vg_len > 50.0f) {                              // |VG|>50 -> 50
-        cam.go_x_ = cam.go_prev_x_ + vg_x * 50.0f / vg_len;
-        cam.go_y_ = cam.go_prev_y_ + vg_y * 50.0f / vg_len;
+        jl_new_x = iq_x + vg_x * 50.0f / vg_len;
+        jl_new_y = iq_y + vg_y * 50.0f / vg_len;
     }
     cam.du_prev_x_ = cam.du_x_;                        // DO = Du.ma
     cam.du_prev_y_ = cam.du_y_;
-    cam.go_prev_x_ = cam.go_x_;                        // iq = Go.ma (post-XA)
+    cam.go_prev2_x_ = cam.go_x_;                       // f-1 becomes f-2
+    cam.go_prev2_y_ = cam.go_y_;
+    cam.go_prev_x_ = cam.go_x_;                        // Go.mf (pre-XA)
     cam.go_prev_y_ = cam.go_y_;
+    cam.go_x_ = jl_new_x;                              // Go.XA(Jl)
+    cam.go_y_ = jl_new_y;
 
     // --- the panorama clamp (Ut.Al: Io = arenaWidth/2 - focus -----------
     // clamped to +/-((arenaWidth-oGa)*Bj*0.5 - nC*0.5)). The native

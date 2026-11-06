@@ -65,7 +65,7 @@ FLOAT_TOL = 0.0025
 CAM_TOL = 1.0
 # Enabled by `--compare-cam` (see collect_fields): the focus is compared only
 # when the caller wants camera work, because the recording points differ.
-COMPARE_CAM = False
+COMPARE_CAM = True   # [FIX Go Verlet] the focus now matches the JS
 
 # Fields emitted but NOT counted toward the divergence total, with the reason.
 # (A field is only informational when the two sides structurally CANNOT hold
@@ -649,7 +649,7 @@ def main(argv=None):
                          "(default: always exit 0 for manual scenarios)")
     args = ap.parse_args(argv)
     global COMPARE_CAM
-    COMPARE_CAM = bool(getattr(args, "compare_cam", False))
+    COMPARE_CAM = bool(getattr(args, "compare_cam", True))
     return run(args)
 
 
