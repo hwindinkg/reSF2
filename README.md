@@ -16,7 +16,7 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 92% | 11/12 | camera chase: the target is compared DIRECTLY (oracle `Eu.ma`) and the residual is a GLOBAL one-frame trace offset, not a camera/COM bug: aligning only the dojo's intro-stance start makes the stance match frame-for-frame but raises diff:dojo-move 0 -> 236, because the whole port timeline (input, reactions) runs one frame early relative to the oracle. Measured camera drift: means 1.36/0.84, max 5.5/10.4 |
+| **Animation & physics** | 🟨 | 92% | 11/12 | camera focus: the TARGET is now exact - the COM midpoint matches `com.mid` to 0.001 after f=30 (it differed ~1.3 before the timeline was 1:1), so the COM/pan input is right. The remaining `cam.cx/cy` residual is the 0.15-gain chase itself (|dcx| mean 0.68 max 1.49, |dcy| 0.18 max 0.91 after f=30); `--compare-cam` still shows it |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |

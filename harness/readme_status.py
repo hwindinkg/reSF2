@@ -71,13 +71,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
-        ("camera chase: the target is compared DIRECTLY (oracle `Eu.ma`) and "
-         "the residual is a GLOBAL one-frame trace offset, not a camera/COM "
-         "bug: aligning only the dojo's intro-stance start makes the stance "
-         "match frame-for-frame but raises diff:dojo-move 0 -> 236, because the "
-         "whole port timeline (input, reactions) runs one frame early relative "
-         "to the oracle. Measured camera drift: means 1.36/0.84, max 5.5/10.4",
-         False),
+        ("camera focus: the TARGET is now exact - the COM midpoint matches "
+         "`com.mid` to 0.001 after f=30 (it differed ~1.3 before the timeline "
+         "was 1:1), so the COM/pan input is right. The remaining `cam.cx/cy` "
+         "residual is the 0.15-gain chase itself (|dcx| mean 0.68 max 1.49, "
+         "|dcy| 0.18 max 0.91 after f=30); `--compare-cam` still shows it", False),
         ("camera start: the fight camera is initialized at the FIRST live frame "
          "(JS `ql` init) instead of during setup - its f=0 focus is now exactly "
          "the spawn midpoint (831.5,-101.5, delta 0.000) instead of 122.8 units "
