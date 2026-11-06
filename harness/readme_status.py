@@ -71,6 +71,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
+        ("state coverage: positions (`fighters.*.y`, `sep_x`) are compared on "
+         "EVERY frame now, ragdoll frames included - the old skip (excused by a "
+         "\"different quantities\" caveat) is gone and all 8 diff scenarios stay "
+         "0, so the position parity holds through the ragdoll phases too", True),
         ("camera focus: FIXED and GATED - the JS `ql.dZa` starts with "
          "`Go.sk(0)`, i.e. the focus node is a Verlet body whose `ma` is "
          "EXTRAPOLATED by its velocity and `iq = Go.mf` is the pre-extrapolation "

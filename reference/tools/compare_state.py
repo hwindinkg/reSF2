@@ -393,7 +393,11 @@ def collect_fields(nf, of, swap):
         # ~4 units, d|x| ~2 mm, on every frame). The ragdoll's bones are
         # compared by compare_pose.py; the state harness skips the position
         # fields on ragdoll frames instead of reporting a false divergence.
-        standing = a.get("rag") == 0 and b.get("rag") == 0
+        # [enlarged coverage] Positions are compared on EVERY frame now: the
+        # QD dummy's chain was made frame-exact (velocity damping + the world
+        # solver seed), so the old "ragdoll frames report different quantities"
+        # caveat no longer applies and the skip was hiding real coverage.
+        standing = True
         for k in ("w", "hp", "mhp", "combo", "style", "unhit", "shock", "block",
                   "invuln", "move", "af", "rag", "ragf"):
             va = a.get(k)

@@ -8,7 +8,7 @@
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-72 of 72 checklist items; every gap below is documented in BUGS.md.
+73 of 73 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -16,7 +16,7 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟩 | 100% | 12/12 | - |
+| **Animation & physics** | 🟩 | 100% | 13/13 | - |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -25,9 +25,9 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 100% | 72/72 | - |
+| **overall** | 🟩 | 100% | 73/73 | - |
 
-The `overall` row is every checklist item at once (72 of 72); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (73 of 73); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
