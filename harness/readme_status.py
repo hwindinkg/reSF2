@@ -71,14 +71,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
-        ("pose trace: the earlier pose-vs-state disagreement was a STALE FILE "
-         "(the dump was not armed on `--replay`); that is fixed, the dump now "
-         "carries a bone-NAME header and with the same loadout the bone counts "
-         "match (player 205 vs the oracle's 205, dummy 15 vs 15), so the "
-         "alignment is meaningful: 568/900 frames. Bone parity is NOT proven yet "
-         "- the player's pose deviates mean 0.236/max 54 and the dummy's chain "
-         "mean 7.26/max 222 on the JumpUp frames (f~563-567), with the camera and "
-         "world positions matching to 0.001", False),
+        ("pose/bone parity: MEASURED, skeleton clean - of the 568 matched "
+         "frames every bone that deviates more than 5 units is a CLOTH/chain "
+         "node (`BODY-Node3/10..20`, `HEAD-Node111..130`) or the Mass=0 `COM` "
+         "node; no skeletal bone (NTop/NNeck/NShoulder/NElbow/NWrist/NHip/"
+         "NKnee/NAnkle/NToe) deviates. Maxima: COM 222.7 (unused aux node), "
+         "BODY-Node18 28.7, dummy chain 0.1. A pose gate still has to be added, "
+         "and it must state whether cloth nodes are excluded", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "
