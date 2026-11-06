@@ -71,6 +71,17 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
+        ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
+         "should load `skyport`, Titan `neural_network`) and the roster scroll "
+         "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "
+         "needs a live-game screenshot of the Titan bodyguard selection", False),
+        ("BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a "
+         "port-vs-JS divergence - the reference (web build) never selects "
+         "ranged/magic/ability moves in a whole traced fight (0 picks), the "
+         "`.dat` animation pool has no `*Player` cast rows and the JS "
+         "`EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game "
+         "does throw shurikens, so that path is outside the reference and needs "
+         "a live trace to compare against", False),
         ("state coverage: positions (`fighters.*.y`, `sep_x`) are compared on "
          "EVERY frame now, ragdoll frames included - the old skip (excused by a "
          "\"different quantities\" caveat) is gone and all 8 diff scenarios stay "
