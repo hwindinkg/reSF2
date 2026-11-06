@@ -2676,6 +2676,7 @@ private:
 
     // --- pose dump (trace infrastructure, no behavior change) --------------
     std::string pose_dump_path_;
+    bool pose_names_written_ = false;
     int pose_dump_frames_ = 0;      // frames left to dump (0 = off)
     int pose_dump_written_ = 0;     // lines written so far
     std::FILE* pose_dump_file_ = nullptr;

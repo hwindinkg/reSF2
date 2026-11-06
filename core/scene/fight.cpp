@@ -10283,6 +10283,26 @@ void FightController::dump_pose_frame() {
         }
     }
 
+    // [trace] Bone NAMES once, so the pose comparator can map by name
+    // instead of by index: the ports merged player model carries 274
+    // bones against the oracles 205, so index-wise comparison is
+    // meaningless. One header line per file.
+    if (!pose_names_written_) {
+        pose_names_written_ = true;
+        std::fprintf(pose_dump_file_, "{\"t\":\"bones\",\"Me\":[");
+        const sf2::scene::Model& mme = player_.fighter.model();
+        for (std::size_t b = 0; b < mme.bones.size(); ++b) {
+            std::fprintf(pose_dump_file_, b ? ",\"%s\"" : "\"%s\"",
+                         mme.bones[b].name.c_str());
+        }
+        std::fprintf(pose_dump_file_, "],\"Enemy\":[");
+        const sf2::scene::Model& men = enemy_.fighter.model();
+        for (std::size_t b = 0; b < men.bones.size(); ++b) {
+            std::fprintf(pose_dump_file_, b ? ",\"%s\"" : "\"%s\"",
+                         men.bones[b].name.c_str());
+        }
+        std::fprintf(pose_dump_file_, "]}\n");
+    }
     const FightFighter* fighters[2] = {&player_, &enemy_};
     // The dumped zoom = the LAYER zoom Bj (Ut.xCa) — what the oracle trace
     // records (its hook reads Ut.Al's this.Bj = 1.0 at the fight start),
