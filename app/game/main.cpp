@@ -9154,8 +9154,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // The +1 applies to the SHARED-SCRIPT replay only: the
                 // embedded `--verify-input` tape asserts its probes at exact
                 // `fight_frames` values and must keep the old mapping.
-                const int edge_now =
-                    verify_input ? fight_frames : fight_frames + 1;
+                // [FIX one frame] With the FightNone stance now starting on the
+                // same frame as the JS (see intro_pick_armed_), the +1
+                // compensation that made the script land one frame early is
+                // gone: the shared script's frames are the fight's own frames.
+                const int edge_now = fight_frames;
                 while (ei < edges.size() && edges[ei].frame <= edge_now) {
                     if (edges[ei].glfw) {
                         fs->on_key(edges[ei].control, edges[ei].down);

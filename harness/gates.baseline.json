@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-06T00:10:16",
+    "updated": "2026-11-06T14:58:32",
     "mode": "only"
   },
   "gates": {
@@ -101,10 +101,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-demo": {
-      "metric": 0,
-      "commit": "d83909eb",
-      "reason": "the camera focus comparison is opt-in again (--compare-cam): the two sides record the smoothed chase at slightly different points inside a frame, producing a ~1-unit systematic difference on EVERY fight (measured: boss-lynx 270, tournament 461, kusarigama 393) even when the fight state matches; the difference and its analysis stay recorded in BUGS.md",
-      "date": "2026-11-06T00:10:16"
+      "metric": 2,
+      "commit": "853212ad",
+      "reason": "timeline comparison is literal now (no key-based frame shift): the FightNone intro stance starts on the JS frame and the replay script's one-frame compensation is gone. The 2 remaining divergences are the dummy's pre-ragdoll chain advancing twice per frame (pivot +1.652 vs +0.833 between f=0 and f=1)",
+      "date": "2026-11-06T14:58:32"
     },
     "diff:boss-lynx": {
       "metric": 0,
@@ -131,10 +131,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-move": {
-      "metric": 0,
-      "commit": "d83909eb",
-      "reason": "the camera focus comparison is opt-in again (--compare-cam): the two sides record the smoothed chase at slightly different points inside a frame, producing a ~1-unit systematic difference on EVERY fight (measured: boss-lynx 270, tournament 461, kusarigama 393) even when the fight state matches; the difference and its analysis stay recorded in BUGS.md",
-      "date": "2026-11-06T00:10:16"
+      "metric": 2,
+      "commit": "853212ad",
+      "reason": "timeline comparison is literal now (no key-based frame shift): the FightNone intro stance starts on the JS frame and the replay script's one-frame compensation is gone. The 2 remaining divergences are the dummy's pre-ragdoll chain advancing twice per frame (pivot +1.652 vs +0.833 between f=0 and f=1)",
+      "date": "2026-11-06T14:58:32"
     },
     "disarm-ai": {
       "metric": 0,

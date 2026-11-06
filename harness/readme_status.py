@@ -64,6 +64,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
+        ("dojo dummy: the pre-ragdoll chain advances TWICE per frame (pivot "
+         "+1.652 vs the oracle's +0.833 between f=0 and f=1), which is the "
+         "whole 2-divergence remainder of diff:dojo-move/diff:dojo-demo now "
+         "that the timeline comparison is literal (1:1, no key-based frame "
+         "shift); the world solver needs to step exactly once per frame", False),
         ("camera chase: the target is compared DIRECTLY (oracle `Eu.ma`) and "
          "the residual is a GLOBAL one-frame trace offset, not a camera/COM "
          "bug: aligning only the dojo's intro-stance start makes the stance "

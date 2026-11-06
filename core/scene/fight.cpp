@@ -9764,7 +9764,12 @@ void FightController::update(float dt) {
             // The deferred `Bg.ia()` dispatch has now run (this frame's
             // fighters' update above), so the stage-start pick may fire from
             // the NEXT phase-1 frame (see `intro_pick_armed_`).
-            intro_pick_armed_ = true;
+            // [FIX FightNone one frame] the dojo viewer starts its intro stance
+            // one frame later than a real fight (oracle f=2 vs port f=1; real
+            // fights match at their f=1 on both sides).
+            if (battle_.type != "FightNone" || frame_ >= 1) {
+                intro_pick_armed_ = true;
+            }
             break;
         }
         case fight_phase::fight: {
