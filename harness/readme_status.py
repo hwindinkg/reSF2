@@ -64,11 +64,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("dojo dummy: the pre-ragdoll chain advances TWICE per frame (pivot "
-         "+1.652 vs the oracle's +0.833 between f=0 and f=1), which is the "
-         "whole 2-divergence remainder of diff:dojo-move/diff:dojo-demo now "
-         "that the timeline comparison is literal (1:1, no key-based frame "
-         "shift); the world solver needs to step exactly once per frame", False),
+        ("dojo dummy: the pre-ragdoll chain now matches the oracle frame for "
+         "frame (f=1 -107.281 both, f=2 -106.590 vs -106.591, f>=3 within "
+         "0.001). The cause was the solver relaxation becoming VELOCITY while "
+         "the QD dummy has no move (the JS never poses it through `eda`): the "
+         "port carried +2.286 into frame 1. Damping it exactly in that window "
+         "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
+         "physics", True),
         ("camera chase: the target is compared DIRECTLY (oracle `Eu.ma`) and "
          "the residual is a GLOBAL one-frame trace offset, not a camera/COM "
          "bug: aligning only the dojo's intro-stance start makes the stance "

@@ -4044,6 +4044,19 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                          frame, ragdoll_frame_count_, bones[mi].name.c_str(), md);
             std::fflush(stdout);
         }
+        // [FIX QD start velocity] While the QD dummy has NO move, the JS never
+        // poses it through da (its da.ia is gated), so the solver relaxation
+        // does not become velocity: measured, the port carried the first
+        // relaxation (+2.286) into frame 1 and stepped -106.462 where the oracle
+        // goes to -107.281. Damping it only in this window keeps the later
+        // physics (from PhysicalDummy at f=2) untouched.
+        if (not_animation_ && current_move_ == nullptr) {
+            for (std::size_t i2 = 0; i2 < n; ++i2) {
+                sol_mf_[i2 * 3] = sol_ma_[i2 * 3];
+                sol_mf_[i2 * 3 + 1] = sol_ma_[i2 * 3 + 1];
+                sol_mf_[i2 * 3 + 2] = sol_ma_[i2 * 3 + 2];
+            }
+        }
         // The solved pose becomes this frame's positions.
         for (std::size_t i = 0; i < n; ++i) {
             px[i] = sol_ma_[i * 3];

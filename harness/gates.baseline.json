@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-06T14:58:32",
+    "updated": "2026-11-06T16:29:27",
     "mode": "only"
   },
   "gates": {
@@ -101,10 +101,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-demo": {
-      "metric": 2,
-      "commit": "853212ad",
-      "reason": "timeline comparison is literal now (no key-based frame shift): the FightNone intro stance starts on the JS frame and the replay script's one-frame compensation is gone. The 2 remaining divergences are the dummy's pre-ragdoll chain advancing twice per frame (pivot +1.652 vs +0.833 between f=0 and f=1)",
-      "date": "2026-11-06T14:58:32"
+      "metric": 0,
+      "commit": "89db0dd9",
+      "reason": "the QD dummy's solver velocity is damped exactly while it has no move (the JS never poses it through eda), so the relaxation delta no longer becomes frame 1's velocity: pivot f=1 -107.281 = the oracle's, f>=3 within 0.001, both diffs 2 -> 0",
+      "date": "2026-11-06T16:29:27"
     },
     "diff:boss-lynx": {
       "metric": 0,
@@ -131,10 +131,10 @@
       "date": "2026-10-20T08:48:41"
     },
     "diff:dojo-move": {
-      "metric": 2,
-      "commit": "853212ad",
-      "reason": "timeline comparison is literal now (no key-based frame shift): the FightNone intro stance starts on the JS frame and the replay script's one-frame compensation is gone. The 2 remaining divergences are the dummy's pre-ragdoll chain advancing twice per frame (pivot +1.652 vs +0.833 between f=0 and f=1)",
-      "date": "2026-11-06T14:58:32"
+      "metric": 0,
+      "commit": "89db0dd9",
+      "reason": "the QD dummy's solver velocity is damped exactly while it has no move (the JS never poses it through eda), so the relaxation delta no longer becomes frame 1's velocity: pivot f=1 -107.281 = the oracle's, f>=3 within 0.001, both diffs 2 -> 0",
+      "date": "2026-11-06T16:29:27"
     },
     "disarm-ai": {
       "metric": 0,
