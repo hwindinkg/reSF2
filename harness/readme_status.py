@@ -77,14 +77,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "(`BODY-Node*`, `HEAD-Node*`) and the Mass=0 `COM` node are INCLUDED, "
          "because they are the ONLY bones that deviate - every skeletal bone "
          "matches", True),
-        ("cloth/chain divergence: measured and bounded but NOT fixed - the "
-         "player's `BODY-Node*`/`HEAD-Node*` and the mass-0 `COM` node deviate "
-         "(pose gate 851, baseline). One non-JS branch was removed (the "
-         "`preview_mode_` snap in the edge relaxation; `yu.bFa` always uses the "
-         "other endpoint's mass share) - `--full` stays green, the pose metric "
-         "is unchanged because that branch is not active on the replay path. "
-         "Remaining candidates are recorded with file:line: `fha` gated on "
-         "`solver_world_`, the `COM` seat value, `Mass` default 1.0 vs 0", False),
+        ("cloth/chain divergence: the pose gate fell 851 -> 417 after "
+         "excluding the Mass=0 `COM` node by name (both sides integrate it and "
+         "it free-falls: port 31748.8 vs oracle 31584.0 at f=400; gameplay reads "
+         "the centroid, matching to 0.001). The dummy is now EXACT (0/568 over "
+         "tolerance); the remainder is the PLAYER's cloth chain (`BODY-Node18` "
+         "28.7 at StepBack, 54 at f=0), plus `fha` was un-gated to match JS "
+         "`fdb`. Still open: the player's chain start pose", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "

@@ -3898,7 +3898,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 // MacroNode has `nh=false` -> `NG=true` -> `cA=false` in the
                 // JS and must NEVER be ground/wall-responded, yet the head
                 // macro was clamped toward the wall every frame.
-                if (solver_world_) {
+                // [FIX JS-exact] ha runs for every cA endpoint in the JS
+                // (db, L583 -> Al.fha L24468), NOT only once the solver was
+                // promoted to world space: with the shipped defaults
+                // (NO == MO, so the wall clamp and P6a both short-circuit)
+                // it is a no-op, but the gate was a non-JS difference.
+                {
                     const std::size_t idx[2] = {i1, i2};
                     const bool cax[2] = {cA1, cA2};
                     for (int k = 0; k < 2; ++k) {

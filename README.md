@@ -16,7 +16,7 @@ Gates with a baseline: **39** (38 at 0 divergences, 1 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 82% | 14/17 | cloth/chain divergence: measured and bounded but NOT fixed - the player's `BODY-Node*`/`HEAD-Node*` and the mass-0 `COM` node deviate (pose gate 851, baseline). One non-JS branch was removed (the `preview_mode_` snap in the edge relaxation; `yu.bFa` always uses the other endpoint's mass share) - `--full` stays green, the pose metric is unchanged because that branch is not active on the replay path. Remaining candidates are recorded with file:line: `fha` gated on `solver_world_`, the `COM` seat value, `Mass` default 1.0 vs 0; BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only partially measured (BUGS.md QA-29.10 п.7); the remaining half needs a live-game screenshot of the Titan bodyguard selection; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability moves in a whole traced fight (0 picks), the `.dat` animation pool has no `*Player` cast rows and the JS `EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game does throw shurikens, so that path is outside the reference and needs a live trace to compare against |
+| **Animation & physics** | 🟨 | 82% | 14/17 | cloth/chain divergence: the pose gate fell 851 -> 417 after excluding the Mass=0 `COM` node by name (both sides integrate it and it free-falls: port 31748.8 vs oracle 31584.0 at f=400; gameplay reads the centroid, matching to 0.001). The dummy is now EXACT (0/568 over tolerance); the remainder is the PLAYER's cloth chain (`BODY-Node18` 28.7 at StepBack, 54 at f=0), plus `fha` was un-gated to match JS `fdb`. Still open: the player's chain start pose; BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only partially measured (BUGS.md QA-29.10 п.7); the remaining half needs a live-game screenshot of the Titan bodyguard selection; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability moves in a whole traced fight (0 picks), the `.dat` animation pool has no `*Player` cast rows and the JS `EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game does throw shurikens, so that path is outside the reference and needs a live trace to compare against |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -49,7 +49,7 @@ The `overall` row is every checklist item at once (74 of 77); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 48158 | 18 |
-| `core/scene` | 40123 | 35 |
+| `core/scene` | 40128 | 35 |
 | `app/game` | 12224 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (74 of 77); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **110448** | |
+| **total** | **110453** | |
 <!-- STATUS:END -->

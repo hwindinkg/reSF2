@@ -51,6 +51,9 @@ DEFAULT_ORACLE = os.path.join("reference", "traces", "oracle_pose.jsonl")
 DEFAULT_OUT = os.path.join("reference", "traces", "pose_gap_report.txt")
 DEFAULT_TOLERANCE = 5.0  # world units; both sides dump world-space bone positions
 WORST_FRAMES = 10
+# Bone indices excluded from the deviation metric (filled from the native
+# {"t":"bones"} header: the Mass=0 COM node, which free-falls on both sides).
+SKIP_BONES: set[int] = set()
 WORST_BONES = 10
 TOP_BONES = 20
 UNALIGNED_SAMPLE = 20
@@ -373,6 +376,13 @@ def fighter_metrics(nf, of, native_fid, oracle_fid, tolerance, coord_transform="
         deltas, n_common, n_nat, n_ora = bone_deltas(nb_adj, ob_adj)
     else:
         deltas, n_common, n_nat, n_ora = bone_deltas(nb, ob)
+    # Excluded auxiliary nodes (the Mass=0 COM): both sides integrate it and
+    # it free-falls chaotically, so it carries no parity signal (see
+    # com_bone_indices).
+    if SKIP_BONES:
+        for i in SKIP_BONES:
+            if i < len(deltas):
+                deltas[i] = 0.0
     finite = [d for d in deltas if math.isfinite(d)]
     maxd = max(finite) if finite else 0.0
     meand = sum(finite) / len(finite) if finite else 0.0
@@ -1001,6 +1011,31 @@ def run_frame_mode(args):
     return 0
 
 
+def com_bone_indices(path):
+    """Indices of the Mass=0 COM node from a {"t":"bones"} header.
+
+    Both sides INTEGRATE that auxiliary node and it free-falls chaotically
+    (measured at f=400: port 31748.8 vs oracle 31584.0), while gameplay reads
+    the mass-weighted centroid (com_axis_in, matching to 0.001). Comparing it
+    per-bone only measures chaos, so it is excluded by NAME (the header lists
+    the names; the oracle order matches when the bone counts do).
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            first = fh.readline()
+        head = json.loads(first)
+    except Exception:
+        return set()
+    if head.get("t") != "bones":
+        return set()
+    out = set()
+    for side in ("Me", "Enemy"):
+        for k, n in enumerate(head.get(side) or []):
+            if n == "COM":
+                out.add(k)
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Compare native vs oracle pose traces (Shadow Fight 2).")
@@ -1025,6 +1060,8 @@ def main(argv=None):
                          "tolerance, when the summary is absent, or when the oracle "
                          "trace is missing (not supported with --clip)")
     args = ap.parse_args(argv)
+    SKIP_BONES.clear()
+    SKIP_BONES.update(com_bone_indices(getattr(args, "native", "")))
 
     if args.tolerance <= 0:
         print("compare_pose: --tolerance must be positive", file=sys.stderr)
