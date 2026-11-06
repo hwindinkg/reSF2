@@ -82,7 +82,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "it free-falls: port 31748.8 vs oracle 31584.0 at f=400; gameplay reads "
          "the centroid, matching to 0.001). The dummy is now EXACT (0/568 over "
          "tolerance); the remainder is the PLAYER's cloth chain (`BODY-Node18` "
-         "28.7 at StepBack, 54 at f=0), plus `fha` was un-gated to match JS "
+         "28.7 at StepBack, HEAD-Node* ~8 early; the start pose matches (<=0.4 at f=0) and the max-54-at-f=0 was an alignment artifact), plus `fha` was un-gated to match JS "
          "`fdb`. Still open: the player's chain start pose", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
