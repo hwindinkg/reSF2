@@ -64,13 +64,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("clip sub-frames (`MidFrames`) and timing", True),
         ("ragdoll, cloth, walls, ring-out", True),
         ("hit reactions and the `GetUp` chain", True),
-        ("camera chase: `--compare-cam` compares the focus (1-unit tolerance) "
-         "and it still drifts - 190 `cx` / 58 `cy` frames on the dojo (mean "
-         "1.36 / 0.84, max 5.5 / 10.4) and ~270-460 per real fight. The start "
-         "matches exactly after the first-live-frame fix, so the residual is "
-         "the COM-based target (`Dl.v6` centroid) feeding the 0.15-gain chase; "
-         "it is off by default because the two sides record the smoothed chase "
-         "at slightly different points in a frame, which alone yields ~1 unit",
+        ("camera chase: the target is compared DIRECTLY (oracle `Eu.ma`) and "
+         "the residual is a GLOBAL one-frame trace offset, not a camera/COM "
+         "bug: aligning only the dojo's intro-stance start makes the stance "
+         "match frame-for-frame but raises diff:dojo-move 0 -> 236, because the "
+         "whole port timeline (input, reactions) runs one frame early relative "
+         "to the oracle. Measured camera drift: means 1.36/0.84, max 5.5/10.4",
          False),
         ("camera start: the fight camera is initialized at the FIRST live frame "
          "(JS `ql` init) instead of during setup - its f=0 focus is now exactly "

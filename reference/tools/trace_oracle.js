@@ -1282,6 +1282,22 @@
     var tmr = timerOf(fight);
     return {
       t: "oracle",
+      // [probe] the two fighters' Center-Of-Mass bodies (`Dl.v6` -> `Eu.ma`) and
+      // the camera target the JS feeds it (`Dl.mea` midpoint). The port's
+      // `SF2_TRACE_COM=1` prints the same quantities.
+      com: (function () {
+        try {
+          var f = function (x) {
+            if (!x || !x.oa || !x.oa.Eu || !x.oa.Eu.ma) return null;
+            return { x: num(x.oa.Eu.ma.x), y: num(x.oa.Eu.ma.y) };
+          };
+          var a = f(me), b = f(en);
+          return {
+            me: a, enemy: b,
+            mid: (a && b) ? { x: num((a.x + b.x) * 0.5), y: num((a.y + b.y) * 0.5) } : null
+          };
+        } catch (e0) { return null; }
+      })(),
       f: num(fight.frame),
       phase: num(fight.eu),
       round: (fight.round && typeof fight.round.round === "number")
