@@ -4,11 +4,11 @@
 
 ![gates](https://img.shields.io/badge/gates-38%20%C2%B7%2038%20%C2%B70-brightgreen) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 97%
+### Readiness: 96%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-73 of 75 checklist items; every gap below is documented in BUGS.md.
+73 of 76 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -16,7 +16,7 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 87% | 13/15 | BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only partially measured (BUGS.md QA-29.10 п.7); the remaining half needs a live-game screenshot of the Titan bodyguard selection; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability moves in a whole traced fight (0 picks), the `.dat` animation pool has no `*Player` cast rows and the JS `EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game does throw shurikens, so that path is outside the reference and needs a live trace to compare against |
+| **Animation & physics** | 🟨 | 81% | 13/16 | pose trace: in ONE run the pose dump reports the player's clip as `KusarigamaStartStance-Left` while the state dump reports `FistsStartStance-Left` (both read `current_move()->name`), so `compare_pose.py` aligns 1/700 frames and a pose gate would compare different moves. Needs the two dump paths reconciled first; BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only partially measured (BUGS.md QA-29.10 п.7); the remaining half needs a live-game screenshot of the Titan bodyguard selection; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability moves in a whole traced fight (0 picks), the `.dat` animation pool has no `*Player` cast rows and the JS `EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game does throw shurikens, so that path is outside the reference and needs a live trace to compare against |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -25,9 +25,9 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 97% | 73/75 | - |
+| **overall** | 🟩 | 96% | 73/76 | - |
 
-The `overall` row is every checklist item at once (73 of 75); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (73 of 76); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 

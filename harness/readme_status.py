@@ -71,6 +71,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
+        ("pose trace: in ONE run the pose dump reports the player's clip as "
+         "`KusarigamaStartStance-Left` while the state dump reports "
+         "`FistsStartStance-Left` (both read `current_move()->name`), so "
+         "`compare_pose.py` aligns 1/700 frames and a pose gate would compare "
+         "different moves. Needs the two dump paths reconciled first", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "

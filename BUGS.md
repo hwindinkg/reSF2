@@ -5653,3 +5653,29 @@ dojo-move: cam.cx 184 -> 0, cam.cy 70 -> 0, всего 0 расхождений
    веб-сборке → нужен живой трейс (или запись боя), чтобы было с чем сравнивать.
 Оба пункта вынесены в чек-лист как `False` с пометкой BLOCKED ON USER, чтобы
 дашборд не показывал ложные 100% там, где не хватает материала.
+
+### QA-06.11 — ПОЗОВЫЙ ГЕЙТ: попытка вскрыла расхождение САМИХ ТРЕЙСОВ
+
+Хотел добавить позовый гейт (`compare_pose.py`). Сначала выяснилось, что
+`compare_pose` не выравнивает кадры: **совпал ровно 1 кадр из 700**, и причина —
+имена клипов:
+```
+native-only:  kusarigamastartstance-left (178 кадров), kusarigamastartstanceidle (124), highblock (49)
+oracle-only:  fistsstartstance-left (133), stepforward (200), stepback (240), jumpup (68), spinningpunch (44)
+```
+То есть порт и оракул в этом сценарии показывают РАЗНЫЕ клипы. Проверил в ОДНОМ
+прогоне (`--dump-state 30 --dump-pose 30`), и это не разные прогоны:
+```
+f=3   pose clip = KusarigamaStartStance-Left   | state move = FistsStartStance-Left
+f=10  pose clip = KusarigamaStartStance-Left   | state move = FistsStartStance-Left
+f=20  pose clip = KusarigamaStartStance-Left   | state move = FistsStartStance-Left
+```
+Оба дампа читают `f.current_move()->name` — значит расходится не источник, а
+сам путь дампа (разные массивы бойцов/порядок, либо один из дампов берёт
+`current_move` у ДРУГОГО бойца). Пока это не объяснено, позовый гейт ставить
+нельзя: он сравнивал бы позы разных мувов.
+Сейв тут ни при чём: `reference/saves/save.xml` содержит `Fists` и его mtime не
+меняется после прогона (проверено).
+Следующий шаг: сравнить `dump_pose_frame` и `dump_state_frame` построчно —
+какой массив бойцов и какой аксессор каждый использует, почему у одного
+`current_move` даёт Kusarigama-стойку, а у другого Fists-стойку в одном кадре.
