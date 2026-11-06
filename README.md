@@ -16,7 +16,7 @@ Gates with a baseline: **38** (38 at 0 divergences, 0 known non-zero) · referen
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 81% | 13/16 | pose trace: in ONE run the pose dump reports the player's clip as `KusarigamaStartStance-Left` while the state dump reports `FistsStartStance-Left` (both read `current_move()->name`), so `compare_pose.py` aligns 1/700 frames and a pose gate would compare different moves. Needs the two dump paths reconciled first; BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only partially measured (BUGS.md QA-29.10 п.7); the remaining half needs a live-game screenshot of the Titan bodyguard selection; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability moves in a whole traced fight (0 picks), the `.dat` animation pool has no `*Player` cast rows and the JS `EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game does throw shurikens, so that path is outside the reference and needs a live trace to compare against |
+| **Animation & physics** | 🟨 | 81% | 13/16 | pose trace: the earlier pose-vs-state disagreement was a STALE FILE, not a trace bug - `--dump-pose` was armed only in the `--fight`/`--kick-ko` branches, so a `--replay` run silently kept the previous jsonl (the gate compared a Kusarigama-era file against Fists state). Armed on the replay path now: the pose dump agrees with the state dump and aligns 568/900 frames; a POSE GATE still needs a bone-NAME map because the port's merged player model has 274 bones against the oracle's 205, so index-wise bone comparison is invalid; BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only partially measured (BUGS.md QA-29.10 п.7); the remaining half needs a live-game screenshot of the Titan bodyguard selection; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability moves in a whole traced fight (0 picks), the `.dat` animation pool has no `*Player` cast rows and the JS `EnableBossAbility -> Pi.dS` path is a `debugger;` stub. The live game does throw shurikens, so that path is outside the reference and needs a live trace to compare against |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -50,7 +50,7 @@ The `overall` row is every checklist item at once (73 of 76); a system row count
 |---|---:|---:|
 | `core/app` | 48158 | 18 |
 | `core/scene` | 40116 | 35 |
-| `app/game` | 12206 | 1 |
+| `app/game` | 12224 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1251 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (73 of 76); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **110423** | |
+| **total** | **110441** | |
 <!-- STATUS:END -->

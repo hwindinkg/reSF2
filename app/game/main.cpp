@@ -8996,6 +8996,24 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     ->enable_state_dump("reference/traces/native_state.jsonl",
                                         dump_state_frames);
             }
+        // [trace] --dump-pose N arms the POSE trace on the replay path
+        // too (it used to be armed only in the --fight/--kick-ko
+        // branches, so a --replay run with --dump-pose silently
+        // kept the PREVIOUS file - which is what made the pose gate
+        // compare stale poses).
+        if (dump_pose_frames > 0) {
+            std::filesystem::create_directories("reference/traces");
+            if (app.screens().top() != nullptr) {
+                static_cast<sf2::app::FightScreen*>(app.screens().top())
+                    ->enable_pose_dump("reference/traces/native_pose.jsonl",
+                                       dump_pose_frames);
+            }
+            std::fprintf(stdout,
+                         "[dump] pose trace armed (replay): first %d fight frames -> "
+                         "reference/traces/native_pose.jsonl\\n",
+                         dump_pose_frames);
+            std::fflush(stdout);
+        }
             std::fprintf(stdout,
                          "[dump] state trace armed: first %d fight frames -> "
                          "reference/traces/native_state.jsonl\n",
