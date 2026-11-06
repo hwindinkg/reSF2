@@ -71,13 +71,18 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "port carried +2.286 into frame 1. Damping it exactly in that window "
          "fixed diff:dojo-move/diff:dojo-demo 2 -> 0 without touching the later "
          "physics", True),
-        ("pose/bone parity: MEASURED, skeleton clean - of the 568 matched "
-         "frames every bone that deviates more than 5 units is a CLOTH/chain "
-         "node (`BODY-Node3/10..20`, `HEAD-Node111..130`) or the Mass=0 `COM` "
-         "node; no skeletal bone (NTop/NNeck/NShoulder/NElbow/NWrist/NHip/"
-         "NKnee/NAnkle/NToe) deviates. Maxima: COM 222.7 (unused aux node), "
-         "BODY-Node18 28.7, dummy chain 0.1. A pose gate still has to be added, "
-         "and it must state whether cloth nodes are excluded", False),
+        ("pose gate: ADDED - `pose:<scenario>` reports compare_pose.py's "
+         "over-tolerance frame count from the SAME scenario run (dojo-move: 851 "
+         "of 568 matched frames, baseline recorded). Policy: cloth/chain nodes "
+         "(`BODY-Node*`, `HEAD-Node*`) and the Mass=0 `COM` node are INCLUDED, "
+         "because they are the ONLY bones that deviate - every skeletal bone "
+         "matches", True),
+        ("cloth/chain divergence: measured and bounded but NOT fixed - the "
+         "player's `BODY-Node18` deviates up to 28.7 units, eight `HEAD-Node*` "
+         "nodes up to ~15, and the auxiliary Mass=0 `COM` node up to 222.7 "
+         "(unused: gameplay `To COM` reads the centroid, which matches to "
+         "0.001). Tracked by the pose gate's baseline (851 over-tolerance "
+         "frames) so a regression is caught", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "

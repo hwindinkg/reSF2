@@ -565,6 +565,24 @@ def p_dialog(text: str) -> tuple[int, str]:
     return (0 if m.group(1) == "PASS" else 1), "parse census " + m.group(1)
 
 
+def p_pose_over(text: str) -> tuple[int, str]:
+    """Pose gate: the number of matched frames with ANY bone over tolerance.
+
+    `compare_pose.py` prints one line per fighter:
+      `  Me    mean .. max .. | frames with any bone over tolerance: 417/568`
+    The metric is the SUM over both fighters, so a regression on either side
+    moves it. Cloth/chain (`BODY-Node*`, `HEAD-Node*`) and the Mass=0 `COM`
+    node are INCLUDED on purpose (they are the only bones that deviate today).
+    """
+    pat = re.compile(r"frames with any bone over tolerance:\s*(\d+)/(\d+)")
+    hits = pat.findall(text)
+    if not hits:
+        raise AnchorMissing("frames with any bone over tolerance: N/M")
+    total = sum(int(a) for a, _ in hits)
+    frames = max(int(b) for _, b in hits)
+    return total, f"{total} over-tolerance frames (of {frames})"
+
+
 def p_total_divergences(text: str) -> tuple[int, str]:
     m = _need(r"total divergences:\s*(\d+)", text)
     n = int(m.group(1))
@@ -817,7 +835,8 @@ SCENARIOS: dict[str, dict] = {
         native=["--fight", "--battle", "BOSS_LYNX", "--zone", "ZONE_1",
                 "--fight-ordinal", "0", "--location", "moon",
                 "--loadout", "SAVE", "--equip-probe", "WEAPON_KUSARIGAMA",
-                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+                "--headless", "700", "--dump-state", "600", "--dump-pose", "600", "--watchdog", "900"],
+        pose=True,
         timeout_s=420,
     ),
     # C3_BOSS_TITAN fight 1: the ladder whose `<Fight Location="skyport">`
@@ -846,8 +865,10 @@ SCENARIOS: dict[str, dict] = {
                 "--input-script", "reference/tools/dojo_move.txt",
                 "--timeout-ms", "90000"],
         native=["--replay", "reference/tools/dojo_move.txt",
-                "--headless", "900", "--dump-state", "900", "--watchdog", "900"],
+                "--headless", "900", "--dump-state", "900", "--dump-pose", "900",
+                "--watchdog", "900"],
         timeout_s=420,
+        pose=True,
     ),
 }
 
@@ -1048,6 +1069,48 @@ def run_diff_gate(gate: Gate) -> GateResult:
                           error=f"state compare anchor missing: {exc}",
                           seconds=time.time() - started)
 
+    # 3b. POSE diff on the same run (per-bone, per-frame). The metric is the
+    # number of matched frames with ANY bone over the comparator's tolerance.
+    # Policy: cloth/chain nodes (`BODY-Node*`, `HEAD-Node*`) and the Mass=0
+    # `COM` node are INCLUDED (measured: only they deviate; the skeletal bones
+    # match) - the baseline records that number, so a cloth regression shows up.
+    pose_metric = None
+    pose_detail = ""
+    if cfg.get("pose"):
+        native_pose = ROOT / "reference" / "traces" / "native_pose.jsonl"
+        if native_pose.exists() and native_pose.stat().st_size > 0:
+            shutil.copy2(native_pose, art / "native_pose.jsonl")
+            oracle_console = art / "oracle_console.log"
+            pose_rows = 0
+            if oracle_console.exists():
+                with open(oracle_console, encoding="utf-8", errors="replace") as fin, \
+                        open(art / "oracle_pose.jsonl", "w", encoding="utf-8",
+                             newline="\n") as fout:
+                    for line in fin:
+                        if '"t":"run_start"' in line:
+                            fout.seek(0)
+                            fout.truncate()
+                            pose_rows = 0
+                            continue
+                        i2 = line.find('{"t":"frame"')
+                        if i2 < 0:
+                            continue
+                        fout.write(line[i2:].strip() + "\n")
+                        pose_rows += 1
+            if pose_rows > 0:
+                pose_report = REPORTS / f"pose_{scenario}.txt"
+                pr = run_proc(
+                    [PY, "reference/tools/compare_pose.py",
+                     "--native", str((art / "native_pose.jsonl").relative_to(ROOT).as_posix()),
+                     "--oracle", str((art / "oracle_pose.jsonl").relative_to(ROOT).as_posix()),
+                     "--out", str(pose_report.relative_to(ROOT))],
+                    f"{scenario}-pose", 180,
+                )
+                try:
+                    pose_metric, pose_detail = p_pose_over(pr.out)
+                except AnchorMissing:
+                    pose_detail = "pose anchor missing"
+
     # 4. UI stack diff on the same run (artifacts are in place).
     ui_detail = ""
     ui_metric = None
@@ -1067,6 +1130,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
     return GateResult(gate.id, "diff", metric, detail,
                       time.time() - started,
                       extra={"ui_metric": ui_metric, "ui_detail": ui_detail,
+                             "pose_metric": pose_metric, "pose_detail": pose_detail,
                              "attempts": attempts,
                              "artifacts": str(art.relative_to(ROOT))})
 
@@ -1344,6 +1408,12 @@ def main(argv=None) -> int:
                     timeline[g.id] = first_divergences(
                         REPORTS / f"state_{g.scenario}.txt")
                 results.append(r)
+                if g.kind == "diff" and r.extra.get("pose_metric") is not None:
+                    results.append(GateResult(
+                        f"pose:{g.scenario}", "pose", r.extra["pose_metric"],
+                        r.extra.get("pose_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"pose:{g.scenario}"] = []
                 # RULE 0: strictly sequential; fail fast on an environment error.
                 if r.verdict == "ERROR":
                     break
@@ -1361,7 +1431,11 @@ def main(argv=None) -> int:
     if args.update_baseline:
         moved = []
         for r in results:
-            if wanted and r.gate_id not in wanted:
+            # A pose:<scenario> result belongs to its diff:<scenario> gate,
+            # so asking to (re)baseline the diff also baselines the pose.
+            pose_of = r.gate_id.startswith("pose:") and (
+                "diff:" + r.gate_id.split(":", 1)[1]) in wanted
+            if wanted and r.gate_id not in wanted and not pose_of:
                 continue
             if r.metric is None:
                 print(f"gates: refusing to baseline {r.gate_id}: no metric",
