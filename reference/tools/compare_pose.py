@@ -324,6 +324,32 @@ def bone_deltas(nb, ob):
     return deltas, n, len(nb), len(ob)
 
 
+def bone_vel_deltas(nv, ov):
+    """Per-bone max-abs-component delta of the TRUE solver velocity (`ma - mf`).
+
+    Both traces dump `vel` (the oracle in `vels3d`, the port from
+    `Fighter::posed_vel`). Positions alone cannot separate "same dynamics,
+    different phase" from a real per-frame difference, so velocity is measured
+    separately: a velocity-class regression stays invisible in positions until
+    it has already displaced the chain.
+    """
+    if not isinstance(nv, list) or not isinstance(ov, list) or not nv or not ov:
+        return []
+    out = []
+    for k in range(min(len(nv), len(ov))):
+        a = nv[k]
+        b = ov[k]
+        if not isinstance(a, (list, tuple)) or not isinstance(b, (list, tuple)):
+            continue
+        try:
+            d = max(abs(float(a[i]) - float(b[i]))
+                    for i in range(min(len(a), len(b), 3)))
+        except (TypeError, ValueError):
+            continue
+        out.append(d)
+    return out
+
+
 def fighter_metrics(nf, of, native_fid, oracle_fid, tolerance, coord_transform="none", native_mean_x=0.0, oracle_mean_x=0.0):
     """Per-fighter metrics for one aligned frame pair, or None if the fighter
     is missing on either side. Supports cross-role mapping and center transform."""
@@ -398,10 +424,14 @@ def fighter_metrics(nf, of, native_fid, oracle_fid, tolerance, coord_transform="
     meand = sum(finite) / len(finite) if finite else 0.0
     over = sum(1 for d in finite if d > tolerance)
     worst = sorted(range(len(deltas)), key=lambda k: (-deltas[k], k))[:WORST_BONES]
+    vel_deltas = bone_vel_deltas(a.get("vel"), b.get("vel"))
+    vel_over = sum(1 for d in vel_deltas if d > tolerance)
     return {
         "dx": dx,
         "dy": dy,
         "fx_mismatch": fx_mismatch,
+        "vel_deltas": vel_deltas,
+        "vel_over": vel_over,
         "bone_max": maxd,
         "bone_mean": meand,
         "bone_over": over,
@@ -692,6 +722,22 @@ def build_report(args, native_frames, oracle_frames, native_clips, oracle_clips,
           % (fid, fmt(s["mean_of_means"]), fmt(s["max_of_maxes"]),
              s["over_frames"], s["comparable_frames"]))
     w("")
+    # Frames (not per-fighter counts): a frame is over when EITHER fighter has a
+    # bone over the velocity tolerance, so this total can never exceed the number
+    # of matched frames.
+    vcmp = max([stats["vel"][fid]["comparable_frames"]
+                for fid in ("Me", "Enemy")] or [0])
+    vtot = stats.get("vel_frames_over", 0)
+    w("[velocity]  (true `ma - mf`, per-bone max component, same tolerance)")
+    for fid in ("Me", "Enemy"):
+        sv = stats["vel"][fid]
+        if sv["comparable_frames"] == 0:
+            continue
+        w("  %-5s mean %s  max %s  | frames with any bone velocity over tolerance: %d/%d"
+          % (fid, fmt(sv["mean_of_means"]), fmt(sv["max_of_maxes"]),
+             sv["over_frames"], sv["comparable_frames"]))
+    w("  total frames with any bone velocity over tolerance: %d/%d" % (vtot, vcmp))
+    w("")
 
     w("[worst %d frames by max bone deviation]  (max over both fighters)" % WORST_FRAMES)
     for rank, (maxd, ni) in enumerate(stats["worst_frames"], 1):
@@ -905,6 +951,9 @@ def run_frame_mode(args):
     cam = {"dcx": [], "dcy": [], "dzoom": []}
     world = {"Me": {"dx": [], "dy": [], "fx": 0},
              "Enemy": {"dx": [], "dy": [], "fx": 0}}
+    vel_frame_over = {}
+    vel = {"Me": {"means": [], "maxes": [], "over": 0, "comparable": 0},
+           "Enemy": {"means": [], "maxes": [], "over": 0, "comparable": 0}}
     bone = {"Me": {"means": [], "maxes": [], "over": 0, "comparable": 0},
             "Enemy": {"means": [], "maxes": [], "over": 0, "comparable": 0}}
     bone_over_pct = {"Me": defaultdict(lambda: [0, 0]),  # idx -> [over, total]
@@ -934,6 +983,13 @@ def run_frame_mode(args):
             bone[fid]["maxes"].append(s["bone_max"])
             if s["bone_over"] > 0:
                 bone[fid]["over"] += 1
+            if s.get("vel_deltas"):
+                vel[fid]["means"].append(sum(s["vel_deltas"]) / len(s["vel_deltas"]))
+                vel[fid]["maxes"].append(max(s["vel_deltas"]))
+                if s["vel_over"] > 0:
+                    vel[fid]["over"] += 1
+                    vel_frame_over[ni] = True
+                vel[fid]["comparable"] += 1
             if s["bone_common"] > 0:
                 bone[fid]["comparable"] += 1
             if s["bone_native"] != s["bone_oracle"]:
@@ -976,6 +1032,14 @@ def run_frame_mode(args):
                   "comparable_frames": bone[fid]["comparable"]}
             for fid in ("Me", "Enemy")
         },
+        "vel": {
+            fid: {"mean_of_means": mean(vel[fid]["means"]),
+                  "max_of_maxes": maxv(vel[fid]["maxes"]),
+                  "over_frames": vel[fid]["over"],
+                  "comparable_frames": vel[fid]["comparable"]}
+            for fid in ("Me", "Enemy")
+        },
+        "vel_frames_over": len(vel_frame_over),
         "bone_over_pct": {},
         "shape": shape,
         "worst_frames": sorted(worst, key=lambda t: (-t[0], t[1]))[:WORST_FRAMES],

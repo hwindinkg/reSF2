@@ -104,7 +104,11 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "unidentified after enumerating ALL 277 merged edges name-matched in 3D "
          "(mean |port-oracle| length difference 0.013 units, no edge above 0.5) and "
          "after checking for a hidden velocity reset on either side (0 collapses "
-         "below 30 percent of the neighbour average). What is left is the "
+         "below 30 percent of the neighbour average). A NEW gate covers velocity too: "
+         "posevel:dojo-move = 69 of 568 frames with any bone true velocity over the "
+         "5-unit tolerance (player only; the dummy 0/568, max 2.44), so a "
+         "velocity-class regression can no longer hide behind matching positions. "
+         "What is left is the "
          "PLAYER's chain riding with a different lag under translation (site "
          "mean ~2, spread ~10) at StepForward/StepBack", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "

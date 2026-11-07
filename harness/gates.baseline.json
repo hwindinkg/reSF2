@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-07T18:16:59",
+    "updated": "2026-11-07T21:32:36",
     "mode": "only"
   },
   "gates": {
@@ -132,9 +132,9 @@
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "3b7e8222",
-      "reason": "the cloth solver now steps on the clip-end frame like JS Al.ia (Nd.ia runs unconditionally): Fighter::advance_step returned at the clip-finished branch without calling sample_current, so the chain froze for exactly one frame at every clip boundary - 11 frames measured with step 0.000 against the oracle's 0.4-0.9 - losing its velocity and restarting from rest. After the fix the frozen frames are 0 and the cloth 3D deviation falls (mean 4.687 -> 3.901), pose 425 -> 421",
-      "date": "2026-11-07T18:16:59"
+      "commit": "cc728804",
+      "reason": "new gate posevel:dojo-move - the traces carry the TRUE solver velocity (ma-mf) on both sides and compare_pose reports matched frames with any bone velocity over the same 5-unit tolerance: 69 of 568 (player chain; the dummy is 0/568, max 2.44). Kept separate from the position metric because a velocity-class regression would not show in positions until the chain had already moved",
+      "date": "2026-11-07T21:32:36"
     },
     "disarm-ai": {
       "metric": 0,
@@ -234,9 +234,15 @@
     },
     "pose:dojo-move": {
       "metric": 421,
-      "commit": "3b7e8222",
-      "reason": "the cloth solver now steps on the clip-end frame like JS Al.ia (Nd.ia runs unconditionally): Fighter::advance_step returned at the clip-finished branch without calling sample_current, so the chain froze for exactly one frame at every clip boundary - 11 frames measured with step 0.000 against the oracle's 0.4-0.9 - losing its velocity and restarting from rest. After the fix the frozen frames are 0 and the cloth 3D deviation falls (mean 4.687 -> 3.901), pose 425 -> 421",
-      "date": "2026-11-07T18:16:59"
+      "commit": "cc728804",
+      "reason": "new gate posevel:dojo-move - the traces carry the TRUE solver velocity (ma-mf) on both sides and compare_pose reports matched frames with any bone velocity over the same 5-unit tolerance: 69 of 568 (player chain; the dummy is 0/568, max 2.44). Kept separate from the position metric because a velocity-class regression would not show in positions until the chain had already moved",
+      "date": "2026-11-07T21:32:36"
+    },
+    "posevel:dojo-move": {
+      "metric": 69,
+      "commit": "cc728804",
+      "reason": "new gate posevel:dojo-move - the traces carry the TRUE solver velocity (ma-mf) on both sides and compare_pose reports matched frames with any bone velocity over the same 5-unit tolerance: 69 of 568 (player chain; the dummy is 0/568, max 2.44). Kept separate from the position metric because a velocity-class regression would not show in positions until the chain had already moved",
+      "date": "2026-11-07T21:32:36"
     }
   }
 }

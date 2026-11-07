@@ -583,6 +583,22 @@ def p_pose_over(text: str) -> tuple[int, str]:
     return total, f"{total} over-tolerance frames (of {frames})"
 
 
+def p_pose_vel_over(text: str) -> tuple[int, str]:
+    """Velocity gate: matched frames with ANY bone's true velocity over tolerance.
+
+    `compare_pose.py` prints a single canonical total:
+      `  total frames with any bone velocity over tolerance: N/M`
+    It is a separate metric from the position deltas on purpose: the traces
+    carry the real solver velocity (`ma - mf`), and a velocity-class regression
+    would stay invisible in positions until the chain had already moved.
+    """
+    pat = re.compile(r"total frames with any bone velocity over tolerance:\s*(\d+)/(\d+)")
+    m = pat.search(text)
+    if not m:
+        raise AnchorMissing("total frames with any bone velocity over tolerance: N/M")
+    return int(m.group(1)), "%s over-tolerance velocity frames (of %s)" % (m.group(1), m.group(2))
+
+
 def p_total_divergences(text: str) -> tuple[int, str]:
     m = _need(r"total divergences:\s*(\d+)", text)
     n = int(m.group(1))
@@ -1076,6 +1092,8 @@ def run_diff_gate(gate: Gate) -> GateResult:
     # match) - the baseline records that number, so a cloth regression shows up.
     pose_metric = None
     pose_detail = ""
+    posevel_metric = None
+    posevel_detail = ""
     if cfg.get("pose"):
         native_pose = ROOT / "reference" / "traces" / "native_pose.jsonl"
         if native_pose.exists() and native_pose.stat().st_size > 0:
@@ -1110,6 +1128,10 @@ def run_diff_gate(gate: Gate) -> GateResult:
                     pose_metric, pose_detail = p_pose_over(pr.out)
                 except AnchorMissing:
                     pose_detail = "pose anchor missing"
+                try:
+                    posevel_metric, posevel_detail = p_pose_vel_over(pr.out)
+                except AnchorMissing:
+                    posevel_detail = "velocity anchor missing"
 
     # 4. UI stack diff on the same run (artifacts are in place).
     ui_detail = ""
@@ -1131,6 +1153,8 @@ def run_diff_gate(gate: Gate) -> GateResult:
                       time.time() - started,
                       extra={"ui_metric": ui_metric, "ui_detail": ui_detail,
                              "pose_metric": pose_metric, "pose_detail": pose_detail,
+                             "posevel_metric": posevel_metric,
+                             "posevel_detail": posevel_detail,
                              "attempts": attempts,
                              "artifacts": str(art.relative_to(ROOT))})
 
@@ -1408,6 +1432,15 @@ def main(argv=None) -> int:
                     timeline[g.id] = first_divergences(
                         REPORTS / f"state_{g.scenario}.txt")
                 results.append(r)
+                if (g.kind == "diff" and
+                        r.extra.get("posevel_metric") is not None and
+                        r.extra.get("pose_metric") is not None):
+                    results.append(GateResult(
+                        f"posevel:{g.scenario}", "posevel",
+                        r.extra["posevel_metric"],
+                        r.extra.get("posevel_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"posevel:{g.scenario}"] = []
                 if g.kind == "diff" and r.extra.get("pose_metric") is not None:
                     results.append(GateResult(
                         f"pose:{g.scenario}", "pose", r.extra["pose_metric"],
@@ -1433,7 +1466,8 @@ def main(argv=None) -> int:
         for r in results:
             # A pose:<scenario> result belongs to its diff:<scenario> gate,
             # so asking to (re)baseline the diff also baselines the pose.
-            pose_of = r.gate_id.startswith("pose:") and (
+            pose_of = (r.gate_id.startswith("pose:") or
+                       r.gate_id.startswith("posevel:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue
