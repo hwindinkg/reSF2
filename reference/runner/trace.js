@@ -492,6 +492,26 @@ function ensureHooks(fight) {
    * native port use), as [x,y,z] triples, 3 decimals. The z component is
    * INCLUDED: the cloth chains hang almost along z, so an xy-only trace hides
    * the coordinate that decides whether two chains are actually the same. */
+  /* Per-bone VELOCITY (`ma - mf`) in oa.Va.all order, 3 decimals. Positions
+   * alone cannot separate "same dynamics, different phase" from a real
+   * per-frame difference: `mf` is NOT always the previous `ma` (Te.eda's f4()
+   * and Bl.s2a's midpoint smoothing rewrite it), so the true velocity has to
+   * be dumped directly. */
+  function vels3d(f) {
+    var out = [];
+    try {
+      var all = f.oa && f.oa.Va && f.oa.Va.all;
+      if (all && all.length) {
+        for (var i = 0; i < all.length; i++) {
+          var m = all[i];
+          if (!m || !m.ma || !m.mf) { out.push([0, 0, 0]); continue; }
+          out.push([r3(m.ma.x - m.mf.x), r3(m.ma.y - m.mf.y), r3(m.ma.z - m.mf.z)]);
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
   function bones3d(f) {
     var out = [];
     try {
@@ -526,6 +546,7 @@ function ensureHooks(fight) {
       } catch (e) { /* ignore */ }
     }
     out.bones = bones3d(f);
+    out.vel = vels3d(f);
     return out;
   }
 

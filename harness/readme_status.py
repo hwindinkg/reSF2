@@ -91,7 +91,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "measured with step 0.000 against the oracle's 0.4-0.9 - losing its "
          "velocity while JS `Nd.ia` runs unconditionally. Stepping it through "
          "the clip-less path removed all 11 and lowered the cloth 3D deviation "
-         "mean 4.687 -> 3.901 and the gate 425 -> 421. What is left is the "
+         "mean 4.687 -> 3.901 and the gate 425 -> 421. Speed is now dumped on BOTH sides as the true `ma - mf` (not derived from "
+         "positions): the module matches (|v| 2.291 vs 2.296) while the velocity "
+         "VECTOR differs by 0.623 mean / 9.4 max, and that difference is almost "
+         "entirely TANGENTIAL to the anchor (0.76-1.21 vs radial 0.25-0.81) - the "
+         "chain rotates at a slightly different rate, and without Attenuation the "
+         "phase difference cannot decay. What is left is the "
          "PLAYER's chain riding with a different lag under translation (site "
          "mean ~2, spread ~10) at StepForward/StepBack", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "

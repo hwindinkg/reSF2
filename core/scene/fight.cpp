@@ -10367,6 +10367,16 @@ void FightController::dump_pose_frame() {
                          pos[b], pos[b + 1],
                          static_cast<double>(f.posed_z(b / 2)));
         }
+        // [trace] per-bone velocity (`ma - mf`), the same quantity the oracle
+        // now dumps as `vel` — positions alone cannot separate "same dynamics,
+        // different phase" from a real per-frame difference.
+        std::fprintf(pose_dump_file_, "],\"vel\":[");
+        for (std::size_t b = 0; b < pos.size() / 2; ++b) {
+            std::fprintf(pose_dump_file_, "%s[%.3f,%.3f,%.3f]", b == 0 ? "" : ",",
+                         static_cast<double>(f.posed_vel(b, 0)),
+                         static_cast<double>(f.posed_vel(b, 1)),
+                         static_cast<double>(f.posed_vel(b, 2)));
+        }
         std::fprintf(pose_dump_file_, "]}");
     }
     std::fprintf(pose_dump_file_, "]}\n");

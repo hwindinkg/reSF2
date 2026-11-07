@@ -1085,6 +1085,15 @@ public:
     // `Bva`.
     void apply_pending_impulses();
     bool ragdoll_active() const { return nk_; }
+    // [trace] the SOLVED velocity of bone `i` (`ma - mf`, JS `Vc.sk`'s Verlet
+    // delta). `mf` is NOT always the previous `ma` (the clip apply sets
+    // `mf = ma` for clip bones and the strike smoothing halves it), so the true
+    // velocity has to be dumped rather than derived from positions.
+    float posed_vel(std::size_t i, int axis) const {
+        const std::size_t k = i * 3 + static_cast<std::size_t>(axis);
+        if (k < sol_ma_.size() && k < sol_mf_.size()) return sol_ma_[k] - sol_mf_[k];
+        return 0.0f;
+    }
     // [trace] the SOLVED z of bone `i` in solver space (the pose dump keeps
     // only x/y; the cloth chains hang almost along z, so a 2-D trace cannot
     // tell two chains apart).
