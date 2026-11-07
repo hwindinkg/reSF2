@@ -489,15 +489,17 @@ function ensureHooks(fight) {
   /* ---------- frame data ---------- */
 
   /* Final per-bone positions in oa.Va.all order (the bone order the model /
-   * native port use), as [x,y] pairs with z dropped, 3 decimals. */
-  function bones2d(f) {
+   * native port use), as [x,y,z] triples, 3 decimals. The z component is
+   * INCLUDED: the cloth chains hang almost along z, so an xy-only trace hides
+   * the coordinate that decides whether two chains are actually the same. */
+  function bones3d(f) {
     var out = [];
     try {
       var all = f.oa && f.oa.Va && f.oa.Va.all;
       if (all && all.length) {
         for (var i = 0; i < all.length; i++) {
           var m = all[i] && all[i].ma;
-          out.push([m ? r3(m.x) : 0, m ? r3(m.y) : 0]);
+          out.push([m ? r3(m.x) : 0, m ? r3(m.y) : 0, m ? r3(m.z) : 0]);
         }
       }
     } catch (e) { /* ignore */ }
@@ -523,7 +525,7 @@ function ensureHooks(fight) {
         if (da.fq && da.fq[0]) out.subn = da.fq[0].length;
       } catch (e) { /* ignore */ }
     }
-    out.bones = bones2d(f);
+    out.bones = bones3d(f);
     return out;
   }
 

@@ -82,10 +82,10 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "it free-falls: port 31748.8 vs oracle 31584.0 at f=400; gameplay reads "
          "the centroid, matching to 0.001); the dummy is now EXACT (0/568). The "
          "remainder is the PLAYER's merged body/head cloth (`BODY-Node18` 28.7 "
-         "at StepBack, `HEAD-Node*` ~8 early). Two subagent leads were tested: "
+         "at StepBack, `HEAD-Node*` ~8 early). Verified: solver cadence is already 1:1 with JS Al.ia (one sk+jE per sim frame; the earlier 0.28x figure used the dump cap as the frame count), all 277 merged edges resolve, Gravitation 0.4 and IterativeProcess 2 match internal_settings.xml, and the ankle edge IS satisfied (15.0 in 3D - the 5.6 reading was a 2D projection of a chain hanging along z). Two subagent leads were tested: "
          "`fha` un-gated (done) and the `nclip` bind-reseed REFUTED by "
          "measurement (the player always samples 67 clip bones; the `nclip=0` "
-         "samples are the dummy bind clip). Open: the bFa fixed-point lead", False),
+         "samples are the dummy bind clip). The pose trace is now 3D on BOTH sides (x,y,z): the skeleton matches to 0.003 in 3D, the divergence is the cloth chain on ALL axes (|dx| 2.70, |dy| 1.31, |dz| 2.57, 3D mean 4.45 max 29.1). With the step formula, 2 iterations, gravity 0.4, all 277 edges, masses, rest lengths and anchors verified and the skeleton exact in 3D, the chain VELOCITIES match the oracle almost exactly (mean 2.18 vs 2.32 at f=400, 1.57 vs 1.57 at f=60), so the step/gravity/relaxation and energy are right; the divergence is BORN on the first live frame: the cloth step there is 7.156 vs the oracle 4.808 (1.49x) while the skeleton step is identical (0.000) on both, and every later frame matches within 2% (f 1->2 33.187 vs 32.835, f 5->6 4.469 vs 4.541). Cause: Fighter::sample() runs more than once on that frame and every call stepped Al.ia, i.e. the chain stepped twice where the JS steps once - and body cloth has no Attenuation, so the excess never decays; the once-per-frame latch is prepared. Open: the bFa fixed-point lead", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "

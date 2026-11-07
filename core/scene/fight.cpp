@@ -10361,8 +10361,11 @@ void FightController::dump_pose_frame() {
                      f.world_x(), f.world_y(), f.clip_mirror(), clip_name.c_str(),
                      f.playhead_xh(), f.subframe(), f.sub());
         for (std::size_t b = 0; b + 1 < pos.size(); b += 2) {
-            std::fprintf(pose_dump_file_, "%s[%.3f,%.3f]", b == 0 ? "" : ",", pos[b],
-                         pos[b + 1]);
+            // [trace] include z: the oracle dumps [x,y,z] too, and the cloth
+            // chains hang almost along z (a 2-D trace cannot separate them).
+            std::fprintf(pose_dump_file_, "%s[%.3f,%.3f,%.3f]", b == 0 ? "" : ",",
+                         pos[b], pos[b + 1],
+                         static_cast<double>(f.posed_z(b / 2)));
         }
         std::fprintf(pose_dump_file_, "]}");
     }

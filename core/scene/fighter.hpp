@@ -1085,6 +1085,14 @@ public:
     // `Bva`.
     void apply_pending_impulses();
     bool ragdoll_active() const { return nk_; }
+    // [trace] the SOLVED z of bone `i` in solver space (the pose dump keeps
+    // only x/y; the cloth chains hang almost along z, so a 2-D trace cannot
+    // tell two chains apart).
+    float posed_z(std::size_t i) const {
+        if (i * 3 + 2 < sol_ma_.size()) return sol_ma_[i * 3 + 2];
+        if (i < model_.bones.size()) return model_.bones[i].z;
+        return 0.0f;
+    }
     int ragdoll_frame_count() const { return ragdoll_frame_count_; }
     const std::vector<std::string>& ragdoll_names() const { return ragdoll_names_; }
 
