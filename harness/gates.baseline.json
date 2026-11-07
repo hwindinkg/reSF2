@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-06T23:07:10",
+    "updated": "2026-11-07T18:16:59",
     "mode": "only"
   },
   "gates": {
@@ -132,9 +132,9 @@
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "49dbaf04",
-      "reason": "pose gate improved 851 -> 417: the Mass=0 COM node is excluded by name (both sides integrate it and it free-falls chaotically - port 31748.8 vs oracle 31584.0 at f=400 - while gameplay reads the centroid, matching to 0.001). The dummy's pose now matches exactly (0/568 over tolerance); the remainder is the player's cloth chain (BODY-Node18 28.7 etc.)",
-      "date": "2026-11-06T23:07:10"
+      "commit": "3b7e8222",
+      "reason": "the cloth solver now steps on the clip-end frame like JS Al.ia (Nd.ia runs unconditionally): Fighter::advance_step returned at the clip-finished branch without calling sample_current, so the chain froze for exactly one frame at every clip boundary - 11 frames measured with step 0.000 against the oracle's 0.4-0.9 - losing its velocity and restarting from rest. After the fix the frozen frames are 0 and the cloth 3D deviation falls (mean 4.687 -> 3.901), pose 425 -> 421",
+      "date": "2026-11-07T18:16:59"
     },
     "disarm-ai": {
       "metric": 0,
@@ -233,10 +233,10 @@
       "date": "2026-11-06T21:28:25"
     },
     "pose:dojo-move": {
-      "metric": 417,
-      "commit": "49dbaf04",
-      "reason": "pose gate improved 851 -> 417: the Mass=0 COM node is excluded by name (both sides integrate it and it free-falls chaotically - port 31748.8 vs oracle 31584.0 at f=400 - while gameplay reads the centroid, matching to 0.001). The dummy's pose now matches exactly (0/568 over tolerance); the remainder is the player's cloth chain (BODY-Node18 28.7 etc.)",
-      "date": "2026-11-06T23:07:10"
+      "metric": 421,
+      "commit": "3b7e8222",
+      "reason": "the cloth solver now steps on the clip-end frame like JS Al.ia (Nd.ia runs unconditionally): Fighter::advance_step returned at the clip-finished branch without calling sample_current, so the chain froze for exactly one frame at every clip boundary - 11 frames measured with step 0.000 against the oracle's 0.4-0.9 - losing its velocity and restarting from rest. After the fix the frozen frames are 0 and the cloth 3D deviation falls (mean 4.687 -> 3.901), pose 425 -> 421",
+      "date": "2026-11-07T18:16:59"
     }
   }
 }

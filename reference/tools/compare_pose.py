@@ -291,7 +291,15 @@ def align(native_frames, oracle_frames, swap=False):
 # ---------------------------------------------------------------------------
 
 def bone_deltas(nb, ob):
-    """Per-bone max-abs-component delta over the common prefix.
+    """Per-bone max-abs-component delta over the common prefix (3D).
+
+    Both traces now carry `[x, y, z]` (`reference/runner/trace.js` `bones3d`
+    and the native `posed_z`), so the delta uses all three axes: the cloth
+    chains hang largely along z, and an xy-only delta under-reports them.
+
+    A constant trace-origin offset of ~0.58 in z (measured on the skeleton,
+    identical for every bone of a frame) is far below the 5-unit tolerance, so
+    it creates no false positive.
 
     Returns (deltas, n_common, n_native, n_oracle). A non-list bone entry
     yields delta=inf (counted over-tolerance, excluded from mean/max).
@@ -308,9 +316,11 @@ def bone_deltas(nb, ob):
             continue
         ax = a[0] if len(a) > 0 else 0.0
         ay = a[1] if len(a) > 1 else 0.0
+        az = a[2] if len(a) > 2 else 0.0
         bx = b[0] if len(b) > 0 else 0.0
         by = b[1] if len(b) > 1 else 0.0
-        deltas.append(max(abs(ax - bx), abs(ay - by)))
+        bz = b[2] if len(b) > 2 else 0.0
+        deltas.append(max(abs(ax - bx), abs(ay - by), abs(az - bz)))
     return deltas, n, len(nb), len(ob)
 
 

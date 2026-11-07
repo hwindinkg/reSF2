@@ -2672,6 +2672,16 @@ void Fighter::advance_step() {
         render_offset_valid_ = true;
         align_pivot_u_ = -1;
         align_pivot_bone_u_ = -1;
+        // [FIX frozen cloth at every clip end] JS `Al.ia` (`Nd.ia`, L582) runs
+        // UNCONDITIONALLY every frame — including the frame a clip ends on —
+        // while this branch returned without stepping the solver. Measured on
+        // the dojo trace: at EVERY clip boundary (11 times) the port's cloth
+        // step is exactly 0.000 while the oracle keeps moving 0.4-0.9, so the
+        // chain loses its velocity for a frame and restarts from rest. Step it
+        // through the clip-less path: `nclip == 0` leaves the clip bones at
+        // their last pose, so only the solver (sk+jE+macros) and the pose fill
+        // run — the same path the ended-move case above already uses.
+        sample_bind_pose();
         return;
     }
 
