@@ -1721,4 +1721,5 @@ private:
     }
 };
 
+void set_trace_fight_frame(int f);
 } // namespace sf2::scene

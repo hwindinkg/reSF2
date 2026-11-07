@@ -851,6 +851,49 @@ function ensureHooks(fight) {
     } catch (e) { /* ignore */ }
   }
 
+  /* RELAX TRACE (`?relaxTrace=1`, harness-only), read-only variant: snapshot
+   * every edge length BEFORE the app's per-frame update (`aa`, which runs
+   * `Nd.ia()` = sk + jE) and compare it AFTER. No game method is patched - an
+   * earlier attempt that wrapped `Al.prototype.jE` broke the trace after ~24
+   * frames, and per-edge corrections can be read from the same positions
+   * without touching the engine. `fight.pb.Nd` is the 23-edge dummy in the
+   * dojo, `fight.yb.Nd` the 277-edge player, so both are sampled. */
+  function relaxSnapshot(fight) {
+    var out = [];
+    try {
+      if (new URLSearchParams(window.location.search).get("relaxTrace") !== "1") {
+        return out;
+      }
+      var sides = ["pb", "yb"];
+      for (var si = 0; si < sides.length; si++) {
+        var ftr = fight[sides[si]];
+        var sol = ftr && ftr.Nd;
+        var edges = sol && sol.oa && sol.oa.Nl && sol.oa.Nl.all;
+        if (!edges || !edges.length) continue;
+        // Index-keyed and CLOTH-AGNOSTIC: node names are not reliably exposed on
+        // the edge objects, so every edge of a solver with more than 30 edges
+        // (the player: 277; the dummy has 23) is sampled, capped to bound output.
+        if (edges.length < 30) continue;
+        var row = {};
+        // The merged order is skeleton (193) then body (36) then head (48), so
+        // the BODY cloth chain lives at indices ~193..228: sample that band.
+        var lo = 185, hi = Math.min(edges.length, 245);
+        for (var i = lo; i < hi; i++) {
+          var e = edges[i];
+          var a = e && e.sx ? e.sx.ma : null;
+          var b = e && e.Zs ? e.Zs.ma : null;
+          if (!a || !b) continue;
+          var dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+          row["i" + i] = { pre: Math.sqrt(dx * dx + dy * dy + dz * dz),
+                            len: typeof e.length === "number" ? e.length : 0,
+                            side: sides[si], n: i };
+        }
+        out.push({ side: sides[si], row: row, sol: sol });
+      }
+    } catch (e0) { /* ignore */ }
+    return out;
+  }
+
   function beforeFrame() {
     if (tr.done || !tr.enabled) return;
     pollStimulus();
@@ -998,6 +1041,52 @@ function ensureHooks(fight) {
         return;
       tr.lastFightFrame = fight.frame;
     } catch (e) { /* ignore */ }
+    try {
+      if (tr.relaxPre && tr.relaxPre.length) {
+        var frNow = (typeof fight.frame === "number") ? fight.frame : 0;
+        if (frNow >= 100 && frNow <= 400) {
+          for (var pi = 0; pi < tr.relaxPre.length; pi++) {
+            var snap = tr.relaxPre[pi];
+            var edges2 = snap.sol && snap.sol.oa && snap.sol.oa.Nl && snap.sol.oa.Nl.all;
+            if (!edges2) continue;
+            for (var key in snap.row) {
+              if (!Object.prototype.hasOwnProperty.call(snap.row, key)) continue;
+              var rec = snap.row[key];
+              var e2 = edges2[rec.n];
+              if (!e2 || !e2.sx || !e2.Zs) continue;
+              var a2 = e2.sx.ma, b2 = e2.Zs.ma;
+              var ddx = a2.x - b2.x, ddy = a2.y - b2.y, ddz = a2.z - b2.z;
+              console.log(JSON.stringify({
+                t: "relax", f: frNow, side: rec.side, e: key,
+                pre: r3(rec.pre),
+                post: r3(Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz)),
+                len: r3(rec.len)
+              }));
+            }
+          }
+        }
+        tr.relaxPre = null;
+      }
+    } catch (eR2) { /* ignore */ }
+    // Snapshot the CURRENT lengths as the PRE of the next frame: fterFrame
+    // runs after a, so this is exactly the post state of this frame.
+    try {
+      tr.relaxPre = relaxSnapshot(fight);
+      if (!tr.relaxDbg || (tr.frameCount % 200) === 0) {
+        tr.relaxDbg = 1;
+        var dbgSides = [];
+        try {
+          var pSol = fight.pb && fight.pb.Nd;
+          var ySol = fight.yb && fight.yb.Nd;
+          dbgSides.push(pSol && pSol.oa && pSol.oa.Nl && pSol.oa.Nl.all ? pSol.oa.Nl.all.length : -1);
+          dbgSides.push(ySol && ySol.oa && ySol.oa.Nl && ySol.oa.Nl.all ? ySol.oa.Nl.all.length : -1);
+        } catch (eD) { dbgSides.push("err"); }
+        console.log('{"t":"relaxdbg","pre":' + (tr.relaxPre ? tr.relaxPre.length : -1) +
+                    ',"sides":' + JSON.stringify(dbgSides) + '}');
+      }
+    } catch (eR3) {
+      console.log('{"t":"relaxdbg","err":' + JSON.stringify(String(eR3)) + '}');
+    }
     emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
     var stDbg = fightState(fight);

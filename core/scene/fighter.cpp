@@ -2822,6 +2822,9 @@ float Fighter::anim_time() const {
 // early-returned instead, freezing the clip-less bag's drawn pose. Sampling
 // the 1-frame, bone-less bind clip re-runs the exact solver/placement path
 // `sample()` uses (`nclip == 0`), so `sol_ma_` steps and `pos_` follows.
+static int g_trace_fight_frame = -1;
+void set_trace_fight_frame(int f) { g_trace_fight_frame = f; }
+
 void Fighter::sample_bind_pose() {
     sf2::data::anim_clip bind_clip;
     bind_clip.frames.resize(1);
@@ -3869,6 +3872,30 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // a && d.vc)` — the same predicate as `Al.sk`.
             return nk_ || jy || (shock_latch_ && b.shock);
         };
+        // [probe] `SF2_TRACE_RELAX=1`: per-edge pre/post length across BOTH
+        // relaxation passes, for the merged edge-index band 185..244 (skeleton
+        // ends at 193, body 193..228, head 229..276). Index-keyed so it can be
+        // compared directly with the oracle hook `?relaxTrace=1`, which samples
+        // the same band of `Nd.oa.Nl.all`.
+        const bool trace_relax =
+            !not_animation_ && std::getenv("SF2_TRACE_RELAX") != nullptr;
+        std::vector<std::size_t> tr_idx;
+        std::vector<float> tr_pre;
+        if (trace_relax) {
+            const std::size_t hi = std::min<std::size_t>(model_.edges.size(), 245);
+            for (std::size_t k = 185; k < hi; ++k) {
+                const int b1 = edge_bone_idx_[k].first;
+                const int b2 = edge_bone_idx_[k].second;
+                if (b1 < 0 || b2 < 0) continue;
+                const std::size_t u1 = static_cast<std::size_t>(b1) * 3;
+                const std::size_t u2 = static_cast<std::size_t>(b2) * 3;
+                const float dx = sol_ma_[u2] - sol_ma_[u1];
+                const float dy = sol_ma_[u2 + 1] - sol_ma_[u1 + 1];
+                const float dz = sol_ma_[u2 + 2] - sol_ma_[u1 + 2];
+                tr_idx.push_back(k);
+                tr_pre.push_back(std::sqrt(dx * dx + dy * dy + dz * dz));
+            }
+        }
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
         for (int it = 0; it < kEdgeIters; ++it) {
             for (std::size_t ei = 0; ei < model_.edges.size(); ++ei) {
@@ -3968,6 +3995,24 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                     }
                 }
             }
+        }
+        if (trace_relax) {
+            for (std::size_t j = 0; j < tr_idx.size(); ++j) {
+                const std::size_t k = tr_idx[j];
+                const std::size_t u1 = static_cast<std::size_t>(
+                                           edge_bone_idx_[k].first) * 3;
+                const std::size_t u2 = static_cast<std::size_t>(
+                                           edge_bone_idx_[k].second) * 3;
+                const float dx = sol_ma_[u2] - sol_ma_[u1];
+                const float dy = sol_ma_[u2 + 1] - sol_ma_[u1 + 1];
+                const float dz = sol_ma_[u2 + 2] - sol_ma_[u1 + 2];
+                std::fprintf(stdout, "[relax] f=%d t=%d i=%zu pre=%.3f post=%.3f len=%.3f\n",
+                             g_trace_fight_frame, ia_ticks_, k,
+                             static_cast<double>(tr_pre[j]),
+                             static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)),
+                             static_cast<double>(model_.edges[k].length));
+            }
+            std::fflush(stdout);
         }
         // JS `Al.ia` (L582) tail: `sk(); jE(); nk&&frameCount++`.
         // Only the once-per-frame `ia()` path ticks the counter: the

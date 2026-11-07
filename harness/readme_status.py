@@ -108,7 +108,7 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "posevel:dojo-move = 69 of 568 frames with any bone true velocity over the "
          "5-unit tolerance (player only; the dummy 0/568, max 2.44), so a "
          "velocity-class regression can no longer hide behind matching positions. "
-         "What is left is the "
+         "The per-edge RELAXATION corrections are now measured on BOTH sides (oracle ?relaxTrace=1 reads Nd.oa.Nl.all read-only from afterFrame - no engine patching; port SF2_TRACE_RELAX=1 samples the same index band): over frames 100..400 on 60 edges the pre-relax lengths differ by 0.19 units on average and the applied correction by 0.116 (max 0.42), all of it proportional to the already-diverged chain - no edge has a wrong length, mass or rest value. What is left is the "
          "PLAYER's chain riding with a different lag under translation (site "
          "mean ~2, spread ~10) at StepForward/StepBack", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "

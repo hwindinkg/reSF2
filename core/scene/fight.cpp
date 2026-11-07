@@ -9600,6 +9600,7 @@ void FightController::update(float dt) {
     // The idle lead-in (the ROUND plate, before phase 1) keeps it at 0 so
     // `frame_ == 0` coincides with phase 1 (`enter_start_stance` resets it).
     if (phase_ != fight_phase::idle) ++frame_;
+    sf2::scene::set_trace_fight_frame(static_cast<int>(frame_));
     // Fight-HUD perk icons (JS `Sf.ia` -> `Id.ia`/`je.ia` -> `Hr.ia` -> `Ir.ia`
     // -> `Kab`/`t2a`/`l4`, L2035/L2042-2043): advance the fade + pulse once per
     // 60 Hz sim frame. Stepping here (not in the uncapped render loop) keeps
