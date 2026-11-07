@@ -80,10 +80,12 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("cloth/chain divergence: the pose gate fell 851 -> 417 after "
          "excluding the Mass=0 `COM` node by name (both sides integrate it and "
          "it free-falls: port 31748.8 vs oracle 31584.0 at f=400; gameplay reads "
-         "the centroid, matching to 0.001). The dummy is now EXACT (0/568 over "
-         "tolerance); the remainder is the PLAYER's cloth chain (`BODY-Node18` "
-         "28.7 at StepBack, HEAD-Node* ~8 early; the start pose matches (<=0.4 at f=0) and the max-54-at-f=0 was an alignment artifact), plus `fha` was un-gated to match JS "
-         "`fdb`. Still open: the player's chain start pose", False),
+         "the centroid, matching to 0.001); the dummy is now EXACT (0/568). The "
+         "remainder is the PLAYER's merged body/head cloth (`BODY-Node18` 28.7 "
+         "at StepBack, `HEAD-Node*` ~8 early). Two subagent leads were tested: "
+         "`fha` un-gated (done) and the `nclip` bind-reseed REFUTED by "
+         "measurement (the player always samples 67 clip bones; the `nclip=0` "
+         "samples are the dummy bind clip). Open: the bFa fixed-point lead", False),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "
