@@ -483,8 +483,18 @@ def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
         # tutorial fight is built with `ha == null` (`v.m1a` L50365), so it has
         # no `Sf` HUD timer at all — `nf`/`timer` are then structurally absent,
         # not divergent).
+        # [FIX weapon field blind spot] `fighters.*.w` is NEVER auto-demoted.
+        # The generic rule below fires when the oracle exposed no value on every
+        # frame - but a port-side value in that situation is exactly the bug
+        # class "the port reports a weapon the JS does not have" (the training
+        # bag: oracle `parameters.Hd == null`, port `"Fists"`), and the rule hid
+        # it as `[info]` on every frame of the dojo scenarios. The port now
+        # emits `null` for the bag (fight.cpp), so the field matches with 0
+        # mismatches and stays COUNTED, which means a regression fails the gate.
+        weapon_field = field in ("fighters.Me.w", "fighters.Enemy.w")
         info = field in INFORMATIONAL or (
-            s.get("oracle_none", 0) > 0 and s["oracle_none"] == s["compared"])
+            not weapon_field and s.get("oracle_none", 0) > 0
+            and s["oracle_none"] == s["compared"])
         if s["mismatch"] and not info:
             counted_total += s["mismatch"]
         rows.append((field, s, info))

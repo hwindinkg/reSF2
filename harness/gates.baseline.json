@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-08T17:49:50",
+    "updated": "2026-11-08T19:45:22",
     "mode": "only"
   },
   "gates": {
@@ -102,39 +102,39 @@
     },
     "diff:dojo-demo": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:54"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "diff:boss-lynx": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "diff:tournament": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "diff:survival": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "diff:challenge": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:56"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     },
     "disarm-ai": {
       "metric": 0,
@@ -222,87 +222,135 @@
     },
     "diff:titan-ladder": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
     },
     "diff:kusarigama": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
-      "date": "2026-11-08T17:49:50"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
     },
     "pose:dojo-move": {
       "metric": 421,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:56"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     },
     "posevel:dojo-move": {
       "metric": 69,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:56"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     },
     "cov:dojo-demo": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:54"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "cov:boss-lynx": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "cov:tournament": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
     },
     "cov:survival": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
     },
     "cov:kusarigama": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
-      "date": "2026-11-08T17:49:50"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
     },
     "cov:titan-ladder": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:55"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
     },
     "cov:challenge": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:56"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     },
     "cov:dojo-move": {
       "metric": 0,
-      "commit": "97954a20",
-      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
-      "date": "2026-11-08T17:41:56"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     },
     "posevel:kusarigama": {
       "metric": 268,
-      "commit": "97954a20",
-      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
-      "date": "2026-11-08T17:49:50"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
     },
     "pose:kusarigama": {
       "metric": 357,
-      "commit": "97954a20",
-      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
-      "date": "2026-11-08T17:49:50"
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
+    },
+    "ui:dojo-demo": {
+      "metric": 7,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
+    },
+    "ui:boss-lynx": {
+      "metric": 15,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
+    },
+    "ui:tournament": {
+      "metric": 15,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:20"
+    },
+    "ui:survival": {
+      "metric": 15,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
+    },
+    "ui:kusarigama": {
+      "metric": 15,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
+    },
+    "ui:titan-ladder": {
+      "metric": 15,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:21"
+    },
+    "ui:challenge": {
+      "metric": 15,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
+    },
+    "ui:dojo-move": {
+      "metric": 7,
+      "commit": "cc3bcddc",
+      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
+      "date": "2026-11-08T19:45:22"
     }
   }
 }

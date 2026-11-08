@@ -10577,15 +10577,27 @@ void FightController::dump_state_frame() {
             move_name = m->name;
             if (move_name.empty()) move_name = m->file_name;
         }
+        // [FIX `w` semantics] The JS `fighters[].w` is `parameters.Hd` — the
+        // equipped weapon ITEM, or NULL when the combatant has no weapon (the
+        // not-animation training bag). The port emitted its internal default
+        // "Fists" for the bag, so the state comparator saw "Fists vs None" on
+        // every frame and demoted the field to [info] — a real mismatch hidden
+        // by the demotion rule. Emit JSON null in exactly that case.
+        std::string w_json;
+        if (f.not_animation()) {
+            w_json = "null";
+        } else {
+            w_json = "\"" + ff.weapon + "\"";
+        }
         std::fprintf(state_dump_file_,
-                     "%s{\"id\":\"%s\",\"x\":%.4f,\"y\":%.4f,\"w\":\"%s\","
+                     "%s{\"id\":\"%s\",\"x\":%.4f,\"y\":%.4f,\"w\":%s,"
                      "\"hp\":%.3f,\"mhp\":%.3f,\"combo\":%d,"
                      "\"style\":%d,\"unhit\":%d,\"shock\":%d,\"block\":%d,"
                      "\"invuln\":%d,\"move\":\"%s\",\"af\":%d,\"rag\":%d,"
                      "\"ragf\":%d,\"iv\":[",
                      i == 0 ? "" : ",", i == 0 ? "Me" : "Enemy",
                      static_cast<double>(f.world_x()),
-                     static_cast<double>(f.world_y()), ff.weapon.c_str(),
+                     static_cast<double>(f.world_y()), w_json.c_str(),
                      static_cast<double>(ff.hp), static_cast<double>(ff.max_hp),
                      ff.combo_run, ff.style.level, ff.round_unhit ? 1 : 0,
                      ff.shock.shocked_vc ? 1 : 0, f.has_block() ? 1 : 0,

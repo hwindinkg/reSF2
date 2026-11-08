@@ -118,6 +118,17 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "stay valid. What is left is the "
          "PLAYER's chain riding with a different lag under translation (site "
          "mean ~2, spread ~10) at StepForward/StepBack", False),
+        ("harness blind spots closed: the weapon-name field `fighters[].w` is "
+         "never auto-demoted any more and the port emits JSON null for the "
+         "weaponless training bag (the JS `parameters.Hd` is null there), so "
+         "`Fists vs None` on every dojo frame is now COUNTED instead of hidden "
+         "as [info] - measured 0/702 on both fighters after the fix; and the UI "
+         "stack diff is now a gate (`ui:<scenario>`, depth + per-entry + "
+         "oracle-only) baselined at 7 on the dojo scenarios and 15 on the "
+         "campaign ones, which is UI-trace COVERAGE rather than a semantic "
+         "divergence (the oracle records the whole boot navigation, the native "
+         "dump only the live-fight stack, and screen ids differ)",
+         True),
         ("coverage gate: `cov:<scenario>` now gates ALIGNMENT - the state "
          "comparator pairs frames by `(phase, move, af)` and silently drops the "
          "rest as unaligned, so a port playing the wrong move used to read as 0 "

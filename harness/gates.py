@@ -1464,6 +1464,12 @@ def main(argv=None) -> int:
                     timeline[g.id] = first_divergences(
                         REPORTS / f"state_{g.scenario}.txt")
                 results.append(r)
+                if g.kind == "diff" and r.extra.get("ui_metric") is not None:
+                    results.append(GateResult(
+                        f"ui:{g.scenario}", "ui", r.extra["ui_metric"],
+                        r.extra.get("ui_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"ui:{g.scenario}"] = []
                 if g.kind == "diff" and r.extra.get("cov_metric") is not None:
                     results.append(GateResult(
                         f"cov:{g.scenario}", "cov", r.extra["cov_metric"],
@@ -1506,7 +1512,8 @@ def main(argv=None) -> int:
             # so asking to (re)baseline the diff also baselines the pose.
             pose_of = (r.gate_id.startswith("pose:") or
                        r.gate_id.startswith("posevel:") or
-                       r.gate_id.startswith("cov:")) and (
+                       r.gate_id.startswith("cov:") or
+                       r.gate_id.startswith("ui:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue
