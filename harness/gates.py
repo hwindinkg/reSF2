@@ -580,6 +580,28 @@ def p_subframe_over(text: str) -> tuple[int, str]:
         m.group(1), m.group(2))
 
 
+def p_pos_drift(text: str) -> tuple[int, str]:
+    """Frames whose world-position offset leaves the scenario's constant.
+
+    `compare_state.py` prints
+      `  frames whose offset leaves that constant by more than N units: A/B`
+    The absolute x/y offset is a CONSTANT per scenario (measured: -0.6 on
+    boss-lynx, +78.98 on titan-ladder, and identical for both fighters), i.e. the
+    pair is placed at a different arena origin - `fighters.sep_x` matches 0/368.
+    What must NOT happen is that offset CHANGING inside a run, which would be a
+    real position divergence. Gating `x`/`y` absolutely would just encode the
+    origin; gating this residual detects the divergence.
+    """
+    pat = re.compile(
+        r"frames whose offset leaves that constant by more than [\d.]+ units:"
+        r"\s*(\d+)/(\d+)")
+    m = pat.search(text)
+    if not m:
+        raise AnchorMissing("frames whose offset leaves that constant: A/B")
+    return int(m.group(1)), "%s frames drift from the constant offset (of %s)" % (
+        m.group(1), m.group(2))
+
+
 def p_coverage_short(text: str) -> tuple[int, str]:
     """Alignment coverage as a FAILURE count.
 
@@ -1130,12 +1152,20 @@ def run_diff_gate(gate: Gate) -> GateResult:
     # divergences.
     cov_metric = None
     cov_detail = ""
+    pos_res_metric = None
+    pos_res_detail = ""
     try:
         with open(REPORTS / f"state_{scenario}.txt", encoding="utf-8",
                   errors="replace") as fh:
             cov_metric, cov_detail = p_coverage_short(fh.read())
     except (OSError, AnchorMissing):
         cov_detail = "coverage anchor missing"
+    try:
+        with open(REPORTS / f"state_{scenario}.txt", encoding="utf-8",
+                  errors="replace") as fh:
+            pos_res_metric, pos_res_detail = p_pos_drift(fh.read())
+    except (OSError, AnchorMissing):
+        pos_res_detail = "position-offset anchor missing"
 
     # 3b. POSE diff on the same run (per-bone, per-frame). The metric is the
     # number of matched frames with ANY bone over the comparator's tolerance.
@@ -1218,6 +1248,8 @@ def run_diff_gate(gate: Gate) -> GateResult:
                              "pose_metric": pose_metric, "pose_detail": pose_detail,
                              "cov_metric": cov_metric, "cov_detail": cov_detail,
                              "sub_metric": sub_metric, "sub_detail": sub_detail,
+                             "pos_res_metric": pos_res_metric,
+                             "pos_res_detail": pos_res_detail,
                              "posevel_metric": posevel_metric,
                              "posevel_detail": posevel_detail,
                              "attempts": attempts,
@@ -1511,6 +1543,14 @@ def main(argv=None) -> int:
                         r.extra.get("ui_detail", ""), 0.0,
                         extra={"n": 1}))
                     timeline[f"ui:{g.scenario}"] = []
+                if (g.kind == "diff" and
+                        r.extra.get("pos_res_metric") is not None):
+                    results.append(GateResult(
+                        f"posres:{g.scenario}", "posres",
+                        r.extra["pos_res_metric"],
+                        r.extra.get("pos_res_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"posres:{g.scenario}"] = []
                 if g.kind == "diff" and r.extra.get("cov_metric") is not None:
                     results.append(GateResult(
                         f"cov:{g.scenario}", "cov", r.extra["cov_metric"],
@@ -1555,7 +1595,8 @@ def main(argv=None) -> int:
                        r.gate_id.startswith("posevel:") or
                        r.gate_id.startswith("cov:") or
                        r.gate_id.startswith("ui:") or
-                       r.gate_id.startswith("sub:")) and (
+                       r.gate_id.startswith("sub:") or
+                       r.gate_id.startswith("posres:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue

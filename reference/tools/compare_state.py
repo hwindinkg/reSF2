@@ -57,6 +57,11 @@ DEFAULT_OUT = os.path.join("reference", "traces", "state_gap_report.txt")
 # coordinates (`sep_x = |x1 - x2|`) can differ by up to 2 * 5e-4 = 0.001 just
 # from that rounding. 0.0025 covers the round-trip with margin and stays far
 # below any behavioural difference (the fighters are ~200-350 units apart).
+# Allowed drift of the per-fighter x/y offset away from the scenario's median
+# (see the position-offset block: a CONSTANT offset is an arena-origin shift,
+# a CHANGING one is a real divergence).
+POS_DRIFT_TOL = 1.0
+
 FLOAT_TOL = 0.0025
 # The fight camera focus (`cam.cx/cy`) is a SMOOTHED position (the JS `ql`
 # chase, gain 0.15 + the 50-unit velocity clamp), so it lags the COM target and
@@ -441,7 +446,8 @@ def collect_fields(nf, of, swap):
 
 
 def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
-                 matches, un_nat, un_ora, stats, swap):
+                 matches, un_nat, un_ora, stats, swap,
+                 pos_res=None, pos_res_frames=0, pos_res_compared=0):
     L = []
     w = L.append
     w("State gap report - native port vs web oracle (FIGHT LOGIC)")
@@ -471,6 +477,16 @@ def build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
         w("[no aligned frames] - cannot diff; check the scenario / role map.")
         return L
 
+    w("[position offset]  (constant arena-origin shift removed)")
+    if pos_res:
+        w("  median per-fighter offset: " + ", ".join(
+            "%s=%+.3f" % (k.replace("fighters.", ""), v)
+            for k, v in sorted(pos_res.items())))
+        w("  frames whose offset leaves that constant by more than %.1f units: %d/%d"
+          % (POS_DRIFT_TOL, pos_res_frames, pos_res_compared))
+    else:
+        w("  no aligned frames")
+    w("")
     w("[field divergences]  (over %d matched frames; first = native f / oracle f)"
       % len(matches))
     w("  %-26s %-22s %s" % ("field", "first divergence", "mismatches / compared"))
@@ -582,6 +598,17 @@ def run(args):
     args.align_kind = align_kind
 
     stats = {}
+    # [FIX `x` blind spot] `fighters.*.x/.y` are emitted by both traces and
+    # reported as INFORMATION ONLY, so a port walking to a different place could
+    # not fail a gate. Measured: the absolute x differs by a CONSTANT per
+    # scenario (boss-lynx 0.6, challenge/tournament 22.2, survival 14.2,
+    # kusarigama 43.9, titan-ladder 78.9) while `fighters.sep_x` is 0/368 - i.e.
+    # the whole PAIR is placed at a different arena origin, not a gameplay
+    # divergence. The residual below is the deviation from that constant: it is
+    # 0 when the offset is exactly constant (pure origin shift) and grows the
+    # moment the port actually moves differently.
+    pos_off = {"fighters.Me.x": [], "fighters.Enemy.x": [],
+               "fighters.Me.y": [], "fighters.Enemy.y": []}
     for ni, oi in matches:
         fields = collect_fields(native_frames[ni], oracle_frames[oi], swap)
         for field, (nv, ov) in fields.items():
@@ -607,9 +634,40 @@ def run(args):
                     s["first"] = (native_frames[ni].get("f"), oracle_frames[oi].get("f"), nv, ov)
             if ov is None:
                 s["oracle_none"] = s.get("oracle_none", 0) + 1
+            if field in pos_off:
+                try:
+                    pos_off[field].append((float(nv), float(ov)))
+                except (TypeError, ValueError):
+                    pass
+
+    pos_res = {}
+    pos_res_frames = 0
+    pos_res_compared = 0
+    if matches:
+        # A frame counts once if EITHER fighter's offset moved away from the
+        # scenario's median offset by more than POS_DRIFT_TOL.
+        per_frame = {}
+        med = {}
+        for field, pairs in pos_off.items():
+            if len(pairs) < 3:
+                continue
+            diffs = sorted(a - b for a, b in pairs)
+            med[field] = diffs[len(diffs) // 2]
+        for idx, (ni, oi) in enumerate(matches):
+            per_frame[idx] = False
+        for field, pairs in pos_off.items():
+            if field not in med:
+                continue
+            for idx, (a, b) in enumerate(pairs):
+                if abs((a - b) - med[field]) > POS_DRIFT_TOL:
+                    per_frame[idx] = True
+        pos_res_frames = sum(1 for v in per_frame.values() if v)
+        pos_res_compared = len(matches)
+        pos_res = {f: round(m, 4) for f, m in med.items()}
 
     lines = build_report(args, native_frames, oracle_frames, native_bad, oracle_bad,
-                         matches, un_nat, un_ora, stats, swap)
+                         matches, un_nat, un_ora, stats, swap,
+                         pos_res, pos_res_frames, pos_res_compared)
     if oracle_missing:
         lines.append("[oracle missing] oracle state trace not present; native file "
                      "validated only. Re-run once %s exists." % args.oracle)

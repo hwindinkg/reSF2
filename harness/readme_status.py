@@ -129,6 +129,17 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("position gate: `fighters.*.x/.y` were emitted by both traces and "
+         "reported as INFORMATION ONLY, so a port walking to a different place "
+         "could not fail anything. Measured: the offset is a CONSTANT per "
+         "scenario and IDENTICAL for both fighters (boss-lynx -0.598, "
+         "challenge/tournament -22.211, survival +14.229, kusarigama -43.887, "
+         "titan-ladder +78.984) while `fighters.sep_x` matches 0/368 - i.e. a "
+         "different arena ORIGIN, not a gameplay divergence. `posres:<scenario>` "
+         "therefore gates the deviation from that constant (frames where the "
+         "offset moves by more than 1.0 unit): 0 on dojo and boss-lynx, 1 (the "
+         "live-fight transition frame) on the rest",
+         True),
         ("pose coverage: the per-bone/velocity gate used to exist only for the "
          "two dojo scenarios, so the player's cloth and weapon geometry was "
          "UNGATED in every campaign fight. BOSS_LYNX (a fixed opponent, 100 "
