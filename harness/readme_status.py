@@ -129,6 +129,23 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("pose coverage: the per-bone/velocity gate used to exist only for the "
+         "two dojo scenarios, so the player's cloth and weapon geometry was "
+         "UNGATED in every campaign fight. BOSS_LYNX (a fixed opponent, 100 "
+         "percent state coverage: 368 aligned frames, 0 state divergences) now "
+         "gates pose too: 268 frames align and the measured baselines are "
+         "pose:boss-lynx 357 (268 player + 89 enemy frames over tolerance, mean "
+         "1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163 and "
+         "sub:boss-lynx 0",
+         True),
+        ("subframe gate: the play-buffer slot fields `sub`/`subn` were emitted "
+         "by both traces and compared by NOTHING. Raw values differ on 197 of "
+         "568 dojo frames purely by ENCODING - the JS counts the slot 1..subn "
+         "(Te.Xh) while the port counts 0..subn-1, and the oracle uses INT_MAX "
+         "for no-active-subframe. compare_pose normalises the native 0 to subn, "
+         "skips the sentinel and also compares subn: 0/568 (dojo) and 0/268 "
+         "(kusarigama), now gated as sub:<scenario>",
+         True),
         ("coverage gate: `cov:<scenario>` now gates ALIGNMENT - the state "
          "comparator pairs frames by `(phase, move, af)` and silently drops the "
          "rest as unaligned, so a port playing the wrong move used to read as 0 "

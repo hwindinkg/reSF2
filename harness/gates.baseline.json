@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-08T19:45:22",
+    "updated": "2026-11-08T21:12:47",
     "mode": "only"
   },
   "gates": {
@@ -108,9 +108,9 @@
     },
     "diff:boss-lynx": {
       "metric": 0,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:20"
+      "commit": "213ecb9d",
+      "reason": "coverage: the pose gate existed only for the two dojo scenarios - the player's cloth/weapon geometry was UNGATED in every campaign fight. BOSS_LYNX is a FIXED opponent with 100 percent state coverage (368 aligned frames, 0 state divergences), so it is the cleanest campaign case: 268 pose frames now align and gate the cloth during a real boss fight with hits and knockdowns. Measured pose:boss-lynx 357 (= 268 player + 89 enemy frames over tolerance, mean 1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163, sub:boss-lynx 0",
+      "date": "2026-11-08T21:12:46"
     },
     "diff:tournament": {
       "metric": 0,
@@ -132,9 +132,9 @@
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:22"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "disarm-ai": {
       "metric": 0,
@@ -228,21 +228,21 @@
     },
     "diff:kusarigama": {
       "metric": 0,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:21"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:39"
     },
     "pose:dojo-move": {
       "metric": 421,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:22"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:41"
     },
     "posevel:dojo-move": {
       "metric": 69,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:22"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "cov:dojo-demo": {
       "metric": 0,
@@ -252,9 +252,9 @@
     },
     "cov:boss-lynx": {
       "metric": 0,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:20"
+      "commit": "213ecb9d",
+      "reason": "coverage: the pose gate existed only for the two dojo scenarios - the player's cloth/weapon geometry was UNGATED in every campaign fight. BOSS_LYNX is a FIXED opponent with 100 percent state coverage (368 aligned frames, 0 state divergences), so it is the cleanest campaign case: 268 pose frames now align and gate the cloth during a real boss fight with hits and knockdowns. Measured pose:boss-lynx 357 (= 268 player + 89 enemy frames over tolerance, mean 1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163, sub:boss-lynx 0",
+      "date": "2026-11-08T21:12:47"
     },
     "cov:tournament": {
       "metric": 0,
@@ -270,9 +270,9 @@
     },
     "cov:kusarigama": {
       "metric": 0,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:21"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "cov:titan-ladder": {
       "metric": 0,
@@ -288,21 +288,21 @@
     },
     "cov:dojo-move": {
       "metric": 0,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:22"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "posevel:kusarigama": {
       "metric": 268,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:21"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "pose:kusarigama": {
       "metric": 357,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:21"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "ui:dojo-demo": {
       "metric": 7,
@@ -312,9 +312,9 @@
     },
     "ui:boss-lynx": {
       "metric": 15,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:20"
+      "commit": "213ecb9d",
+      "reason": "coverage: the pose gate existed only for the two dojo scenarios - the player's cloth/weapon geometry was UNGATED in every campaign fight. BOSS_LYNX is a FIXED opponent with 100 percent state coverage (368 aligned frames, 0 state divergences), so it is the cleanest campaign case: 268 pose frames now align and gate the cloth during a real boss fight with hits and knockdowns. Measured pose:boss-lynx 357 (= 268 player + 89 enemy frames over tolerance, mean 1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163, sub:boss-lynx 0",
+      "date": "2026-11-08T21:12:47"
     },
     "ui:tournament": {
       "metric": 15,
@@ -330,9 +330,9 @@
     },
     "ui:kusarigama": {
       "metric": 15,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:21"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
     },
     "ui:titan-ladder": {
       "metric": 15,
@@ -348,9 +348,39 @@
     },
     "ui:dojo-move": {
       "metric": 7,
-      "commit": "cc3bcddc",
-      "reason": "new gate ui:<scenario> - the UI stack diff (compare_ui.py) was computed and printed but never entered a verdict, so a UI regression could not fail the build. Metric = depth mismatch + per-entry mismatch + oracle-only (the same total compare_ui.py --gate computes). Measured: 7 on the two dojo scenarios and 15 on the six campaign scenarios, all of it oracle-only: the oracle trace records the whole navigation from boot (7-15 stack changes) while the native dump records the live-fight stack only (1 change), and the two sides number screens differently (native 3=Dojo/6=Fight/10=Results/11=Settings vs oracle 0/3), so 0 transitions match. The baselined number is therefore a UI-trace COVERAGE/regression metric, now visible and gated instead of printed and ignored",
-      "date": "2026-11-08T19:45:22"
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
+    },
+    "sub:kusarigama": {
+      "metric": 0,
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
+    },
+    "sub:dojo-move": {
+      "metric": 0,
+      "commit": "213ecb9d",
+      "reason": "new gate sub:<scenario> - sub/subn (the play-buffer subframe slot) were emitted by both traces and compared by NOTHING, so a port playing the wrong subframe could not fail. The two sides encode the slot differently: the JS counts 1..subn (its Te.Xh convention), the port 0..subn-1, so raw values differ on 197 of 568 dojo frames purely by convention (e.g. native 0 vs oracle 3 with subn=3). compare_pose now normalises the native 0 to subn and skips the oracle INT_MAX sentinel ('no active subframe'), and also compares subn. Measured after normalisation: 0/568 on dojo-move and 0/268 on kusarigama - the slot alignment is exact",
+      "date": "2026-11-08T20:35:40"
+    },
+    "sub:boss-lynx": {
+      "metric": 0,
+      "commit": "213ecb9d",
+      "reason": "coverage: the pose gate existed only for the two dojo scenarios - the player's cloth/weapon geometry was UNGATED in every campaign fight. BOSS_LYNX is a FIXED opponent with 100 percent state coverage (368 aligned frames, 0 state divergences), so it is the cleanest campaign case: 268 pose frames now align and gate the cloth during a real boss fight with hits and knockdowns. Measured pose:boss-lynx 357 (= 268 player + 89 enemy frames over tolerance, mean 1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163, sub:boss-lynx 0",
+      "date": "2026-11-08T21:12:47"
+    },
+    "posevel:boss-lynx": {
+      "metric": 163,
+      "commit": "213ecb9d",
+      "reason": "coverage: the pose gate existed only for the two dojo scenarios - the player's cloth/weapon geometry was UNGATED in every campaign fight. BOSS_LYNX is a FIXED opponent with 100 percent state coverage (368 aligned frames, 0 state divergences), so it is the cleanest campaign case: 268 pose frames now align and gate the cloth during a real boss fight with hits and knockdowns. Measured pose:boss-lynx 357 (= 268 player + 89 enemy frames over tolerance, mean 1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163, sub:boss-lynx 0",
+      "date": "2026-11-08T21:12:47"
+    },
+    "pose:boss-lynx": {
+      "metric": 357,
+      "commit": "213ecb9d",
+      "reason": "coverage: the pose gate existed only for the two dojo scenarios - the player's cloth/weapon geometry was UNGATED in every campaign fight. BOSS_LYNX is a FIXED opponent with 100 percent state coverage (368 aligned frames, 0 state divergences), so it is the cleanest campaign case: 268 pose frames now align and gate the cloth during a real boss fight with hits and knockdowns. Measured pose:boss-lynx 357 (= 268 player + 89 enemy frames over tolerance, mean 1.33 / 0.80, max 106 / 157 at knockdowns), posevel:boss-lynx 163, sub:boss-lynx 0",
+      "date": "2026-11-08T21:12:47"
     }
   }
 }

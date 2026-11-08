@@ -565,6 +565,21 @@ def p_dialog(text: str) -> tuple[int, str]:
     return (0 if m.group(1) == "PASS" else 1), "parse census " + m.group(1)
 
 
+def p_subframe_over(text: str) -> tuple[int, str]:
+    """Mismatched `sub`/`subn` frames after normalising the two encodings.
+
+    `compare_pose.py` prints `total frames with subframe mismatch: N/M`. The
+    field was emitted by both traces and compared by nothing, so a port playing
+    the wrong play-buffer slot could not fail a gate.
+    """
+    pat = re.compile(r"total frames with subframe mismatch:\s*(\d+)/(\d+)")
+    m = pat.search(text)
+    if not m:
+        raise AnchorMissing("total frames with subframe mismatch: N/M")
+    return int(m.group(1)), "%s subframe-mismatch frames (of %s)" % (
+        m.group(1), m.group(2))
+
+
 def p_coverage_short(text: str) -> tuple[int, str]:
     """Alignment coverage as a FAILURE count.
 
@@ -829,7 +844,14 @@ SCENARIOS: dict[str, dict] = {
                 "--timeout-ms", "60000"],
         native=["--fight", "--battle", "BOSS_LYNX", "--zone", "ZONE_1",
                 "--fight-ordinal", "0", "--location", "moon",
-                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+                "--headless", "700", "--dump-state", "600",
+                "--dump-pose", "600", "--watchdog", "900"],
+        # [coverage] The pose gate used to exist only for the two dojo scenarios
+        # and kusarigama, so the player's cloth/weapon geometry was UNGATED in
+        # every campaign fight (hits, knockdowns, ragdoll). BOSS_LYNX is a FIXED
+        # opponent with 100% state coverage (368/368 aligned frames, 0 state
+        # divergences), i.e. the cleanest campaign case to gate first.
+        pose=True,
         timeout_s=420,
     ),
     "tournament": dict(
@@ -1124,6 +1146,12 @@ def run_diff_gate(gate: Gate) -> GateResult:
     pose_detail = ""
     posevel_metric = None
     posevel_detail = ""
+    # Scenarios without `pose` never enter the block below, so these must be
+    # initialised here (the same UnboundLocalError class as `posevel_metric`
+    # earlier - caught by --full, not by --fast, because --fast runs one
+    # scenario).
+    sub_metric = None
+    sub_detail = ""
     if cfg.get("pose"):
         native_pose = ROOT / "reference" / "traces" / "native_pose.jsonl"
         if native_pose.exists() and native_pose.stat().st_size > 0:
@@ -1163,6 +1191,10 @@ def run_diff_gate(gate: Gate) -> GateResult:
                     posevel_metric, posevel_detail = p_pose_vel_over(pr.out)
                 except AnchorMissing:
                     posevel_detail = "velocity anchor missing"
+                try:
+                    sub_metric, sub_detail = p_subframe_over(pr.out)
+                except AnchorMissing:
+                    sub_detail = "subframe anchor missing"
 
     # 4. UI stack diff on the same run (artifacts are in place).
     ui_detail = ""
@@ -1185,6 +1217,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
                       extra={"ui_metric": ui_metric, "ui_detail": ui_detail,
                              "pose_metric": pose_metric, "pose_detail": pose_detail,
                              "cov_metric": cov_metric, "cov_detail": cov_detail,
+                             "sub_metric": sub_metric, "sub_detail": sub_detail,
                              "posevel_metric": posevel_metric,
                              "posevel_detail": posevel_detail,
                              "attempts": attempts,
@@ -1464,6 +1497,14 @@ def main(argv=None) -> int:
                     timeline[g.id] = first_divergences(
                         REPORTS / f"state_{g.scenario}.txt")
                 results.append(r)
+                if (g.kind == "diff" and
+                        r.extra.get("sub_metric") is not None and
+                        r.extra.get("pose_metric") is not None):
+                    results.append(GateResult(
+                        f"sub:{g.scenario}", "sub", r.extra["sub_metric"],
+                        r.extra.get("sub_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"sub:{g.scenario}"] = []
                 if g.kind == "diff" and r.extra.get("ui_metric") is not None:
                     results.append(GateResult(
                         f"ui:{g.scenario}", "ui", r.extra["ui_metric"],
@@ -1513,7 +1554,8 @@ def main(argv=None) -> int:
             pose_of = (r.gate_id.startswith("pose:") or
                        r.gate_id.startswith("posevel:") or
                        r.gate_id.startswith("cov:") or
-                       r.gate_id.startswith("ui:")) and (
+                       r.gate_id.startswith("ui:") or
+                       r.gate_id.startswith("sub:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue

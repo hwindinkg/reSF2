@@ -460,12 +460,34 @@ def fighter_metrics(nf, of, native_fid, oracle_fid, tolerance, coord_transform="
     worst = sorted(range(len(deltas)), key=lambda k: (-deltas[k], k))[:WORST_BONES]
     vel_deltas = bone_vel_deltas(a.get("vel"), b.get("vel"))
     vel_over = sum(1 for d in vel_deltas if d > tolerance)
+    # SUBFRAME ENCODING (`sub`/`subn`): emitted by both traces, never compared
+    # anywhere. The two sides count the play-buffer slot differently - the JS
+    # uses 1..subn (1-based, its own `Te.Xh` convention) while the port uses
+    # 0..subn-1 - so the raw values differ on ~35% of frames purely by
+    # convention. Normalise the native 0 to `subn` (the same slot) and compare
+    # the slot AND the slot count; a real playback divergence still shows.
+    sub_mismatch = False
+    try:
+        nsub = int(a.get("sub")) if a.get("sub") is not None else None
+        osub = int(b.get("sub")) if b.get("sub") is not None else None
+        nsubn = a.get("subn")
+        osubn = b.get("subn")
+        if nsub is not None and osub is not None and nsubn:
+            # the oracle's INT_MAX sentinel means "no active subframe"
+            if osub != 2147483647:
+                nsub_n = nsub if nsub else int(nsubn)
+                sub_mismatch = (nsub_n != osub)
+        if nsubn is not None and osubn is not None and nsubn != osubn:
+            sub_mismatch = True
+    except (TypeError, ValueError):
+        sub_mismatch = False
     return {
         "dx": dx,
         "dy": dy,
         "fx_mismatch": fx_mismatch,
         "vel_deltas": vel_deltas,
         "vel_over": vel_over,
+        "sub_mismatch": sub_mismatch,
         "bone_max": maxd,
         "bone_mean": meand,
         "bone_over": over,
@@ -771,6 +793,8 @@ def build_report(args, native_frames, oracle_frames, native_clips, oracle_clips,
           % (fid, fmt(sv["mean_of_means"]), fmt(sv["max_of_maxes"]),
              sv["over_frames"], sv["comparable_frames"]))
     w("  total frames with any bone velocity over tolerance: %d/%d" % (vtot, vcmp))
+    w("  total frames with subframe mismatch: %d/%d"
+      % (stats.get("sub_frames_over", 0), vcmp))
     w("")
 
     w("[worst %d frames by max bone deviation]  (max over both fighters)" % WORST_FRAMES)
@@ -986,6 +1010,7 @@ def run_frame_mode(args):
     world = {"Me": {"dx": [], "dy": [], "fx": 0},
              "Enemy": {"dx": [], "dy": [], "fx": 0}}
     vel_frame_over = {}
+    sub_frame_over = {}
     vel = {"Me": {"means": [], "maxes": [], "over": 0, "comparable": 0},
            "Enemy": {"means": [], "maxes": [], "over": 0, "comparable": 0}}
     bone = {"Me": {"means": [], "maxes": [], "over": 0, "comparable": 0},
@@ -1017,6 +1042,8 @@ def run_frame_mode(args):
             bone[fid]["maxes"].append(s["bone_max"])
             if s["bone_over"] > 0:
                 bone[fid]["over"] += 1
+            if s.get("sub_mismatch"):
+                sub_frame_over[ni] = True
             if s.get("vel_deltas"):
                 vel[fid]["means"].append(sum(s["vel_deltas"]) / len(s["vel_deltas"]))
                 vel[fid]["maxes"].append(max(s["vel_deltas"]))
@@ -1074,6 +1101,7 @@ def run_frame_mode(args):
             for fid in ("Me", "Enemy")
         },
         "vel_frames_over": len(vel_frame_over),
+        "sub_frames_over": len(sub_frame_over),
         "bone_over_pct": {},
         "shape": shape,
         "worst_frames": sorted(worst, key=lambda t: (-t[0], t[1]))[:WORST_FRAMES],
