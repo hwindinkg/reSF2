@@ -1090,6 +1090,60 @@ function ensureHooks(fight) {
     } catch (eR3) {
       console.log('{"t":"relaxdbg","err":' + JSON.stringify(String(eR3)) + '}');
     }
+    /* PRE-JE PROBE (`?preje=1`, harness-only): the earlier end-of-frame
+     * snapshot measures the state AFTER jE, so it cannot separate "the port
+     * arrives more distorted" from "we sampled a different stage". The excess
+     * measured per edge sits on cloth<->SKELETON edges (top 10: +0.20..+0.41),
+     * which is exactly the stage-sensitive class, so read the oracle's TRUE
+     * post-sk/pre-jE state by wrapping ONE instance's `jE` (not the prototype -
+     * that broke the trace) with every step guarded. */
+    try {
+      if (new URLSearchParams(window.location.search).get("preje") === "1" &&
+          !tr.prejeHooked) {
+        var meF = fight.yb;
+        var sol2 = meF && meF.Nd;
+        if (sol2 && typeof sol2.jE === "function") {
+          var orig2 = sol2.jE;
+          sol2.jE = function () {
+            var pre = null;
+            try {
+              var edges3 = this.oa && this.oa.Nl && this.oa.Nl.all;
+              if (edges3 && edges3.length > 30) {
+                pre = new Array(edges3.length);
+                for (var i3 = 0; i3 < edges3.length; i3++) {
+                  var e3 = edges3[i3];
+                  var a3 = e3 && e3.sx ? e3.sx.ma : null;
+                  var b3 = e3 && e3.Zs ? e3.Zs.ma : null;
+                  if (!a3 || !b3) continue;
+                  var dx3 = a3.x - b3.x, dy3 = a3.y - b3.y, dz3 = a3.z - b3.z;
+                  pre[i3] = Math.sqrt(dx3 * dx3 + dy3 * dy3 + dz3 * dz3);
+                }
+              }
+            } catch (e0) { pre = null; }
+            var res = orig2.apply(this, arguments);
+            try {
+              if (pre) {
+                var f3 = (typeof fight.frame === "number") ? fight.frame : -1;
+                if (f3 >= 40 && f3 <= 150) {
+                  for (var k3 = 185; k3 < Math.min(pre.length, 245); k3++) {
+                    if (pre[k3] == null) continue;
+                    console.log(JSON.stringify({
+                      t: "preje", f: f3, i: k3,
+                      d: r3(pre[k3]),
+                      len: r3(typeof this.oa.Nl.all[k3].length === "number"
+                              ? this.oa.Nl.all[k3].length : 0)
+                    }));
+                  }
+                }
+              }
+            } catch (e1) { /* ignore */ }
+            return res;
+          };
+          tr.prejeHooked = 1;
+          console.log('{"t":"prejehooked"}');
+        }
+      }
+    } catch (eh) { /* ignore */ }
     emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
     var stDbg = fightState(fight);
