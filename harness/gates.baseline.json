@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-07T21:32:36",
+    "updated": "2026-11-08T17:49:50",
     "mode": "only"
   },
   "gates": {
@@ -102,39 +102,39 @@
     },
     "diff:dojo-demo": {
       "metric": 0,
-      "commit": "89db0dd9",
-      "reason": "the QD dummy's solver velocity is damped exactly while it has no move (the JS never poses it through eda), so the relaxation delta no longer becomes frame 1's velocity: pivot f=1 -107.281 = the oracle's, f>=3 within 0.001, both diffs 2 -> 0",
-      "date": "2026-11-06T16:29:27"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:54"
     },
     "diff:boss-lynx": {
       "metric": 0,
-      "commit": "db4c58c2",
-      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
-      "date": "2026-10-20T08:48:41"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
     },
     "diff:tournament": {
       "metric": 0,
-      "commit": "db4c58c2",
-      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
-      "date": "2026-10-20T08:48:41"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
     },
     "diff:survival": {
       "metric": 0,
-      "commit": "37695427",
-      "reason": "the throw victim keeps its own position (JS Dl.oL L24171): the absolute-align clips no longer drag the victim 5000u off screen - 863 -> 0",
-      "date": "2026-11-01T19:39:54"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
     },
     "diff:challenge": {
       "metric": 0,
-      "commit": "db4c58c2",
-      "reason": "initial baseline 2026-10-20 on db4c58c2: 16 flag gates 0; diffs measured with shift-invariant position (sep_x)+standing-only absolute x/y: boss-lynx/tournament/challenge 0, dojo-demo 2 (dummy spawn y off by 1 unit), survival 2649 (wrong warrior from Generic_1 + knock-on), dojo-move 1527 (Back hold never starts a move + punch sequence)",
-      "date": "2026-10-20T08:48:41"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
     },
     "diff:dojo-move": {
       "metric": 0,
-      "commit": "cc728804",
-      "reason": "new gate posevel:dojo-move - the traces carry the TRUE solver velocity (ma-mf) on both sides and compare_pose reports matched frames with any bone velocity over the same 5-unit tolerance: 69 of 568 (player chain; the dummy is 0/568, max 2.44). Kept separate from the position metric because a velocity-class regression would not show in positions until the chain had already moved",
-      "date": "2026-11-07T21:32:36"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:56"
     },
     "disarm-ai": {
       "metric": 0,
@@ -222,27 +222,87 @@
     },
     "diff:titan-ladder": {
       "metric": 0,
-      "commit": "fe966deb",
-      "reason": "new gate: C3_BOSS_TITAN fight 1 (skyport) state+pose match the oracle, 0 divergences",
-      "date": "2026-11-02T18:54:49"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
     },
     "diff:kusarigama": {
       "metric": 0,
-      "commit": "c2f62560",
-      "reason": "new pose gates: the pose comparator's over-tolerance frame count (per-bone, per-frame, cloth/COM nodes INCLUDED by policy). Measured: only cloth/chain nodes (BODY-Node*, HEAD-Node*) and the Mass=0 COM node deviate; the skeletal bones match, so this baseline records the cloth state",
-      "date": "2026-11-06T21:28:25"
+      "commit": "97954a20",
+      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
+      "date": "2026-11-08T17:49:50"
     },
     "pose:dojo-move": {
       "metric": 421,
-      "commit": "cc728804",
-      "reason": "new gate posevel:dojo-move - the traces carry the TRUE solver velocity (ma-mf) on both sides and compare_pose reports matched frames with any bone velocity over the same 5-unit tolerance: 69 of 568 (player chain; the dummy is 0/568, max 2.44). Kept separate from the position metric because a velocity-class regression would not show in positions until the chain had already moved",
-      "date": "2026-11-07T21:32:36"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:56"
     },
     "posevel:dojo-move": {
       "metric": 69,
-      "commit": "cc728804",
-      "reason": "new gate posevel:dojo-move - the traces carry the TRUE solver velocity (ma-mf) on both sides and compare_pose reports matched frames with any bone velocity over the same 5-unit tolerance: 69 of 568 (player chain; the dummy is 0/568, max 2.44). Kept separate from the position metric because a velocity-class regression would not show in positions until the chain had already moved",
-      "date": "2026-11-07T21:32:36"
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:56"
+    },
+    "cov:dojo-demo": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:54"
+    },
+    "cov:boss-lynx": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
+    },
+    "cov:tournament": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
+    },
+    "cov:survival": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
+    },
+    "cov:kusarigama": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
+      "date": "2026-11-08T17:49:50"
+    },
+    "cov:titan-ladder": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:55"
+    },
+    "cov:challenge": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:56"
+    },
+    "cov:dojo-move": {
+      "metric": 0,
+      "commit": "97954a20",
+      "reason": "new gate cov:<scenario>: alignment coverage from compare_state.py as 100-minus-coverage in per-mille (0 = every native frame paired). Coverage failures were previously invisible - frames that fail the (phase,move,af) key are dropped as unaligned, so a port playing the WRONG move would still read as 0 divergences. Measured 100.0% on the scenarios so far",
+      "date": "2026-11-08T17:41:56"
+    },
+    "posevel:kusarigama": {
+      "metric": 268,
+      "commit": "97954a20",
+      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
+      "date": "2026-11-08T17:49:50"
+    },
+    "pose:kusarigama": {
+      "metric": 357,
+      "commit": "97954a20",
+      "reason": "the kusarigama pose gate now RUNS: role mapping picked the best bone-count pairing (was a hard >50 threshold that missed 274 vs 302) and bones are compared relative to the fighter root (--rel-root), since the two runs place the fighters at a constant +43.72 x offset (dy 0.000, spread 0.16). Previously compare_pose skipped the whole comparison (1/600 frames, 0.2% coverage); now 268 frames align and the shape deviation is mean 1.8/0.8 per fighter. The baselined 357 position frames (268 Me + 89 Enemy) and 268 velocity frames are a REAL divergence in this scenario that was invisible before",
+      "date": "2026-11-08T17:49:50"
     }
   }
 }

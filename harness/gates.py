@@ -565,6 +565,23 @@ def p_dialog(text: str) -> tuple[int, str]:
     return (0 if m.group(1) == "PASS" else 1), "parse census " + m.group(1)
 
 
+def p_coverage_short(text: str) -> tuple[int, str]:
+    """Alignment coverage as a FAILURE count.
+
+    `compare_state.py` pairs frames by `(phase, move, af)`; frames that fail the
+    key are dropped as "unaligned", so a port playing the WRONG move would still
+    report 0 divergences. The gate must see that, otherwise a coverage collapse
+    is invisible. Metric = 100 - coverage in per-mille, so 0 means perfect
+    coverage and a regression is a positive number.
+    """
+    pat = re.compile(r"coverage \(matched/native\):\s*([0-9.]+)%")
+    m = pat.search(text)
+    if not m:
+        raise AnchorMissing("coverage (matched/native): N%")
+    pct = float(m.group(1))
+    return int(round((100.0 - pct) * 10)), "%.1f%% of native frames aligned" % pct
+
+
 def p_pose_over(text: str) -> tuple[int, str]:
     """Pose gate: the number of matched frames with ANY bone over tolerance.
 
@@ -671,6 +688,7 @@ PARSERS = {
     "disarm_ai": p_disarm_ai,
     "dialog": p_dialog,
     "total_div": p_total_divergences,
+        "cov_short": p_coverage_short,
     "ui_total": p_ui_total,
     # `stages.xml` L819-882: the Survival fight's `<Attributes Eclipse="1"
     # DamageFactor="-4000" ApplyTo="Player"/>` / `4000 ApplyTo="Bot"` must not
@@ -1085,6 +1103,18 @@ def run_diff_gate(gate: Gate) -> GateResult:
                           error=f"state compare anchor missing: {exc}",
                           seconds=time.time() - started)
 
+    # 3a. ALIGNMENT COVERAGE on the same state compare (see p_coverage_short):
+    # a wrong move silently unaligns frames and would otherwise read as 0
+    # divergences.
+    cov_metric = None
+    cov_detail = ""
+    try:
+        with open(REPORTS / f"state_{scenario}.txt", encoding="utf-8",
+                  errors="replace") as fh:
+            cov_metric, cov_detail = p_coverage_short(fh.read())
+    except (OSError, AnchorMissing):
+        cov_detail = "coverage anchor missing"
+
     # 3b. POSE diff on the same run (per-bone, per-frame). The metric is the
     # number of matched frames with ANY bone over the comparator's tolerance.
     # Policy: cloth/chain nodes (`BODY-Node*`, `HEAD-Node*`) and the Mass=0
@@ -1121,6 +1151,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
                     [PY, "reference/tools/compare_pose.py",
                      "--native", str((art / "native_pose.jsonl").relative_to(ROOT).as_posix()),
                      "--oracle", str((art / "oracle_pose.jsonl").relative_to(ROOT).as_posix()),
+                     "--rel-root",
                      "--out", str(pose_report.relative_to(ROOT))],
                     f"{scenario}-pose", 180,
                 )
@@ -1153,6 +1184,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
                       time.time() - started,
                       extra={"ui_metric": ui_metric, "ui_detail": ui_detail,
                              "pose_metric": pose_metric, "pose_detail": pose_detail,
+                             "cov_metric": cov_metric, "cov_detail": cov_detail,
                              "posevel_metric": posevel_metric,
                              "posevel_detail": posevel_detail,
                              "attempts": attempts,
@@ -1432,6 +1464,12 @@ def main(argv=None) -> int:
                     timeline[g.id] = first_divergences(
                         REPORTS / f"state_{g.scenario}.txt")
                 results.append(r)
+                if g.kind == "diff" and r.extra.get("cov_metric") is not None:
+                    results.append(GateResult(
+                        f"cov:{g.scenario}", "cov", r.extra["cov_metric"],
+                        r.extra.get("cov_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"cov:{g.scenario}"] = []
                 if (g.kind == "diff" and
                         r.extra.get("posevel_metric") is not None and
                         r.extra.get("pose_metric") is not None):
@@ -1467,7 +1505,8 @@ def main(argv=None) -> int:
             # A pose:<scenario> result belongs to its diff:<scenario> gate,
             # so asking to (re)baseline the diff also baselines the pose.
             pose_of = (r.gate_id.startswith("pose:") or
-                       r.gate_id.startswith("posevel:")) and (
+                       r.gate_id.startswith("posevel:") or
+                       r.gate_id.startswith("cov:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue

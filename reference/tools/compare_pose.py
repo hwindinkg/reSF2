@@ -238,15 +238,21 @@ def detect_swap_auto(native_frames, oracle_frames):
     n_en = first_bone_count(native_frames, "Enemy")
     if n_me is None or o_me is None:
         return False
-    # oracle Me is 15-bone dummy, Enemy is 205 -> swap
-    if o_me == 15 and n_me == 205:
-        # also verify Enemy is 205 on both sides if present
-        if o_en == 205 and n_en == 205:
-            return True
-        return True
-    if abs(n_me - o_me) > 50:
-        return True
-    return False
+    # Choose the role pairing that matches the BONE COUNTS best instead of a
+    # hard threshold. The old rule swapped only when `abs(n_me - o_me) > 50`,
+    # so the kusarigama scenario (native Me 274 vs oracle Me 302, a 28-bone
+    # weapon-part difference) was NOT swapped, the comparator then paired 274
+    # with 302, skipped the whole bone comparison and reported 0.2% alignment.
+    def _d(a, b):
+        return abs(a - b) if isinstance(a, int) and isinstance(b, int) else None
+    direct = [_d(n_me, o_me), _d(n_en, o_en)]
+    cross = [_d(n_me, o_en), _d(n_en, o_me)]
+    direct = [x for x in direct if x is not None]
+    cross = [x for x in cross if x is not None]
+    if not direct or not cross:
+        # fall back to the ragdoll rule when one side is incomplete
+        return o_me == 15 and n_me != 15
+    return sum(cross) < sum(direct)
 
 
 def align(native_frames, oracle_frames, swap=False):
@@ -289,6 +295,27 @@ def align(native_frames, oracle_frames, swap=False):
 # ---------------------------------------------------------------------------
 # per-frame metrics
 # ---------------------------------------------------------------------------
+
+# [FIX arena offset] Compare POSE SHAPE, not world placement: the two runs can
+# stand the same fighter at a different x (measured on kusarigama: |dx| mean
+# 43.72, max-min 0.16, dy 0.000 - a CONSTANT lateral offset), which inflated the
+# per-bone delta to 43 and made every frame read as over-tolerance. With
+# `--rel-root` every bone is expressed relative to its own fighter root first.
+REL_ROOT = False
+
+
+def _rel_root(bones, root_x, root_y):
+    out = []
+    for b in bones or []:
+        if isinstance(b, (list, tuple)) and len(b) >= 2:
+            nb = [float(b[0]) - root_x, float(b[1]) - root_y]
+            if len(b) > 2:
+                nb.append(b[2])
+            out.append(nb)
+        else:
+            out.append(b)
+    return out
+
 
 def bone_deltas(nb, ob):
     """Per-bone max-abs-component delta over the common prefix (3D).
@@ -357,6 +384,13 @@ def fighter_metrics(nf, of, native_fid, oracle_fid, tolerance, coord_transform="
     b = get_fighter(of, oracle_fid)
     if a is None or b is None:
         return None
+    if REL_ROOT:
+        a = dict(a)
+        b = dict(b)
+        a["bones"] = _rel_root(a.get("bones"), float(a.get("x", 0.0) or 0.0),
+                               float(a.get("y", 0.0) or 0.0))
+        b["bones"] = _rel_root(b.get("bones"), float(b.get("x", 0.0) or 0.0),
+                               float(b.get("y", 0.0) or 0.0))
     # world position with optional center transform (subtract per-frame mean x)
     ax = a.get("x", 0.0)
     ay = a.get("y", 0.0)
@@ -1117,6 +1151,9 @@ def main(argv=None):
                     help="native pose JSONL (default: %s)" % DEFAULT_NATIVE)
     ap.add_argument("--oracle", default=DEFAULT_ORACLE,
                     help="oracle pose JSONL (default: %s)" % DEFAULT_ORACLE)
+    ap.add_argument("--rel-root", action="store_true",
+                    help="express bones relative to each fighter's own root "
+                         "before comparing (removes a constant arena offset)")
     ap.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE,
                     help="bone/world tolerance in world units (default: %s)" % DEFAULT_TOLERANCE)
     ap.add_argument("--out", default=DEFAULT_OUT,
@@ -1134,6 +1171,8 @@ def main(argv=None):
                          "tolerance, when the summary is absent, or when the oracle "
                          "trace is missing (not supported with --clip)")
     args = ap.parse_args(argv)
+    global REL_ROOT
+    REL_ROOT = bool(getattr(args, "rel_root", False))
     SKIP_BONES.clear()
     SKIP_BONES.update(com_bone_indices(getattr(args, "native", "")))
 

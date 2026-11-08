@@ -118,6 +118,15 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "stay valid. What is left is the "
          "PLAYER's chain riding with a different lag under translation (site "
          "mean ~2, spread ~10) at StepForward/StepBack", False),
+        ("coverage gate: `cov:<scenario>` now gates ALIGNMENT - the state "
+         "comparator pairs frames by `(phase, move, af)` and silently drops the "
+         "rest as unaligned, so a port playing the wrong move used to read as 0 "
+         "divergences. The new gate (100 - coverage in per-mille) is 0 on all 8 "
+         "scenarios. The subagent audit also listed what is still NOT compared: "
+         "the kusarigama pose skip is FIXED (role mapping now picks the best bone-count pairing instead of a hard >50 threshold, and bones are compared relative to the fighter root via --rel-root because the runs place the fighters at a constant +43.72 x offset), so that scenario now gates pose and velocity too - and it exposes a REAL divergence that was invisible before: pose:kusarigama 357 of 268 frames and posevel:kusarigama 268 of 268; pose gating still exists in only 2 of 9 scenarios and is skipped wholesale "
+         "for kusarigama (274 vs 302 bones), the weapon name is demoted to info, "
+         "the UI diff never fails a gate, and `sub`/`subn` are never compared",
+         True),
         ("BLOCKED ON USER - Titan bodyguards: the location question (the guards "
          "should load `skyport`, Titan `neural_network`) and the roster scroll "
          "are only partially measured (BUGS.md QA-29.10 п.7); the remaining half "
