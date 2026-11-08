@@ -1124,7 +1124,10 @@ function ensureHooks(fight) {
             try {
               if (pre) {
                 var f3 = (typeof fight.frame === "number") ? fight.frame : -1;
-                if (f3 >= 40 && f3 <= 150) {
+                // Whole-run window: the stage-matched comparison is only
+                // useful if it can find the FIRST frame at which the solver
+                // input states separate, not just a fixed early slice.
+                if (f3 >= 0 && f3 <= 600) {
                   for (var k3 = 185; k3 < Math.min(pre.length, 245); k3++) {
                     if (pre[k3] == null) continue;
                     console.log(JSON.stringify({
