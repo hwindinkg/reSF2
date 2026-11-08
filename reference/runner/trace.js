@@ -1044,7 +1044,10 @@ function ensureHooks(fight) {
     try {
       if (tr.relaxPre && tr.relaxPre.length) {
         var frNow = (typeof fight.frame === "number") ? fight.frame : 0;
-        if (frNow >= 100 && frNow <= 400) {
+        // Sample from the FIRST live frame: the separation of i210/i224 is
+        // already present at the old window start (f=100), so the onset has to
+        // be found below it.
+        if (frNow >= 0 && frNow <= 140) {
           for (var pi = 0; pi < tr.relaxPre.length; pi++) {
             var snap = tr.relaxPre[pi];
             var edges2 = snap.sol && snap.sol.oa && snap.sol.oa.Nl && snap.sol.oa.Nl.all;
