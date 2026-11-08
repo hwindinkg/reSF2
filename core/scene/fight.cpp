@@ -10656,6 +10656,9 @@ void FightController::dump_audio_frame() {
         au.drain_frame_stops();
         return;
     }
+    // Exactly ONE row per fight frame, like the oracle's tracer.
+    if (frame_ == audio_dump_last_frame_) return;
+    audio_dump_last_frame_ = frame_;
     if (audio_dump_file_ == nullptr) {
         if (fopen_s(&audio_dump_file_, audio_dump_path_.c_str(), "wb") != 0 ||
             audio_dump_file_ == nullptr) {

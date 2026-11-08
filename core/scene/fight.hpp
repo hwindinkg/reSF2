@@ -2697,6 +2697,13 @@ private:
     std::string audio_dump_path_;
     int audio_dump_frames_ = 0;     // frames left to dump (0 = off)
     int audio_dump_written_ = 0;
+    // [FIX one audio row per fight frame] The oracle's tracer emits exactly one
+    // `{"t":"audio"}` line per fight frame (`if (fight.frame ===
+    // tr.lastFightFrame) return;`). The port called `dump_audio_frame()` from
+    // every `emit_state_dump()`, and on some frames that runs twice, so the
+    // trace carried 2500 rows for 2068 frames (432 duplicated frames with
+    // identical content) - `compare_audio.py` then double-counted every `play`.
+    int audio_dump_last_frame_ = -1;
     std::FILE* audio_dump_file_ = nullptr;
     void dump_audio_frame();
 

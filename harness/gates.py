@@ -580,6 +580,19 @@ def p_subframe_over(text: str) -> tuple[int, str]:
         m.group(1), m.group(2))
 
 
+def p_audio_total(text: str) -> tuple[int, str]:
+    """compare_audio.py: per-frame audio divergences + whole-run event totals.
+
+    The audio differential was fully implemented (`compare_audio.py`, the
+    oracle's `{"t":"audio"}` line, `--dump-audio`) and NEVER wired: no gate
+    anywhere mentioned audio, so a missing/extra SFX, a wrong music track or a
+    bus-state divergence could not fail the build.
+    """
+    per = int(_need(r"total per-frame divergences:\s*(\d+)", text).group(1))
+    cnt = int(_need(r"events with total-count mismatch:\s*(\d+)", text).group(1))
+    return per + cnt, "per-frame=%d event-count=%d" % (per, cnt)
+
+
 def p_pos_drift(text: str) -> tuple[int, str]:
     """Frames whose world-position offset leaves the scenario's constant.
 
@@ -1104,6 +1117,11 @@ def run_diff_gate(gate: Gate) -> GateResult:
                                 % (attempts, scenario),
                           seconds=time.time() - started)
     shutil.copy2(oracle_state, art / "oracle_state.jsonl")
+    run_proc([PY, "reference/tools/extract_layer.py", "audio"],
+             f"{scenario}-extract-audio", 120)
+    oracle_audio = ROOT / "reference" / "traces" / "oracle_audio.jsonl"
+    if oracle_audio.exists() and oracle_audio.stat().st_size > 0:
+        shutil.copy2(oracle_audio, art / "oracle_audio.jsonl")
     run_proc([PY, "reference/tools/extract_layer.py", "ui"],
              f"{scenario}-extract-ui", 120)
     oracle_ui = ROOT / "reference" / "traces" / "oracle_ui.jsonl"
@@ -1111,8 +1129,24 @@ def run_diff_gate(gate: Gate) -> GateResult:
         shutil.copy2(oracle_ui, art / "oracle_ui.jsonl")
 
     # 2. Native side (same input stream, --dump-ui is free).
+    #    [coverage] `--dump-audio N` feeds `compare_audio.py`: the audio layer
+    #    was implemented on both sides and never compared by any gate.
+    dump_audio = 0
+    _nat = cfg["native"]
+    if "--fight" in _nat:
+        for i, a in enumerate(_nat):
+            if a == "--dump-state" and i + 1 < len(_nat):
+                try:
+                    dump_audio = int(_nat[i + 1])
+                except ValueError:
+                    dump_audio = 0
+        stale = ROOT / "reference" / "traces" / "native_audio.jsonl"
+        if dump_audio and stale.exists():
+            stale.unlink()
     nres = run_proc(
-        [str(GAME)] + cfg["native"] + ["--dump-ui", RES, SAVE_REL],
+        [str(GAME)] + cfg["native"] +
+        (["--dump-audio", str(dump_audio)] if dump_audio else []) +
+        ["--dump-ui", RES, SAVE_REL],
         f"{scenario}-native", cfg["timeout_s"],
     )
     if nres.timed_out:
@@ -1128,6 +1162,11 @@ def run_diff_gate(gate: Gate) -> GateResult:
     native_ui = ROOT / "reference" / "traces" / "native_ui.jsonl"
     if native_ui.exists():
         shutil.copy2(native_ui, art / "native_ui.jsonl")
+    native_audio = ROOT / "reference" / "traces" / "native_audio.jsonl"
+    audio_ok = False
+    if dump_audio and native_audio.exists() and native_audio.stat().st_size > 0:
+        shutil.copy2(native_audio, art / "native_audio.jsonl")
+        audio_ok = True
 
     # 3. State diff (the metric of this gate).
     report = REPORTS / f"state_{scenario}.txt"
@@ -1226,6 +1265,24 @@ def run_diff_gate(gate: Gate) -> GateResult:
                 except AnchorMissing:
                     sub_detail = "subframe anchor missing"
 
+    # 3c. AUDIO diff on the same run (see p_audio_total: previously ungated).
+    audio_metric = None
+    audio_detail = ""
+    if dump_audio and (art / "native_audio.jsonl").exists() and \
+            (art / "oracle_audio.jsonl").exists():
+        audio_report = REPORTS / f"audio_{scenario}.txt"
+        au = run_proc(
+            [PY, "reference/tools/compare_audio.py", "--label", scenario,
+             "--native", str((art / "native_audio.jsonl").relative_to(ROOT).as_posix()),
+             "--oracle", str((art / "oracle_audio.jsonl").relative_to(ROOT).as_posix()),
+             "--out", str(audio_report.relative_to(ROOT))],
+            f"{scenario}-cmp-audio", 180,
+        )
+        try:
+            audio_metric, audio_detail = p_audio_total(au.out)
+        except AnchorMissing:
+            audio_detail = "audio anchor missing"
+
     # 4. UI stack diff on the same run (artifacts are in place).
     ui_detail = ""
     ui_metric = None
@@ -1250,6 +1307,8 @@ def run_diff_gate(gate: Gate) -> GateResult:
                              "sub_metric": sub_metric, "sub_detail": sub_detail,
                              "pos_res_metric": pos_res_metric,
                              "pos_res_detail": pos_res_detail,
+                             "audio_metric": audio_metric,
+                             "audio_detail": audio_detail,
                              "posevel_metric": posevel_metric,
                              "posevel_detail": posevel_detail,
                              "attempts": attempts,
@@ -1543,6 +1602,12 @@ def main(argv=None) -> int:
                         r.extra.get("ui_detail", ""), 0.0,
                         extra={"n": 1}))
                     timeline[f"ui:{g.scenario}"] = []
+                if g.kind == "diff" and r.extra.get("audio_metric") is not None:
+                    results.append(GateResult(
+                        f"audio:{g.scenario}", "audio", r.extra["audio_metric"],
+                        r.extra.get("audio_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"audio:{g.scenario}"] = []
                 if (g.kind == "diff" and
                         r.extra.get("pos_res_metric") is not None):
                     results.append(GateResult(
@@ -1596,7 +1661,8 @@ def main(argv=None) -> int:
                        r.gate_id.startswith("cov:") or
                        r.gate_id.startswith("ui:") or
                        r.gate_id.startswith("sub:") or
-                       r.gate_id.startswith("posres:")) and (
+                       r.gate_id.startswith("posres:") or
+                       r.gate_id.startswith("audio:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue

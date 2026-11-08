@@ -171,6 +171,18 @@ def run(args):
         for f, (nv, ov) in pairs.items():
             s = stats[f]
             s["compared"] += 1
+            if f == "music_track":
+                # [FIX structural absence] The dojo/hub run has NO fight music:
+                # the JS reports an EMPTY track on every frame while the port
+                # names the menu track it is actually playing. That is a
+                # reporting difference (the JS field only knows the FIGHT music),
+                # the same class as an always-null oracle field, so it must not
+                # inflate the metric on every single frame. Counted only if the
+                # oracle ever names a track.
+                if not ov:
+                    s["oracle_none"] = s.get("oracle_none", 0) + 1
+                else:
+                    s["oracle_some"] = s.get("oracle_some", 0) + 1
             if nv != ov:
                 s["mismatch"] += 1
                 if s["first"] is None:
@@ -205,7 +217,13 @@ def run(args):
             nf, of, nv, ov = s["first"]
             first = "f=%s / f=%s" % (nf, of)
             sample = "  (%s vs %s)" % (fmt(nv), fmt(ov))
-        total += s["mismatch"]
+        demote_track = (f == "music_track" and s.get("oracle_some", 0) == 0
+                        and s.get("oracle_none", 0) > 0)
+        if demote_track:
+            first = "structurally absent in the oracle"
+            sample = ""
+        else:
+            total += s["mismatch"]
         w("  %-14s %-22s %d / %d%s" % (f, first, s["mismatch"], s["compared"], sample))
     w("")
     w("[divergent frames]  (native f / oracle f : field: native vs oracle)")

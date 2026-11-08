@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-08T22:11:30",
+    "updated": "2026-11-09T00:03:24",
     "mode": "only"
   },
   "gates": {
@@ -102,33 +102,33 @@
     },
     "diff:dojo-demo": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
+      "date": "2026-11-09T00:03:24"
     },
     "diff:boss-lynx": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "diff:tournament": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "diff:survival": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "diff:challenge": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "diff:dojo-move": {
       "metric": 0,
@@ -222,15 +222,15 @@
     },
     "diff:titan-ladder": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "diff:kusarigama": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "pose:dojo-move": {
       "metric": 421,
@@ -246,45 +246,45 @@
     },
     "cov:dojo-demo": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
+      "date": "2026-11-09T00:03:24"
     },
     "cov:boss-lynx": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "cov:tournament": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "cov:survival": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "cov:kusarigama": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "cov:titan-ladder": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "cov:challenge": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:30"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:54"
     },
     "cov:dojo-move": {
       "metric": 0,
@@ -294,57 +294,57 @@
     },
     "posevel:kusarigama": {
       "metric": 268,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "pose:kusarigama": {
       "metric": 357,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "ui:dojo-demo": {
       "metric": 7,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
+      "date": "2026-11-09T00:03:24"
     },
     "ui:boss-lynx": {
       "metric": 15,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "ui:tournament": {
       "metric": 15,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "ui:survival": {
       "metric": 15,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "ui:kusarigama": {
       "metric": 15,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "ui:titan-ladder": {
       "metric": 15,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "ui:challenge": {
       "metric": 15,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "ui:dojo-move": {
       "metric": 7,
@@ -354,9 +354,9 @@
     },
     "sub:kusarigama": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "sub:dojo-move": {
       "metric": 0,
@@ -366,69 +366,111 @@
     },
     "sub:boss-lynx": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "posevel:boss-lynx": {
       "metric": 163,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "pose:boss-lynx": {
       "metric": 357,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "posres:dojo-demo": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
+      "date": "2026-11-09T00:03:24"
     },
     "posres:boss-lynx": {
       "metric": 0,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:27"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
     },
     "posres:tournament": {
       "metric": 1,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "posres:survival": {
       "metric": 1,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:28"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "posres:kusarigama": {
       "metric": 1,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
     },
     "posres:titan-ladder": {
       "metric": 1,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:29"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
     },
     "posres:challenge": {
       "metric": 1,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:30"
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:54"
     },
     "posres:dojo-move": {
       "metric": 0,
       "commit": "381d043a",
       "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
       "date": "2026-11-08T22:11:30"
+    },
+    "audio:boss-lynx": {
+      "metric": 7,
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
+    },
+    "audio:tournament": {
+      "metric": 7,
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:51"
+    },
+    "audio:survival": {
+      "metric": 0,
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
+    },
+    "audio:kusarigama": {
+      "metric": 6,
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:52"
+    },
+    "audio:titan-ladder": {
+      "metric": 0,
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
+    },
+    "audio:challenge": {
+      "metric": 0,
+      "commit": "81ce6dda",
+      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
+      "date": "2026-11-08T23:19:53"
+    },
+    "audio:dojo-demo": {
+      "metric": 7,
+      "commit": "81ce6dda",
+      "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
+      "date": "2026-11-09T00:03:24"
     }
   }
 }

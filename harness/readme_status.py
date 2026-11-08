@@ -129,6 +129,19 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("audio gate: `compare_audio.py`, the oracle's `t:audio` line and the "
+         "native `--dump-audio` were ALL implemented and NEVER wired into a "
+         "gate - a missing/extra SFX, a wrong music track or a bus divergence "
+         "could not fail the build. Every `--fight` scenario now diffs one audio "
+         "row per fight frame (`audio:<scenario>`): 0 on survival, titan-ladder "
+         "and challenge, and small REAL divergences elsewhere - boss-lynx and "
+         "tournament 7, kusarigama 6. All per-frame cases are hit-sound VARIANTS "
+         "drawn differently (tournament: snd_hit5 vs snd_hit4, snd_hit1 vs "
+         "snd_hit3, snd_hit3 vs snd_hit2), i.e. the `<RandomSound Event=Strike>` "
+         "draw from the shared fight rng stream lands on another variant - a "
+         "class of mismatch that was invisible before. The dojo scenarios use "
+         "`--replay`, which has no audio arming site, so they stay ungated",
+         True),
         ("position gate: `fighters.*.x/.y` were emitted by both traces and "
          "reported as INFORMATION ONLY, so a port walking to a different place "
          "could not fail anything. Measured: the offset is a CONSTANT per "
