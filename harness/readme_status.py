@@ -129,6 +129,33 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("post-6s root cause (measured): diffing the extended challenge window "
+         "frame by frame shows the port's `af` (clip playhead) stalling for 21 "
+         "frames while `Me.y` rises 8x slower - that is `sub`=21, i.e. the "
+         "finishing-blow SLOW-MO, not a stuck clip. The port log arms it with an "
+         "absurd prediction: `finishing blow armed (F721 BEZUMETS tgt_hp=1.0 "
+         "pred=167772.2 ...)` under `if (foe.hp <= predict_interval_damage(...))`. "
+         "34 frames later the port knocks the player down (`PhysicalFall`, rag=1) "
+         "where the JS keeps standing. The challenge battle is exactly where "
+         "`DamageFactor=-4219/-2219` attributes exist, and the JS rule class `bn` "
+         "(ERuleDamageFactor, L36232) is all `debugger;` stubs, i.e. inert in the "
+         "web build while the port applies it - the prime suspect for the bogus "
+         "prediction. Next: verify the JS DamageFactor formula/stub and drop the "
+         "factor from the port's damage (prediction and real) if it is inert",
+         True),
+        ("post-6s divergence FOUND (window experiment): every campaign gate only "
+         "covers the first ~6 s of a fight (native `--headless 700` = 368 state "
+         "frames while the oracle writes 2400+), so round ends, the round "
+         "counter, `result` and the next round were never compared. Extending "
+         "challenge to `--dump-state 3200` (RoundTime 45) turned the gate red "
+         "with 2471 divergences over 1126 matched frames, and it is real: first "
+         "`fighters.Me.y` differs by 0.04 at nat f=786, then at nat f=820 the "
+         "port knocks the player down (`physicalfall`, rag=1) where the JS keeps "
+         "them standing (`fistsstartstanceidle-left`), with block, callouts and "
+         "sep_x (230 vs 205) diverging after. The extension was reverted (a red "
+         "gate would block the build) and the frame around nat f=786 is the next "
+         "big investigation - it is fighter state/hits, not cloth",
+         True),
         ("RNG cadence (root cause found, not a local fix): the port does not run "
          "the AI through the `Gc` bus at all - SF2_TRACE_GC on boss-lynx shows "
          "matched=0/kept=0 on 367 frames and the bus only ever carries types "
