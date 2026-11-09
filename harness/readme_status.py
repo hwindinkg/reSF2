@@ -141,8 +141,14 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "for the fight: drawsBefore=8 seed=0xc0ffee'. Verified draw by draw "
          "(port SF2_TRACE_MR=1 vs oracle ?mrtrace=1): the first 8 values match "
          "exactly, then the oracle re-pins a SECOND time (two reseed lines, "
-         "drawsBefore=8 and 4) and restarts its stream - port 11 draws per fight "
-         "vs oracle 106, so the remaining task is the per-frame draw count",
+         "drawsBefore=8 and 4) and restarts its stream. Every oracle draw goes "
+         "through `uf.sja` (three call sites in the JS: the reaction pick "
+         "`f[sja(f.length)]`, the Rha pick `g[sja(g.length)]` and the "
+         "RandomSound name), and the port implements exactly that code - but it "
+         "makes 11 draws on 8 frames where the oracle makes 112 on 67, so the "
+         "port does not reach `Gc.DK` on most frames where the JS does. That "
+         "shifted stream is what makes 2-3 hit-sound variants differ; the "
+         "remaining task is that entry condition",
          True),
         ("audio gate: `compare_audio.py`, the oracle's `t:audio` line and the "
          "native `--dump-audio` were ALL implemented and NEVER wired into a "
