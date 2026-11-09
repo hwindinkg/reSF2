@@ -129,6 +129,21 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("determinism pin: the tracer the gates actually load "
+         "(`reference/runner/trace.js`) had LOST the `Math.random` pin that the "
+         "port mirrors - it pins `mulberry32(0xC0FFEE)` (`shared_rng.hpp` "
+         "kFightMathRandomSeed, re-pinned in enter_start_stance) and the OLD "
+         "tracer `reference/tools/trace_oracle.js` had it, but the runner one did "
+         "not, so on the oracle side every Math.random consumer (hit-sound "
+         "variants, particles, shock rolls) was browser-random. Restored: same "
+         "seed, same mulberry32 body, re-pin at the first live frame (eu == 1, "
+         "skipping FightNone); the oracle console now logs 'math.random reseeded "
+         "for the fight: drawsBefore=8 seed=0xc0ffee'. Verified draw by draw "
+         "(port SF2_TRACE_MR=1 vs oracle ?mrtrace=1): the first 8 values match "
+         "exactly, then the oracle re-pins a SECOND time (two reseed lines, "
+         "drawsBefore=8 and 4) and restarts its stream - port 11 draws per fight "
+         "vs oracle 106, so the remaining task is the per-frame draw count",
+         True),
         ("audio gate: `compare_audio.py`, the oracle's `t:audio` line and the "
          "native `--dump-audio` were ALL implemented and NEVER wired into a "
          "gate - a missing/extra SFX, a wrong music track or a bus divergence "

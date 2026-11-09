@@ -70,6 +70,77 @@
       new URLSearchParams(window.location.search).get("probe") === "save";
   } catch (e) { /* no query string */ }
 
+  /* ================= DETERMINISTIC Math.random =================
+   * [FIX missing harness pin] The port mirrors `mulberry32(0xC0FFEE)` for every
+   * JS `Math.random` consumer (`shared_rng.hpp` `kFightMathRandomSeed`,
+   * `reseed_shared_math_random` at the first live frame; the documented pin is
+   * `reference/traces/README.md` `harness.mathRandom`). This tracer - the one
+   * the gate runs actually load - had NO pin at all, so on the oracle side the
+   * stream was the browser's REAL random: every consumer diverged run to run.
+   * The visible symptom was the audio gate: `<RandomSound Event="Strike">`
+   * picks `snd_hit1..6` through `uf.sja(n) = floor(Math.random()*n)` and the
+   * port chose a different variant on 2-3 hits per fight (tournament f=250
+   * snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs
+   * snd_hit2) while all seeded `Da.pg` state matched exactly.
+   *
+   * Ported verbatim from the older `reference/tools/trace_oracle.js`
+   * (`MR_SEED`, the mulberry32 body and the re-pin at `eu == 1`). */
+  var T0_MR = 1720000000000;
+  var MR_SEED = 0xC0FFEE;
+  var mrState = MR_SEED;
+  var mrDraws = 0;   /* diagnostic: draws since load */
+  /* `?mrtrace=1` (harness-only): one line per draw, in the SAME shape the port
+   * prints with `SF2_TRACE_MR=1` (`[mr] f=<frame> n=<counter> v=<value>`), so
+   * the two sequences can be diffed draw by draw and the first consumer that
+   * over/under-draws can be named. */
+  var MR_TRACE = false;
+  try {
+    MR_TRACE =
+      new URLSearchParams(window.location.search).get("mrtrace") === "1";
+  } catch (eMRt) { /* ignore */ }
+  window.__mrDraws = 0;
+  Math.random = function () {
+    mrDraws++;
+    mrState |= 0;
+    mrState = (mrState + 0x6D2B79F5) | 0;
+    var t = Math.imul(mrState ^ (mrState >>> 15), 1 | mrState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    var v = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    if (MR_TRACE) {
+      try {
+        var fr = -1;
+        var f0 = null;
+        try { f0 = fightObj(); } catch (eMRf) { f0 = null; }
+        if (f0 && typeof f0.frame === "number") fr = f0.frame;
+        console.log("[mr] f=" + fr + " n=" + mrDraws + " v=" + v.toFixed(9));
+      } catch (eMRl) { /* ignore */ }
+    }
+    return v;
+  };
+  try {
+    window.__oracleHarness = {
+      dateFixed: T0_MR,
+      mathRandom: "mulberry32(0xC0FFEE)"
+    };
+  } catch (e0) { /* ignore */ }
+
+  /* Re-pin at the FIRST live fight frame, like the port's `enter_start_stance`:
+   * hub/dojo draws before that must not shift the fight's own sequence. */
+  var mrFightReseeded = false;
+  function reseedMathRandomForFight(fight) {
+    if (mrFightReseeded || !fight) return;
+    try {
+      if (fight.Da && fight.Da.type === "FightNone") return;
+      if (Number(fight.eu) !== 1) return;
+    } catch (e1) { return; }
+    mrFightReseeded = true;
+    try {
+      console.log("[ORACLE] math.random reseeded for the fight: drawsBefore=" +
+                  mrDraws + " seed=0x" + MR_SEED.toString(16));
+    } catch (e2) { /* ignore */ }
+    mrState = MR_SEED;
+  }
+
   function readSavegameB64() {
     try {
       var keys = ["shadow-fight-2:savegame", "SF2User", "savegame"];
@@ -896,6 +967,9 @@ function ensureHooks(fight) {
 
   function beforeFrame() {
     if (tr.done || !tr.enabled) return;
+    try {
+      reseedMathRandomForFight(fightObj());
+    } catch (eMR) { /* ignore */ }
     pollStimulus();
     if (!STIM.items || STIM.next >= STIM.items.length) return;
     var fight = fightObj();
