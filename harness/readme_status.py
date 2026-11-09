@@ -129,6 +129,20 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("pose coverage (campaigns): `pose:`/`posevel:` stood only on the dojo "
+         "scenarios, kusarigama and boss-lynx. Tournament, survival, "
+         "titan-ladder and challenge now dump poses too, aligning 268 frames "
+         "each (role map native Me <-> oracle Enemy, no shape skips, subframe "
+         "0/268) with baselines pose 444/536/389/536 and posevel "
+         "133/150/97/154. The worst bones are the usual cloth set "
+         "(BODY-Node15..20 = 76-81, HEAD-Node124/129 = 91-92) and the world "
+         "offset is the usual constant, so it is the known undamped-cloth "
+         "divergence now gated in four more scenarios. Because these counters "
+         "jitter by 1-2 frames (survival measured 535/536/536 across three "
+         "runs - the oracle navigation is wall-clock), `verdict_for` now takes a "
+         "per-kind tolerance (pose 2, posevel 2, ui 2, audio 2, posres 1, sub 0, "
+         "cov 0) while `diff:` stays exact",
+         True),
         ("determinism pin: the tracer the gates actually load "
          "(`reference/runner/trace.js`) had LOST the `Math.random` pin that the "
          "port mirrors - it pins `mulberry32(0xC0FFEE)` (`shared_rng.hpp` "

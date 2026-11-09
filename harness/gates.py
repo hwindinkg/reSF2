@@ -895,7 +895,9 @@ SCENARIOS: dict[str, dict] = {
                 "--timeout-ms", "60000"],
         native=["--fight", "--battle", "Tournament", "--zone", "ZONE_1",
                 "--fight-ordinal", "0", "--location", "arena",
-                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+                "--headless", "700", "--dump-state", "600",
+                "--dump-pose", "600", "--watchdog", "900"],
+        pose=True,
         timeout_s=420,
     ),
     "survival": dict(
@@ -904,7 +906,9 @@ SCENARIOS: dict[str, dict] = {
                 "--timeout-ms", "60000"],
         native=["--fight", "--battle", "Survival", "--zone", "ZONE_1",
                 "--fight-ordinal", "0", "--location", "bamboo_grove",
-                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+                "--headless", "700", "--dump-state", "600",
+                "--dump-pose", "600", "--watchdog", "900"],
+        pose=True,
         timeout_s=420,
     ),
     # KUSARIGAMA: the same fight on both sides with the weapon equipped, so the
@@ -939,7 +943,9 @@ SCENARIOS: dict[str, dict] = {
                 "--timeout-ms", "60000"],
         native=["--fight", "--battle", "C3_BOSS_TITAN", "--zone", "ZONE_7",
                 "--fight-ordinal", "0", "--location", "skyport",
-                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+                "--headless", "700", "--dump-state", "600",
+                "--dump-pose", "600", "--watchdog", "900"],
+        pose=True,
         timeout_s=420,
     ),
     "challenge": dict(
@@ -948,7 +954,9 @@ SCENARIOS: dict[str, dict] = {
                 "--timeout-ms", "60000"],
         native=["--fight", "--battle", "Challenge", "--zone", "ZONE_2",
                 "--fight-ordinal", "0", "--location", "autumn",
-                "--headless", "700", "--dump-state", "600", "--watchdog", "900"],
+                "--headless", "700", "--dump-state", "600",
+                "--dump-pose", "600", "--watchdog", "900"],
+        pose=True,
         timeout_s=420,
     ),
     "dojo-move": dict(
@@ -1557,7 +1565,7 @@ def main(argv=None) -> int:
         for r in results:
             base = baseline["gates"].get(r.gate_id, {}).get("metric")
             r.baseline = base
-            r.verdict = verdict_for(r.metric, base)
+            r.verdict = verdict_for(r.metric, base, r.kind)
         print_report(results, baseline, "reparse", 0.0, SaveGuard(), [], {})
         return 0
 
@@ -1645,7 +1653,7 @@ def main(argv=None) -> int:
                 base = baseline["gates"].get(r.gate_id, {}).get("metric")
                 r.baseline = base
                 if not r.verdict:
-                    r.verdict = verdict_for(r.metric, base)
+                    r.verdict = verdict_for(r.metric, base, r.kind)
         finally:
             save_guard.restore()
             changed = refwww.restore()
@@ -1708,15 +1716,36 @@ def main(argv=None) -> int:
     return exit_code
 
 
-def verdict_for(metric: int | None, base: int | None) -> str:
+# Derived metrics (pose/velocity/subframe/coverage/UI/audio/position) are counts
+# of matched frames, and the oracle navigation is wall-clock: the captured frame
+# window can shift by a frame or two between runs, which moves those counts by
+# 1-2 even with identical behaviour. Measured directly on survival, whose pose
+# metric alternated 535/536/536 across three runs. Behaviour gates (`diff:`)
+# keep the exact comparison.
+GATE_TOL = {
+    "pose": 2,
+    "posevel": 2,
+    "sub": 0,
+    "cov": 0,
+    "posres": 1,
+    "ui": 2,
+    "audio": 2,
+}
+
+
+def verdict_for(metric: int | None, base: int | None,
+                kind: str | None = None) -> str:
     if metric is None:
         return "FAIL"
     if base is None:
         return "NO-BASELINE"
-    if metric > base:
+    tol = GATE_TOL.get(kind or "", 0)
+    if metric > base + tol:
         return "REGRESSION"
     if metric < base:
         return "IMPROVEMENT"
+    if metric > base:
+        return "OK"           # inside the tolerance band
     return "OK"
 
 

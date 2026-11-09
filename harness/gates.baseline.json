@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-09T00:03:24",
+    "updated": "2026-11-09T18:43:52",
     "mode": "only"
   },
   "gates": {
@@ -114,21 +114,21 @@
     },
     "diff:tournament": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
     },
     "diff:survival": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
     },
     "diff:challenge": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     },
     "diff:dojo-move": {
       "metric": 0,
@@ -222,9 +222,9 @@
     },
     "diff:titan-ladder": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "diff:kusarigama": {
       "metric": 0,
@@ -258,15 +258,15 @@
     },
     "cov:tournament": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
     },
     "cov:survival": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "cov:kusarigama": {
       "metric": 0,
@@ -276,15 +276,15 @@
     },
     "cov:titan-ladder": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     },
     "cov:challenge": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:54"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     },
     "cov:dojo-move": {
       "metric": 0,
@@ -318,15 +318,15 @@
     },
     "ui:tournament": {
       "metric": 15,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
     },
     "ui:survival": {
       "metric": 15,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "ui:kusarigama": {
       "metric": 15,
@@ -336,15 +336,15 @@
     },
     "ui:titan-ladder": {
       "metric": 15,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "ui:challenge": {
       "metric": 15,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     },
     "ui:dojo-move": {
       "metric": 7,
@@ -396,15 +396,15 @@
     },
     "posres:tournament": {
       "metric": 1,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
     },
     "posres:survival": {
       "metric": 1,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "posres:kusarigama": {
       "metric": 1,
@@ -414,15 +414,15 @@
     },
     "posres:titan-ladder": {
       "metric": 1,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "posres:challenge": {
       "metric": 1,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:54"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     },
     "posres:dojo-move": {
       "metric": 0,
@@ -438,15 +438,15 @@
     },
     "audio:tournament": {
       "metric": 7,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
     },
     "audio:survival": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "audio:kusarigama": {
       "metric": 6,
@@ -456,21 +456,93 @@
     },
     "audio:titan-ladder": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
     },
     "audio:challenge": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     },
     "audio:dojo-demo": {
       "metric": 7,
       "commit": "81ce6dda",
       "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
       "date": "2026-11-09T00:03:24"
+    },
+    "sub:tournament": {
+      "metric": 0,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
+    },
+    "posevel:tournament": {
+      "metric": 132,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
+    },
+    "pose:tournament": {
+      "metric": 444,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
+    },
+    "sub:survival": {
+      "metric": 0,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:50"
+    },
+    "posevel:survival": {
+      "metric": 144,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
+    },
+    "pose:survival": {
+      "metric": 535,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
+    },
+    "sub:titan-ladder": {
+      "metric": 0,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:51"
+    },
+    "posevel:titan-ladder": {
+      "metric": 97,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
+    },
+    "pose:titan-ladder": {
+      "metric": 389,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
+    },
+    "sub:challenge": {
+      "metric": 0,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
+    },
+    "posevel:challenge": {
+      "metric": 154,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
+    },
+    "pose:challenge": {
+      "metric": 536,
+      "commit": "71863699",
+      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
+      "date": "2026-11-09T18:43:52"
     }
   }
 }
