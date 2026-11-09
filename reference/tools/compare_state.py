@@ -62,6 +62,14 @@ DEFAULT_OUT = os.path.join("reference", "traces", "state_gap_report.txt")
 # a CHANGING one is a real divergence).
 POS_DRIFT_TOL = 1.0
 
+# Ragdoll frames: the separation is still meaningful (measured on dojo-move,
+# 700 of 702 matched frames have a ragdoll participant - the training bag always
+# swings), but the extra solver freedom moves it by ~0.006 units on average
+# (max 0.026) instead of the standing ~0.0025 rounding budget. 0.05 keeps a
+# 10x margin over measurement and stays ~4 orders of magnitude below a
+# behavioural difference (the fighters stand ~200-350 units apart).
+SEP_RAG_TOL = 0.05
+
 FLOAT_TOL = 0.0025
 # The fight camera focus (`cam.cx/cy`) is a SMOOTHED position (the JS `ql`
 # chase, gain 0.15 + the 50-unit velocity clamp), so it lags the COM target and
@@ -442,6 +450,13 @@ def collect_fields(nf, of, swap):
         if standing:
             out["fighters.sep_x"] = (
                 round(abs(n_en - n_me), 4), round(abs(o_en - o_me), 4))
+        else:
+            # [coverage] While ANY fighter was in ragdoll the separation was not
+            # emitted at all, so knockdown/swing frames had NO position check.
+            # Separate field + its own tolerance (SEP_RAG_TOL) so the standing
+            # baseline does not move.
+            out["fighters.sep_x_rag"] = (
+                round(abs(n_en - n_me), 4), round(abs(o_en - o_me), 4))
     return out
 
 
@@ -624,6 +639,8 @@ def run(args):
                 # rounded to 4 decimals): compare with the same tolerance the
                 # hp fields use, so 1e-4 rounding never reads as a divergence.
                 ok = scalar_eq(nv, ov, FLOAT_TOL)
+            elif field == "fighters.sep_x_rag":
+                ok = scalar_eq(nv, ov, SEP_RAG_TOL)
             elif field in ("cam.cx", "cam.cy"):
                 ok = scalar_eq(nv, ov, CAM_TOL)
             else:

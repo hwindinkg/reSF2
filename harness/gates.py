@@ -1722,14 +1722,19 @@ def main(argv=None) -> int:
 # 1-2 even with identical behaviour. Measured directly on survival, whose pose
 # metric alternated 535/536/536 across three runs. Behaviour gates (`diff:`)
 # keep the exact comparison.
+# (absolute, relative): the oracle navigation is wall-clock, so the captured
+# frame window can shift and these COUNTS move with it. Measured on the campaign
+# scenarios: pose stable (536 twice on survival/challenge), posevel up to ~10%
+# (challenge 154 -> 167 between runs), the dojo ones stable to 1 (they use
+# `--replay`, i.e. no navigation). `diff:` (behavioural) has no tolerance.
 GATE_TOL = {
-    "pose": 2,
-    "posevel": 2,
-    "sub": 0,
-    "cov": 0,
-    "posres": 1,
-    "ui": 2,
-    "audio": 2,
+    "pose": (2, 0.02),
+    "posevel": (2, 0.10),
+    "sub": (0, 0.0),
+    "cov": (0, 0.0),
+    "posres": (1, 0.0),
+    "ui": (2, 0.10),
+    "audio": (2, 0.10),
 }
 
 
@@ -1739,7 +1744,8 @@ def verdict_for(metric: int | None, base: int | None,
         return "FAIL"
     if base is None:
         return "NO-BASELINE"
-    tol = GATE_TOL.get(kind or "", 0)
+    abs_tol, rel_tol = GATE_TOL.get(kind or "", (0, 0.0))
+    tol = max(abs_tol, int(round(base * rel_tol)))
     if metric > base + tol:
         return "REGRESSION"
     if metric < base:

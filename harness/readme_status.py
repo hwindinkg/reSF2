@@ -129,6 +129,30 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "divergence (the oracle records the whole boot navigation, the native "
          "dump only the live-fight stack, and screen ids differ)",
          True),
+        ("RNG cadence (root cause found, not a local fix): the port does not run "
+         "the AI through the `Gc` bus at all - SF2_TRACE_GC on boss-lynx shows "
+         "matched=0/kept=0 on 367 frames and the bus only ever carries types "
+         "{14,12,13,9,11,10}, while `Gc.OGa` (L28729) admits candidates ONLY for "
+         "types 1-6. The JS AI injects its own type-2 KeyPressed (`dsb`->`hJa`->"
+         "`Vgb`->`Gc.Ih(2,...)`), so its `dxa`->`DK` runs and spends one "
+         "`uf.sja` (Math.random) draw on those frames; the port reproduces the "
+         "RESULT through its own AiController, so that draw never happens (11 vs "
+         "112 per fight) and the stream shifts - which is exactly why 2-3 "
+         "hit-sound variants differ. Fixing it means replacing the port's AI with "
+         "the Gc-bus path, a hot-code rewrite that risks the currently exact "
+         "state parity, so it is recorded as a structural task and the audio "
+         "delta as its cosmetic consequence",
+         True),
+        ("sep_x coverage (and its result): `compare_state` emitted NO "
+         "separation while any fighter was in ragdoll. Added as a separate "
+         "`fighters.sep_x_rag` with its own 0.05-unit tolerance - and it is not "
+         "theoretical: dojo-move has 700 of 702 matched frames with a ragdoll "
+         "participant (the swinging bag). The first run failed only because the "
+         "standing 0.0025 tolerance caught the real difference, which is tiny: "
+         "mean 0.006, median 0.005, max 0.026 units. With SEP_RAG_TOL 0.05 the "
+         "field reads 0/700, so the ragdoll separation matches the JS within "
+         "0.05 units on every such frame while `diff:` stays 0",
+         True),
         ("pose coverage (campaigns): `pose:`/`posevel:` stood only on the dojo "
          "scenarios, kusarigama and boss-lynx. Tournament, survival, "
          "titan-ladder and challenge now dump poses too, aligning 268 frames "
