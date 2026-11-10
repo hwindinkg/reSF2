@@ -4595,8 +4595,8 @@ void FightController::set_slowmo(bool on) {
     const float rate = 1.0f / game_speed_;
     player_.fighter.set_anim_rate(rate);
     enemy_.fighter.set_anim_rate(rate);
-    std::fprintf(stdout, "[fx] slow-mo %s on()=%.0f\n", on ? "on" : "off",
-                 static_cast<double>(game_speed_));
+    std::fprintf(stdout, "[fx] slow-mo %s on()=%.0f at F%d\n",
+                 on ? "on" : "off", static_cast<double>(game_speed_), frame_);
     std::fflush(stdout);
 }
 
