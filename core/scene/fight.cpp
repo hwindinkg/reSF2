@@ -9077,6 +9077,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                         {n, pf->fighter.interval_type(n), true});
                 }
                 c.keys_gm = false;  // the AI path bypasses the `<Keys>` gate
+                // [probe] `SF2_TRACE_COND=1`: show WHICH `<Conditions>` node
+                // rejects a `Gc` pump candidate (JS `Yz`, L29205 -> `he()`).
+                // `Gc.DK` picks on ~18% of the JS frames and only ~2% of the
+                // port's, so the rejecting predicate is the thing to find.
+                static const bool trace_cond =
+                    std::getenv("SF2_TRACE_COND") != nullptr;
+                if (trace_cond) {
+                    static int shown = 0;
+                    std::string tr;
+                    const bool ok =
+                        sf2::scene::eval_move_conditions(m.conditions, c, &tr);
+                    if (!ok && shown < 300 && !m.conditions.empty()) {
+                        ++shown;
+                        std::fprintf(stdout, "[cond] f=%d move=%s keys_gm=%d nkeys=%zu ok=0\n%s",
+                                     frame_, m.name.c_str(), c.keys_gm ? 1 : 0,
+                                     c.keys.size(), tr.c_str());
+                        std::fflush(stdout);
+                    }
+                    return ok;
+                }
                 return sf2::scene::eval_move_conditions(m.conditions, c);
             };
         }
