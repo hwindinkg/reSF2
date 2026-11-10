@@ -2044,7 +2044,20 @@ std::string AiController::gc_frame(const AiFightState& st) {
     // 14 EveryFrame - returns FALSE, so `EZa` never produces a candidate for
     // them: the `Gc` pump starts nothing on a clip end (the fighter simply
     // returns to its stance idle through `Nnb`).
+    // [experiment] `SF2_GC_ALLTYPES=1`: admit EVERY event type a move declares,
+    // which is what the JS actually does. `Gc.EZa` (L28542) dispatches the
+    // candidate list through `Su.dea(event.type)` (L22464: 1/2/3/6/7/9/10/12/13/
+    // 14/15/16 all have their own bucket) and filters on the CONDITION GROUP's
+    // code (`Gc.OGa(a.model, b, g.Ob)`, L28730), which is a different thing from
+    // the event type. The port applied `OGa`'s type set (1-6) to the EVENT type,
+    // so the pump produced no candidate for the events the port actually fires
+    // (its bus carries 9/10/11/12/13/14 - measured matched=0 on 367/367 frames,
+    // hence 11 `uf.sja` draws per fight against the oracle's 112).
+    static const bool gc_all_types = std::getenv("SF2_GC_ALLTYPES") != nullptr;
     auto gc_type_admitted = [](int t) -> bool {
+        static const bool all =
+            std::getenv("SF2_GC_ALLTYPES") != nullptr;
+        if (all) return t != 0;
         return t == 1 || t == 2 || t == 3 || t == 4 || t == 5 || t == 6;
     };
     auto event_matches = [this, &fired, &gc_type_admitted](const MoveDef& m) -> bool {
@@ -2127,10 +2140,31 @@ std::string AiController::gc_frame(const AiFightState& st) {
                      names.c_str(), why_all.c_str());
         std::fflush(stdout);
     }
+    // [experiment] `SF2_GC_TWOBUCKET=1`: JS `Gnb`/`dxa` runs the pick ONCE PER
+    // NON-EMPTY BUCKET (`this.dxa(this.td, this.Hsa)` for the non-`Rha` list and
+    // `this.dxa(this.wg, this.Isa)` for the `Rha` one, L28360-28362), so a frame
+    // can spend TWO `uf.sja` draws. The oracle stack confirms it: every draw is
+    // `uf.sja` inside `Gc.DK` called from `Gc.dxa`, 112 of them over 67 frames
+    // (~1.67/frame). The port built only the non-`Rha` list, so it could never
+    // spend the second draw.
+    static const bool gc_two = std::getenv("SF2_GC_TWOBUCKET") != nullptr;
+    std::vector<const MoveDef*> rha_best;
     for (const MoveDef* m : *st.my_moves) {
         if (m == nullptr) continue;
         if (!event_matches(*m)) continue;
-        if (m->no_animation) continue;  // `Rha` -> the unused `g` group
+        if (m->no_animation) {
+            // JS `g` (`d.Ukb(g[uf.sja(g.length)].animation)`): picked, but it
+            // starts nothing - only the DRAW is consumed.
+            if (gc_two && !(st.full_conditions && !st.full_conditions(*m))) {
+                if (rha_best.empty() || m->priority > rha_best.front()->priority) {
+                    rha_best.clear();
+                    rha_best.push_back(m);
+                } else if (m->priority == rha_best.front()->priority) {
+                    rha_best.push_back(m);
+                }
+            }
+            continue;  // `Rha` -> the `g` group
+        }
         // The StartStance family is gated by `<RoundStage Value="StartStance">`
         // in the move's MAIN conditions, which `de.V1` does not evaluate (it
         // reads only the tactics list). The JS's `EZa` calls `f.Yz(b,null,g)`
@@ -2149,21 +2183,42 @@ std::string AiController::gc_frame(const AiFightState& st) {
         // legitimate pump pick: that IS the JS's `fk=10` block behaviour).
         // The getup / loss / win / stance animations are excluded: they are
         // the HIT-reaction and `try_every_frame_move` recovery chains.
-        if (st.full_conditions && !st.full_conditions(*m)) continue;
+        // [experiment] SF2_GC_NOCOND=1: skip the Yz / <Conditions> gate.
+        static const bool gc_nocond = std::getenv("SF2_GC_NOCOND") != nullptr;
+        if (!gc_nocond && st.full_conditions && !st.full_conditions(*m)) continue;
         // `EZa` admits no type-10/13 candidates (`Gc.OGa` L28730), so the
         // idle family can never be a pump pick: only MOVE/ATTACK and the
         // block family (which carries no `Type` attr) are candidates.
-        if (m->type != "ATTACK" && m->type != "MOVE" &&
+        // [experiment] `SF2_GC_ANYTYPE=1`: drop the port-only MOVE/ATTACK/Block
+        // restriction. JS `Gc.EZa` (L28542) accepts ANY candidate in
+        // `Su.dea(event.type)` that passes `Yz` (its conditions); the idle
+        // family is a legitimate `Gc` pick there (that is how the JS re-enters
+        // `...Idle` after a clip).
+        static const bool gc_anytype =
+            std::getenv("SF2_GC_ANYTYPE") != nullptr;
+        if (!gc_anytype && m->type != "ATTACK" && m->type != "MOVE" &&
             m->name.find("Block") == std::string::npos) {
             continue;
         }
-        if (!v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
+        // [experiment] `SF2_GC_NOV1=1`: skip the `V1`/`ABa` filter here. JS applies
+        // `ABa` only on the AI path (`eb=true`, `Gc.Vkb` -> `Pkb`); the uniform
+        // `f[uf.sja(f.length)]` pick of the `eb=false` branch draws from the
+        // candidates that passed `Yz` (conditions) alone.
+        static const bool gc_nov1 = std::getenv("SF2_GC_NOV1") != nullptr;
+        if (!gc_nov1 && !v1(*m, st, nullptr, /*mirror_filter=*/false)) continue;
         if (best.empty() || m->priority > best.front()->priority) {
             best.clear();
             best.push_back(m);
         } else if (m->priority == best.front()->priority) {
             best.push_back(m);
         }
+    }
+    if (!rha_best.empty()) {
+        // JS `g[uf.sja(g.length)]` -> `Ukb(...)`: one draw, nothing stored.
+        float rr = math_roll();
+        if (rr < 0.0f) rr = 0.0f;
+        if (rr >= 1.0f) rr = 0.9999999f;
+        (void)rr;
     }
     if (!best.empty() && !keypress_owned) {
         float r = math_roll();
