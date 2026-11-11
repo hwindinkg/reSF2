@@ -8753,6 +8753,50 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
     // skipped call also owns the `Da.pg` draws of the model-EVENT handlers, so
     // this must never be set for a trace diff.
     const bool ai_off = !me.is_player && std::getenv("SF2_AI_ENEMY_OFF") != nullptr;
+    // [experiment] `SF2_PLAYER_PUMP=1`: the store-only `Gc` pass for the PLAYER.
+    // JS `Gc.dxa` (L28597) walks the MODEL list, so `DK` runs for BOTH fighters
+    // and each non-empty bucket spends a `uf.sja` draw; the port runs
+    // `gc_frame` only for the fighter that owns an AiController (the enemy), so
+    // the player's picks never happen and the pinned stream is left ahead. Here
+    // the player's own bus events open the candidate bucket and ONE uniform
+    // draw is spent and discarded - nothing is started, so the simulation is
+    // untouched and only the `Math.random` position moves.
+    // `Gc.OGa` admits the CONDITION-GROUP code 1..6, which these event slots map
+    // to: RoundStageStart=1, HitPreCrit/HitPostCrit=Hit=6, KeyPressed=2.
+    if (me.is_player && std::getenv("SF2_PLAYER_PUMP") != nullptr) {
+        auto slot_gc = [](int slot) -> int {
+            switch (slot) {
+                case 1: return 1;              // RoundStageStart
+                case 5: case 6: return 6;      // HitPreCrit / HitPostCrit -> Hit
+                case 17: return 2;             // KeyPressed
+                default: return 0;
+            }
+        };
+        auto name_gc = [](const std::string& n) -> int {
+            if (n == "RoundStageStart") return 1;
+            if (n == "Hit" || n == "HitPreCrit" || n == "HitPostCrit") return 6;
+            if (n == "KeyPressed") return 2;
+            return 0;
+        };
+        bool cand = false;
+        for (const auto& ev : ai_events_prev_) {
+            if (ev.side != 0) continue;
+            const int t = slot_gc(ev.slot);
+            if (t == 0) continue;
+            for (const sf2::scene::MoveDef* m : me.fighter.hb()) {
+                if (m == nullptr) continue;
+                for (const std::string& e : m->events) {
+                    if (name_gc(e) == t) {
+                        cand = true;
+                        break;
+                    }
+                }
+                if (cand) break;
+            }
+            if (cand) break;
+        }
+        if (cand) me.fighter.pump_draw();
+    }
     if (me.ai != nullptr && !ai_off) {
         sf2::scene::AiFightState st;
         st.phase_fight = (phase_ == fight_phase::fight);

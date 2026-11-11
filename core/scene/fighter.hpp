@@ -1259,6 +1259,18 @@ private:
     // `uf.sja`'s `Math.random` mirror (`set_math_random`); unset -> no draw is
     // needed because the `Aua` group is a singleton (value-free).
     std::function<float()> math_random_;
+
+   public:
+    // [experiment] ONE `uf.sja` draw from the pinned `Math.random` stream - the
+    // `Gc.DK` uniform pick, used by the store-only PLAYER pump pass
+    // (`SF2_PLAYER_PUMP`). Discards the value: JS `Gc.dxa` walks the MODEL list,
+    // so the pump picks for both fighters, while the port only runs
+    // `AiController::gc_frame` for the AI-driven one.
+    void pump_draw() {
+        if (math_random_) (void)math_random_();
+    }
+
+   private:
     const MoveDef* current_move_ = nullptr; // playing move (JS `da.Ua`)
     // JS `Te.Pe` complement: true after the clip finished (`Te.KNa` L548)
     // while `Ua`/`Xh`/`xj` stay set. Cleared by `clear_move` and every move
