@@ -9083,12 +9083,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 // port's, so the rejecting predicate is the thing to find.
                 static const bool trace_cond =
                     std::getenv("SF2_TRACE_COND") != nullptr;
+                // window of interest passed as SF2_TRACE_COND_FRAMES=lo:hi
+                static int cond_f0 = 0, cond_f1 = 1 << 30;
+                static bool cond_range_ini = false;
+                if (trace_cond && !cond_range_ini) {
+                    cond_range_ini = true;
+                    if (const char* rg = std::getenv("SF2_TRACE_COND_FRAMES")) {
+                        const char* colon = std::strchr(rg, 0x3a);
+                        if (colon != nullptr) {
+                            cond_f0 = std::atoi(rg);
+                            cond_f1 = std::atoi(colon + 1);
+                        }
+                    }
+                }
                 if (trace_cond) {
                     static int shown = 0;
                     std::string tr;
                     const bool ok =
                         sf2::scene::eval_move_conditions(m.conditions, c, &tr);
-                    if (!ok && shown < 300 && !m.conditions.empty()) {
+                    if (!ok && shown < 300 && !m.conditions.empty() &&
+                        frame_ >= cond_f0 && frame_ <= cond_f1) {
                         ++shown;
                         std::fprintf(stdout, "[cond] f=%d move=%s keys_gm=%d nkeys=%zu ok=0\n%s",
                                      frame_, m.name.c_str(), c.keys_gm ? 1 : 0,

@@ -2058,6 +2058,20 @@ std::string AiController::gc_frame(const AiFightState& st) {
         static const bool all =
             std::getenv("SF2_GC_ALLTYPES") != nullptr;
         if (all) return t != 0;
+        // [experiment] `SF2_GC_ANIMTYPES=1`: admit the ANIMATION/INTERVAL event
+        // types (9 AnimationStart, 10 AnimationEnd, 11 Interrupted, 12
+        // IntervalStart, 13 IntervalEnd) but NOT 14 EveryFrame. The port's bus
+        // carries exactly {14 on all 367 frames, 12 x13, 13 x10, 9 x5, 11 x4,
+        // 10 x1} - i.e. the non-EveryFrame events fire on ~12 distinct frames,
+        // which is exactly the oracle's in-window pick count (12). The old
+        // filter admitted only 1-6, so those frames could never produce a
+        // candidate; admitting 14 instead only produces the EveryFrame reaction
+        // moves (Loss_1 / WallHit), which correctly fail their conditions.
+        static const bool animtypes =
+            std::getenv("SF2_GC_ANIMTYPES") != nullptr;
+        if (animtypes) return t == 1 || t == 2 || t == 3 || t == 4 || t == 5 ||
+                              t == 6 || t == 9 || t == 10 || t == 11 || t == 12 ||
+                              t == 13;
         return t == 1 || t == 2 || t == 3 || t == 4 || t == 5 || t == 6;
     };
     auto event_matches = [this, &fired, &gc_type_admitted](const MoveDef& m) -> bool {
@@ -2219,6 +2233,19 @@ std::string AiController::gc_frame(const AiFightState& st) {
         if (rr < 0.0f) rr = 0.0f;
         if (rr >= 1.0f) rr = 0.9999999f;
         (void)rr;
+    }
+    // [experiment] `SF2_GC_TWOPICK=1`: JS `Gnb` runs `dxa(this.td, this.Hsa)` AND
+    // `dxa(this.wg, this.Isa)` (L28360-28362); each `dxa` calls `Gc.DK` once per
+    // MODEL with a non-empty candidate array, and `DK` spends one `uf.sja` per
+    // non-empty group. With no `Rha` move shipped in PvE the `g` group is empty,
+    // so the per-frame `uf.sja` count is one per list = TWO, while the port makes
+    // ONE. Measured: oracle 4-6 draws per pick frame vs the port's 1-2.
+    static const bool gc_twopick = std::getenv("SF2_GC_TWOPICK") != nullptr;
+    if (gc_twopick && !best.empty()) {
+        float r2 = math_roll();  // the second `dxa` pass, discarded
+        if (r2 < 0.0f) r2 = 0.0f;
+        if (r2 >= 1.0f) r2 = 0.9999999f;
+        (void)r2;
     }
     if (!best.empty() && !keypress_owned) {
         float r = math_roll();

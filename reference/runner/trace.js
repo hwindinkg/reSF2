@@ -1221,6 +1221,46 @@ function ensureHooks(fight) {
         }
       }
     } catch (eh) { /* ignore */ }
+    /* SOLVER-CADENCE PROBE (`?iacount=1`, harness-only): count how many times the
+     * CLOTH SOLVER runs per fight frame. JS `Te.ia` (L20591) calls
+     * `this.Nd.ia()` (the `Al` solver = `sk(); jE();`) ONCE per call, but `Te.ia`
+     * itself may run more than once per rendered frame - if it does, the cloth
+     * integrates more steps than the port's one-per-frame and the chain rotates
+     * at a different rate (the measured residual is almost purely TANGENTIAL).
+     * Logs a counter line per fight frame and the total per frame. */
+    try {
+      if (new URLSearchParams(window.location.search).get("iacount") === "1") {
+        if (!tr.iaHooked) {
+          tr.iaHooked = 1;
+          tr.iaTot = 0;
+          var wrapNd = function (m) {
+            var da = m && m.da;
+            if (!da || typeof da.ia !== "function" || da.__wrapped) return;
+            // Count the ANIMATOR tick (`Te.ia`), which calls the cloth solver
+            // (`this.Nd.ia()`) exactly once - so the count is the solver cadence.
+            var orig = da.ia;
+            da.ia = function () {
+              tr.iaTot++;
+              return orig.apply(this, arguments);
+            };
+            da.__wrapped = 1;
+          };
+          try {
+            var d0 = fight && fight.yb && fight.yb.da;
+            console.log(JSON.stringify({ t: "iakeys", n: d0 ? Object.keys(d0).length : -1,
+                                         hasNd: !!(d0 && d0.Nd),
+                                         hasIa: !!(d0 && typeof d0.ia === "function") }));
+          } catch (e00) { /* ignore */ }
+          try { wrapNd(fight.yb); } catch (e0) { /* ignore */ }
+          try { wrapNd(fight.pb); } catch (e1) { /* ignore */ }
+          console.log('{"t":"iahooked"}');
+          tr.iaTot = 0;
+        }
+        var fr2 = -1;
+        try { fr2 = fight.frame; } catch (e2) { fr2 = -1; }
+        console.log(JSON.stringify({ t: "ia", f: fr2, tot: tr.iaTot }));
+      }
+    } catch (e3) { /* ignore */ }
     emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
     var stDbg = fightState(fight);

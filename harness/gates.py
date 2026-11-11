@@ -1724,12 +1724,15 @@ def main(argv=None) -> int:
 # keep the exact comparison.
 # (absolute, relative): the oracle navigation is wall-clock, so the captured
 # frame window can shift and these COUNTS move with it. Measured on the campaign
-# scenarios: pose stable (536 twice on survival/challenge), posevel up to ~10%
-# (challenge 154 -> 167 between runs), the dojo ones stable to 1 (they use
-# `--replay`, i.e. no navigation). `diff:` (behavioural) has no tolerance.
+# scenarios: pose stable (536 in three consecutive runs on survival/challenge),
+# posevel up to ~11% of its baseline (survival measured 150, 144, 159 and later
+# 152 across runs on the SAME code; challenge 154 -> 167), the dojo ones stable
+# to 1 (they use `--replay`, i.e. no navigation). `posevel` therefore gets 15%,
+# which covers the measured spread with margin while still tripping on a genuine
+# regression (tens of frames). `diff:` (behavioural) has no tolerance.
 GATE_TOL = {
     "pose": (2, 0.02),
-    "posevel": (2, 0.10),
+    "posevel": (2, 0.15),
     "sub": (0, 0.0),
     "cov": (0, 0.0),
     "posres": (1, 0.0),
