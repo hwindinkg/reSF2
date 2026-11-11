@@ -31,6 +31,11 @@ namespace {
 // Forward: Jf.OBa stage ids (defined with the bus block below).
 int oba_phase(fight_phase p);
 
+// [probe] consumer tag for the `SF2_TRACE_MR` log (defined with the pinned
+// `Math.random` stream below). Declared here because `random_sound_index`
+// (line ~668) uses it.
+const char*& math_random_tag();
+
 // JS `lg.vQ` slot 1/2 (`XH`/`z_`; `lg.he` L749 `lg.xEa(this.Ba, c)`): a
 // fighter's animation-NAME list is the current animation's `xl` = the move's
 // own name plus its TRANSITIVE `<Template>` chain (`MoveDef::anim_names`).
@@ -667,6 +672,7 @@ void FightController::reseed_stream(int seed) {
 // fight's `Da.pg` draws. Native: the pinned `math_random01()`.
 int FightController::random_sound_index(int n) {
     if (n <= 0) return -1;
+    math_random_tag() = "sound";
     return static_cast<int>(math_random01() * static_cast<float>(n));
 }
 
@@ -2141,6 +2147,15 @@ int& math_random_trace_frame() {
     static int f = -1;
     return f;
 }
+
+// [probe] `SF2_TRACE_MR=1` with tags: which consumer spent the draw (`aua` = a
+// fighter's `uf.sja` pick, `sound` = `<RandomSound>` name, `ai` = the Gc pump).
+// Without this the log cannot say WHICH site the port's handful of draws come
+// from, and every attempt to match the oracle's cadence was guessing.
+const char*& math_random_tag() {
+    static const char* t = "-";
+    return t;
+}
 }  // namespace
 
 void reseed_shared_math_random(std::uint32_t seed) {
@@ -2170,10 +2185,11 @@ float shared_math_random01() {
     static const bool trace_mr = std::getenv("SF2_TRACE_MR") != nullptr;
     if (trace_mr) {
         ++n;
-        std::fprintf(stderr, "[mr] f=%d n=%llu v=%.9f\n",
+        std::fprintf(stderr, "[mr] f=%d n=%llu v=%.9f tag=%s\n",
                      math_random_trace_frame(),
                      static_cast<unsigned long long>(n),
-                     static_cast<double>(v));
+                     static_cast<double>(v), math_random_tag());
+        math_random_tag() = "-";
     }
     return v;
 }
@@ -2217,7 +2233,7 @@ FightFighter FightController::make_fighter(
     // the `Gc.DK` pick draws from (`e = f[uf.sja(f.length)]` L674). Install
     // the pinned `math_random01()` (never `Da.pg`) so a multi-element `Aua`
     // max-`<Priority>` group really draws instead of always taking index 0.
-    f.fighter.set_math_random([]() { return FightController::math_random01(); });
+    f.fighter.set_math_random([]() { math_random_tag() = "aua"; return FightController::math_random01(); });
     // [FIX Phase 4b — black silhouettes] The fighters' fill color is the
     // LOCATION's Root Color (the dojo_params `<Root Color="0x000000">`),
     // not a hardcoded team color — the oracle's fighters are black
@@ -8913,7 +8929,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // (`e = f[uf.sja(f.length)]`). Wire the AI's `math_roll()` to the
         // pinned `math_random01()` so the `Pkb` candidate list's duplicate
         // draw comes from the same stream the JS uses.
-        st.math_random = []() { return FightController::math_random01(); };
+        st.math_random = []() {
+        math_random_tag() = "ai";
+        return FightController::math_random01();
+    };
         // JS `Da.pg` — the ONE shared stream; hand it to the AI so QJa/gfa/
         // aea/dqb/jL/slots all draw from it (the port previously kept QJa on
         // a private DaPrng, splitting the stream). With a test override
