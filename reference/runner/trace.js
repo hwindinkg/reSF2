@@ -1261,6 +1261,61 @@ function ensureHooks(fight) {
         console.log(JSON.stringify({ t: "ia", f: fr2, tot: tr.iaTot }));
       }
     } catch (e3) { /* ignore */ }
+    /* CLIP-SAMPLE PROBE (`?clipsamples=1`, harness-only): snapshot the chain
+     * nodes' `ma` immediately BEFORE the cloth solver runs. `Te.ia` writes the
+     * clip pose into every node (`e.ma = clip`) via `eda`, and only then calls
+     * `this.Nd.ia()` = `sk(); jE();`. Wrapping `Nd.ia` and reading
+     * `Nd.oa.Va.all[i].ma` first therefore yields exactly the pre-solver input
+     * the port's `[clipsample]` line logs (same band 76..81, 91, 92). */
+    try {
+      if (new URLSearchParams(window.location.search).get("clipsamples") === "1") {
+        if (!tr.csHooked) {
+          tr.csHooked = 1;
+          var wrapSol = function (ftr, side) {
+            var sol = ftr && ftr.Nd;
+            if (!sol || typeof sol.ia !== "function" || sol.__csWrapped) return;
+            var orig = sol.ia;
+            var BAND = [76, 77, 78, 79, 80, 81, 91, 92];
+            sol.ia = function () {
+              try {
+                var nodes = sol.oa && sol.oa.Va && sol.oa.Va.all;
+                if (nodes && nodes.length > 92) {
+                  var fr = -1;
+                  try { fr = fight.frame; } catch (e0) { fr = -1; }
+                  // The same key compare_pose aligns by: (clip, cf) = the JS
+                  // `da.Ua.name` and `da.Xh` (the port dumps `playhead_xh()`).
+                  var clipName = "", cfv = -1;
+                  try {
+                    var anim = ftr && ftr.da;
+                    if (anim) {
+                      if (anim.Ua && anim.Ua.name != null) {
+                        clipName = String(anim.Ua.name);
+                      }
+                      if (typeof anim.Xh === "number") cfv = anim.Xh;
+                    }
+                  } catch (e9) { /* ignore */ }
+                  for (var bi = 0; bi < BAND.length; bi++) {
+                    var ix = BAND[bi];
+                    var p = nodes[ix] && nodes[ix].ma;
+                    if (!p) continue;
+                    console.log("[clipsample] s=" + side + " f=" + fr +
+                                " clip=" + clipName + " cf=" + cfv + " i=" + ix +
+                                " x=" + p.x.toFixed(5) +
+                                " y=" + p.y.toFixed(5) +
+                                " z=" + p.z.toFixed(5));
+                  }
+                }
+              } catch (e1) { /* ignore */ }
+              return orig.apply(this, arguments);
+            };
+            sol.__csWrapped = 1;
+          };
+          try { wrapSol(fight.pb, "Enemy"); } catch (e2) { /* ignore */ }
+          try { wrapSol(fight.yb, "Me"); } catch (e3) { /* ignore */ }
+          console.log('{"t":"cshooked"}');
+        }
+      }
+    } catch (e4) { /* ignore */ }
     emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
     var stDbg = fightState(fight);

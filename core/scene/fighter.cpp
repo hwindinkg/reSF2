@@ -3834,6 +3834,37 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // are NOT moved by the solver (they keep their `Te.eda` pose). The
         // old native integrated every non-fixed non-macro bone, dragging the
         // posed skeleton off the clip (the stretched mesh).
+        // [probe, authorised] `SF2_TRACE_CLIPSAMPLES=1`: the PRE-SOLVER chain
+        // positions - `sol_ma_` right after the clip write above and before
+        // `sk()`/`jE()` run. The oracle probe (`?clipsamples=1`) snapshots the
+        // same band from `Nd.oa.Va.all[i].ma` immediately before `Nd.ia()`,
+        // i.e. after `Te.eda` wrote `e.ma = clip`. Diffing the two sets at lag 0
+        // decides whether the residual is the clip INPUT or the solver.
+        static const bool trace_clipsamples =
+            std::getenv("SF2_TRACE_CLIPSAMPLES") != nullptr;
+        if (trace_clipsamples && !not_animation_) {
+            static const int kBand[] = {76, 77, 78, 79, 80, 81, 91, 92};
+            // The same key `compare_pose.py` aligns by: (clip, cf). `cf` is the
+            // JS `Te.Xh` (`playhead_xh()`), the quantity the pose dump emits.
+            std::string cs_clip;
+            if (current_move_ != nullptr) {
+                cs_clip = current_move_->name;
+                if (cs_clip.empty()) cs_clip = current_move_->file_name;
+            }
+            const int cs_cf = playhead_xh();
+            for (int bi : kBand) {
+                if (bi < 0 || static_cast<std::size_t>(bi) + 1 > n) continue;
+                const std::size_t u = static_cast<std::size_t>(bi) * 3;
+                std::fprintf(stdout,
+                             "[clipsample] f=%d clip=%s cf=%d i=%d "
+                             "x=%.5f y=%.5f z=%.5f\n",
+                             ia_ticks_, cs_clip.c_str(), cs_cf, bi,
+                             static_cast<double>(sol_ma_[u]),
+                             static_cast<double>(sol_ma_[u + 1]),
+                             static_cast<double>(sol_ma_[u + 2]));
+            }
+            std::fflush(stdout);
+        }
         const float kGrav = kGravitation / (model_hd_ * model_hd_);  // JS `Al.O9a`
         for (std::size_t i = 0; i < n; ++i) {
             const Bone& b = bones[i];
