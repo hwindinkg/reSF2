@@ -9704,3 +9704,39 @@ subscription-список непуст; если у игрока в boss-lynx/to
 есть EveryFrame-виджет), то бакет `oz` у игрока = мувы игрока с `<EveryFrame>`.
 Проверить это по его `hb()` (печать списка) и, если таких мувов нет, закрыть
 линию «помпа игрока» как несуществующую и вернуться к `Yz` у босса.
+
+### QA-34.11 — У ИГРОКА БАКЕТ ЕСТЬ: 59 МУВОВ С `<EveryFrame>`/`<Hit>` — ЛИНИЮ «ПОМПЫ ИГРОКА НЕТ» ЗАКРЫВАТЬ НЕЛЬЗЯ
+
+Распечатал `player_.fighter.hb()` на boss-lynx (проба `SF2_TRACE_HB=1`, кадр 5):
+
+```
+[hb] player moves=137
+[hb] Loss_1                  every=1 hit=0 strike=0 animend=0 novis=0 events=1
+[hb] Loss_2                  every=1 hit=0 strike=0 animend=0 novis=0 events=1
+[hb] WallHit                 every=1 hit=0 strike=0 animend=0 novis=0 events=1
+[hb] WallHitFall             every=1 hit=0 strike=0 animend=0 novis=0 events=1
+[hb] PhysicalGroundHit       every=1 ...   [hb] PhysicalLying  every=1 ...
+[hb] HighBlock/MiddleBlock/SweepBlock/OverheadBlock(+Heavy, +Plus)  hit=1
+[hb] StanceIdle/FistsStartStanceIdle-*  animend=1
+итого мувов с every=1 или hit=1: 59
+```
+
+То есть бакет игрока РЕАЛЬНЫЙ: `oz` = {Loss_1, Loss_2, WallHit, WallHitFall,
+PhysicalGroundHit, PhysicalLying, ...}, `hQ` = блоки (у них `<Hit>`). Поэтому
+вариант «линия помпы игрока не существует» ОТПАДАЕТ — JS `dxa(td)` обходит обе
+модели именно потому, что бакеты есть у обеих.
+
+Прошлый no-op (QA-33.11) объясняется узостью гейта: он требовал точного имени
+события у мува, а `cand` включался только при совпадении `Hit`, тогда как
+`every=1`-мувы в гейте не участвовали вовсе (`gc_name_of` возвращал
+"EveryFrame", но `name_gc`/`m->events` сравнение шло по именам, и у `Loss_1`
+`events=1` — это `<EveryFrame>`, так что совпадение должно было быть; значит
+`gc_model_events_` в тот кадр не содержал записи для стороны игрока).
+
+Следующий шаг (по делу): гонять бакет игрока так же, как у босса — с `Yz`
+(`<Conditions>` мува) — в конце кадра, и тратить один `uf.sja` на непустой
+бакет. Нужен `FightContext` для игрока; в порте он собирается в
+`try_select_move`/`fill_ctx_geometry` + `fill_ctx_cond_state`, их можно
+переиспользовать. Ожидание: у игрока `oz` проходит так же редко, как у босса
+(`Loss_1` падает на `Distance [0..0]`), а вот `hQ` (блоки) на кадрах с `Hit`
+может пройти — это и есть недостающие вызовы на 221/242/342/359.
