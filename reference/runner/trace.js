@@ -1316,6 +1316,42 @@ function ensureHooks(fight) {
         }
       }
     } catch (e4) { /* ignore */ }
+    /* BUCKET TRACE (`?buckettrace=1`, harness-only): what `Gc.DK` actually
+     * receives. `DK(a, b, c)` is called by `dxa` per MODEL with `b` = the
+     * candidate array AFTER `EZa`/`Yz` filtering, so `b.length` is exactly the
+     * "non-empty bucket" that decides whether a `uf.sja` is spent
+     * (`f[uf.sja(f.length)]`). Read-only: only the counts and the first few
+     * animation names are printed, then the original runs untouched. */
+    try {
+      if (new URLSearchParams(window.location.search).get("buckettrace") === "1") {
+        if (!tr.bucketHooked && fight.Bg && typeof fight.Bg.DK === "function") {
+          tr.bucketHooked = 1;
+          var origDK = fight.Bg.DK;
+          fight.Bg.DK = function (a, b, c) {
+            try {
+              var who = "?";
+              if (a === fight.yb) {
+                who = "Me";
+              } else if (a === fight.pb) {
+                who = "Enemy";
+              }
+              var names = [];
+              var nb = b ? b.length : -1;
+              for (var i = 0; i < nb && i < 6; i++) {
+                try { names.push(b[i].animation.name); } catch (e2) { /* ignore */ }
+              }
+              console.log("[bucket] f=" +
+                          (typeof fight.frame === "number" ? fight.frame : -1) +
+                          " model=" + who + " cand=" + nb +
+                          " eb=" + (c ? 1 : 0) +
+                          " [" + names.join(" ") + "]");
+            } catch (e1) { /* ignore */ }
+            return origDK.apply(this, arguments);
+          };
+        }
+      }
+    } catch (eBT) { /* ignore */ }
+
     /* TU TRACE (`?tutrace=1`, harness-only): the Gc bus widgets that frame
      * (`Gc.Tu`), sampled INSIDE `Gc.Gnb` - the function CONSUMES and clears
      * `Tu` (`Gnb`: `... a = this.Tu.length = 0`), so reading it after `Bg.ia`
