@@ -1316,6 +1316,36 @@ function ensureHooks(fight) {
         }
       }
     } catch (e4) { /* ignore */ }
+    /* TU TRACE (`?tutrace=1`, harness-only): the Gc bus widgets LIVE this
+     * frame (`Gc.Tu`), i.e. exactly the array `Gc.Gnb` hands to
+     * `dxa(td,Hsa)`/`dxa(wg,Isa)` and buckets through `Su.dea(type)`. This is
+     * the input the pump's `uf.sja` accounting is built from, and the port has
+     * no way to see the oracle's side of it - `[yz]` measured that the port
+     * rejects nearly every candidate, but not WHICH events the JS actually
+     * raised. Read-only: nothing is patched, `Tu` is only read. */
+    try {
+      if (new URLSearchParams(window.location.search).get("tutrace") === "1") {
+        var tu = fight.Bg && fight.Bg.Tu;
+        if (tu) {
+          var tv = [];
+          for (var ti = 0; ti < tu.length; ti++) {
+            var tEl = tu[ti];
+            var who = "?";
+            try {
+              if (tEl.model && tEl.model === fight.yb) {
+                who = "Me";
+              } else if (tEl.model && tEl.model === fight.pb) {
+                who = "Enemy";
+              }
+            } catch (eTUw) { who = "?"; }
+            tv.push(tEl.type + ":" + who);
+          }
+          console.log("[tu] f=" +
+                      (typeof fight.frame === "number" ? fight.frame : -1) +
+                      " n=" + tv.length + " [" + tv.join(" ") + "]");
+        }
+      }
+    } catch (eTU) { /* ignore */ }
     emitMovesOnce(fight);
     console.log(JSON.stringify(frameJson(fight)));
     var stDbg = fightState(fight);
