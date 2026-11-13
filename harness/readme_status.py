@@ -343,7 +343,18 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "pick frame (oracle: 48 draws over 12 pick frames in 130..498), while the "
          "port spends 1.2 per frame (14 over 11). Blind extra draws were measured "
          "and move the stream the wrong way (audio 7 -> 9 and 7 -> 8), so the fix "
-         "is the structural per-model/per-list walk, not an added draw",
+         "is the structural per-model/per-list walk, not an added draw. The draw "
+         "map is now measured per frame (`?mrtrace=1` + `SF2_TRACE_MR=1`): the "
+         "port reaches `Gc.DK` on 8 of 368 frames (11 draws) where the oracle "
+         "does on 68 (112 draws), and on hit frames the port spends ONLY the "
+         "sound pick - and because the oracle is dozens of draws AHEAD in the "
+         "same stream (at f=202 the port draws the values the oracle drew at its "
+         "frames 90 and 132), the variant cannot coincide even when a frame's "
+         "count matches. The real gap is the pump's trigger: JS `Rwa`/`EZa` "
+         "collects candidates on every frame with active widget animations for "
+         "every model of the list, the port only on bus slots 1/5/6/17. The "
+         "dojo-demo 4-event difference is NOT counted as a port bug: the oracle "
+         "captures 0 plays in all 308 frames there",
          True),
         ("position gate: `fighters.*.x/.y` were emitted by both traces and "
          "reported as INFORMATION ONLY, so a port walking to a different place "
