@@ -2111,13 +2111,8 @@ std::string AiController::gc_frame(const AiFightState& st) {
     auto event_matches_js = [this, &fired](const MoveDef& m) -> bool {
         for (const std::string& ev : m.events) {
             const int t = js_event_type(ev);
-            // [FIX] type 14 (EveryFrame) IS the pump's input: the corrected
-            // `?tutrace=1` probe (hooks `Gc.Gnb`, which consumes and clears
-            // `Tu`) shows `Tu` = `14:Me 14:Enemy` on essentially every frame,
-            // and `Su.dea(14)` is the `oz` bucket (moves with
-            // `<Events><EveryFrame>`). Skipping 14 here made the draw
-            // accounting ignore the only bucket the JS uses every frame.
-            if (t == 0) continue;
+            if (t == 0 || t == 14) continue;   // 14 = EveryFrame
+
             for (const auto& fe : fired) {
                 if (fe.first != t) continue;
                 if (t == 13 && !m.interval_end_matches(fe.second, 0)) continue;
