@@ -1340,10 +1340,24 @@ function ensureHooks(fight) {
               for (var i = 0; i < nb && i < 6; i++) {
                 try { names.push(b[i].animation.name); } catch (e2) { /* ignore */ }
               }
+              // Model identity: `parameters.qb` is the CONTROLLED flag (the
+              // port's `ctx.qb`), and `Hd.name` is the equipped weapon, so
+              // `Me`/`Enemy` can be matched to the port's sides without
+              // guessing.
+              var qbv = "?";
+              try {
+                qbv = String(a.parameters && a.parameters.qb);
+              } catch (eQ) { qbv = "?"; }
+              var wea = "?";
+              try {
+                wea = String((a.parameters && a.parameters.Hd &&
+                              a.parameters.Hd.name) || "");
+              } catch (eW) { wea = "?"; }
               console.log("[bucket] f=" +
                           (typeof fight.frame === "number" ? fight.frame : -1) +
                           " model=" + who + " cand=" + nb +
-                          " eb=" + (c ? 1 : 0) +
+                          " eb=" + (c ? 1 : 0) + " qb=" + qbv +
+                          " wea=" + wea +
                           " [" + names.join(" ") + "]");
             } catch (e1) { /* ignore */ }
             return origDK.apply(this, arguments);
