@@ -8006,7 +8006,6 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         }
     }
     // Perk bus per-frame work (EveryFrame slot 2 + mod ia + 12/13 edges).
-    tick_bus_side(&me == &player_ ? 0 : 1);
     // Perk DoTs/HoTs (JS `znb`/`Inb`, L1290/L1298): tick installed mods
     // once per frame (signed per-frame value, clamped, expired dropped).
     if (!me.dots.empty()) sf2::scene::tick_active_mods(me.dots, me.hp, me.max_hp);
@@ -8537,6 +8536,12 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         if (v > 0.0f && !me.is_player) me.fighter.set_time_scale(v);
     }
     me.fighter.advance(dt);
+    // [FIX interval-edge frame] JS raises the interval edges from the clip
+    // frame that just advanced (EStopIntervalEvent after wd.ia), so the
+    // prev/cur comparison must run AFTER Fighter::advance. It ran before, and
+    // the measured [iv] edges landed one frame late (port 253/304/313/352
+    // against the oracle's 252/303/312/351 from ?tutrace=1).
+    tick_bus_side(&me == &player_ ? 0 : 1);
     // [weapon drop, probe] The flung weapon's `Shock="1"` nodes must TRANSLATE
     // after the `Wqb` impulse. Log the max render-pose delta of those nodes
     // for the first frames after the drop (JS `Wqb` L268496 writes `e.ma`;
