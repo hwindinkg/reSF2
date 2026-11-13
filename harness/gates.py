@@ -1068,10 +1068,27 @@ def build_gate(force: bool) -> GateResult:
     return GateResult("build", "build", 0, recipe + note, time.time() - started)
 
 
+# [speed] Several gates run the SAME game command and only differ in which
+# anchors their parser reads (`--kick-ko` feeds kick-ko / end-stance-win /
+# style-player-only / disarm-ai; `--fidelity-tour` feeds fidelity-tour /
+# cloth-hangs). The run is deterministic given the command, so the second gate
+# reuses the first one's stdout instead of paying for another launch. Measured
+# on a warm --full: cloth-hangs 183 s + end-stance-win 69 + style-player-only 70
+# + disarm-ai 66 = 388 s of pure duplication.
+_FLAG_RUNS: dict[tuple, "object"] = {}
+
+
 def run_flag_gate(gate: Gate) -> GateResult:
     argv = [str(GAME), gate.flag, *gate.args, "--watchdog", str(gate.watch),
             RES, SAVE_REL]
-    res = run_proc(argv, gate.id, gate.outer_timeout(), gate.env or None)
+    memo = (tuple(argv), tuple(sorted((gate.env or {}).items())))
+    if memo in _FLAG_RUNS:
+        res = _FLAG_RUNS[memo]
+        print(f"[run] {gate.id}: reuse of {gate.flag} "
+              f"({res.seconds:.1f}s saved)", flush=True)
+    else:
+        res = run_proc(argv, gate.id, gate.outer_timeout(), gate.env or None)
+        _FLAG_RUNS[memo] = res
     started = res.seconds
     if res.timed_out:
         return GateResult(gate.id, "gate", None, verdict="TIMEOUT",
@@ -1085,6 +1102,88 @@ def run_flag_gate(gate: Gate) -> GateResult:
                           error=f"anchor missing: {exc}\n--- stdout tail ---\n{tail}",
                           seconds=started)
     return GateResult(gate.id, "gate", metric, detail, started)
+
+
+# `--no-oracle-cache` forces the live WebView2 oracle run (see oracle_cache_key).
+NO_ORACLE_CACHE = False
+
+ORACLE_CACHE = ROOT / ".harness" / "oracle_cache"
+
+
+def oracle_cache_key(cfg: dict) -> str:
+    """Hash of exactly what the ORACLE run depends on.
+
+    The oracle side is deterministic given (query, input script, tracer,
+    runner page) - the port's code is not part of it. Re-running WebView2 for
+    every `--full` therefore re-measures the SAME oracle output while the port
+    changes, which is most of the wall-clock cost of a run (boot + the
+    wall-clock hub -> Map -> battle navigation + the scripted taps).
+    """
+    h = hashlib.sha256()
+    h.update(json.dumps(cfg.get("oracle", [])).encode())
+    for a in cfg.get("oracle", []):
+        if isinstance(a, str) and a.startswith("reference/"):
+            q = ROOT / a
+            if q.is_file():
+                h.update(q.read_bytes())
+    for name in ("trace.js", "index.html"):
+        q = ROOT / "reference" / "runner" / name
+        if q.is_file():
+            h.update(q.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def oracle_cache_load(key: str, console: Path, state: Path,
+                      traces: Path, art: Path) -> bool:
+    d = ORACLE_CACHE / key
+    src_c, src_s = d / "console.log", d / "oracle_state.jsonl"
+    if not (src_c.is_file() and src_s.is_file()):
+        return False
+    if src_s.stat().st_size == 0:
+        return False
+    shutil.copy2(src_c, console)
+    shutil.copy2(src_s, state)
+    for name in ("oracle_audio.jsonl", "oracle_ui.jsonl", "oracle_pose.jsonl"):
+        q = d / name
+        if q.is_file():
+            shutil.copy2(q, traces / name)
+    return True
+
+
+def oracle_cache_save(key: str, console: Path, state: Path,
+                      traces: Path) -> None:
+    try:
+        d = ORACLE_CACHE / key
+        d.mkdir(parents=True, exist_ok=True)
+        if console.is_file() and console.stat().st_size:
+            shutil.copy2(console, d / "console.log")
+        if state.is_file() and state.stat().st_size:
+            shutil.copy2(state, d / "oracle_state.jsonl")
+        for name in ("oracle_audio.jsonl", "oracle_ui.jsonl", "oracle_pose.jsonl"):
+            q = traces / name
+            if q.is_file() and q.stat().st_size:
+                shutil.copy2(q, d / name)
+    except OSError:
+        pass
+
+
+def write_timings(results, args) -> None:
+    """Per-gate wall clock: the report does not show it, and knowing the top
+    offenders is what makes a run faster (the oracle cache was found this way)."""
+    rows = sorted(((r.seconds, r.gate_id) for r in results), reverse=True)
+    total = sum(r.seconds for r in results)
+    out = ["slowest gates (wall clock, %.0f s total)" % total]
+    for sec, gid in rows[:15]:
+        out.append("  %8.1f s  %s" % (sec, gid))
+    text = "\n".join(out)
+    try:
+        (ROOT / ".harness" / "last_timings.txt").write_text(text + "\n",
+                                                            encoding="utf-8")
+    except OSError:
+        pass
+    if getattr(args, "timings", False):
+        print()
+        print(text)
 
 
 def run_diff_gate(gate: Gate) -> GateResult:
@@ -1107,7 +1206,21 @@ def run_diff_gate(gate: Gate) -> GateResult:
     console.parent.mkdir(parents=True, exist_ok=True)
     oracle_state = ROOT / "reference" / "traces" / "oracle_state.jsonl"
     attempts = 0
-    while attempts < ORACLE_ATTEMPTS:
+    # [speed] The oracle output depends only on (query, input script, tracer,
+    # runner page), so it is cached and reused while the PORT changes. A miss
+    # runs the real WebView2 oracle and populates the cache; `--no-oracle-cache`
+    # forces the live run (the only way to see the run-to-run navigation jitter).
+    cache_key = None
+    cache_hit = False
+    if not NO_ORACLE_CACHE:
+        cache_key = oracle_cache_key(cfg)
+        if oracle_state.exists():
+            oracle_state.unlink()
+        cache_hit = oracle_cache_load(cache_key, console, oracle_state,
+                                      ROOT / "reference" / "traces", art)
+        if cache_hit:
+            print(f"[oracle] {scenario}: cache HIT key={cache_key}", flush=True)
+    while not cache_hit and attempts < ORACLE_ATTEMPTS:
         attempts += 1
         suffix = "" if attempts == 1 else f"-try{attempts}"
         console.write_text("", encoding="utf-8")
@@ -1135,6 +1248,9 @@ def run_diff_gate(gate: Gate) -> GateResult:
     oracle_ui = ROOT / "reference" / "traces" / "oracle_ui.jsonl"
     if oracle_ui.exists():
         shutil.copy2(oracle_ui, art / "oracle_ui.jsonl")
+    if cache_key is not None and not cache_hit:
+        oracle_cache_save(cache_key, console, oracle_state,
+                          ROOT / "reference" / "traces")
 
     # 2. Native side (same input stream, --dump-ui is free).
     #    [coverage] `--dump-audio N` feeds `compare_audio.py`: the audio layer
@@ -1479,11 +1595,21 @@ def main(argv=None) -> int:
     ap.add_argument("--yes", action="store_true",
                     help="confirm a baseline update (the human said ok)")
     ap.add_argument("--json", default="", help="write the machine report here")
+    ap.add_argument("--timings", action="store_true",
+                    help="print the slowest gates of this run (wall clock) and "
+                         "write .harness/last_timings.txt")
+    ap.add_argument("--no-oracle-cache", action="store_true",
+                    help="run the WebView2 oracle even when its artifacts are "
+                         "cached (it depends only on the query, the input "
+                         "script and the tracer, so a port change does not "
+                         "need a new oracle run)")
     ap.add_argument("--readme", action="store_true",
                     help="regenerate README.md's status block and exit")
     ap.add_argument("--check-readme", action="store_true",
                     help="exit 1 when README.md's status block is stale")
     args = ap.parse_args(argv)
+    global NO_ORACLE_CACHE
+    NO_ORACLE_CACHE = bool(getattr(args, "no_oracle_cache", False))
 
     if args.readme or args.check_readme:
         import readme_status  # same directory
@@ -1700,6 +1826,7 @@ def main(argv=None) -> int:
     used_refwww = changed
     print_report(results, baseline, mode_name, time.time() - started,
                  save_guard, used_refwww, timeline)
+    write_timings(results, args)
     print(f"exit {exit_code}")
     if args.json:
         write_json(ROOT / args.json if not os.path.isabs(args.json) else Path(args.json),
