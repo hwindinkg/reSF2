@@ -2111,7 +2111,13 @@ std::string AiController::gc_frame(const AiFightState& st) {
     auto event_matches_js = [this, &fired](const MoveDef& m) -> bool {
         for (const std::string& ev : m.events) {
             const int t = js_event_type(ev);
-            if (t == 0 || t == 14) continue;   // 14 = perk-bus EveryFrame
+            // [FIX] type 14 (EveryFrame) IS the pump's input: the corrected
+            // `?tutrace=1` probe (hooks `Gc.Gnb`, which consumes and clears
+            // `Tu`) shows `Tu` = `14:Me 14:Enemy` on essentially every frame,
+            // and `Su.dea(14)` is the `oz` bucket (moves with
+            // `<Events><EveryFrame>`). Skipping 14 here made the draw
+            // accounting ignore the only bucket the JS uses every frame.
+            if (t == 0) continue;
             for (const auto& fe : fired) {
                 if (fe.first != t) continue;
                 if (t == 13 && !m.interval_end_matches(fe.second, 0)) continue;
@@ -2164,7 +2170,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
             } else if (m->type != "ATTACK" && m->type != "MOVE" &&
                        m->name.find("Block") == std::string::npos) {
                 why = "type:" + m->type;
-            } else if (st.full_conditions && !st.full_conditions(*m)) {
+            } else if (st.full_conditions && !st.full_conditions(*m, nullptr)) {
                 why = "conditions";
             } else if (!v1(*m, st, &why, false)) {
                 const std::size_t colon = why.find(':');
@@ -2203,7 +2209,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
         if (m->no_animation) {
             // JS `g` (`d.Ukb(g[uf.sja(g.length)].animation)`): picked, but it
             // starts nothing - only the DRAW is consumed.
-            if (gc_two && !(st.full_conditions && !st.full_conditions(*m))) {
+            if (gc_two && !(st.full_conditions && !st.full_conditions(*m, nullptr))) {
                 if (rha_best.empty() || m->priority > rha_best.front()->priority) {
                     rha_best.clear();
                     rha_best.push_back(m);
@@ -2233,7 +2239,7 @@ std::string AiController::gc_frame(const AiFightState& st) {
         // the HIT-reaction and `try_every_frame_move` recovery chains.
         // [experiment] SF2_GC_NOCOND=1: skip the Yz / <Conditions> gate.
         static const bool gc_nocond = std::getenv("SF2_GC_NOCOND") != nullptr;
-        if (!gc_nocond && st.full_conditions && !st.full_conditions(*m)) continue;
+        if (!gc_nocond && st.full_conditions && !st.full_conditions(*m, nullptr)) continue;
         // `EZa` admits no type-10/13 candidates (`Gc.OGa` L28730), so the
         // idle family can never be a pump pick: only MOVE/ATTACK and the
         // block family (which carries no `Type` attr) are candidates.
@@ -2263,16 +2269,42 @@ std::string AiController::gc_frame(const AiFightState& st) {
     }
     {
         bool yz_nonrha = false, yz_rha = false;
+        // [probe] SF2_TRACE_YZ=1: ONLY the pump's own candidates (this loop),
+        // not the shared `full_conditions` callers - the earlier trace mixed
+        // `try_select_move`/animate calls and could not answer whether the
+        // `oz` bucket (EveryFrame) passes where the oracle draws.
+        static const bool trace_yz = std::getenv("SF2_TRACE_YZ") != nullptr;
+        int yz_cand = 0, yz_pass = 0;
+        std::string yz_first_fail;
         for (const MoveDef* m : *st.my_moves) {
             if (m == nullptr) continue;
             if (!event_matches_js(*m)) continue;
-            if (st.full_conditions && !st.full_conditions(*m)) continue;
-            if (m->no_animation) {
-                yz_rha = true;
-            } else {
-                yz_nonrha = true;
+            ++yz_cand;
+            const bool ok = !(st.full_conditions && !st.full_conditions(*m, nullptr));
+            if (ok) {
+                ++yz_pass;
+                if (m->no_animation) {
+                    yz_rha = true;
+                } else {
+                    yz_nonrha = true;
+                }
+                if (yz_nonrha && yz_rha) break;
+            } else if (yz_first_fail.empty()) {
+                yz_first_fail = m->name;
+                if (trace_yz) {
+                    std::string why;
+                    st.full_conditions(*m, &why);
+                    std::fprintf(stdout, "[yzwhy] f=%d move=%s\n%s",
+                                 st.fight_frame, m->name.c_str(), why.c_str());
+                    std::fflush(stdout);
+                }
             }
-            if (yz_nonrha && yz_rha) break;
+        }
+        if (trace_yz && yz_cand > 0) {
+            std::fprintf(stdout, "[pump] f=%d cand=%d pass=%d first_fail=%s\n",
+                         st.fight_frame, yz_cand, yz_pass,
+                         yz_first_fail.c_str());
+            std::fflush(stdout);
         }
         const int want = (yz_nonrha ? 1 : 0) + (yz_rha ? 1 : 0);
         const int have = (!best.empty() ? 1 : 0) + (!rha_best.empty() ? 1 : 0);

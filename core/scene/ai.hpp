@@ -422,7 +422,9 @@ struct AiFightState {
     // WHOLE `<Conditions>` tree (not just the tactics list `de.V1` reads), so
     // a start-stance / getup / loss animation is never a pump candidate
     // during the fight. Provided by the fight (it owns the context builder).
-    std::function<bool(const MoveDef&)> full_conditions;
+    // `trace` (optional) receives `eval_move_conditions`' explanation, so a
+    // probe can name the exact `<Condition>` that rejects a pump candidate.
+    std::function<bool(const MoveDef&, std::string*)> full_conditions;
     // My fighter (the one being controlled).
     const MoveDef* current_move = nullptr;   // `da.Ua`
     int move_frame = 0;                      // `Te.Xh` (playback frame)

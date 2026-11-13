@@ -9128,7 +9128,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         {
             FightFighter* pm = &me;
             FightFighter* pf = &foe;
-            st.full_conditions = [this, pm, pf](const sf2::scene::MoveDef& m) {
+            st.full_conditions = [this, pm, pf](const sf2::scene::MoveDef& m, std::string* trace) {
                 sf2::scene::FightContext c;
                 c.roll01 = [this]() { return draw01(); };
                 c.stage = static_cast<sf2::scene::round_stage>(phase_);
@@ -9179,7 +9179,10 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                     }
                     return ok;
                 }
-                return sf2::scene::eval_move_conditions(m.conditions, c);
+                return trace != nullptr
+                           ? sf2::scene::eval_move_conditions(m.conditions, c,
+                                                              trace)
+                           : sf2::scene::eval_move_conditions(m.conditions, c);
             };
         }
         // [Gc pump] the model event TYPES raised for MY side this frame
