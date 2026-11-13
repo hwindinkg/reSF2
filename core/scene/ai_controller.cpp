@@ -2014,13 +2014,11 @@ std::string AiController::gc_frame(const AiFightState& st) {
     auto gc_type = [](int slot) -> int {
         switch (slot) {
             case 1: return 1;   // RoundStageStart
-            // [FIX Gc.Tu parity] EveryFrame (perk slot 2) must NOT enter the
-            // pump: JS raises it on the perk bus only (	b.Gj(model, 2, ...))
-            // and ?tutrace=1 shows Gc.Tu never carries type 14 (106
-            // non-empty frames, all IntervalEnd = 13). Feeding it in made the
-            // pump draw on every frame against the oz bucket, whose
-            // candidates then fail Yz (measured: admitted on 1 frame of 368).
-            case 2: return 0;   // EveryFrame -> the perk bus 	b, not Gc.Tu
+            case 2: return 14;  // EveryFrame. The ?tutrace=1 probe that
+            // hooks `Gc.Gnb` (the consumer) shows `Tu` = `14:Me 14:Enemy`
+            // on essentially EVERY frame, so 14 IS the pump's input; the
+            // earlier "never carries 14" reading came from a probe placed
+            // AFTER `Gnb`, which clears `Tu`.
             case 5: return 6;   // HitPreCrit -> Hit
             case 6: return 6;   // HitPostCrit -> Hit
             case 7: return 7;   // PostHit -> Strike

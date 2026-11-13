@@ -1316,33 +1316,38 @@ function ensureHooks(fight) {
         }
       }
     } catch (e4) { /* ignore */ }
-    /* TU TRACE (`?tutrace=1`, harness-only): the Gc bus widgets LIVE this
-     * frame (`Gc.Tu`), i.e. exactly the array `Gc.Gnb` hands to
-     * `dxa(td,Hsa)`/`dxa(wg,Isa)` and buckets through `Su.dea(type)`. This is
-     * the input the pump's `uf.sja` accounting is built from, and the port has
-     * no way to see the oracle's side of it - `[yz]` measured that the port
-     * rejects nearly every candidate, but not WHICH events the JS actually
-     * raised. Read-only: nothing is patched, `Tu` is only read. */
+    /* TU TRACE (`?tutrace=1`, harness-only): the Gc bus widgets that frame
+     * (`Gc.Tu`), sampled INSIDE `Gc.Gnb` - the function CONSUMES and clears
+     * `Tu` (`Gnb`: `... a = this.Tu.length = 0`), so reading it after `Bg.ia`
+     * only ever showed leftovers. The wrapper prints the list the pump really
+     * had, then calls the original. Read-only apart from the wrapper. */
     try {
       if (new URLSearchParams(window.location.search).get("tutrace") === "1") {
-        var tu = fight.Bg && fight.Bg.Tu;
-        if (tu) {
-          var tv = [];
-          for (var ti = 0; ti < tu.length; ti++) {
-            var tEl = tu[ti];
-            var who = "?";
+        if (!tr.tuHooked && fight.Bg && typeof fight.Bg.Gnb === "function") {
+          tr.tuHooked = 1;
+          var origGnb = fight.Bg.Gnb;
+          fight.Bg.Gnb = function () {
             try {
-              if (tEl.model && tEl.model === fight.yb) {
-                who = "Me";
-              } else if (tEl.model && tEl.model === fight.pb) {
-                who = "Enemy";
+              var tu = this.Tu || [];
+              var tv = [];
+              for (var ti = 0; ti < tu.length; ti++) {
+                var el = tu[ti];
+                var who = "?";
+                try {
+                  if (el.model && el.model === fight.yb) {
+                    who = "Me";
+                  } else if (el.model && el.model === fight.pb) {
+                    who = "Enemy";
+                  }
+                } catch (eW) { who = "?"; }
+                tv.push(el.type + ":" + who);
               }
-            } catch (eTUw) { who = "?"; }
-            tv.push(tEl.type + ":" + who);
-          }
-          console.log("[tu] f=" +
-                      (typeof fight.frame === "number" ? fight.frame : -1) +
-                      " n=" + tv.length + " [" + tv.join(" ") + "]");
+              console.log("[tub] f=" +
+                          (typeof fight.frame === "number" ? fight.frame : -1) +
+                          " n=" + tv.length + " [" + tv.join(" ") + "]");
+            } catch (eB) { /* ignore */ }
+            return origGnb.apply(this, arguments);
+          };
         }
       }
     } catch (eTU) { /* ignore */ }
