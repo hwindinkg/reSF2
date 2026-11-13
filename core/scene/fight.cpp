@@ -9254,7 +9254,26 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         // started only when the fighter is idle (`Bnb` gates on `!Pe`).
         static const bool gc_pump_off = std::getenv("SF2_NO_GC_PUMP") != nullptr;
         if (me.ai != nullptr && !gc_pump_off) {
-            (void)me.ai->gc_frame(st);
+            // [FIX pump event frame] JS Gc.ia (L28336) dispatches the events
+            // raised THIS frame (Gc.Tu), and the pump runs at the end of the
+            // frame (ca.ia L15877-15886). The port handed it the PREVIOUS
+            // frame's list (i_events_prev_), so every interval end was
+            // consumed one frame late ([gc] 253/304/313/352 while [iv]
+            // raised them on 252/303/312/351). Build the state from this
+            // frame's bus events instead; the pick is only stored
+            // (gc_stored_), so this changes the Math.random position, not
+            // what the AI starts.
+            sf2::scene::AiFightState st_cur = st;
+            st_cur.my_event_types.clear();
+            {
+                const int my_side = me.is_player ? 0 : 1;
+                for (const auto& ev : bus_.frame_events) {
+                    if (ev.side == my_side) {
+                        st_cur.my_event_types.push_back({ev.slot, ev.name});
+                    }
+                }
+            }
+            (void)me.ai->gc_frame(st_cur);
         }
         if (!decision.empty()) {
             const sf2::scene::MoveDef* chosen = nullptr;

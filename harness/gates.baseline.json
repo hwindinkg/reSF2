@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-11T16:49:10",
+    "updated": "2026-11-13T19:42:57",
     "mode": "only"
   },
   "gates": {
@@ -108,9 +108,9 @@
     },
     "diff:boss-lynx": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "diff:tournament": {
       "metric": 0,
@@ -228,9 +228,9 @@
     },
     "diff:kusarigama": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "pose:dojo-move": {
       "metric": 421,
@@ -252,9 +252,9 @@
     },
     "cov:boss-lynx": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "cov:tournament": {
       "metric": 0,
@@ -270,9 +270,9 @@
     },
     "cov:kusarigama": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "cov:titan-ladder": {
       "metric": 0,
@@ -312,9 +312,9 @@
     },
     "ui:boss-lynx": {
       "metric": 15,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "ui:tournament": {
       "metric": 15,
@@ -330,9 +330,9 @@
     },
     "ui:kusarigama": {
       "metric": 15,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "ui:titan-ladder": {
       "metric": 15,
@@ -390,9 +390,9 @@
     },
     "posres:boss-lynx": {
       "metric": 0,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "posres:tournament": {
       "metric": 1,
@@ -408,9 +408,9 @@
     },
     "posres:kusarigama": {
       "metric": 1,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "posres:titan-ladder": {
       "metric": 1,
@@ -431,10 +431,10 @@
       "date": "2026-11-08T22:11:30"
     },
     "audio:boss-lynx": {
-      "metric": 7,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "metric": 6,
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "audio:tournament": {
       "metric": 7,
@@ -449,10 +449,10 @@
       "date": "2026-11-11T16:49:09"
     },
     "audio:kusarigama": {
-      "metric": 6,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:52"
+      "metric": 5,
+      "commit": "985f8b05",
+      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
+      "date": "2026-11-13T19:42:57"
     },
     "audio:titan-ladder": {
       "metric": 0,

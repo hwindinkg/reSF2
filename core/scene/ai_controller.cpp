@@ -2101,6 +2101,36 @@ std::string AiController::gc_frame(const AiFightState& st) {
         }
         return false;
     };
+    // [FIX Gc.Tu draw accounting] JS `Gc.DK` builds the bucket from EVERY
+    // `Su.dea(type)` (1/2/3/6/7/9/10/12/13/15/16; `11` falls back to all moves)
+    // and spends the uniform `f[uf.sja(f.length)]` draw as soon as that bucket,
+    // filtered only by `Yz`, is non-empty - BEFORE the AI's `Pkb`/`v1`
+    // filtering. The port only draws when `v1` kept a candidate, so it spent 11
+    // `uf.sja` draws over 368 frames where the oracle spends 112. This matcher
+    // rebuilds the JS bucket for the DRAW COUNT only; which move STARTS stays
+    // `best`/`v1` (admitting these types into the start set measured
+    // diff:boss-lynx 0 -> 182).
+    auto event_matches_js = [this, &fired](const MoveDef& m) -> bool {
+        for (const std::string& ev : m.events) {
+            const int t = js_event_type(ev);
+            if (t == 0 || t == 14) continue;   // 14 = perk-bus EveryFrame
+            for (const auto& fe : fired) {
+                if (fe.first != t) continue;
+                if (t == 13 && !m.interval_end_matches(fe.second, 0)) continue;
+                if (t == 10) {
+                    std::vector<std::string> ended;
+                    if (moves_ != nullptr) {
+                        const auto it = moves_->find(fe.second);
+                        if (it != moves_->end()) ended = it->second.anim_names;
+                    }
+                    if (ended.empty()) ended.push_back(fe.second);
+                    if (!m.anim_end_matches(ended)) continue;
+                }
+                return true;
+            }
+        }
+        return false;
+    };
     static const bool gc_every = std::getenv("SF2_GC_EVERY") != nullptr;
     if (fired.empty()) return gc_every ? std::string() : gc_stored_;
     // [probe] SF2_TRACE_GC=1: the fired types + what the buckets keep.
@@ -2231,6 +2261,28 @@ std::string AiController::gc_frame(const AiFightState& st) {
             best.push_back(m);
         } else if (m->priority == best.front()->priority) {
             best.push_back(m);
+        }
+    }
+    {
+        bool yz_nonrha = false, yz_rha = false;
+        for (const MoveDef* m : *st.my_moves) {
+            if (m == nullptr) continue;
+            if (!event_matches_js(*m)) continue;
+            if (st.full_conditions && !st.full_conditions(*m)) continue;
+            if (m->no_animation) {
+                yz_rha = true;
+            } else {
+                yz_nonrha = true;
+            }
+            if (yz_nonrha && yz_rha) break;
+        }
+        const int want = (yz_nonrha ? 1 : 0) + (yz_rha ? 1 : 0);
+        const int have = (!best.empty() ? 1 : 0) + (!rha_best.empty() ? 1 : 0);
+        for (int k = have; k < want; ++k) {
+            float ry = math_roll();
+            if (ry < 0.0f) ry = 0.0f;
+            if (ry >= 1.0f) ry = 0.9999999f;
+            (void)ry;
         }
     }
     if (!rha_best.empty()) {
