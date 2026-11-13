@@ -3997,6 +3997,11 @@ void FightController::enter_start_stance() {
     // EndStance=3, ...). The port publishes the JS stage NAME, which is the
     // same 1..7 map as `sf2::scene::round_stage`.
     dispatch_global_triggers("RoundStageStart", "RoundStageStart", "StartStance");
+    // [FIX Gc tu events] `Gc.Ih(1, model)` for BOTH models on the stage start
+    // (`?tutrace=1`: `1:Me 1:Enemy`). The perk bus already had the trigger; the
+    // pump's `jQ` bucket needs the model EVENT, which was never raised.
+    fire_bus_slot(sf2::scene::kEvRoundStage, sf2::scene::TrigVars(), 0, true);
+    fire_bus_slot(sf2::scene::kEvRoundStage, sf2::scene::TrigVars(), 1, true);
 }
 
 // JS `Rkb` (L410): phase 2 — the round goes live (HUD play() sets
@@ -6367,6 +6372,14 @@ void FightController::player_input(sf2::scene::key_type key, sf2::scene::press_t
         std::fprintf(stdout, "[cd] yJa F%d key=%d slot=%d ready -> Kl.Sgb\n",
                      frame_, slot, slot);
         std::fflush(stdout);
+    }
+    // [FIX Gc tu events] JS raises the `KeyPressed` model event (`Gc.Ih(2,...)`)
+    // from the input handler; `?tutrace=1` shows `2:Enemy` (the port's player)
+    // on the frames where it fires. Without this the pump's `iQ` bucket is
+    // never non-empty and the `uf.sja` pick for it is never spent.
+    if (press == press_type::tap) {
+        fire_bus_slot(sf2::scene::kEvKeyPressed, sf2::scene::TrigVars(), 0,
+                      true);
     }
     player_.fighter.input(key, press);
 }
