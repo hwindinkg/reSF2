@@ -1274,14 +1274,14 @@ static const VerifyProbe kVerifyProbes[] = {
     // (`uf.sja` L4476 calls `uf.OKa.RGa()` unconditionally; `floor(r*1) == 0`
     // -> index 0 but the stream advances). No `Pkb`.
     {180, "Back Tap x2 (spawn gap 283)", "BackHandflip",
-     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=0.021142 idx=0 BackHandflip",
+     "cands=StepBack@10,BackHandflip@20 f=BackHandflip draw=0.739584 idx=0 BackHandflip",
      4, false},
     // F300: Forward Tap x2. Document order: StepForward then
     // DoubleStepForward. `Aua` keeps DoubleStepForward (Priority 20 > 10),
     // a singleton `f` -> one `uf.sja` tick consumed, no `Pkb`. The 2key double
     // step wins on PRIORITY, not on a weight.
     {300, "Forward Tap x2", "DoubleStepForward",
-     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=0.779971 idx=0 DoubleStepForward",
+     "cands=StepForward@10,DoubleStepForward@20 f=DoubleStepForward draw=0.363724 idx=0 DoubleStepForward",
      4, false},
     // F420: Punch Tap x2 + Forward Hold. PROOF that the `va.Ts`
     // <Tactics><Conditions> filter of `Gc.Pkb` (L675) is NOT on this path:
@@ -1298,12 +1298,12 @@ static const VerifyProbe kVerifyProbes[] = {
     // guard correctly rejects the restart (the pre-fix expectation listed it
     // only because `anims_me` held the move NAME and the guard never matched).
     {420, "Punch Tap x2 + Forward Hold", "DoublePunch",
-     "cands=HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=0.145958 idx=0 DoublePunch",
+     "cands=HighPunch@110,HeavyPunch@120,DoublePunch@130 f=DoublePunch draw=0.413713 idx=0 DoublePunch",
      4, false},
     // F520: single Forward tap -> the 1key StepForward (singleton `Aua`), one
     // `uf.sja` tick.
     {520, "Forward Tap x1 (1key)", "StepForward",
-     "cands=StepForward@10 f=StepForward draw=0.776821 idx=0 StepForward",
+     "cands=StepForward@10 f=StepForward draw=0.577233 idx=0 StepForward",
      4, false},
     // F550: single Forward tap 30 frames later. [item-1 fix] The tap lands
     // while the previous `StepForward` is still inside `SelfUninterrupt [0,13]`
@@ -1330,7 +1330,7 @@ static const VerifyProbe kVerifyProbes[] = {
     // at this distance; the port's selection is correct and only the
     // authored expectation was stale.
     {620, "K key -> Punch-key move (no Tactics gate)", "ShortUpwardElbowStrike",
-     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=0.050383 idx=0 ShortUpwardElbowStrike",
+     "cands=HighPunch@110,ShortUpwardElbowStrike@150 f=ShortUpwardElbowStrike draw=0.281395 idx=0 ShortUpwardElbowStrike",
      14, false},
     // F700: B (GLFW 66) is unbound -> no tap -> no decision, no move.
     {700, "B key -> dropped (no move)", "<none>", "", 12, false},

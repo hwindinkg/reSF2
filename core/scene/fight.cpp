@@ -10355,6 +10355,95 @@ void FightController::update(float dt) {
         l.e_hp = enemy_.hp;
     }
 
+    // [FIX player Gc pump] JS `Gc.Gnb` -> `dxa(td)` walks EVERY model, so the
+    // PLAYER's model also runs `DK` and spends one `uf.sja` per non-empty
+    // bucket after `Yz`. The `?buckettrace=1` probe proved the mapping
+    // (oracle Me = this player: qb=true, wea=Fists) and shows the buckets come
+    // from the frame's MODEL EVENTS, not only EveryFrame: at f=132 the single
+    // candidate FistsStartStanceIdle-Left is an `<AnimationEnd>` move (the
+    // player's hb dump shows every=0 animend=1), which is why scanning only
+    // "EveryFrame" never produced that draw.
+    if (std::getenv("SF2_NO_GC_PUMP") == nullptr) {
+        const auto slot_type = [](int slot) -> int {
+            switch (slot) {
+                case 1: return 1;
+                case 2: return 14;
+                case 5: return 6;
+                case 6: return 6;
+                case 7: return 7;
+                case 9: return 9;
+                case 10: return 10;
+                case 11: return 11;
+                case 12: return 12;
+                case 13: return 13;
+                case 14: return 16;
+                case 17: return 2;
+                default: return 0;
+            }
+        };
+        const auto type_name = [](int t) -> const char* {
+            switch (t) {
+                case 1: return "RoundStageStart";
+                case 2: return "KeyPressed";
+                case 3: return "KeyReleased";
+                case 6: return "Hit";
+                case 7: return "Strike";
+                case 9: return "AnimationStart";
+                case 10: return "AnimationEnd";
+                case 11: return "AnimationInterrupted";
+                case 12: return "IntervalStart";
+                case 13: return "IntervalEnd";
+                case 14: return "EveryFrame";
+                case 15: return "Birth";
+                case 16: return "ModExpires";
+                default: return nullptr;
+            }
+        };
+        std::vector<int> live{14};
+        const auto add_type = [&live](int ty) {
+            if (ty == 0) return;
+            if (std::find(live.begin(), live.end(), ty) == live.end()) {
+                live.push_back(ty);
+            }
+        };
+        for (const auto& ev : ai_events_prev_) {
+            if (ev.side == 0) add_type(slot_type(ev.slot));
+        }
+        sf2::scene::FightContext pc;
+        pc.stage = static_cast<sf2::scene::round_stage>(phase_);
+        pc.anims_me = anim_names_of(player_.fighter);
+        pc.anims_enemy = anim_names_of(enemy_.fighter);
+        fill_ctx_geometry(pc, player_, enemy_);
+        pc.health_ratio =
+            player_.max_hp > 0.0f ? player_.hp / player_.max_hp : 0.0f;
+        fill_ctx_cond_state(pc, player_, enemy_, 0);
+        for (const std::string& n : player_.fighter.active_intervals()) {
+            pc.intervals.push_back({n, player_.fighter.interval_type(n), true});
+        }
+        for (const std::string& n : enemy_.fighter.active_intervals()) {
+            pc.intervals_enemy.push_back({n, 0, true});
+        }
+        for (int ty : live) {
+            const char* nm = type_name(ty);
+            if (nm == nullptr) continue;
+            bool nonrha = false, rha = false;
+            for (const sf2::scene::MoveDef* m : player_.fighter.hb()) {
+                if (m == nullptr) continue;
+                if (!m->has_event(nm)) continue;
+                if (!sf2::scene::eval_move_conditions(m->conditions, pc)) {
+                    continue;
+                }
+                if (m->no_animation) {
+                    rha = true;
+                } else {
+                    nonrha = true;
+                }
+                if (nonrha && rha) break;
+            }
+            const int want = (nonrha ? 1 : 0) + (rha ? 1 : 0);
+            for (int k = 0; k < want; ++k) (void)math_random01();
+        }
+    }
     // The events raised this frame are dispatched by `Gc.ia` on the NEXT one.
     ai_events_prev_ = bus_.frame_events;
 

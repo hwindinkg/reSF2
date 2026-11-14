@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-13T19:42:57",
+    "updated": "2026-11-14T10:10:27",
     "mode": "only"
   },
   "gates": {
@@ -108,15 +108,15 @@
     },
     "diff:boss-lynx": {
       "metric": 0,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "diff:tournament": {
       "metric": 0,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "diff:survival": {
       "metric": 0,
@@ -228,9 +228,9 @@
     },
     "diff:kusarigama": {
       "metric": 0,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:27"
     },
     "pose:dojo-move": {
       "metric": 421,
@@ -252,15 +252,15 @@
     },
     "cov:boss-lynx": {
       "metric": 0,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "cov:tournament": {
       "metric": 0,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "cov:survival": {
       "metric": 0,
@@ -270,9 +270,9 @@
     },
     "cov:kusarigama": {
       "metric": 0,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:27"
     },
     "cov:titan-ladder": {
       "metric": 0,
@@ -312,15 +312,15 @@
     },
     "ui:boss-lynx": {
       "metric": 15,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "ui:tournament": {
       "metric": 15,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "ui:survival": {
       "metric": 15,
@@ -330,9 +330,9 @@
     },
     "ui:kusarigama": {
       "metric": 15,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:27"
     },
     "ui:titan-ladder": {
       "metric": 15,
@@ -390,15 +390,15 @@
     },
     "posres:boss-lynx": {
       "metric": 0,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "posres:tournament": {
       "metric": 1,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "posres:survival": {
       "metric": 1,
@@ -408,9 +408,9 @@
     },
     "posres:kusarigama": {
       "metric": 1,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:27"
     },
     "posres:titan-ladder": {
       "metric": 1,
@@ -431,16 +431,16 @@
       "date": "2026-11-08T22:11:30"
     },
     "audio:boss-lynx": {
-      "metric": 6,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "metric": 3,
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "audio:tournament": {
-      "metric": 7,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "metric": 6,
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:26"
     },
     "audio:survival": {
       "metric": 0,
@@ -449,10 +449,10 @@
       "date": "2026-11-11T16:49:09"
     },
     "audio:kusarigama": {
-      "metric": 5,
-      "commit": "985f8b05",
-      "reason": "Gc pump consumes THIS frame's bus events (JS Gc.ia at the frame end) and spends the JS DK draws: audio 7->6 and 6->5, diff:* 0",
-      "date": "2026-11-13T19:42:57"
+      "metric": 4,
+      "commit": "f7d280ae",
+      "reason": "player Gc pump from the frame's model events (f=132 candidate FistsStartStanceIdle-Left is an AnimationEnd move) + verify-input probe draws re-pinned to the JS-aligned stream: audio boss-lynx 6->3, tournament 7->6, kusarigama 5->4, all diff:* 0, kick-ko WIN, verify-input 7/7",
+      "date": "2026-11-14T10:10:27"
     },
     "audio:titan-ladder": {
       "metric": 0,
