@@ -98,6 +98,14 @@
     MR_TRACE =
       new URLSearchParams(window.location.search).get("mrtrace") === "1";
   } catch (eMRt) { /* ignore */ }
+  /* ?mrcaller=1 (harness-only): tag every draw with the name of the function
+   * that consumed it, so a value that lands on a different consumer can be
+   * identified instead of guessed. Read-only. */
+  var MR_CALLER = false;
+  try {
+    MR_CALLER =
+      new URLSearchParams(window.location.search).get("mrcaller") === "1";
+  } catch (eMRc) { /* ignore */ }
   window.__mrDraws = 0;
   Math.random = function () {
     mrDraws++;
@@ -112,7 +120,24 @@
         var f0 = null;
         try { f0 = fightObj(); } catch (eMRf) { f0 = null; }
         if (f0 && typeof f0.frame === "number") fr = f0.frame;
-        console.log("[mr] f=" + fr + " n=" + mrDraws + " v=" + v.toFixed(9));
+        var caller = "?";
+      if (MR_CALLER) {
+        try {
+          var st = (new Error()).stack || "";
+          var sl = st.split("\n");
+          /* [0] = "Error", [1] = this wrapper, [2..5] = the real consumers;
+           * keep only the function part, the blob URL is noise. */
+          var frl = [];
+          for (var si = 2; si < sl.length && frl.length < 4; si++) {
+            var t2 = String(sl[si] || "").trim().split(" (blob")[0].trim();
+            t2 = t2.replace(/^at\s+/, "");
+            if (t2 && t2 !== "at") frl.push(t2.slice(0, 40));
+          }
+          caller = frl.join(" < ");
+        } catch (eMRs) { caller = "?"; }
+      }
+      console.log("[mr] f=" + fr + " n=" + mrDraws + " v=" + v.toFixed(9) +
+                  (MR_CALLER ? " c=" + caller : ""));
       } catch (eMRl) { /* ignore */ }
     }
     return v;
