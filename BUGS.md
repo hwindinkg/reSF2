@@ -11468,3 +11468,79 @@ count считает расхождения против трейса, в кот
 
 Дерево после откатa всех проб: `--fast` exit 0, `diff:*` 0, `audio` 3/6/4/7,
 `verify-input` 7/7, `kick-ko` WIN.
+
+### QA-84.11 — ФИЛЬТР `iEa` РЕАЛИЗОВАН (JS-ТОЧНО) И НЕ УБИРАЕТ f=290: ПОРТ ШЛЁТ `IntervalStart('Throwable')` И `IntervalEnd('Uninterrupt')` В ОДНОМ КАДРЕ, А ОРАКУЛ — В ДВУХ СОСЕДНИХ
+
+**1. JS-цепочка фильтров помпы** (`Gc.EZa` L28531-28570): кандидат проходит
+`Kbb` (дедуп по уже набранным) → `OGa(event.model, model, node.Ob)` (атрибут
+`Player`) → `iEa(node, ctx, event)` = `node.compare(ctx)` → `f.Yz(...)`
+(`<Conditions>`). Для `IntervalEnd` это `Om.compare` (L32510-32532):
+```js
+if (!super.compare(a)) return false;      // type 13 == 13
+let d = a.data;                           // the ENDED interval object
+if (!(d instanceof fe)) d = null;
+if (d == null) return false;              // нет данных -> отказ, даже при пустом Name
+if (this.AC == 0 || this.AC == d.type) {  // AC: нет Type -> 0
+  if (this.Ki == null || this.Ki == "" || this.Ki == d.name) a = true;
+}
+if (this.cb) return !a;                   // Not="1"
+```
+
+**2. Реализовал это в помпе** (тип + `Name` + `Not`, через существующие
+`interval_end_matches` / `anim_end_matches`) и замерил:
+```
+audio:boss-lynx  3 -> 9   (per-frame 3, event-count 6)   РЕГРЕСС
+diff:boss-lynx 0
+```
+Правка JS-верная, но поток уходит — откачено. Причина видна из пробы.
+
+**3. Проба `SF2_TRACE_PZ` (события помпы) на спорных кадрах:**
+```
+f=243 type=10 evname='FistsStartStanceIdle-Left' want=1     (совпадает с ora 372 ab)
+f=244 type=6  evname='TwoFootJumpKick'           want=1     (Hit, а не AnimationEnd!)
+f=245 type=12 evname='Uninterrupt'               want=0
+f=245 type=13 evname='Throwable'                 want=0
+f=290 type=12(IntervalStart) evname='Throwable'  want=0
+f=290 type=13(IntervalEnd)   evname='Uninterrupt' want=1    <- вот он
+```
+То есть порт на кадре 290 поднимает **оба** события сразу: `IntervalStart`
+интервала `Throwable` и `IntervalEnd` интервала `Uninterrupt`. Оракул же
+(`?tutrace=1`) на этих кадрах:
+```
+raw f=418  tu=[12:Me 14:Me 14:Enemy]     <- IntervalStart
+raw f=419  tu=[13:Me 14:Me 14:Enemy]     <- IntervalEnd, СЛЕДУЮЩИЙ кадр
+raw f=420  tu=[14:Me 14:Enemy]           <- пусто (порт рисует здесь)
+```
+и его бакет на 419 ПУСТ. Значит `Om.compare` в JS отклонил всех кандидатов, а
+порт — нет. Имя в событии порта (`Uninterrupt`) совпадает со спекой
+`StepForward` (`<IntervalEnd Name="Uninterrupt"/>` из шаблона `Controlled`),
+поэтому фильтр по имени ничего не меняет: расходится САМО событие
+(идентичность/кадр закончившегося интервала), а не фильтр.
+
+**4. Вторая проверенная гипотеза (и её результат).** В помпе `pc.keys_gm` не
+выставляется (по умолчанию false) и `pc.keys` не заполняется, поэтому **любое**
+условие `<Keys>` в помпе проходит: `eval_keys` возвращает true при
+`!ctx.keys_gm`. В JS `vm.he` (`a.gm ? … : true`) при `gm=false` тоже true, но
+`gm` — переходящий флаг: `EZa` ставит false только на время `KeyPressed`+`eb`
+(L28548) и обратно true (L28565).
+
+Проверил прямо: добавил `Fighter::buffered_keys()` и заполнил `pc.keys` +
+`pc.keys_gm = true` в помпе. Результат — ХУЖЕ по всем четырём:
+```
+audio:boss-lynx  3 -> 6     audio:tournament 6 -> 8   audio:kusarigama 4 -> 5
+audio:dojo-demo  7 -> 7     verify-input 7/7 -> 2/7   kick-ko WIN
+```
+Откачено. Значит у JS-евской помпы игрока `gm` действительно остаётся false (у
+модели игрока нет синтетического `KeyPressed`+`eb`, он есть только у watch-пути
+ИИ), и `<Keys>` в помпе игрока проходят без проверки — то есть это НЕ причина
+отклонения `StepForward` на raw 419. Остаётся `Yz` (условия мува) и идентичность
+закончившегося интервала.
+
+**Следующий шаг (точный):** чинить интервальную книгу порта — почему на f=290
+`IntervalStart('Throwable')` и `IntervalEnd('Uninterrupt')` приходят в один кадр,
+тогда как у оракула это два соседних кадра (418/419), и какое имя у реально
+закончившегося интервала (`Om.compare` сравнивает `Name` спеки именно с ним, а
+`a.data == null` отвергает кандидата целиком). `<Keys>`-гипотеза закрыта
+измерением выше.
+
+Дерево: `audio` 3/6/4/7, `verify-input` 7/7, `kick-ko` WIN, `diff:*` 0, `--fast` exit 0.
