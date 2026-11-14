@@ -1,14 +1,12 @@
 # Stage-2 KICK-ONLY fight input script (one file, BOTH sides).
 #
-# The port's `--kick-ko` probe drives the player with KICK taps only (control 10,
-# GLFW 76 / browser keyCode 76 = "L") until the boss is knocked out, which is what
-# makes every landed hit carry the `RestrictedAnimation` kick animation and fires
-# the `KickFights` achievement counter. That probe teleports the fighters into
-# range as a harness convenience, so it has NO oracle counterpart; this script is
-# the shared, input-only version: navigate to the BOSS_LYNX fight (the taps are the
-# same ones `state_boss_lynx.txt` uses, and the port's `--replay` ignores them
-# because it boots the fight directly), then press Forward to close the distance and
-# KICK repeatedly, at fight-frame anchors both sides share.
+# v2: every key edge is anchored AFTER phase 2 starts (the first live fight frame
+# is 203 on BOTH sides - measured: native and oracle base-relative phase-2 start
+# agree at 203). The v1 script pressed Forward at 180, i.e. during the phase-1
+# intro, and the two sides then disagreed: the port started StepForward on the
+# first phase-2 frame (203) while the JS stayed in FistsStartStance, which is why
+# the fight could not be compared. Starting the input inside phase 2 removes that
+# ambiguity.
 #
 # ORACLE side:
 #   shell\bin\Release\net9.0-windows\OracleShell.exe ^
@@ -28,49 +26,45 @@ tap 140 250
 wait 2500
 tap 1130 580
 wait 6000
-# Close the distance: Forward (keyCode 68) held in 60-frame bursts.
-atframe 60 keydown 68
-atframe 120 keyup 68
-atframe 180 keydown 68
-atframe 240 keyup 68
-atframe 300 keydown 68
-atframe 360 keyup 68
+# Close the distance: Forward (keyCode 68) held in 120-frame bursts, all inside
+# phase 2 (>= 203).
+atframe 260 keydown 68
+atframe 380 keyup 68
 atframe 420 keydown 68
-atframe 480 keyup 68
-atframe 540 keydown 68
-atframe 600 keyup 68
-# Kick taps (keyCode 76 = "L" -> Kick(10)), one edge every 4th fight frame,
-# exactly the cadence the `--kick-ko` probe uses when the player is idle.
-atframe 620 keydown 76
-atframe 621 keyup 76
-atframe 624 keydown 76
-atframe 625 keyup 76
-atframe 628 keydown 76
-atframe 629 keyup 76
-atframe 632 keydown 76
-atframe 633 keyup 76
-atframe 636 keydown 76
-atframe 637 keyup 76
-atframe 640 keydown 76
-atframe 641 keyup 76
-atframe 644 keydown 76
-atframe 645 keyup 76
-atframe 648 keydown 76
-atframe 649 keyup 76
-atframe 652 keydown 76
-atframe 653 keyup 76
-atframe 656 keydown 76
-atframe 657 keyup 76
-atframe 660 keydown 76
-atframe 661 keyup 76
-atframe 664 keydown 76
-atframe 665 keyup 76
-atframe 668 keydown 76
-atframe 669 keyup 76
-atframe 672 keydown 76
-atframe 673 keyup 76
-atframe 676 keydown 76
-atframe 677 keyup 76
-atframe 680 keydown 76
-atframe 681 keyup 76
+atframe 540 keyup 68
+atframe 580 keydown 68
+atframe 700 keyup 68
+# Kick taps (keyCode 76 = "L" -> Kick(10)) every 4th fight frame.
+atframe 720 keydown 76
+atframe 721 keyup 76
+atframe 724 keydown 76
+atframe 725 keyup 76
+atframe 728 keydown 76
+atframe 729 keyup 76
+atframe 732 keydown 76
+atframe 733 keyup 76
+atframe 736 keydown 76
+atframe 737 keyup 76
+atframe 740 keydown 76
+atframe 741 keyup 76
+atframe 744 keydown 76
+atframe 745 keyup 76
+atframe 748 keydown 76
+atframe 749 keyup 76
+atframe 752 keydown 76
+atframe 753 keyup 76
+atframe 756 keydown 76
+atframe 757 keyup 76
+atframe 760 keydown 76
+atframe 761 keyup 76
+atframe 764 keydown 76
+atframe 765 keyup 76
+atframe 768 keydown 76
+atframe 769 keyup 76
+atframe 772 keydown 76
+atframe 773 keyup 76
+atframe 776 keydown 76
+atframe 777 keyup 76
+atframe 780 keydown 76
+atframe 781 keyup 76
 wait 60000
