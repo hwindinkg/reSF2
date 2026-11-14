@@ -466,12 +466,6 @@
       "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
       "date": "2026-11-09T18:43:52"
     },
-    "audio:dojo-demo": {
-      "metric": 7,
-      "commit": "81ce6dda",
-      "reason": "audio:dojo-demo - the audio gate now also covers the dojo demo (it uses --fight, so the dump is armed). Measured 7 = 4 per-frame + 3 event-count: the port plays snd_swish5/6/7 on 4 frames where the JS plays nothing, and 3 events differ in total count. The 308-frame music_track difference (native names the menu track, the JS reports an EMPTY track because its field only knows the FIGHT music) is reported as structurally absent and not counted - same policy as compare_state demoting an always-null oracle field",
-      "date": "2026-11-09T00:03:24"
-    },
     "sub:tournament": {
       "metric": 0,
       "commit": "71863699",
@@ -586,5 +580,8 @@
       "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
       "date": "2026-11-14T19:05:00"
     }
+  },
+  "_retired": {
+    "audio:dojo-demo": "dropped 2026-11-14: the oracle dojo-demo trace carries no audio at all (900 rows, plays=[] everywhere, audiodiag d=[] with the hook installed), so the metric compared the port against an empty play list. The same move's cues are recorded in boss-lynx, i.e. the preview model simply never dispatches them. Scenario marked no_audio=True."
   }
 }

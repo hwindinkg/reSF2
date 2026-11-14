@@ -884,6 +884,12 @@ SCENARIOS: dict[str, dict] = {
                 "--input-script", "reference/tools/state_dojo_demo.txt",
                 "--timeout-ms", "40000"],
         native=["--fight", "--headless", "640", "--dump-state", "400", "--watchdog", "900"],
+        # The oracle's dojo-demo never reaches the mixer: its battle preview model
+        # plays FistsStartStance-Left (which declares swish6@7/swish7@14/swish6@28/
+        # swish5@35) yet records zero cues in 900 rows with the audio hook installed,
+        # while boss-lynx records the same cues - so an AUDIO diff here compares a
+        # real fight against a silent preview and carries no signal.
+        no_audio=True,
         timeout_s=300,
     ),
     "boss-lynx": dict(
@@ -1417,7 +1423,13 @@ def run_diff_gate(gate: Gate) -> GateResult:
     # 3c. AUDIO diff on the same run (see p_audio_total: previously ungated).
     audio_metric = None
     audio_detail = ""
-    if dump_audio and (art / "native_audio.jsonl").exists() and \
+    # [coverage] `no_audio=True` drops the AUDIO diff for a scenario whose oracle
+    # trace cannot carry sound: dojo-demo runs a battle PREVIEW model that never
+    # dispatches the move's `<Sound>` actions (measured: 900 oracle audio rows,
+    # `plays=[]` in every one, `{"t":"audiodiag","d":[],"hooked":true}`), while the
+    # SAME move's cues are recorded in boss-lynx - so the comparison has no signal.
+    if dump_audio and not cfg.get("no_audio") and \
+            (art / "native_audio.jsonl").exists() and \
             (art / "oracle_audio.jsonl").exists():
         audio_report = REPORTS / f"audio_{scenario}.txt"
         au = run_proc(
