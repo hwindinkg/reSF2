@@ -1,0 +1,70 @@
+# Stage-2 KICK-ONLY fight input script (one file, BOTH sides).
+#
+# v2: every key edge is anchored AFTER phase 2 starts (the first live fight frame
+# is 203 on BOTH sides - measured: native and oracle base-relative phase-2 start
+# agree at 203). The v1 script pressed Forward at 180, i.e. during the phase-1
+# intro, and the two sides then disagreed: the port started StepForward on the
+# first phase-2 frame (203) while the JS stayed in FistsStartStance, which is why
+# the fight could not be compared. Starting the input inside phase 2 removes that
+# ambiguity.
+#
+# ORACLE side:
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=1&skipFightNone=1&maxFrames=9000&battle=BOSS_LYNX&battleZone=ZONE_1" ^
+#     --input-script reference/tools/kick_ko.txt --timeout-ms 180000
+# NATIVE side:
+#   build\app\game\Release\game.exe --replay reference/tools/kick_ko.txt ^
+#     --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location dojo ^
+#     --headless 9000 --dump-state 9000 --watchdog 900 ^
+#     reference/www/res reference/saves/save.xml
+#
+# Menu navigation (oracle only; the native `--replay` path boots straight in).
+wait 8000
+tap 180 98
+wait 1500
+tap 140 250
+wait 2500
+tap 1130 580
+wait 6000
+# Close the distance: Forward (keyCode 68) held in 120-frame bursts, all inside
+# phase 2 (>= 203).
+atframe 390 keydown 68
+atframe 510 keyup 68
+atframe 550 keydown 68
+atframe 670 keyup 68
+atframe 710 keydown 68
+atframe 830 keyup 68
+# Kick taps (keyCode 76 = "L" -> Kick(10)) every 4th fight frame.
+atframe 850 keydown 76
+atframe 851 keyup 76
+atframe 854 keydown 76
+atframe 855 keyup 76
+atframe 858 keydown 76
+atframe 859 keyup 76
+atframe 862 keydown 76
+atframe 863 keyup 76
+atframe 866 keydown 76
+atframe 867 keyup 76
+atframe 870 keydown 76
+atframe 871 keyup 76
+atframe 874 keydown 76
+atframe 875 keyup 76
+atframe 878 keydown 76
+atframe 879 keyup 76
+atframe 882 keydown 76
+atframe 883 keyup 76
+atframe 886 keydown 76
+atframe 887 keyup 76
+atframe 890 keydown 76
+atframe 891 keyup 76
+atframe 894 keydown 76
+atframe 895 keyup 76
+atframe 898 keydown 76
+atframe 899 keyup 76
+atframe 902 keydown 76
+atframe 903 keyup 76
+atframe 906 keydown 76
+atframe 907 keyup 76
+atframe 910 keydown 76
+atframe 911 keyup 76
+wait 60000
