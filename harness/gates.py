@@ -1655,11 +1655,25 @@ def main(argv=None) -> int:
 
     wanted = [s for s in args.only.split(",") if s] if args.only else []
     if wanted:
-        missing = [w for w in wanted if w not in {g.id for g in all_gates}]
+        # Derived ids (`pose:<scenario>`, `posevel:`, `cam:`, `audio:`, `cov:`,
+        # `ui:`, `sub:`, `posres:`) are emitted per diff run and live in the
+        # baseline, but they are NOT in the static gate list - the tool's own
+        # "--update-baseline --only audio:x" hint was rejected as unknown.
+        known = {g.id for g in all_gates}
+        baseline_ids = set(load_baseline().get("gates", {}))
+        missing = [w for w in wanted
+                   if w not in known and w not in baseline_ids]
         if missing:
-            print(f"gates: unknown gate id(s): {', '.join(missing)}", file=sys.stderr)
+            print(f"gates: unknown gate id(s): {', '.join(missing)}",
+                  file=sys.stderr)
             return 2
-        selected = [g for g in all_gates if g.id in wanted]
+        # A derived id needs its scenario's diff gate to run (that run emits it).
+        derived_prefixes = ("pose:", "posevel:", "cam:", "audio:", "cov:",
+                            "ui:", "sub:", "posres:")
+        derived_scen = {"diff:" + w.split(":", 1)[1] for w in wanted
+                        if w.startswith(derived_prefixes) and ":" in w}
+        selected = [g for g in all_gates
+                    if g.id in wanted or g.id in derived_scen]
     elif args.full:
         selected = [g for g in all_gates if "full" in g.tags]
     else:

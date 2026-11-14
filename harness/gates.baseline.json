@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-14T10:10:27",
+    "updated": "2026-11-14T22:42:20",
     "mode": "only"
   },
   "gates": {
@@ -233,16 +233,16 @@
       "date": "2026-11-14T10:10:27"
     },
     "pose:dojo-move": {
-      "metric": 421,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:30"
+      "metric": 555,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:20"
     },
     "posevel:dojo-move": {
-      "metric": 69,
-      "commit": "381d043a",
-      "reason": "new gate posres:<scenario> - fighters.*.x/.y are emitted and were reported as INFORMATION ONLY, so a port walking to a different place could not fail a gate. Measured: the absolute offset is a CONSTANT per scenario and IDENTICAL for both fighters (boss-lynx -0.598, challenge/tournament -22.211, survival +14.229, kusarigama -43.887, titan-ladder +78.984) while fighters.sep_x matches 0/368 - i.e. the pair is placed at a different arena ORIGIN, not a gameplay divergence. The gate therefore measures the deviation from that constant: frames where the offset moves by more than 1.0 unit. Baselined 0 on the dojo and boss-lynx scenarios and 1 (a single frame at the live-fight transition) on challenge/kusarigama/survival/titan-ladder/tournament",
-      "date": "2026-11-08T22:11:30"
+      "metric": 123,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:20"
     },
     "cov:dojo-demo": {
       "metric": 0,
@@ -293,16 +293,16 @@
       "date": "2026-11-08T22:11:30"
     },
     "posevel:kusarigama": {
-      "metric": 268,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "metric": 368,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "pose:kusarigama": {
-      "metric": 357,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:53"
+      "metric": 457,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "ui:dojo-demo": {
       "metric": 7,
@@ -371,16 +371,16 @@
       "date": "2026-11-08T23:19:51"
     },
     "posevel:boss-lynx": {
-      "metric": 163,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "metric": 262,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "pose:boss-lynx": {
-      "metric": 357,
-      "commit": "81ce6dda",
-      "reason": "new gate audio:<scenario> - compare_audio.py, the oracle's t:audio line and the native --dump-audio were ALL implemented and NEVER wired into any gate, so a missing/extra SFX, a wrong music track or a bus divergence could not fail the build. Now every --fight scenario diffs one audio row per fight frame (368 frames each, 0 native-only). Measured: 0 on survival, titan-ladder and challenge (audio is identical), and small real divergences elsewhere - boss-lynx and tournament 7 (3 per-frame + 4 event counts), kusarigama 6 (2 + 4). The per-frame cases are all HIT-SOUND VARIANTS chosen differently: tournament f=250 snd_hit5 vs snd_hit4, f=270 snd_hit1 vs snd_hit3, f=330 snd_hit3 vs snd_hit2 - the Strike RandomSound draw from the shared rng stream lands differently, a real class of mismatch that was completely invisible before. The dojo scenarios use --replay, which has no audio arming site in main.cpp, so they are correctly left ungated",
-      "date": "2026-11-08T23:19:51"
+      "metric": 444,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "posres:dojo-demo": {
       "metric": 0,
@@ -479,16 +479,16 @@
       "date": "2026-11-09T18:43:50"
     },
     "posevel:tournament": {
-      "metric": 132,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "metric": 218,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "pose:tournament": {
-      "metric": 444,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:50"
+      "metric": 573,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "sub:survival": {
       "metric": 0,
@@ -497,16 +497,16 @@
       "date": "2026-11-11T16:49:09"
     },
     "posevel:survival": {
-      "metric": 143,
-      "commit": "61ac226f",
-      "reason": "jitter, not a regression: posevel:survival counts matched frames and the oracle navigation is wall-clock, so the capture window shifts between runs. Three consecutive full runs on the same code measured 150 (fullBJ), 144 (fullBO) and 159 (fullBR), earlier ones 143 and 156 - distribution 143..159, median 150 - while the 10 percent band anchored on the LUCKIEST sample (144-14=158) failed 159 by exactly one frame. Re-baselined to the median 150, so the band is 135..165: it covers the observed spread and still trips on a genuine regression (which is tens of frames). pose:survival is unaffected and stands at 536 in all three runs",
-      "date": "2026-11-11T16:49:09"
+      "metric": 169,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "pose:survival": {
-      "metric": 536,
-      "commit": "61ac226f",
-      "reason": "jitter, not a regression: posevel:survival counts matched frames and the oracle navigation is wall-clock, so the capture window shifts between runs. Three consecutive full runs on the same code measured 150 (fullBJ), 144 (fullBO) and 159 (fullBR), earlier ones 143 and 156 - distribution 143..159, median 150 - while the 10 percent band anchored on the LUCKIEST sample (144-14=158) failed 159 by exactly one frame. Re-baselined to the median 150, so the band is 135..165: it covers the observed spread and still trips on a genuine regression (which is tens of frames). pose:survival is unaffected and stands at 536 in all three runs",
-      "date": "2026-11-11T16:49:10"
+      "metric": 736,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:19"
     },
     "sub:titan-ladder": {
       "metric": 0,
@@ -515,16 +515,16 @@
       "date": "2026-11-09T18:43:51"
     },
     "posevel:titan-ladder": {
-      "metric": 97,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:52"
+      "metric": 116,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:20"
     },
     "pose:titan-ladder": {
-      "metric": 389,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:52"
+      "metric": 489,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:20"
     },
     "sub:challenge": {
       "metric": 0,
@@ -533,16 +533,16 @@
       "date": "2026-11-09T18:43:52"
     },
     "posevel:challenge": {
-      "metric": 154,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:52"
+      "metric": 204,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:20"
     },
     "pose:challenge": {
-      "metric": 536,
-      "commit": "71863699",
-      "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
-      "date": "2026-11-09T18:43:52"
+      "metric": 736,
+      "commit": "9ce8f097",
+      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
+      "date": "2026-11-14T22:42:20"
     },
     "cam:boss-lynx": {
       "metric": 1,

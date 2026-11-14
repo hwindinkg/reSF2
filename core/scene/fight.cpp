@@ -10519,6 +10519,11 @@ void FightController::set_state_dump(const std::string& path, int frames) {
 // nothing here mutates the fight state.
 void FightController::dump_pose_frame() {
     if (pose_dump_frames_ <= 0) return;
+    // The idle lead-in (`eu` 0) has no oracle counterpart: the oracle's pose
+    // trace carries phases 1/2 only and not a single `f=0` row, while the port
+    // emitted 332 phase-0 rows (all stamped `f=0`) that could never pair and
+    // skewed the alignment.
+    if (phase() == static_cast<int>(fight_phase::idle)) return;
     if (pose_dump_file_ == nullptr) {
         if (fopen_s(&pose_dump_file_, pose_dump_path_.c_str(), "wb") != 0 ||
             pose_dump_file_ == nullptr) {
