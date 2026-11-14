@@ -1,0 +1,76 @@
+# Stage-2 KICK-ONLY fight input script (one file, BOTH sides).
+#
+# The port's `--kick-ko` probe drives the player with KICK taps only (control 10,
+# GLFW 76 / browser keyCode 76 = "L") until the boss is knocked out, which is what
+# makes every landed hit carry the `RestrictedAnimation` kick animation and fires
+# the `KickFights` achievement counter. That probe teleports the fighters into
+# range as a harness convenience, so it has NO oracle counterpart; this script is
+# the shared, input-only version: navigate to the BOSS_LYNX fight (the taps are the
+# same ones `state_boss_lynx.txt` uses, and the port's `--replay` ignores them
+# because it boots the fight directly), then press Forward to close the distance and
+# KICK repeatedly, at fight-frame anchors both sides share.
+#
+# ORACLE side:
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=1&skipFightNone=1&maxFrames=9000&battle=BOSS_LYNX&battleZone=ZONE_1" ^
+#     --input-script reference/tools/kick_ko.txt --timeout-ms 180000
+# NATIVE side:
+#   build\app\game\Release\game.exe --replay reference/tools/kick_ko.txt ^
+#     --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location dojo ^
+#     --headless 9000 --dump-state 9000 --watchdog 900 ^
+#     reference/www/res reference/saves/save.xml
+#
+# Menu navigation (oracle only; the native `--replay` path boots straight in).
+wait 8000
+tap 180 98
+wait 1500
+tap 140 250
+wait 2500
+tap 1130 580
+wait 6000
+# Close the distance: Forward (keyCode 68) held in 60-frame bursts.
+atframe 60 keydown 68
+atframe 120 keyup 68
+atframe 180 keydown 68
+atframe 240 keyup 68
+atframe 300 keydown 68
+atframe 360 keyup 68
+atframe 420 keydown 68
+atframe 480 keyup 68
+atframe 540 keydown 68
+atframe 600 keyup 68
+# Kick taps (keyCode 76 = "L" -> Kick(10)), one edge every 4th fight frame,
+# exactly the cadence the `--kick-ko` probe uses when the player is idle.
+atframe 620 keydown 76
+atframe 621 keyup 76
+atframe 624 keydown 76
+atframe 625 keyup 76
+atframe 628 keydown 76
+atframe 629 keyup 76
+atframe 632 keydown 76
+atframe 633 keyup 76
+atframe 636 keydown 76
+atframe 637 keyup 76
+atframe 640 keydown 76
+atframe 641 keyup 76
+atframe 644 keydown 76
+atframe 645 keyup 76
+atframe 648 keydown 76
+atframe 649 keyup 76
+atframe 652 keydown 76
+atframe 653 keyup 76
+atframe 656 keydown 76
+atframe 657 keyup 76
+atframe 660 keydown 76
+atframe 661 keyup 76
+atframe 664 keydown 76
+atframe 665 keyup 76
+atframe 668 keydown 76
+atframe 669 keyup 76
+atframe 672 keydown 76
+atframe 673 keyup 76
+atframe 676 keydown 76
+atframe 677 keyup 76
+atframe 680 keydown 76
+atframe 681 keyup 76
+wait 60000
