@@ -704,10 +704,24 @@ int FightController::random_sound_index(int n) {
 //                           `hZ(value)` (= `zL(bh+value)` L505) then `LA()`
 //                           L505; `s6==1` (RaidChargeBullet): `vZa(value)`
 //                           (= `dO+=value` L524) then `Amb()` L524.
-// The remaining kinds (CreatePlayer/Delete/PlayAnimation/Effect/StopEffect/
-// StopFollowEffect/TryOnEnd/HitEffect/SetCooldown/ZoomEffect) need the child
-// models / magic-effect containers / perk cooldown timers / intro lens — each
-// is listed with its exact missing subsystem in the follow-up report.
+// EVERY remaining kind HAS a branch in `dispatch_move_actions` below:
+//   ShakeScreen        -> `camera_.apply_hit_effect` (L765)
+//   CameraWeight       -> the JS subscriber `Pi.fS` is `{debugger}`, so this is
+//                         a logged no-op (L788)
+//   EnableBossAbility  -> the JS subscriber `Pi.dS` is `{debugger}`, logged
+//                         no-op (L801)
+//   SetCooldown        -> `ability_cooldown_reset`/`_start` on the button slot
+//                         from `sa.HQ` (L815)
+//   ZoomEffect         -> `camera_.apply_zoom_effect` (L828)
+//   TryOnEnd           -> the TryOn preview lives in the shop screen, not in a
+//                         FightController; the JS dispatch is recorded (L838)
+//   HitEffect          -> `camera_.apply_hit_effect` from the hit record
+//   Effect / StopEffect / StopFollowEffect -> the effect container spawn/stop
+//   CreatePlayer / Delete -> the child models (`child_models`, `spawn_child`)
+//   PlayAnimation      -> the model's own clip start
+// There is no automated comparator for these yet: the port logs `[fx]` spawns,
+// but the oracle emits no effects trace, so they are verified by the action
+// branches and the state/pose/audio gates only - recorded as a coverage gap.
 // JS `sa.HQ(0, name)` (L707) over the `sa.$h` map (L706): the ability-button
 // name -> slot. Absent/unknown -> 0 (`HQ` returns 0).
 static int button_slot(const std::string& name) {
