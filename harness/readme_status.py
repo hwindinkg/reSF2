@@ -76,7 +76,16 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "of 568 matched frames, baseline recorded). Policy: cloth/chain nodes "
          "(`BODY-Node*`, `HEAD-Node*`) and the Mass=0 `COM` node are INCLUDED, "
          "because they are the ONLY bones that deviate - every skeletal bone "
-         "matches", True),
+         "matches. ENFORCEMENT WAS BROKEN and is now fixed: "
+         "`run_diff_gate` wrote the oracle console only on a LIVE run, the "
+         "pose block reads `art/oracle_console.log`, so on every cached run "
+         "`pose:`/`posevel:`/`sub:` were never emitted - the last full log had "
+         "not one `pose` line, i.e. 24 baselines were unenforced. "
+         "`oracle_cache_load` now also copies the cached console into the "
+         "artifacts; the next full run reports all 7 pose + 7 posevel gates "
+         "with their baseline values (pose:dojo-move 421, boss-lynx 357, "
+         "tournament 444, survival 536, kusarigama 357, titan-ladder 389, "
+         "challenge 536; posevel 69/163/132/152/268/97/154)", True),
         ("cloth/chain divergence: FIXED the measured defect and bounded the "
          "rest. The solver cadence is 1:1 with JS `Al.ia` (one sk+jE per sim "
          "frame), all 277 merged edges resolve, Gravitation 0.4 and "
