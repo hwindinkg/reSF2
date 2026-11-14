@@ -1143,6 +1143,12 @@ def oracle_cache_load(key: str, console: Path, state: Path,
         return False
     shutil.copy2(src_c, console)
     shutil.copy2(src_s, state)
+    # [FIX silent pose skip] The pose block reads `art/oracle_console.log`, which
+    # was written ONLY on a live oracle run. On a cache hit it was missing, so
+    # `pose_rows` stayed 0, the block was skipped, and the `pose:`/`posevel:`
+    # gates were never emitted - a pose regression could not fail the build (and
+    # the report stayed stale for days).
+    shutil.copy2(src_c, art / "oracle_console.log")
     for name in ("oracle_audio.jsonl", "oracle_ui.jsonl", "oracle_pose.jsonl"):
         q = d / name
         if q.is_file():
