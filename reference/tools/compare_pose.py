@@ -727,6 +727,8 @@ def build_report(args, native_frames, oracle_frames, native_clips, oracle_clips,
     w("  |dcx|   mean %s  max %s" % (fmt(cam["dcx_mean"]), fmt(cam["dcx_max"])))
     w("  |dcy|   mean %s  max %s" % (fmt(cam["dcy_mean"]), fmt(cam["dcy_max"])))
     w("  |dzoom| mean %s  max %s" % (fmt(cam["dzoom_mean"]), fmt(cam["dzoom_max"])))
+    w("  frames over tolerance: %d/%d  (|dcx|/|dcy| > %s units, |dzoom| > 0.02)"
+      % (cam["over"], cam["frames"], fmt(args.tolerance)))
     w("")
 
     w("[world position]  (per fighter, over matched frames%s)" % (" - centered" if getattr(args, "coord_transform", "none") == "center" else ""))
@@ -1007,6 +1009,7 @@ def run_frame_mode(args):
 
     # ---- aggregate stats over matched frames ----
     cam = {"dcx": [], "dcy": [], "dzoom": []}
+    cam_over = [0, 0]  # [frames over tolerance, matched frames]
     world = {"Me": {"dx": [], "dy": [], "fx": 0},
              "Enemy": {"dx": [], "dy": [], "fx": 0}}
     vel_frame_over = {}
@@ -1028,6 +1031,12 @@ def run_frame_mode(args):
         cam["dcx"].append(fm["dcx"])
         cam["dcy"].append(fm["dcy"])
         cam["dzoom"].append(fm["dzoom"])
+        # The camera was PRINTED but never gated: a shake/zoom divergence of
+        # ~20 units on boss-lynx stayed invisible. Count the frames where the
+        # offset leaves the world tolerance (cx/cy) or the zoom scale (0.02).
+        if max(fm["dcx"], fm["dcy"]) > args.tolerance or fm["dzoom"] > 0.02:
+            cam_over[0] += 1
+        cam_over[1] += 1
         frame_max = 0.0
         frame_max_fid = "Me"
         for fid in ("Me", "Enemy"):
@@ -1079,6 +1088,7 @@ def run_frame_mode(args):
             "dcx_mean": mean(cam["dcx"]), "dcx_max": maxv(cam["dcx"]),
             "dcy_mean": mean(cam["dcy"]), "dcy_max": maxv(cam["dcy"]),
             "dzoom_mean": mean(cam["dzoom"]), "dzoom_max": maxv(cam["dzoom"]),
+            "over": cam_over[0], "frames": cam_over[1],
         },
         "world": {
             fid: {"dx_mean": mean(world[fid]["dx"]), "dx_max": maxv(world[fid]["dx"]),
