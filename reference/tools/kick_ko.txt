@@ -1,5 +1,10 @@
 # Stage-2 KICK-ONLY fight input script (one file, BOTH sides).
 #
+# LOCATION: moon (the same as the boss-lynx gate). With dojo the spawn
+# positions differ (player x 615 vs the JS 793) and the BOSS picks other moves
+# (BackFlipKick vs TwoFootJumpKick), so the fights were never comparable - this
+# was measured, not guessed.
+#
 # v2: every key edge is anchored AFTER phase 2 starts (the first live fight frame
 # is 203 on BOTH sides - measured: native and oracle base-relative phase-2 start
 # agree at 203). The v1 script pressed Forward at 180, i.e. during the phase-1
@@ -14,7 +19,7 @@
 #     --input-script reference/tools/kick_ko.txt --timeout-ms 180000
 # NATIVE side:
 #   build\app\game\Release\game.exe --replay reference/tools/kick_ko.txt ^
-#     --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location dojo ^
+#     --battle BOSS_LYNX --zone ZONE_1 --fight-ordinal 0 --location moon ^
 #     --headless 9000 --dump-state 9000 --watchdog 900 ^
 #     reference/www/res reference/saves/save.xml
 #
