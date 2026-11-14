@@ -565,6 +565,19 @@ def p_dialog(text: str) -> tuple[int, str]:
     return (0 if m.group(1) == "PASS" else 1), "parse census " + m.group(1)
 
 
+def p_cam_over(text: str) -> tuple[int, str]:
+    """`compare_pose.py` camera frames over tolerance (constant offset removed).
+
+    The camera block was printed from the first pose run and NEVER gated. With the
+    per-scenario constant arena-origin offset subtracted (as `posres` already does
+    for positions) the metric is meaningful: 0 on dojo-move, 1 on boss-lynx /
+    challenge / survival / tournament (the first phase-1 frame), 5 on kusarigama
+    and 16 on titan-ladder.
+    """
+    m = _need(r"frames over tolerance:\s*(\d+)/(\d+)", text)
+    return int(m.group(1)), "%s/%s camera frames" % (m.group(1), m.group(2))
+
+
 def p_subframe_over(text: str) -> tuple[int, str]:
     """Mismatched `sub`/`subn` frames after normalising the two encodings.
 
@@ -1351,6 +1364,8 @@ def run_diff_gate(gate: Gate) -> GateResult:
     # scenario).
     sub_metric = None
     sub_detail = ""
+    cam_metric = None
+    cam_detail = ""
     if cfg.get("pose"):
         native_pose = ROOT / "reference" / "traces" / "native_pose.jsonl"
         if native_pose.exists() and native_pose.stat().st_size > 0:
@@ -1394,6 +1409,10 @@ def run_diff_gate(gate: Gate) -> GateResult:
                     sub_metric, sub_detail = p_subframe_over(pr.out)
                 except AnchorMissing:
                     sub_detail = "subframe anchor missing"
+                try:
+                    cam_metric, cam_detail = p_cam_over(pr.out)
+                except AnchorMissing:
+                    cam_detail = "camera anchor missing"
 
     # 3c. AUDIO diff on the same run (see p_audio_total: previously ungated).
     audio_metric = None
@@ -1433,6 +1452,7 @@ def run_diff_gate(gate: Gate) -> GateResult:
                       time.time() - started,
                       extra={"ui_metric": ui_metric, "ui_detail": ui_detail,
                              "pose_metric": pose_metric, "pose_detail": pose_detail,
+                "cam_metric": cam_metric, "cam_detail": cam_detail,
                              "cov_metric": cov_metric, "cov_detail": cov_detail,
                              "sub_metric": sub_metric, "sub_detail": sub_detail,
                              "pos_res_metric": pos_res_metric,
@@ -1771,6 +1791,12 @@ def main(argv=None) -> int:
                         r.extra.get("posevel_detail", ""), 0.0,
                         extra={"n": 1}))
                     timeline[f"posevel:{g.scenario}"] = []
+                if g.kind == "diff" and r.extra.get("cam_metric") is not None:
+                    results.append(GateResult(
+                        f"cam:{g.scenario}", "cam", r.extra["cam_metric"],
+                        r.extra.get("cam_detail", ""), 0.0,
+                        extra={"n": 1}))
+                    timeline[f"cam:{g.scenario}"] = []
                 if g.kind == "diff" and r.extra.get("pose_metric") is not None:
                     results.append(GateResult(
                         f"pose:{g.scenario}", "pose", r.extra["pose_metric"],
@@ -1802,7 +1828,8 @@ def main(argv=None) -> int:
                        r.gate_id.startswith("ui:") or
                        r.gate_id.startswith("sub:") or
                        r.gate_id.startswith("posres:") or
-                       r.gate_id.startswith("audio:")) and (
+                       r.gate_id.startswith("audio:") or
+                       r.gate_id.startswith("cam:")) and (
                 "diff:" + r.gate_id.split(":", 1)[1]) in wanted
             if wanted and r.gate_id not in wanted and not pose_of:
                 continue

@@ -85,7 +85,17 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
          "artifacts; the next full run reports all 7 pose + 7 posevel gates "
          "with their baseline values (pose:dojo-move 421, boss-lynx 357, "
          "tournament 444, survival 536, kusarigama 357, titan-ladder 389, "
-         "challenge 536; posevel 69/163/132/152/268/97/154)", True),
+         "challenge 536; posevel 69/163/132/152/268/97/154). The CAMERA is gated "
+       "too now (`cam:<scenario>`): `compare_pose.py` printed a `[camera]` block "
+       "from the first pose run and no gate ever read it. The metric counts frames "
+       "whose |dcx|/|dcy| exceeds the 5-unit world tolerance (or |dzoom| > 0.02) "
+       "AFTER removing the per-scenario constant arena-origin offset - the same "
+       "offset `posres` baselines (22.211 on challenge/tournament, 43.887 on "
+       "kusarigama, -14.229 on survival, -78.984 on titan-ladder); without that "
+       "subtraction five campaign scenarios read 268/268 for a pure origin shift. "
+       "Measured: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament "
+       "1/268 (the first phase-1 frame, camera not settled), kusarigama 5/268, "
+       "titan-ladder 16/268", True),
         ("cloth/chain divergence: FIXED the measured defect and bounded the "
          "rest. The solver cadence is 1:1 with JS `Al.ia` (one sk+jE per sim "
          "frame), all 277 merged edges resolve, Gravitation 0.4 and "

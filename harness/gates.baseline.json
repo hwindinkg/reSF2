@@ -543,6 +543,48 @@
       "commit": "71863699",
       "reason": "pose coverage: the per-bone and velocity gates were armed only for the dojo scenarios, kusarigama and boss-lynx, so the player's cloth/weapon geometry was UNGATED in tournament, survival, titan-ladder and challenge. All four now dump poses (--dump-pose 600) and align 268 frames each (role map native Me <-> oracle Enemy, no shape skips, subframe 0/268). Measured baselines: pose:tournament 444, pose:survival 536, pose:titan-ladder 389, pose:challenge 536 (frames with any bone over 5 units, summed over both fighters, of 268); posevel: 133 / 150 / 97 / 154. The consistently-over bones are the same cloth set as everywhere else (BODY-Node15..20 = indices 76-81 plus HEAD-Node124/129 = 91-92), and the world-position offset is the usual constant (survival |dx| 14.176/14.229, |dy| 0.000), so this is the known undamped-cloth divergence now visible in four more scenarios, not a new defect class",
       "date": "2026-11-09T18:43:52"
+    },
+    "cam:boss-lynx": {
+      "metric": 1,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
+    },
+    "cam:challenge": {
+      "metric": 1,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
+    },
+    "cam:kusarigama": {
+      "metric": 5,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
+    },
+    "cam:survival": {
+      "metric": 1,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
+    },
+    "cam:titan-ladder": {
+      "metric": 16,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
+    },
+    "cam:tournament": {
+      "metric": 1,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
+    },
+    "cam:dojo-move": {
+      "metric": 0,
+      "commit": "pending",
+      "reason": "new gate cam:<scenario> - compare_pose.py printed the camera block from the first pose run and NOTHING gated it, so a camera/effect regression could not fail the build. The metric counts frames whose |dcx|/|dcy| exceeds the world tolerance (5 units) or |dzoom| > 0.02 AFTER removing the per-scenario constant arena-origin offset (the same offset posres baselines: 22.211 on challenge/tournament, 43.887 on kusarigama, -14.229 on survival, -78.984 on titan-ladder). Measured on the current tree: dojo-move 0/568 (exact), boss-lynx/challenge/survival/tournament 1/268 (the first phase-1 frame, where the camera has not settled), kusarigama 5/268, titan-ladder 16/268.",
+      "date": "2026-11-14T19:05:00"
     }
   }
 }

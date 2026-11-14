@@ -727,8 +727,11 @@ def build_report(args, native_frames, oracle_frames, native_clips, oracle_clips,
     w("  |dcx|   mean %s  max %s" % (fmt(cam["dcx_mean"]), fmt(cam["dcx_max"])))
     w("  |dcy|   mean %s  max %s" % (fmt(cam["dcy_mean"]), fmt(cam["dcy_max"])))
     w("  |dzoom| mean %s  max %s" % (fmt(cam["dzoom_mean"]), fmt(cam["dzoom_max"])))
-    w("  frames over tolerance: %d/%d  (|dcx|/|dcy| > %s units, |dzoom| > 0.02)"
-      % (cam["over"], cam["frames"], fmt(args.tolerance)))
+    w("  frames over tolerance: %d/%d  (median offset removed; |dcx|/|dcy| > %s "
+      "units, |dzoom| > 0.02)" % (cam["over"], cam["frames"],
+                                  fmt(args.tolerance)))
+    w("  constant offset removed: cx %s, cy %s" % (fmt(-cam["med_x"]),
+                                                   fmt(-cam["med_y"])))
     w("")
 
     w("[world position]  (per fighter, over matched frames%s)" % (" - centered" if getattr(args, "coord_transform", "none") == "center" else ""))
@@ -1010,6 +1013,7 @@ def run_frame_mode(args):
     # ---- aggregate stats over matched frames ----
     cam = {"dcx": [], "dcy": [], "dzoom": []}
     cam_over = [0, 0]  # [frames over tolerance, matched frames]
+    cam_dx, cam_dy = [], []  # signed deltas, for the constant-offset removal
     world = {"Me": {"dx": [], "dy": [], "fx": 0},
              "Enemy": {"dx": [], "dy": [], "fx": 0}}
     vel_frame_over = {}
@@ -1028,15 +1032,15 @@ def run_frame_mode(args):
         nf = native_frames[ni]
         of = oracle_frames[oi]
         fm = frame_metrics(nf, of, args.tolerance, coord_transform=coord_transform, swap=swap)
+        _cn, _co = (nf.get("cam") or {}), (of.get("cam") or {})
+        cam_signed = (_cn.get("cx", 0.0) - _co.get("cx", 0.0),
+                      _cn.get("cy", 0.0) - _co.get("cy", 0.0))
+        cam_dx.append(cam_signed[0])
+        cam_dy.append(cam_signed[1])
         cam["dcx"].append(fm["dcx"])
         cam["dcy"].append(fm["dcy"])
         cam["dzoom"].append(fm["dzoom"])
-        # The camera was PRINTED but never gated: a shake/zoom divergence of
-        # ~20 units on boss-lynx stayed invisible. Count the frames where the
-        # offset leaves the world tolerance (cx/cy) or the zoom scale (0.02).
-        if max(fm["dcx"], fm["dcy"]) > args.tolerance or fm["dzoom"] > 0.02:
-            cam_over[0] += 1
-        cam_over[1] += 1
+
         frame_max = 0.0
         frame_max_fid = "Me"
         for fid in ("Me", "Enemy"):
@@ -1083,12 +1087,30 @@ def run_frame_mode(args):
     def maxv(xs):
         return max(xs) if xs else 0.0
 
+    # Constant arena-origin offset (per scenario), removed before the count.
+    def _median(v):
+        if not v:
+            return 0.0
+        u = sorted(v)
+        n = len(u)
+        return u[n // 2] if n % 2 else 0.5 * (u[n // 2 - 1] + u[n // 2])
+
+    cam["med_x"] = _median(cam_dx)
+    cam["med_y"] = _median(cam_dy)
+    cam_over[1] = len(cam["dcx"])
+    for i in range(len(cam["dcx"])):
+        dcx = abs(cam_dx[i] - cam["med_x"])
+        dcy = abs(cam_dy[i] - cam["med_y"])
+        if max(dcx, dcy) > args.tolerance or cam["dzoom"][i] > 0.02:
+            cam_over[0] += 1
+
     stats = {
         "cam": {
             "dcx_mean": mean(cam["dcx"]), "dcx_max": maxv(cam["dcx"]),
             "dcy_mean": mean(cam["dcy"]), "dcy_max": maxv(cam["dcy"]),
             "dzoom_mean": mean(cam["dzoom"]), "dzoom_max": maxv(cam["dzoom"]),
             "over": cam_over[0], "frames": cam_over[1],
+            "med_x": cam.get("med_x", 0.0), "med_y": cam.get("med_y", 0.0),
         },
         "world": {
             fid: {"dx_mean": mean(world[fid]["dx"]), "dx_max": maxv(world[fid]["dx"]),

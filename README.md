@@ -2,7 +2,7 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-90%20%C2%B7%2059%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-97%20%C2%B7%2060%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
 ### Readiness: 97%
 
@@ -10,7 +10,7 @@
 
 86 of 89 checklist items; every gap below is documented in BUGS.md.
 
-Gates with a baseline: **90** (59 at 0 divergences, 31 known non-zero) · reference: the shipped `sf2.readable.js`
+Gates with a baseline: **97** (60 at 0 divergences, 37 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
