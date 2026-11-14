@@ -3038,6 +3038,20 @@ std::string AiController::update(const AiFightState& st) {
             }
             return gc_frame(st2);
         }
+        if (std::getenv("SF2_TRACE_HJA") != nullptr) {
+            const int t0 = tG_;
+            const bool w0 = wN_;
+            const bool iv0 = my_uninterrupt_prev_;
+            const std::string r = update_random(st);
+            std::fprintf(stdout,
+                         "[hja] f=%d side=Enemy tG0=%d wN0=%d tG1=%d wN1=%d "
+                         "clip0=%d iv0=%d dec=%s\n",
+                         st.fight_frame, t0, w0 ? 1 : 0, tG_, wN_ ? 1 : 0,
+                         st.enemy_clip_starts, iv0 ? 1 : 0,
+                         r.empty() ? "-" : r.c_str());
+            std::fflush(stdout);
+            return r;
+        }
         return update_random(st);
     }
 
