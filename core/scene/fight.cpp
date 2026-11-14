@@ -9746,12 +9746,17 @@ void FightController::banner_expire() {
 // JS `ca.Ea` (L385) + `ia` (L388): the per-frame fight update.
 void FightController::update(float dt) {
     style_double_tick_ = false;  // `lk.ia(round.Vt)`: only phase 2 doubles
-    sf2::scene::set_math_random_trace_frame(static_cast<int>(frame_));
     // The fight frame counter (JS `ca.frame`): counts the LIVE phases only.
     // The idle lead-in (the ROUND plate, before phase 1) keeps it at 0 so
     // `frame_ == 0` coincides with phase 1 (`enter_start_stance` resets it).
     if (phase_ != fight_phase::idle) ++frame_;
     sf2::scene::set_trace_fight_frame(static_cast<int>(frame_));
+    // [FIX trace frame] The [mr] draw trace used to be stamped BEFORE the
+    // increment, i.e. one LESS than every other port trace ([gc], [iv],
+    // [ai]) and than the oracle's ight.frame. Comparing it against
+    // ?mrtrace=1 therefore reported a phantom one-frame lag; stamp it with the
+    // same value as the other traces.
+    sf2::scene::set_math_random_trace_frame(static_cast<int>(frame_));
     // Fight-HUD perk icons (JS `Sf.ia` -> `Id.ia`/`je.ia` -> `Hr.ia` -> `Ir.ia`
     // -> `Kab`/`t2a`/`l4`, L2035/L2042-2043): advance the fade + pulse once per
     // 60 Hz sim frame. Stepping here (not in the uncapped render loop) keeps
