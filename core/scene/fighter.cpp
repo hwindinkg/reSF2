@@ -4147,12 +4147,19 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                     ay += sol_ma_[u * 3 + 1] * w;
                     az += sol_ma_[u * 3 + 2] * w;
                 }
+                // JS `Fl.seb` (L33763-33767): `let a=this.mf; let b=this.ma;
+                // a.x=b.x; a.y=b.y; a.z=b.z;` — the macro's PREVIOUS position
+                // is the OLD `ma`, so the macro carries a real Verlet VELOCITY
+                // (average - previous). The port pinned `mf = the new average`
+                // (velocity always 0), which froze every macro node: measured
+                // on dojo-move, the macro bones 82-85 / 94-102 differ from the
+                // oracle by ~45 units of VELOCITY on the first live frame.
+                sol_mf_[idx * 3] = sol_ma_[idx * 3];
+                sol_mf_[idx * 3 + 1] = sol_ma_[idx * 3 + 1];
+                sol_mf_[idx * 3 + 2] = sol_ma_[idx * 3 + 2];
                 sol_ma_[idx * 3] = ax;
                 sol_ma_[idx * 3 + 1] = ay;
                 sol_ma_[idx * 3 + 2] = az;
-                sol_mf_[idx * 3] = ax;
-                sol_mf_[idx * 3 + 1] = ay;
-                sol_mf_[idx * 3 + 2] = az;
             }
             visiting[idx] = 0;
         };
