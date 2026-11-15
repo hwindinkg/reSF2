@@ -3863,6 +3863,19 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             std::getenv("SF2_TRACE_CLIPSAMPLES") != nullptr;
         if (trace_clipsamples && !not_animation_) {
             static const int kBand[] = {76, 77, 78, 79, 80, 81, 91, 92};
+            // [probe] The cloth nodes `compare_pose` flags as diverging (the
+            // "stretched character" chain): resolved by NAME so the index does
+            // not have to be guessed per model.
+            static const char* kClothNames[] = {
+                "BODY_SHIN-Node22", "BODY_SHIN-Node23", "BODY_SHIN-Node24",
+                "BODY_SHIN-Node25", "BODY_SHIN-Node26", "BODY_SHIN-Node27",
+                "BODY_SHIN-Node28", "BODY_SHIN-Node29",
+                "HEAD-Node111", "HEAD-Node118", "HEAD-Node130"};
+            std::vector<int> band(kBand, kBand + sizeof(kBand) / sizeof(kBand[0]));
+            for (const char* nm : kClothNames) {
+                const int bi = model_.bone_by_name(nm);
+                if (bi >= 0) band.push_back(bi);
+            }
             // The same key `compare_pose.py` aligns by: (clip, cf). `cf` is the
             // JS `Te.Xh` (`playhead_xh()`), the quantity the pose dump emits.
             std::string cs_clip;
@@ -3871,7 +3884,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 if (cs_clip.empty()) cs_clip = current_move_->file_name;
             }
             const int cs_cf = playhead_xh();
-            for (int bi : kBand) {
+            for (int bi : band) {
                 if (bi < 0 || static_cast<std::size_t>(bi) + 1 > n) continue;
                 const std::size_t u = static_cast<std::size_t>(bi) * 3;
                 std::fprintf(stdout,
