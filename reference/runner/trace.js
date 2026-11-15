@@ -1331,7 +1331,28 @@ function ensureHooks(fight) {
                   }
                 }
               } catch (e1) { /* ignore */ }
-              return orig.apply(this, arguments);
+              var csr = orig.apply(this, arguments);
+              // [probe] `?clipsamples=1` also dumps the POST-solver `ma` (the
+              // port's `[cframe] sol=` is taken after its `sk()/jE()`), so the
+              // two solver STATES can be diffed directly. This is the only
+              // measurement that separates "wrong step" from "accumulated
+              // state" for the cloth chain.
+              try {
+                var nodes2 = sol.oa && sol.oa.Va && sol.oa.Va.all;
+                if (nodes2 && nodes2.length > 95) {
+                  for (var bj = 0; bj < BAND.length; bj++) {
+                    var ix2 = BAND[bj];
+                    var q = nodes2[ix2] && nodes2[ix2].ma;
+                    if (!q) continue;
+                    console.log("[csample-post] s=" + side + " f=" + fr +
+                                " i=" + ix2 +
+                                " x=" + q.x.toFixed(5) +
+                                " y=" + q.y.toFixed(5) +
+                                " z=" + q.z.toFixed(5));
+                  }
+                }
+              } catch (e5) { /* ignore */ }
+              return csr;
             };
             sol.__csWrapped = 1;
           };

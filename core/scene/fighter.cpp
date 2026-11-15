@@ -4327,7 +4327,10 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // (buffer), `sol_ma_` (solver), the anchor and `world_x_`. Explains the
     // measured 4 -> 40 unit jump at the first clip frame (nclip=67, so the clip
     // does not write these nodes).
-    if (std::getenv("SF2_TRACE_CLOTH_FRAME") != nullptr && ia_ticks_ <= 6) {
+    const char* cfa = std::getenv("SF2_CLOTH_FRAME_AT");
+    const int cfa_at = cfa != nullptr ? std::atoi(cfa) : -1;
+    if ((std::getenv("SF2_TRACE_CLOTH_FRAME") != nullptr && ia_ticks_ <= 6) ||
+        (cfa != nullptr && ia_ticks_ == cfa_at)) {
         static const int kIds[] = {76, 78, 81, 86, 89, 93};
         std::fprintf(stdout,
                      "[cframe] tick=%d move=%s nclip=%zu anchor=%d pxA=%.2f "
