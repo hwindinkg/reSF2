@@ -1717,11 +1717,15 @@ std::string perf_stage_name(sf2::app::ScreenManager* screens) {
 
 void App::render_frame() {
     perf_gpu_begin();
+    const bool tr = std::getenv("SF2_TRACE_RENDER") != nullptr;
+    const double rt0 = tr ? glfwGetTime() : 0.0;
     sf2::render::Camera camera;
     camera.view_w = static_cast<float>(view_w_);
     camera.view_h = static_cast<float>(view_h_);
     renderer_->begin_frame(camera);
+    const double rt1 = tr ? glfwGetTime() : 0.0;
     screens_->render(*this);
+    const double rt2 = tr ? glfwGetTime() : 0.0;
     // JS `Cf`/`ur` (L970063/L968929): the global achievement-unlock toast draws
     // over every screen (it lives on `L.K.root`, not the fight screen).
     sf2::app::draw_global_achievement_toast(*this);
@@ -1738,7 +1742,34 @@ void App::render_frame() {
     draw_debug_overlay(*this);
     // [dev panel] key `5`: modal over everything (its own backdrop).
     dev_panel_draw(*this, *renderer_);
+    const double rt3 = tr ? glfwGetTime() : 0.0;
     renderer_->end_frame();
+    const double rt4 = tr ? glfwGetTime() : 0.0;
+    if (tr) {
+        // [probe, authorised] CPU split of the frame: where the render cost
+        // actually goes (the reported "fps dropped to 20", render 47 ms vs
+        // update 4 ms). One line per second.
+        static double acc = 0.0;
+        static double s_screen = 0.0, s_ovl = 0.0, s_end = 0.0, s_begin = 0.0;
+        static int n = 0;
+        s_begin += rt1 - rt0;
+        s_screen += rt2 - rt1;
+        s_ovl += rt3 - rt2;
+        s_end += rt4 - rt3;
+        ++n;
+        acc += rt4 - rt0;
+        if (acc >= 1.0) {
+            std::fprintf(stdout,
+                         "[rnd] screen=%d %s begin=%.2f scene=%.2f overlays=%.2f "
+                         "swap=%.2f total=%.2f ms/frame\n",
+                         static_cast<int>(screens_->current_id()),
+                         perf_stage_name(screens_.get()),
+                         s_begin / n * 1000.0, s_screen / n * 1000.0,
+                         s_ovl / n * 1000.0, s_end / n * 1000.0, acc / n * 1000.0);
+            std::fflush(stdout);
+            acc = 0.0; n = 0; s_begin = s_screen = s_ovl = s_end = 0.0;
+        }
+    }
     perf_gpu_end();
 }
 

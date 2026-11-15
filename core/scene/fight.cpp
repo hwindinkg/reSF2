@@ -7525,10 +7525,15 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         }
         std::fprintf(stdout,
                      "[strike] F%d %s->%s ax=%.1f dx=%.1f imp=(%.2f,%.2f,%.2f) "
+                     "raw_x=%.2f move=%s "
                      "x1=%.2f x2=%.2f hd=%d fx=%d nk=%d frame=%d ap=%d\n",
                      frame, atk.name.c_str(), def.name.c_str(),
                      atk.fighter.world_x(), def.fighter.world_x(), impulse.x,
-                     impulse.y, impulse.z, imp.node1_vec.x, imp.node2_vec.x,
+                     impulse.y, impulse.z, iv.impulse_x,
+                     atk.fighter.current_move() != nullptr
+                         ? atk.fighter.current_move()->name.c_str()
+                         : "-",
+                     imp.node1_vec.x, imp.node2_vec.x,
                      atk.fighter.clip_mirror(), atk.fighter.facing(),
                      def.fighter.ragdoll_active() ? 1 : 0,
                      def.fighter.ragdoll_frame_count(), apply_strike ? 1 : 0);

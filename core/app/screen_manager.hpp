@@ -108,6 +108,16 @@ public:
     // nothing.
     virtual void on_key(int glfw_key, bool down) { (void)glfw_key; (void)down; }
 
+    // [FIX fps 20 — double scene draw] True when this screen paints EVERY
+    // pixel itself, so the screens below it need not render. The fight's
+    // location layers cover the whole viewport, so re-drawing the Dojo hub
+    // underneath every fight frame cost the hub's ~9 ms scene for nothing
+    // (measured `SF2_TRACE_RENDER`: fight `render_impl` 0.5 ms vs the 9.5 ms
+    // `screen=6` scene; the dojo under it was 9 ms). Screens that composite
+    // over the one below (Results -> fight, Shop/Profile/Settings -> dojo)
+    // keep the default `false`.
+    virtual bool covers_below() const { return false; }
+
     ScreenManager& manager() const { return mgr_; }
     App& app() const;
 

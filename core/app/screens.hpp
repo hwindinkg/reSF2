@@ -746,6 +746,13 @@ public:
     // does not exist yet in the ctor, so the request is applied on the first
     // update where `fight_` is live.
     int pending_pose_dump_ = 0;
+    // The fight's location layers are opaque — do not draw the Dojo under it.
+    // NOTE: the fight's location IS opaque, but skipping the Dojo hub below it
+    // changes the AUDIO stream (udio:challenge 0 -> 5): the hub's stance
+    // swishes are dispatched from the hub's RENDER path, and the oracle plays
+    // them. Enabling this saved 9 ms/frame (measured) but must wait until that
+    // dispatch moves out of render.
+    bool covers_below() const override { return false; }
 
     // JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: the pause `Dr` dialog lives for the
     // screen's lifetime, so destroying the screen restores the MUSIC bus (the

@@ -328,7 +328,17 @@ void ScreenManager::dump_ui_state() {
 }
 
 void ScreenManager::render(App& app) {
-    for (std::size_t i = 0; i < stack_.size(); ++i) {
+    // Skip the screens BELOW the topmost `covers_below()` screen: the fight's
+    // location layers are opaque, so the Dojo hub underneath must not be drawn
+    // (it cost ~9 ms/frame — the "fps dropped to 20" report).
+    std::size_t first = 0;
+    for (std::size_t i = stack_.size(); i > 0; --i) {
+        if (stack_[i - 1] != nullptr && stack_[i - 1]->covers_below()) {
+            first = i - 1;
+            break;
+        }
+    }
+    for (std::size_t i = first; i < stack_.size(); ++i) {
         if (stack_[i] != nullptr) {
             stack_[i]->render(app);
         }

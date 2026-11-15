@@ -165,7 +165,7 @@ int quest_dialog_button_hit_index(App& app, const EngineDialog& d, double x, dou
 // `He.S` L1045-1051 Type routing + the `od.close` L1898 retained-dialog copy
 // (both defined with the dialog layout below; `quest_modal_consume` needs
 // them first).
-enum class DialogKind { kNone, kOd280, kUj290, kVe340, kVn370, kIbBar };
+enum class DialogKind { kNone, kOd280, kUj290, kVe340, kVn370, kIbBar, kOd350, kOd40 };
 DialogKind dialog_kind(const std::string& type);
 void dialog_capture_closing(App& app, const EngineDialog& d);
 // D13: the Settings `un extends od` dialog (JS L1916-1930, opened by
@@ -1155,6 +1155,26 @@ void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
                        const DialogAnim& anim);
 void draw_vn370_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
                        const DialogAnim& anim);
+// The two programmatic confirms (`sn` = 40 / `ph` = 350): `od` family with NO
+// avatar and one big text node.
+void draw_confirm_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                         const DialogAnim& anim, bool exit_layout);
+// Draws an `EngineDialog` by its `dialog_kind` (the shop/fight programmatic
+// confirms hold their own dialog objects, not the quest queue).
+inline void draw_engine_dialog(App& app, sf2::render::Renderer& ren,
+                               const EngineDialog& d) {
+    switch (dialog_kind(d.type)) {
+        case DialogKind::kOd40:
+            draw_confirm_dialog(app, ren, d, DialogAnim{}, true);
+            break;
+        case DialogKind::kOd350:
+            draw_confirm_dialog(app, ren, d, DialogAnim{}, false);
+            break;
+        default:
+            draw_od280_dialog(app, ren, d, DialogAnim{});
+            break;
+    }
+}
 // The live dialog's 0.25 s open/close tween (`od.aa` L1895) at this frame.
 DialogAnim dialog_anim_now(App& app, const EngineDialog& d);
 // The dismissed dialog's 0.25 s close tween (`od.Ge(1)`/`n_` L1898).
@@ -1205,6 +1225,12 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
                 case DialogKind::kUj290: draw_uj290_dialog(app, ren, *d, anim); break;
                 case DialogKind::kVe340: draw_ve340_dialog(app, ren, *d, anim); break;
                 case DialogKind::kVn370: draw_vn370_dialog(app, ren, *d, anim); break;
+                case DialogKind::kOd350:
+                    draw_confirm_dialog(app, ren, *d, anim, /*exit_layout=*/false);
+                    break;
+                case DialogKind::kOd40:
+                    draw_confirm_dialog(app, ren, *d, anim, /*exit_layout=*/true);
+                    break;
                 case DialogKind::kNone: break;  // JS `debugger` (L1048-1050)
             }
         }
@@ -9333,6 +9359,15 @@ constexpr float kOdVeBodyX = -550.0f;   // `kb.C(-550)` L1913
 //   Simple -> a bare `debugger;` in the JS (L1048-1050): no dialog object is
 //   built and `He.S` falls through to `this.sa()` (advance, no display).
 DialogKind dialog_kind(const std::string& type) {
+    // [FIX wrong confirm dialogs — JS layout ids] `Wb.openDialog` builds a
+    // dedicated class per id (`Xob` L39222): 40 -> `sn` (the fight QUIT
+    // confirm, `Xc.Zhb` L39448), 350 -> `ph` (the shop buy/upgrade/order
+    // confirm, `Xc.$hb` L~39345). Both extend `od` but have NO avatar and one
+    // big text node, so rendering them as `Regular` (280) made them look like
+    // the story dialog with a character (the reported "при выходе/покупке
+    // открывается как будто диалог с персонажем").
+    if (type == "BuyConfirm") return DialogKind::kOd350;
+    if (type == "ExitConfirm") return DialogKind::kOd40;
     if (type == "Notification") return DialogKind::kIbBar;
     if (type == "NoAvatar") return DialogKind::kVe340;
     if (type == "ShowLoot") return DialogKind::kVn370;
@@ -9549,24 +9584,36 @@ float dialog_content_md(App& app, const EngineDialog& d) {
     const DialogKind kind = dialog_kind(d.type);
     if (kind == DialogKind::kVe340) return kOdDefaultMd;  // L1894
     if (kind == DialogKind::kVn370) return 600.0f;        // `vn.$A` L1935
+    // The programmatic confirms measure their own text node (`sn.$A`
+    // `kb.Fa(1100,550)`, `ph.$A` `kb.Fa(950,550)`), not the 900 body.
+    const float body_w_design =
+        kind == DialogKind::kOd40 ? 1100.0f
+        : kind == DialogKind::kOd350 ? 950.0f : kOdBodyW;
+    // The confirms' text node is `ua(125)` with `Kc(0.9)` (`sn.$A`/`ph.$A`),
+    // so the measurement must use the SAME font/kc as the drawer — otherwise
+    // `Md` is too small and the dialog clips its last line (the currency
+    // question vanished in the first attempt).
+    const bool confirm = (kind == DialogKind::kOd350 || kind == DialogKind::kOd40);
+    const float row_font = confirm ? 125.0f : 100.0f;
+    const float kc = confirm ? 0.9f : kOdBodyKc;
     const float c = od_panel(2340.0f, 1530.0f).c;
     const float safe_c = c > 0.0f ? c : 1.0f;
     float h = 0.0f;
     if (dialog_scrolls_all_lines(d.type)) {
         for (std::size_t i = 0; i < d.lines.size(); ++i) {  // `sqb` L1953 rows
             h += measure_ui_wrapped(
-                app, dialog_line_text(app, d, d.lines[i]), kOdBodyW * safe_c,
-                dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * safe_c,
-                kOdBodyKc);
+                app, dialog_line_text(app, d, d.lines[i]), body_w_design * safe_c,
+                dialog_text_ua_scale(app, dialog_row_font_px(d, i, row_font)) * safe_c,
+                kc);
         }
     } else {
         // `Od.Xma` L1948 -> `lj` re-measures the CURRENT row.
         const std::size_t page =
             d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
         h = measure_ui_wrapped(
-            app, dialog_page_body(app, d), kOdBodyW * safe_c,
-            dialog_text_ua_scale(app, dialog_row_font_px(d, page, 100.0f)) * safe_c,
-            kOdBodyKc);
+            app, dialog_page_body(app, d), body_w_design * safe_c,
+            dialog_text_ua_scale(app, dialog_row_font_px(d, page, row_font)) * safe_c,
+            kc);
     }
     return std::max(h / safe_c, d.min_content_height);
 }
@@ -9844,6 +9891,10 @@ void draw_notification(App& app, sf2::render::Renderer& ren, const EngineDialog&
 // produces Beige).
 const char* quest_button_frame(const std::string& color, bool primary) {
     if (color == "Red") return "btnDark";
+    // [FIX confirm dialogs] `sn`/`ph` build `Bb("EButtonDark")` — the port's
+    // colour names come from the dialog XML (`Red`/`White`/...), so the
+    // programmatic confirms pass `Dark` explicitly.
+    if (color == "Dark") return "btnDark";
     if (color == "Green") return "btnGreen";
     if (color == "White" || color == "Beige") return "btnWhite";
     if (color == "Gold") return "btnGold";
@@ -9904,8 +9955,19 @@ int quest_dialog_row_hit_index(App& app, const EngineDialog& d, double x, double
 namespace {
 void draw_dialog_plate(App& app, const std::string& text, const std::string& color,
                        bool primary, float cx, float cy, float w, float h) {
+    // JS `Bb`: the sprite's ART box is `xc(600) x fa.y(222)` scaled by the node
+    // scale `Pb(125)` = 125/112, i.e. 669.6 x 247.8 design; the LAYOUT box used
+    // for placement/hit-tests is `width(600) x qa()(125)`. Passing the layout
+    // box as the art box squashed the hexagon to half its height (the reported
+    // wrong button shape).
+    constexpr float kBbNodeScale = 125.0f / 112.0f;
+    const float art_c = h > 0.0f ? h / 125.0f : 1.0f;  // design -> screen
+    const float art_w = 600.0f * kBbNodeScale * art_c;
+    const float art_h = 222.0f * kBbNodeScale * art_c;
+    (void)w;  // the layout width (600) is not the art width (669.6)
     if (!(load_sliced_atlas(app) &&
-          draw_bb_plate(app, quest_button_frame(color, primary), cx, cy, w, h, 1.0f, false))) {
+          draw_bb_plate(app, quest_button_frame(color, primary), cx, cy,
+                        art_w, art_h, 1.0f, false))) {
         draw_flat_button(app, "", cx, cy, w, h, 0.6f, 0.5f, 0.3f, false);
     }
     // The JS od/Bb caption uses the dialog's own dark ink (the oracle's
@@ -10240,6 +10302,33 @@ void draw_ve340_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
     draw_ui_wrapped(app, L.sx(kOdVeBodyX), L.body_y, kOdVeBodyW * L.panel.c, L.body_h, body,
                     dialog_text_ua_scale(app, 125.0f) * L.panel.c, UiAlign::Left,
                     0.12f, 0.09f, 0.06f, kOdBodyKc);
+    draw_dialog_buttons(app, d, anim);
+}
+
+// `Wb.openDialog(40, new sn())` (`Xc.Zhb` L39448 — the fight QUIT confirm) and
+// `Wb.openDialog(350, new ph(...))` (`Xc.$hb` L~39345 — the shop
+// buy/upgrade/order confirm). Both `extends od`: the same 9-slice base, title
+// and `fm(title, primary, "CANCEL", 3)` plate row, but NO avatar node and ONE
+// big text node:
+//   `sn.$A` L79835: `kb.Fa(1100,550); Ia(2); Kc(0.9); ua(125); C(-550)`
+//   `ph.$A` L81774: `kb.Fa(950,550);  ua(125); Ia(2); Kc(0.9); C(-475)`
+// Both plates are `Bb("EButtonDark")` (`sn`/`ph` ctors). Rendering these as
+// `Regular` (280) drew the story layout — the reported "a dialog with a
+// character opens instead".
+void draw_confirm_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog& d,
+                         const DialogAnim& anim, bool exit_layout) {
+    draw_dialog_backdrop(ren, anim.alpha);
+    const OdLayout L = dialog_layout_for(app, d, anim);
+    draw_od_base(app, ren, L.panel);
+    draw_od_stripes(app, L);
+    draw_dialog_title(app, L, d.title);
+    const float body_w = (exit_layout ? 1100.0f : 950.0f) * L.panel.c;
+    const float body_x = L.sx(exit_layout ? -550.0f : -475.0f);
+    const float body_h = std::min(550.0f * L.panel.c, L.body_h);
+    draw_ui_wrapped(app, body_x, L.body_y, body_w, body_h,
+                    dialog_page_body(app, d),
+                    dialog_text_ua_scale(app, 125.0f) * L.panel.c, UiAlign::Left,
+                    0.12f, 0.09f, 0.06f, 0.9f);
     draw_dialog_buttons(app, d, anim);
 }
 
@@ -16599,7 +16688,9 @@ void FightScreen::update_impl(float dt) {
                 sf2::audio::AudioEngine::instance().play("snd_click_1");
                 exit_confirm_ = true;
                 exit_dlg_ = std::make_shared<EngineDialog>();
-                exit_dlg_->type = "Regular";
+                // JS `Xc.Zhb` L39448: `Wb.openDialog(40, new lv(...))` -> `sn`
+                // (the dedicated quit confirm, NO avatar).
+                exit_dlg_->type = "ExitConfirm";
                 exit_dlg_->title = loc(app(), "dlgExitFightTitle", "QUIT");
                 exit_dlg_->lines.push_back(loc(app(), "dlgExitFightMessage",
                                                "Are you sure you want to quit?"));
@@ -16620,7 +16711,7 @@ void FightScreen::update_impl(float dt) {
                 exit_dlg_->left_.text = loc(app(), "CANCEL", "CANCEL");
                 exit_dlg_->left_.color = "Dark";
                 exit_dlg_->button_text = loc(app(), "dlgExitButton", "EXIT");
-                exit_dlg_->button_color = "White";
+                exit_dlg_->button_color = "Dark";
                 exit_dlg_->has_right_button = true;
                 std::fprintf(stdout, "[fight] pause QUIT -> exit-confirm dialog\n");
                 std::fflush(stdout);
@@ -16983,6 +17074,12 @@ void draw_kk_gradient(sf2::render::Renderer& ren, float x, float y, float w, flo
 void FightScreen::render_impl(App& app) {
     sf2::render::Renderer& ren = app.renderer();
     if (fight_ == nullptr) return;
+    const double t_render_start =
+        std::getenv("SF2_TRACE_RENDER") != nullptr
+            ? std::chrono::duration<double>(
+                  std::chrono::steady_clock::now().time_since_epoch())
+                  .count()
+            : 0.0;
     FightAssets& assets = app.fight_assets();
 
     const sf2::scene::FightCamera& cam = fight_->camera();
@@ -17050,6 +17147,13 @@ void FightScreen::render_impl(App& app) {
     // keeps the arena. Only the HUD (`Ar`/`Sf`) draws on top. The gate body
     // keeps its original indentation so the change stays surgical.
     if (fight_->scene_visible()) {
+    const bool rtr = std::getenv("SF2_TRACE_RENDER") != nullptr;
+    const auto tnow = []() {
+        return std::chrono::duration<double>(
+                   std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    };
+    double rt_a = rtr ? tnow() : 0.0, rt_b = 0.0, rt_c = 0.0, rt_d = 0.0;
     // [fix(render): arena layer order] The original game draws the fighters
     // INSIDE the ModelsViewer (Type=2) layer — background layers first, then
     // the fighters, then every layer AFTER the ModelsViewer (the floor /
@@ -17059,6 +17163,7 @@ void FightScreen::render_impl(App& app) {
     // broken "arena behind the fighters" look.
     const std::size_t fighter_layer = assets.fight_location.fighter_layer();
     assets.fight_location.render_layers(ren, camera, 0, fighter_layer);  // background (parallax)
+    if (rtr) rt_b = tnow();
 
     // [fix(render): remove fake shadow] The oracle JS draws NO per-fighter
     // shadow (JS_RENDER §3.2: "в JS НЕТ пер-бойцовской тени"). The old
@@ -17281,6 +17386,7 @@ void FightScreen::render_impl(App& app) {
     // no arrow is active in the current sim (OPEN) — the atlas is loaded so
     // the Wave J `sXa` path is complete and cannot atlas-miss.
     load_ringout_atlas(app);
+    if (rtr) rt_c = tnow();
 
     // [fix(render): arena layer order] The foreground layers — the ones the
     // params XML places AFTER the ModelsViewer (Type=2) fighter layer: the
@@ -17428,6 +17534,27 @@ void FightScreen::render_impl(App& app) {
         }
     }
 
+    if (rtr) {
+        // [probe, authorised] The fight scene's CPU split: location background,
+        // fighters (build_vertices + capsule strip + mesh), foreground layers.
+        rt_d = tnow();
+        static double acc = 0.0;
+        static double sb = 0.0, sc = 0.0, sd = 0.0;
+        static int n = 0;
+        sb += rt_b - rt_a;
+        sc += rt_c - rt_b;
+        sd += rt_d - rt_c;
+        acc += rt_d - rt_a;
+        ++n;
+        if (acc >= 1.0) {
+            std::fprintf(stdout,
+                         "[frnd] bg=%.2f fighters=%.2f fg=%.2f total=%.2f ms\n",
+                         sb / n * 1000.0, sc / n * 1000.0, sd / n * 1000.0,
+                         acc / n * 1000.0);
+            std::fflush(stdout);
+            acc = 0.0; n = 0; sb = sc = sd = 0.0;
+        }
+    }
     // Scene letterbox bars (JS `ma.Sya` L1833-1834; PORT_AUDIT_SCENE D10):
     // drawn over the scene, under the HUD — no-op at 16:9 (BK=0, arena
     // 728px spans y[-4,724]).
@@ -18579,12 +18706,28 @@ void FightScreen::render_impl(App& app) {
         }
         // JS `Wb.openDialog(40, lv(..))` -> the `sn` confirm dialog on top.
         if (exit_confirm_ && exit_dlg_ != nullptr) {
-            draw_od280_dialog(app, ren, *exit_dlg_, DialogAnim{});
+            draw_engine_dialog(app, ren, *exit_dlg_);
         }
     }
     // Sensei dialog modal overlay (`He`): drawn last so it covers the fight
     // HUD and the pause dialog (the other screens draw it the same way).
     draw_quest_modal(app, ren, app.screens().top() == this);
+    if (std::getenv("SF2_TRACE_RENDER") != nullptr) {
+        // [probe, authorised] `render_impl` total vs the scene block (measured
+        // by `[frnd]`): the HUD/second half is total - scene.
+        static double acc_t = 0.0;
+        static int n_t = 0;
+        const double tn = std::chrono::duration<double>(
+                              std::chrono::steady_clock::now().time_since_epoch())
+                              .count();
+        if (t_render_start > 0.0) { acc_t += tn - t_render_start; ++n_t; }
+        if (n_t > 0 && acc_t >= 1.0) {
+            std::fprintf(stdout, "[hrnd] render_impl_total=%.2f ms (%d frames)\n",
+                         acc_t / n_t * 1000.0, n_t);
+            std::fflush(stdout);
+            acc_t = 0.0; n_t = 0;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -19708,7 +19851,8 @@ void ResultsScreen::render_impl(App& app) {
         }
         const std::string ok_label = loc(app, "OK", "OK");
         const float oky2 = 645.0f;  // the table's OK y (design ~622)
-        if (!draw_bb_plate(app, "btnWhite", kViewW * 0.5f, oky2, 230.0f, 52.0f, 1.0f)) {
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, "btnWhite", kViewW * 0.5f, oky2, 279.0f, 104.0f, 1.0f))) {
             draw_flat_button(app, ok_label, kViewW * 0.5f, oky2, 210.0f, 48.0f, 0.85f,
                              0.78f, 0.55f, false);
         }
@@ -19948,18 +20092,17 @@ void ResultsScreen::render_impl(App& app) {
         // `$g.V(Y.na("OK"))` (L2075): the plate caption is the localized `OK`
         // key, not a literal.
         const std::string ok_label = loc(app, "OK", "OK");
-        // JS `Bb` draws its `btnWhite` sprite (300x222 atlas frame) STRETCHED to
-        // the button's design box (`zf(100)` sets the node scale from the
-        // source height); the 9-slice `draw_bb_plate` path squashed the art into
-        // a 24 px face where the oracle's is 50 px (measured on
-        // `results_lose`: oracle 617..667, port 633..657).
         // The `btnWhite` frame is 300x222 with transparent padding: the visible
-        // plate occupies ~60% of its width and ~48% of its height, so a box of
-        // 230x52 produced a 138x25 face while the oracle's is 229x50
-        // (`results_lose`, bright mask). The box is the JS node box
-        // (`Bb` 600x112 design scaled by `zf(100)`), sized so the FACE matches.
-        if (!try_draw_atlas_button(app, "btnWhite", okx, oky, 362.0f, 104.0f, 1.0f,
-                                   /*fill=*/true)) {
+        // plate occupies ~67% of its width and ~49% of its height, so the art
+        // BOX must be ~2x the wanted face. The old `fill=true` path STRETCHED
+        // the whole frame non-uniformly into the box, which squashed the
+        // hexagon's pointed ends into a near-rectangle (the reported "the OK
+        // button is the wrong shape"); `draw_bb_plate` is the JS `Bb` 9-slice
+        // (`this.Y.wl(...)` L1842: a 4-px centre strip stretched, the caps keep
+        // their proportions). Calibrated on `oracle_matrix/results_win.png`:
+        // the oracle OK face is 232x52 (the port was 314x52 at 362 wide).
+        if (!(load_sliced_atlas(app) &&
+              draw_bb_plate(app, "btnWhite", okx, oky, 279.0f, 104.0f, 1.0f))) {
             draw_flat_button(app, ok_label, okx, oky, 210.0f, 48.0f, 0.85f, 0.78f, 0.55f,
                              false);
         }
@@ -19968,8 +20111,8 @@ void ResultsScreen::render_impl(App& app) {
         if (store_visible) {
             const float stx = cx + half;
             const std::string st_label = loc(app, "dlgStoryBtnStore", "SHOP");
-            if (!try_draw_atlas_button(app, "btnGreen", stx, oky, 362.0f, 104.0f, 1.0f,
-                                       /*fill=*/true)) {
+            if (!(load_sliced_atlas(app) &&
+                  draw_bb_plate(app, "btnGreen", stx, oky, 303.0f, 104.0f, 1.0f))) {
                 draw_flat_button(app, st_label, stx, oky, 210.0f, 48.0f, 0.35f, 0.6f,
                                  0.25f, false);
             }
@@ -20854,7 +20997,11 @@ bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
     }
     buy_item_ = bit;
     buy_dlg_ = std::make_shared<EngineDialog>();
-    buy_dlg_->type = "Regular";
+    // JS `Xc.$hb` L~39345 -> `Wb.openDialog(350, new kv(...))` -> `ph`: the
+    // dedicated confirm layout (no avatar, one big text node, both `Bb`s
+    // Dark). It must NOT be built as `Regular`(280) — that is the story
+    // dialog the player reported.
+    buy_dlg_->type = "BuyConfirm";
     buy_dlg_->title = loc(app, "dlgBuyTitle", "Purchase");
     // `ph.$A` L81838-81840: `dlgBuyMessage` + a second line
     // `dlgCurrencyQuestion{img::<gold|ruby>}{price}`.
@@ -20875,7 +21022,7 @@ bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
     buy_dlg_->left_.text = loc(app, "CANCEL", "CANCEL");
     buy_dlg_->left_.color = "Dark";
     buy_dlg_->button_text = loc(app, "shopBuy", "BUY");
-    buy_dlg_->button_color = "White";
+    buy_dlg_->button_color = "Dark";
     buy_dlg_->has_right_button = true;
     buy_confirm_ = true;
     std::fprintf(stdout, "[shop] Xc.$hb -> dlgBuy %s (%s %lld)\n", bit.name.c_str(),
@@ -22936,8 +23083,15 @@ void ShopScreen::render_impl(App& app) {
         const float avail_a = shop_detail_buy_available(*sel_it, seen_.level) ? 1.0f : 0.7f;
         auto draw_price_plate = [&](int slot, const char* icon, std::int64_t value) {
             const float py = byy0 - static_cast<float>(slot) * (bh + bpad);
+            // `Cd` plate: the 9-slice ART box, not the face box (`bh` is the
+            // JS `qa()` layout height = 112*Eb; the `btnWhite`/`btnGreen`
+            // frame's visible face is ~49% of its height). Passing `bh` drew a
+            // half-height plate (the reported squashed shop buttons).
+            const float plate_bh = bh / 0.49f;
+            const float plate_bw = cw0 + 0.919f * bh;
             if (!(load_sliced_atlas(app) &&
-                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, avail_a))) {
+                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, plate_bw,
+                                plate_bh, avail_a))) {
                 draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f * avail_a,
                                  0.62f * avail_a, 0.30f * avail_a, false);
             }
@@ -22995,8 +23149,11 @@ void ShopScreen::render_impl(App& app) {
                               sel_it->type == "RaidItemPack";
         if (real_money && !raid_row) {
             const float py = byy0;
+            const float plate_bh = bh / 0.49f;
+            const float plate_bw = cw0 + 0.919f * bh;
             if (!(load_sliced_atlas(app) &&
-                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, cw0, bh, avail_a))) {
+                  draw_bb_plate(app, "btnGreen", cx0 + cw0 * 0.5f, py, plate_bw,
+                                plate_bh, avail_a))) {
                 draw_flat_button(app, "", cx0 + cw0 * 0.5f, py, cw0, bh, 0.30f * avail_a,
                                  0.62f * avail_a, 0.30f * avail_a, false);
             }
@@ -23083,10 +23240,17 @@ void ShopScreen::render_impl(App& app) {
         const ShopRect ar = shop_try_rect(sl);
         const std::string alabel = shop_action_label(app, seen_, *sel_it);
         const bool ah = side_hover_ == 1;
+        // The `btnWhite` 9-slice (JS `Bb.Y.wl` L1842), NOT a `fill` stretch:
+        // `fill=true` squashed the hexagon's pointed caps into a near-rectangle
+        // (the reported "the СНЯТЬ button is the wrong shape"). The box is
+        // derived from the art's measured transparent margins (the visible face
+        // is ~67% of the width and 49% of the height, `shop_try_rect`), so the
+        // drawn FACE still equals `ar`.
+        const float try_bh = ar.height() / 0.49f;
+        const float try_bw = ar.width() + 0.919f * ar.height();
         if (!(load_sliced_atlas(app) &&
-              try_draw_atlas_button(app, "btnWhite", (ar.J + ar.N) * 0.5f,
-                                    (ar.P + ar.W) * 0.5f, ar.width() / 0.762f,
-                                    ar.height() / 0.673f, 1.0f, /*fill=*/true))) {
+              draw_bb_plate(app, "btnWhite", (ar.J + ar.N) * 0.5f,
+                            (ar.P + ar.W) * 0.5f, try_bw, try_bh, 1.0f))) {
             draw_flat_button(app, alabel, (ar.J + ar.N) * 0.5f, (ar.P + ar.W) * 0.5f, ar.width(),
                              ar.height(), ah ? 0.35f : 0.25f, ah ? 0.65f : 0.45f,
                              ah ? 0.35f : 0.25f, ah);
@@ -23132,7 +23296,7 @@ void ShopScreen::render_impl(App& app) {
     // title `dlgBuyTitle`, the body `dlgBuyMessage` + the currency question, and
     // the `shopBuy`/`CANCEL` plates. Drawn last so it covers the shop surface.
     if (buy_confirm_ && buy_dlg_ != nullptr) {
-        draw_od280_dialog(app, ren, *buy_dlg_, DialogAnim{});
+        draw_engine_dialog(app, ren, *buy_dlg_);
     }
 }
 
