@@ -9419,7 +9419,13 @@ OdLayout od_layout(float md) {
     o.title_y = o.sy(-(o.a + kOdTitleH));  // `Vc.D(-(a+Vc.pfa().y))`
     o.btn_h = kOdBtnH * o.panel.c;
     o.btn_w = kOdBtnW * o.panel.c;
-    o.btn_cy = o.sy(o.a + kOdBtnH * 0.5f);  // `Cd.D(a+Cd.node.qa()/2)`
+    // `Cd.D(a + Cd.node.qa()/2)`: `Cd` is the plate CONTAINER — its height is
+    // the `Bb` node's drawn height, and the oracle `dojo_sensei` shows the
+    // plate face at y 527..579 (centre 553). With the port's `qa()` = 125 the
+    // centre landed at 530 (23 px high, measured in the fidelity captures).
+    // `qa/2 = 111` reproduces the oracle exactly: `Cd` uses the sprite's
+    // NATURAL height (222), not the 112*Eb layout height.
+    o.btn_cy = o.sy(o.a + 222.0f * 0.5f);  // `Cd.D(a+Cd.node.qa()/2)`
     o.body_w = kOdBodyW * o.panel.c;
     o.body_x = o.sx(kOdBodyX);  // `f.C(this.DG?-100:0)`
     o.body_y = o.sy(-o.md * 0.5f);  // `Ne.D(-Md/2)`
