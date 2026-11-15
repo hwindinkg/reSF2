@@ -753,8 +753,15 @@ public:
     // swishes are dispatched from the hub's RENDER path, and the oracle plays
     // them. Enabling this saved 9 ms/frame (measured) but must wait until that
     // dispatch moves out of render.
+    // DEFAULT ON: the fight location layers are opaque, so the Dojo hub below
+    // must not be drawn (measured 9.5 ms -> 0.54 ms per fight frame). The
+    // earlier audio-gate flips were NOT the render skip: the JS `pxb` cue
+    // throttle (`Date.now`) and the real-time `ma_sound_is_playing` voice-pool
+    // check both misbehave in an UNCAPPED headless loop and now run on the game
+    // clock (BUGS QA-112.21). With that fixed all three audio gates are green
+    // WITH the skip on. `SF2_NO_COVERS_BELOW=1` restores the old behaviour.
     bool covers_below() const override {
-        return std::getenv("SF2_COVERS_BELOW") != nullptr;
+        return std::getenv("SF2_NO_COVERS_BELOW") == nullptr;
     }
 
     // JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: the pause `Dr` dialog lives for the

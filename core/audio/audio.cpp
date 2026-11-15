@@ -181,6 +181,15 @@ struct AudioEngine::Impl {
     // partially loaded sfx dir).
     std::vector<std::vector<unsigned char>> loaded_flags;
     std::uint64_t dropped_total = 0;  // JS `Ss.J7a` -1 / `Ss.Hcb` true
+    // [FIX headless determinism] Game-time each (event, voice) was last
+    // started (-1 = never). The JS frees a voice when its output ENDS;
+    // in an uncapped headless loop `ma_sound_is_playing` keeps reporting
+    // "playing" for a sound that would have finished long ago at 60 Hz, so
+    // the 16 one-shot slots fill up and cues are DROPPED (measured:
+    // kusarigama loses snd_swish_sword2 at f=103 and snd_swish2 at f=118
+    // with `covers_below`). Judge the end by the game clock + the sample
+    // length instead.
+    std::vector<std::vector<double>> voice_start;
     // Beep fallback (only when no real sample could be loaded).
     ma_audio_buffer beep{};
     bool beep_ok = false;
@@ -502,6 +511,23 @@ void AudioEngine::play(const std::string& event, bool loop) {
     // `Ss.rhb` when the output ends, so "busy" here is "the sound is still
     // playing". A looped cue that is ALREADY playing the same id is dropped
     // first (`Ss.O6a`: `b && this.Hcb(a)` -> -1): the loop is not restarted.
+    // [FIX headless determinism] Game-time end check (see `voice_start`).
+    auto voice_busy = [&](std::size_t e2, std::size_t v2) {
+        ma_sound* snd = &impl_->sounds[e2][v2];
+        if (!ma_sound_is_playing(snd)) return false;
+        if (e2 < impl_->voice_start.size() &&
+            v2 < impl_->voice_start[e2].size()) {
+            const double st = impl_->voice_start[e2][v2];
+            if (st >= 0.0) {
+                float len = 0.0f;
+                if (ma_sound_get_length_in_seconds(snd, &len) == MA_SUCCESS &&
+                    len > 0.0f && game_clock_ - st >= static_cast<double>(len)) {
+                    return false;   // finished in GAME time
+                }
+            }
+        }
+        return true;
+    };
     {
         int loop_playing = 0;
         int oneshot_playing = 0;
@@ -513,7 +539,7 @@ void AudioEngine::play(const std::string& event, bool loop) {
                     impl_->loaded_flags[e2][v2] == 0) {
                     continue;  // never initialised: not a live voice
                 }
-                if (!ma_sound_is_playing(&pool[v2])) continue;
+                if (!voice_busy(e2, v2)) continue;
                 const bool is_loop =
                     v2 < impl_->loop_flags[e2].size() && impl_->loop_flags[e2][v2] != 0;
                 if (is_loop) {
@@ -530,6 +556,16 @@ void AudioEngine::play(const std::string& event, bool loop) {
         if (over_pool) {
             ++dropped_total_;             // JS `Ss.play` returned -1
             ++impl_->dropped_total;
+            // [probe, authorised] `SF2_TRACE_AUDIO_DROP=1`: which cue was
+            // dropped and how busy the pool was — separates the real-time
+            // voice-pool check from a dispatch difference.
+            if (std::getenv("SF2_TRACE_AUDIO_DROP") != nullptr) {
+                std::fprintf(stdout,
+                             "[adrop] %s loop=%d oneshot=%d loops=%d clock=%.3f\n",
+                             event.c_str(), loop ? 1 : 0, oneshot_playing,
+                             loop_playing, game_clock_);
+                std::fflush(stdout);
+            }
             return;
         }
     }
@@ -543,6 +579,16 @@ void AudioEngine::play(const std::string& event, bool loop) {
     // files[v % n], so consecutive plays walk the event's file pool.
     const int v = impl_->next_voice[static_cast<std::size_t>(e)];
     impl_->next_voice[static_cast<std::size_t>(e)] = (v + 1) % ev.voices;
+    if (impl_->voice_start.size() <= static_cast<std::size_t>(e)) {
+        impl_->voice_start.resize(static_cast<std::size_t>(e) + 1);
+    }
+    if (impl_->voice_start[static_cast<std::size_t>(e)].size() <=
+        static_cast<std::size_t>(v)) {
+        impl_->voice_start[static_cast<std::size_t>(e)].resize(
+            static_cast<std::size_t>(v) + 1, -1.0);
+    }
+    impl_->voice_start[static_cast<std::size_t>(e)]
+                       [static_cast<std::size_t>(v)] = game_clock_;
 
     ma_sound* sound = nullptr;
     std::vector<ma_sound>& own_pool = impl_->sounds[static_cast<std::size_t>(e)];
