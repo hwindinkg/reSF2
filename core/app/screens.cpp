@@ -9970,10 +9970,19 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
                         art_w, art_h, 1.0f, false))) {
         draw_flat_button(app, "", cx, cy, w, h, 0.6f, 0.5f, 0.3f, false);
     }
-    // The JS od/Bb caption uses the dialog's own dark ink (the oracle's
+    // The JS `od/Bb` caption uses the dialog's own dark ink (the oracle's
     // dojo_sensei "В БОЙ" plate), not white: white washed the caption out.
-    draw_ui_rich_line_centered(app, cx, w, cy - 14.0f, 28.0f,
-                               loc(app, text, text), 0.9f, 0.12f, 0.09f, 0.06f);
+    // [FIX caption size — JS `Bb.V` L1844] `b=(Y.za()-80)*.8;
+    // label.Fa(b,106.4); label.ua(106.4)` with the node scale `Pb()/112`:
+    // the caption's box is 106.4 design tall and its font `ua` 106.4, i.e. the
+    // label fills the button node. The port drew it in a 28 px box at 0.9
+    // (measured on `dojo_sensei`: oracle ink 115x32 vs the port's 56x16, a
+    // clean 2x). Size the box/font from the plate's own design height (125).
+    const float cap_c = h > 0.0f ? h / 125.0f : 1.0f;      // design -> screen
+    const float cap_box = 106.4f * (125.0f / 112.0f) * cap_c;
+    const float cap_ua = dialog_text_ua_scale(app, 106.4f * (125.0f / 112.0f)) * cap_c;
+    draw_ui_rich_line_centered(app, cx, w, cy - cap_box * 0.5f, cap_box,
+                               loc(app, text, text), cap_ua, 0.12f, 0.09f, 0.06f);
 }
 
 // One plate of the dialog's button row. `slot` is the `He.dhb` L1061 index
@@ -22537,6 +22546,15 @@ void ShopScreen::render_impl(App& app) {
         const bool level_locked = it.level > seen_.level && !owned;
         bool drawn = draw_item_image(app, it.image, cx, cy, cw * 0.8f, ch * 0.8f,
                                      level_locked ? 0.3f : 1.0f);
+        if (std::getenv("SF2_TRACE_SHOP_CELLS") != nullptr) {
+            std::fprintf(stdout,
+                         "[cells] tab=%d row=%zu name='%s' img='%s' drawn=%d cell=(%.0f..%.0f y %.0f..%.0f) step=%.0f\n",
+                         tab_, i, it.name.c_str(), iname.c_str(), drawn ? 1 : 0,
+                         static_cast<double>(cell.J), static_cast<double>(cell.N),
+                         static_cast<double>(cell.P), static_cast<double>(cell.W),
+                         static_cast<double>(sl.cell_step));
+            std::fflush(stdout);
+        }
         if (!drawn) {
             const float r = equipped ? 0.72f : (selected ? 0.75f : (hovered ? 0.7f : 0.5f));
             const float g = equipped ? 0.60f : (selected ? 0.62f : (hovered ? 0.56f : 0.4f));
