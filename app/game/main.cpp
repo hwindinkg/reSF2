@@ -1796,6 +1796,7 @@ static void install_watchdog(int seconds) {
 // normal launch never prints it. `--dojo-cam-probe` also implies hidden+watchdog
 // (any flag does), so it can never leave a visible window behind.
 bool g_dojo_cam_probe = false;
+bool g_dojo_hit_probe = false;  // --dojo-hit-probe: hub hit/effect evidence
 
 // `--magic-charge-probe`: JS-exact self-check for the magic bullet/charge
 // condition wiring. Before this fix `?PlayerParameter[Me].MagicBullet` was
@@ -2815,6 +2816,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // Prints the hub camera decomposition once per ready frame (see
             // screens.cpp). Combine with `--headless N` to exit deterministically.
             g_dojo_cam_probe = true;
+        } else if (arg == "--dojo-hit-probe") {
+            // Parks the hub player at the training bag and punches (see
+            // `dojo_hit_probe_step` in screens.cpp) so the hub's fight-effect
+            // DRAW path can be verified. Combine with `--headless N`.
+            g_dojo_hit_probe = true;
         } else if (arg == "--map-difficulty-probe") {
             // Per-fight rating ratio + `diff` tier + the DamageFactor side
             // deltas behind `2^((q-r)*l)`. No OS input, no simulation.

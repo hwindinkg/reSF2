@@ -3893,6 +3893,16 @@ void FightController::enter_start_stance() {
     // auto-play (`StanceLeft/Right`) start fresh this round.
     player_.fighter.clear_move();
     // `ZK` -> `wd.reset()` clears `da` (`Ua=null`) for EVERY fighter, the
+    if (std::getenv("SF2_TRACE_POS") != nullptr) {
+        std::fprintf(stdout,
+                     "[reset] after-clear Me wx=%.1f off=%.1f Enemy wx=%.1f "
+                     "off=%.1f\n",
+                     static_cast<double>(player_.fighter.world_x()),
+                     static_cast<double>(player_.fighter.debug_render_offset_x()),
+                     static_cast<double>(enemy_.fighter.world_x()),
+                     static_cast<double>(enemy_.fighter.debug_render_offset_x()));
+        std::fflush(stdout);
+    }
     // dummy included; the intro re-picks its stage move right after. Do NOT
     // skip the dummy here (unlike the phase-2 hand-off below, which is a
     // port-only idle fix, not a JS reset).
@@ -3947,6 +3957,17 @@ void FightController::enter_start_stance() {
     }
     player_.fighter.teleport(battle_.player_spawn_x, battle_.player_spawn_y);
     enemy_.fighter.teleport(battle_.enemy_spawn_x, battle_.enemy_spawn_y);
+    if (std::getenv("SF2_TRACE_POS") != nullptr) {
+        std::fprintf(stdout,
+                     "[reset] teleport f=%d Me wx=%.1f off=%.1f Enemy wx=%.1f "
+                     "off=%.1f\n",
+                     frame_,
+                     static_cast<double>(player_.fighter.world_x()),
+                     static_cast<double>(player_.fighter.debug_render_offset_x()),
+                     static_cast<double>(enemy_.fighter.world_x()),
+                     static_cast<double>(enemy_.fighter.debug_render_offset_x()));
+        std::fflush(stdout);
+    }
     // [FIX phase-1 f=0 = bind — JS `FNa` L409 does NOT sample] `FNa` is
     // `{this.Ta.XF(!0); this.xF(1)}` — it shows the scene and sets the phase;
     // the first `Al.ia` step (`ca.ia` -> `Hnb` -> `wd.ia` -> `Nd.ia`) happens
@@ -3961,6 +3982,16 @@ void FightController::enter_start_stance() {
     const std::vector<float> held_e = enemy_.fighter.positions();
     sample_idle(player_);
     sample_enemy_idle();
+    if (std::getenv("SF2_TRACE_POS") != nullptr) {
+        std::fprintf(stdout,
+                     "[reset] after-idle Me wx=%.1f off=%.1f Enemy wx=%.1f "
+                     "off=%.1f\n",
+                     static_cast<double>(player_.fighter.world_x()),
+                     static_cast<double>(player_.fighter.debug_render_offset_x()),
+                     static_cast<double>(enemy_.fighter.world_x()),
+                     static_cast<double>(enemy_.fighter.debug_render_offset_x()));
+        std::fflush(stdout);
+    }
     player_.fighter.set_drawn_positions(held_p);
     enemy_.fighter.set_drawn_positions(held_e);
     rebuild_body(player_, enemy_);
@@ -4334,6 +4365,17 @@ void FightController::apply_round_result(round_result result, const FightFighter
     // The winner's rounds-won (JS `a.ng++`).
     FightFighter& w = winner.is_player ? player_ : enemy_;
     FightFighter& l = winner.is_player ? enemy_ : player_;
+    if (std::getenv("SF2_TRACE_STANCE") != nullptr) {
+        std::fprintf(stdout,
+                     "[result] F%d apply result=%s winner=%s rounds=%d/%d "
+                     "was_player_winner=%d battle_end_pending=%d\n",
+                     frame_, oc.reason.c_str(),
+                     winner.is_player ? "Player" : "Enemy",
+                     w.rounds_won + 1, round_.length,
+                     winner.is_player ? 1 : 0,
+                     battle_end_pending_ ? 1 : 0);
+        std::fflush(stdout);
+    }
     w.rounds_won++;
     w.is_winner = true;
     l.is_winner = false;
@@ -4454,9 +4496,18 @@ void FightController::apply_round_result(round_result result, const FightFighter
     history_.push_back(oc);
 
     if (a_end && !series_advance) {
-        // JS `bea` (L413): the battle end. `end_battle` raises the result
-        // plate (fu(1.166)) and `battle_over_` flips only on its expiry.
-        end_battle(w);
+        // [FIX no win animation on the final victory — JS `Onb` L411] `a`
+        // (`ng >= Rounds`) does NOT run `bea` here. `Onb` only runs
+        // `this.bea(...)` on the frame AFTER the end-stance animation
+        // (`h9` -> `Onb`): `E3a` sets `kh`, phase 3 picks the `Win_*` move,
+        // `h4a` sets `JJ` when it ends, `Ewb` sets `h9`, and only then does
+        // `bea` run its `NA()` (which CLEARS `kh`/`is_winner`) and the Results.
+        // Calling `end_battle` here ran `NA` BEFORE the phase-3 pick, so
+        // `<RoundResult Victory/>` failed, `Win_*` was never selected, the
+        // shared `stance_ended` flag (set by the LOSER's stopped clip — it is
+        // not the winner) ended phase 3 after ~42 frames and the stats
+        // appeared with no out animation (the player's report). Only ARM it.
+        arm_battle_end(w);
     } else {
         if (series_advance) {
             // JS `Onb` (L411): `mfb(!c || c&&kc==wo.nB)` (the wave spawn runs
@@ -4522,15 +4573,29 @@ void FightController::begin_next_mode_fight(const ModeSetup& setup) {
     std::fflush(stdout);
 }
 
+// JS `Onb` L411's `a` branch: arm the battle end. `bea` itself runs only when
+// the end-stance animation has finished (`h9`), so `NA` (which clears `kh` and
+// `is_winner`) must not run before the phase-3 pick.
+void FightController::arm_battle_end(const FightFighter& winner) {
+    battle_end_pending_ = true;
+    winner_ = &winner;
+    std::fprintf(stdout, "[fight] battle end armed: %s (F%d)\n",
+                 result_plate_ == banner_kind::victory ? "PERFECT"
+                 : result_plate_ == banner_kind::defeat ? "GREAT" : "none",
+                 frame_);
+    std::fflush(stdout);
+}
+
 // JS `bea` (L413): the battle end — the winner is fixed, the fight stops.
 void FightController::end_battle(const FightFighter& winner) {
     // JS `bea` (L413) -> `kD` (L415). `battle_over_` is NOT set here: the
     // result plate (`Cr`, the port's `victory`/`defeat`) takes over with the
     // JS `fu(1.166)` hold, and only its expiry (`banner_expire` case
-    // `end_battle`) finalizes the battle � so the fight-end (K.O./end-stance)
+    // `end_battle`) finalizes the battle — so the fight-end (K.O./end-stance)
     // sequence plays BEFORE the Results. Hiding the winner frame behind the
     // dialog made the battle stats appear "momentally" (instantly).
-    battle_end_pending_ = true;
+    // [FIX] `battle_end_pending_`/`winner_` are armed by `arm_battle_end` at
+    // the ROUND RESULT; this body runs from the phase-3 end-stance gate.
     winner_ = &winner;
     // JS `bea` L16910-16917 (verbatim order):
     //   this.yrb();                              // bars latch `IFa` (both sides)
@@ -4567,12 +4632,7 @@ void FightController::end_battle(const FightFighter& winner) {
     // appear. Tying the Results to the plate's `fu(1.166)` hold here showed
     // the stats while the loser was still falling. `battle_end_pending_` is
     // consumed by the `end_stance` gate, which finalizes the battle when the
-    // loser's KO/knockdown chain ends.
-    std::fprintf(stdout, "[fight] battle end armed: %s (F%d)\n",
-                 result_plate_ == banner_kind::victory ? "PERFECT"
-                 : result_plate_ == banner_kind::defeat ? "GREAT" : "none",
-                 frame_);
-    std::fflush(stdout);
+    // end-stance animation finishes (the winner's `Win_*` included).
 }
 
 // JS `NA` (L414): the between-round recovery. The game heals BOTH fighters
@@ -10047,6 +10107,25 @@ void FightController::update(float dt) {
             // the phase-2 body (fighter step, hit detection, sparks) is the
             // same live path the fight uses.
             if (!fight_none_) {
+                // [probe, authorised] `SF2_FORCE_KO_AT=<frame>`: zero the
+                // enemy's HP on that live frame so the round-end path runs
+                // deterministically (used to measure what the round reset does
+                // to the fighters' positions). No RNG/sim change otherwise.
+                if (const char* fko = std::getenv("SF2_FORCE_KO_AT")) {
+                    static bool ko_done = false;
+                    const int at = std::atoi(fko);
+                    if (!ko_done && at > 0 && frame_ == at &&
+                        phase_ == fight_phase::fight) {
+                        ko_done = true;
+                        enemy_.hp = 0.0f;
+                        std::fprintf(stdout,
+                                     "[probe] force KO at F%d Me=%.1f Enemy=%.1f\n",
+                                     frame_,
+                                     static_cast<double>(player_.fighter.world_x()),
+                                     static_cast<double>(enemy_.fighter.world_x()));
+                        std::fflush(stdout);
+                    }
+                }
                 // JS `ca.ia` L389 `PC(1,3)` -> `du.Ih(1,3,ze)` (rule detection:
                 // the Ringout field exit + the TimeOutWin timer end). Runs
                 // before the round-end check so the fired `Pu` ends the round.
@@ -10200,15 +10279,33 @@ void FightController::update(float dt) {
             }
             // JS `Onb` (L411) `h9` -> `Ewb` (`h9=!0`) -> the NEXT frame's
             // `if(a) this.bea(wo.nB)` (L413) or the `else` round transition.
+            if ((end_stance_pending_ || battle_end_pending_) && stance_ended &&
+                std::getenv("SF2_TRACE_STANCE") != nullptr) {
+                auto desc = [](const FightFighter& f) {
+                    const sf2::scene::MoveDef* m = f.fighter.current_move();
+                    return std::string(m != nullptr ? m->name : "-") + ":" +
+                           std::to_string(f.fighter.move_frame()) +
+                           (f.fighter.playing() ? "/play" : "/stop");
+                };
+                std::fprintf(stdout,
+                             "[stance] F%d END phase3 frames=%d player=%s "
+                             "enemy=%s battle_end=%d\n",
+                             frame_, end_stance_frames_, desc(player_).c_str(),
+                             desc(enemy_).c_str(), battle_end_pending_ ? 1 : 0);
+                std::fflush(stdout);
+            }
             // BOTH wait for the end-stance animation to finish (`kg` L387 ->
             // `h4a` -> `JJ` -> `Ewb`). `bea` does NOT hide the view; only the
             // round-transition branch runs `Ta.XF(!1); ZK(); NA(); Z2()`.
             if ((end_stance_pending_ || battle_end_pending_) && stance_ended) {
                 if (battle_end_pending_) {
-                    // JS `bea` (L413) + the next frame's `xJ` -> `kD` (L415):
-                    // the battle ends HERE, after the end-stance animation —
-                    // NOT at the plate's `fu(1.166)` expiry.
+                    // JS `Onb` L411 `h9` -> `a ? this.bea(wo.nB)`: the battle
+                    // end body (`NA` heal/clear, bars frozen, effects drain)
+                    // runs HERE, AFTER the end-stance animation — never at the
+                    // round result (`E3a` must keep `kh`/`is_winner` for the
+                    // phase-3 `Win_*` pick).
                     battle_end_pending_ = false;
+                    if (winner_ != nullptr) end_battle(*winner_);
                     battle_over_ = true;
                     std::fflush(stdout);
                     break;
@@ -10347,6 +10444,24 @@ void FightController::update(float dt) {
                                           enemy_.fighter.com_x()) * 0.5f),
                      static_cast<double>((player_.fighter.com_y() +
                                           enemy_.fighter.com_y()) * 0.5f));
+        std::fflush(stdout);
+    }
+    // [probe, authorised] `SF2_TRACE_POS=1`: the per-frame WORLD x of both
+    // fighters with the phase/round and the spawn the round reset targets. The
+    // reported "positions were not reset at the round change / stuck at the
+    // edge" needs this to be measured rather than guessed.
+    if (std::getenv("SF2_TRACE_POS") != nullptr) {
+        std::fprintf(stdout,
+                     "[pos] F%d phase=%d round=%d Me=%.1f Enemy=%.1f "
+                     "offMe=%.1f offEnemy=%.1f "
+                     "spawnMe=%.1f spawnEnemy=%.1f\n",
+                     frame_, static_cast<int>(phase_), round_.number,
+                     static_cast<double>(player_.fighter.world_x()),
+                     static_cast<double>(enemy_.fighter.world_x()),
+                     static_cast<double>(player_.fighter.debug_render_offset_x()),
+                     static_cast<double>(enemy_.fighter.debug_render_offset_x()),
+                     static_cast<double>(battle_.player_spawn_x),
+                     static_cast<double>(battle_.enemy_spawn_x));
         std::fflush(stdout);
     }
     camera_.framing(player_.fighter.com_x(), player_.fighter.com_y(),

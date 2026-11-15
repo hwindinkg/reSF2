@@ -65,6 +65,10 @@
 // [dojo-cam-probe] Armed by `--dojo-cam-probe` (defined in app/game/main.cpp).
 // Prints the hub camera `Io`/zoom/factor decomposition once per ready frame.
 extern bool g_dojo_cam_probe;
+// [probe, authorised] `--dojo-hit-probe` (app/game/main.cpp): parks the hub
+// player at the bag and punches, so the hub's fight-effect DRAW path can be
+// proven (see `dojo_hit_probe_step`).
+extern bool g_dojo_hit_probe;
 
 namespace sf2::app {
 
@@ -8891,6 +8895,39 @@ void DojoScreen::on_key(int glfw_key, bool down) {
     std::fflush(stdout);
 }
 
+// [probe, authorised] `--dojo-hit-probe`: parks the hub player at the
+// training bag and taps the punch key so the `FightNone` controller actually
+// CONNECTS. Used to prove the hub now DRAWS the fight's `Bl.strike` sparks and
+// the `hit_blade` flash (the reported "no slash effects in the dojo"): the
+// battle-zone probe (`--boss-hit-probe --zone Punchbag`) already proves the
+// spawns exist, this one proves the hub's render path paints them.
+static void dojo_hit_probe_step(sf2::scene::FightController& fc) {
+    const int f = fc.frame();
+    // The hub enters phase 2 but the opening stance still plays until ~f131
+    // (`FistsStartStanceIdle`), and an active stance swallows attack taps.
+    // Park the player at punch range right before the first tap.
+    if (f == 140) {
+        const float bx = fc.enemy().fighter.world_x();
+        fc.debug_place_fighters(bx - 72.0f, bx);
+        std::fprintf(stdout,
+                     "[dojohit] park f=%d player_x=%.1f bag_x=%.1f gap=%.1f\n",
+                     f, static_cast<double>(fc.player().fighter.world_x()),
+                     static_cast<double>(bx),
+                     static_cast<double>(bx -
+                                         fc.player().fighter.world_x()));
+        std::fflush(stdout);
+    }
+    if (f >= 142 && f <= 600 && ((f - 142) % 25) == 0) {
+        fc.player_input(sf2::scene::key_type::punch,
+                        sf2::scene::press_type::tap);
+        std::fprintf(stdout, "[dojohit] punch tap f=%d move=%s\n", f,
+                     fc.player().fighter.current_move() != nullptr
+                         ? fc.player().fighter.current_move()->name.c_str()
+                         : "(idle)");
+        std::fflush(stdout);
+    }
+}
+
 // The hub's real gamepad source (JS `Za.gamepad` -> `hu`; the hub owns its own
 // `Za` just like the fight). Same `$ab` bindings as `FightScreen`.
 void DojoScreen::evaluate_dojo_gamepad() {
@@ -9058,6 +9095,7 @@ void DojoScreen::update_impl(float dt) {
     // pad tap).
     if (dojo_fight_ != nullptr) {
         update_pad_input(app(), dojo_fight_.get(), dojo_pad_, /*live=*/true, "dojo");
+        if (g_dojo_hit_probe) dojo_hit_probe_step(*dojo_fight_);
         dojo_fight_->update(dt);
         // [probe] SF2_TRACE_DOJO_MOVE=1: the hub viewer's player move + clip
         // frame on every change. A stance that never ends shows here (the
@@ -10700,6 +10738,59 @@ void DojoScreen::render_impl(App& app) {
                     app.fight_assets().dojo.render_layers(
                         ren, hub_cam, fl + 1,
                         app.fight_assets().dojo.layers().size());
+                }
+            }
+            // [FIX dojo hit effects] The `Bl.strike` sparks and the one-shot
+            // `hit_blade`/`critical` flash live in the fight's OWN
+            // `EffectSystem` (`FightController::fx()`), and `FightScreen::draw`
+            // renders both (sparks right after the fighters, the flash on the
+            // camera-glued `Cu` container). The Dojo hub runs the SAME
+            // `FightNone` controller (JS `Tf` L1971), so its hits must be drawn
+            // here too — measured with `--boss-hit-probe --zone Punchbag`: the
+            // spawns happened (`[fx] F210 Player Hit HitEffect
+            // file=hit_blade`) but the hub painted nothing, which is the
+            // reported "no slash effects in the dojo".
+            draw_hit_sparks(app, ren, hub_cam, dojo_fight_->fx(),
+                            app.fight_assets().dojo.root_color(), arena_half,
+                            cont_y);
+            {
+                const sf2::scene::hit_flash& df = dojo_fight_->fx()
+                                                      .hit_flash_state();
+                if (df.active && load_fx_atlas(app)) {
+                    const std::string dframe =
+                        dojo_fight_->fx().hit_flash_frame();
+                    if (!dframe.empty()) {
+                        constexpr float kPi = 3.14159265358979323846f;
+                        const float alpha =
+                            0.5f + 0.5f * std::sin(kPi / arrow_flashing_frames() *
+                                                   df.age);
+                        const float fdx = hub_cam.world_to_screen_x(
+                            df.x - arena_half, 1.0f);
+                        const float fdy =
+                            hub_cam.world_to_screen_y(df.y + cont_y);
+                        const float fsize = 1024.0f * df.scale * hub_cam.zoom;
+                        if (alpha > 0.02f && fsize > 0.5f &&
+                            !draw_fx_frame(app, dframe, fdx, fdy, fsize,
+                                           /*facing=*/1, 1.0f, 1.0f, 1.0f,
+                                           alpha, df.angle_deg)) {
+                            ren.draw_effect_quad(fdx, fdy, fsize * 0.25f,
+                                                 fsize * 0.25f, 0.0f, 1.0f,
+                                                 1.0f, 1.0f, alpha);
+                        }
+                        // [probe] proof the hub drew the live flash (the fight
+                        // screen has the same effect; capped so it cannot spam).
+                        static int df_n = 0;
+                        if (df_n < 6) {
+                            std::fprintf(stdout,
+                                         "[fx] dojo flash drawn frame=%d "
+                                         "file=%s alpha=%.2f size=%.1f\n",
+                                         dojo_fight_->frame(), dframe.c_str(),
+                                         static_cast<double>(alpha),
+                                         static_cast<double>(fsize));
+                            std::fflush(stdout);
+                            ++df_n;
+                        }
+                    }
                 }
             }
             // JS `Ut.V0a` (L831) + `Ut.kyb` (L825): the flashing `arrow`

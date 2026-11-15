@@ -24,6 +24,11 @@
 
 namespace sf2::scene {
 
+// [probe] The live fight frame (set by `FightController::update` via
+// `set_trace_fight_frame`) so the per-frame anchor traces can be correlated
+// with `[pos]`/`[hit]` lines. File-local; no simulation reads it.
+static int g_trace_fight_frame = -1;
+
 namespace {
 // JS `v.wya` (`internal_settings.xml` `<PivotNode Name>`, parse L1155:
 // `v.wya = b != null ? b : "NPivot"`). The config parse overwrites the
@@ -1710,6 +1715,17 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     const bool align_absolute =
         move.align.has_align && (move.align.pos_object == "Animation" ||
                                  move.align.pivot_object == "Animation");
+    // [FIX stale absolute align — JS per-clip align state] The absolute-align
+    // flag is a property of the CURRENT clip (`Te.Gub` L559 reads the move's
+    // own `<Align>` each start), so it MUST be re-decided on every move. The
+    // flag was only ever SET (true) and never cleared, so a single
+    // `<Pivot Object="Animation"/>` move (`WallHit` — the reported "walked
+    // into the wall and stayed stuck in the corner", a `Shop*TryOn*` clip —
+    // the reported "after the weapon animation the character moved back")
+    // pinned `world_x_ = align_own_x_` for the REST of the fight: no walk,
+    // no round reset (the reset teleports, then the next sample forces the
+    // old x back), only attacks still worked.
+    align_absolute_ = false;
     if (align_absolute) {
         render_offset_ = 0.0f;
         render_offset_y_ = 0.0f;
@@ -1776,10 +1792,11 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
                     }
                 }
                 std::fprintf(stdout,
-                             "[off-cap] move=%s old=%.2f new=%.2f wx=%.2f "
+                             "[off-cap] F%d move=%s old=%.2f new=%.2f wx=%.2f "
                              "sol_au=%.2f sol_pu=%.2f prev_wx=%.2f raw=%.2f "
                              "mirror=%d swap=%d\n",
-                             move.name.c_str(), static_cast<double>(off_old),
+                             g_trace_fight_frame, move.name.c_str(),
+                             static_cast<double>(off_old),
                              static_cast<double>(render_offset_),
                              static_cast<double>(world_x_),
                              static_cast<double>(sol_ma_[au * 3]),
@@ -2822,9 +2839,8 @@ float Fighter::anim_time() const {
 // early-returned instead, freezing the clip-less bag's drawn pose. Sampling
 // the 1-frame, bone-less bind clip re-runs the exact solver/placement path
 // `sample()` uses (`nclip == 0`), so `sol_ma_` steps and `pos_` follows.
-static int g_trace_fight_frame = -1;
+// `g_trace_fight_frame` is defined at the top of this file (probe only).
 void set_trace_fight_frame(int f) { g_trace_fight_frame = f; }
-
 void Fighter::sample_bind_pose() {
     sf2::data::anim_clip bind_clip;
     bind_clip.frames.resize(1);
@@ -2964,7 +2980,9 @@ void Fighter::clear_move() {
     preview_mode_ = false;
     align_pivot_u_ = -1;
     align_pivot_bone_u_ = -1;
-    // JS `stop()`/`jc.reset()` drops the per-clip mirror decision too;
+    // [FIX stale absolute align] `Te.reset` drops the animator's align state;
+    // the flag must not survive a clip end (see `start_move_impl`).
+    align_absolute_ = false;
     // `Te.reset` L548 also restores the ctor default `FX = 1`.
     mirror_swap_ = false;
     mirror_x_ = false;
@@ -3732,8 +3750,9 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
-                         "[anchor] move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
+                         "[anchor] F%d move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
                          "off_valid=%d align_u=%d anchor_u=%d solver=%d\n",
+                         g_trace_fight_frame,
                          current_move_ != nullptr ? current_move_->name.c_str() : "-",
                          static_cast<double>(px[anchor_u]),
                          static_cast<double>(render_offset_),

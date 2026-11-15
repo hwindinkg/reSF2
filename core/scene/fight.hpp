@@ -2789,6 +2789,9 @@ private:
     sf2::scene::AchievementRoundRecord& achievement_cur_round();
     void apply_round_result(round_result result, const FightFighter& winner,
                             const FightFighter& loser);
+    // JS `Onb` L411 `a`: ARM the battle end at the round result (the body runs
+    // after the end-stance animation, `h9`).
+    void arm_battle_end(const FightFighter& winner);
     // JS `bea` (L413): the battle end.
     void end_battle(const FightFighter& winner);
     // JS `NA` (L414): the between-round recovery (heal qDa, clear flags).

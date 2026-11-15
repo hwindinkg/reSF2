@@ -825,6 +825,9 @@ public:
     }
     float world_x() const { return world_x_; }
     float world_y() const { return world_y_; }
+    // Debug/probe accessor: the clip->world placement constant (see
+    // `render_offset_`). Test-only; no simulation reads it.
+    float debug_render_offset_x() const { return render_offset_; }
     // JS `Dl.Eu.ma` — the fighter's Center-Of-Mass BODY. It is NOT the XML
     // `<COM Type="CenterOfMass">` bone (that one has Mass=0 and no LCC — a
     // separate immovable body in JS, `sf2.502f0946.js` L571), and NOT the
