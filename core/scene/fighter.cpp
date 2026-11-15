@@ -1794,7 +1794,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
                 std::fprintf(stdout,
                              "[off-cap] F%d move=%s old=%.2f new=%.2f wx=%.2f "
                              "sol_au=%.2f sol_pu=%.2f prev_wx=%.2f raw=%.2f "
-                             "mirror=%d swap=%d\n",
+                             "mirror=%d swap=%d nclip=%zu\n",
                              g_trace_fight_frame, move.name.c_str(),
                              static_cast<double>(off_old),
                              static_cast<double>(render_offset_),
@@ -1804,7 +1804,8 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
                              static_cast<double>(prev_align_pivot_world_x_),
                              static_cast<double>(raw_d),
                              static_cast<int>(clip_mirror_),
-                             mirror_swap_ ? 1 : 0);
+                             mirror_swap_ ? 1 : 0,
+                             current_clip_ != nullptr ? current_clip_->bone_count() : 0);
                 std::fflush(stdout);
             }
             // [FIX cloth Y-space across a clip switch — JS `Te.Gla` L559 +
@@ -1823,6 +1824,26 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // `Gla` value is applied to `align_y_` below.
             render_offset_y_ = prev_align_pivot_world_y_ - sol_ma_[pu * 3 + 1];
             render_offset_valid_ = true;
+            // [FIX cloth across a clip start — JS keeps the solver `ma` in
+            // WORLD space] `pos = sol + render_offset_`, so changing
+            // `render_offset_` at a clip start moves every NON-clip body (the
+            // cloth chain) together with the clip. The JS `eda` only rewrites
+            // the CLIP bones; the cloth `ma` stays where it was. Measured on
+            // dojo-move: the cloth delta jumps 4 -> 40 units at the first clip
+            // frame and grows to 288. Re-express the non-clip bodies so their
+            // world position is unchanged (A/B: `SF2_CLOTH_KEEP_WORLD=1`).
+            if (std::getenv("SF2_CLOTH_KEEP_WORLD") != nullptr &&
+                solver_init_ && current_clip_ != nullptr &&
+                !current_clip_->frames.empty()) {
+                const std::size_t nb = current_clip_->frames[0].bones.size();
+                const float doff = render_offset_ - off_old;
+                if (nb < model_.bones.size() && doff != 0.0f) {
+                    for (std::size_t i = nb * 3; i + 1 < sol_ma_.size(); i += 3) {
+                        sol_ma_[i] -= doff;
+                        sol_mf_[i] -= doff;
+                    }
+                }
+            }
         }
     }
     // [FIX cloth Y-space — JS `Te.Gla` L559] The total clip y shift is
