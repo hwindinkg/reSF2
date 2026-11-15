@@ -4342,13 +4342,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             if (static_cast<std::size_t>(i) >= n) continue;
             std::fprintf(stdout,
                          "[cframe]   i=%-3d pos=(%.2f,%.2f) px=(%.2f,%.2f) "
-                         "sol=(%.2f,%.2f)\n",
+                         "sol=(%.2f,%.2f) bind=(%.2f,%.2f)\n",
                          i, static_cast<double>(pos_[static_cast<std::size_t>(i) * 2]),
                          static_cast<double>(pos_[static_cast<std::size_t>(i) * 2 + 1]),
                          static_cast<double>(px[static_cast<std::size_t>(i)]),
                          static_cast<double>(py[static_cast<std::size_t>(i)]),
                          static_cast<double>(sol_ma_[static_cast<std::size_t>(i) * 3]),
-                         static_cast<double>(sol_ma_[static_cast<std::size_t>(i) * 3 + 1]));
+                         static_cast<double>(sol_ma_[static_cast<std::size_t>(i) * 3 + 1]),
+                         static_cast<double>(bones[static_cast<std::size_t>(i)].x),
+                         static_cast<double>(bones[static_cast<std::size_t>(i)].y));
         }
         std::fflush(stdout);
     }
