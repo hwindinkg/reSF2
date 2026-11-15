@@ -1293,7 +1293,7 @@ function ensureHooks(fight) {
      * `Nd.oa.Va.all[i].ma` first therefore yields exactly the pre-solver input
      * the port's `[clipsample]` line logs (same band 76..81, 91, 92). */
     try {
-      if (new URLSearchParams(window.location.search).get("clipsamples") === "1") {
+      if (new URLSearchParams(window.location.search).get("clipsamples") != null) {
         if (!tr.csHooked) {
           tr.csHooked = 1;
           var wrapSol = function (ftr, side) {
@@ -1340,8 +1340,11 @@ function ensureHooks(fight) {
               try {
                 var nodes2 = sol.oa && sol.oa.Va && sol.oa.Va.all;
                 if (nodes2 && nodes2.length > 95) {
-                  for (var bj = 0; bj < BAND.length; bj++) {
-                    var ix2 = BAND[bj];
+                  var allNodes =
+                    new URLSearchParams(window.location.search).get("clipsamples") === "all";
+                  var nband = allNodes ? nodes2.length : BAND.length;
+                  for (var bj = 0; bj < nband; bj++) {
+                    var ix2 = allNodes ? bj : BAND[bj];
                     var q = nodes2[ix2] && nodes2[ix2].ma;
                     if (!q) continue;
                     console.log("[csample-post] s=" + side + " f=" + fr +

@@ -4332,6 +4332,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     if ((std::getenv("SF2_TRACE_CLOTH_FRAME") != nullptr && ia_ticks_ <= 6) ||
         (cfa != nullptr && ia_ticks_ == cfa_at)) {
         static const int kIds[] = {76, 78, 81, 86, 89, 93};
+        // [probe] With `SF2_CLOTH_FRAME_AT` dump EVERY node, so the whole
+        // solved state can be diffed against the oracle's
+        // `[csample-post]` (`?clipsamples=all`).
+        std::vector<int> ids(kIds, kIds + sizeof(kIds) / sizeof(kIds[0]));
+        if (cfa != nullptr) {
+            ids.clear();
+            for (std::size_t q = 0; q < n; ++q) ids.push_back(static_cast<int>(q));
+        }
         std::fprintf(stdout,
                      "[cframe] tick=%d move=%s nclip=%zu anchor=%d pxA=%.2f "
                      "wx=%.2f xarg=%.2f solver_world=%d\n",
@@ -4341,7 +4349,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      static_cast<double>(px[anchor_u]),
                      static_cast<double>(world_x_), static_cast<double>(x),
                      solver_world_ ? 1 : 0);
-        for (int i : kIds) {
+        for (int i : ids) {
             if (static_cast<std::size_t>(i) >= n) continue;
             std::fprintf(stdout,
                          "[cframe]   i=%-3d pos=(%.2f,%.2f) px=(%.2f,%.2f) "
