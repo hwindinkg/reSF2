@@ -4315,6 +4315,36 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // pose every frame.
     }
     }
+    // [probe, authorised] `SF2_TRACE_CLOTH_FRAME=1`: the placement inputs for
+    // the cloth chain on the first solver frames — `pos_` (drawn), `px`
+    // (buffer), `sol_ma_` (solver), the anchor and `world_x_`. Explains the
+    // measured 4 -> 40 unit jump at the first clip frame (nclip=67, so the clip
+    // does not write these nodes).
+    if (std::getenv("SF2_TRACE_CLOTH_FRAME") != nullptr && ia_ticks_ <= 6) {
+        static const int kIds[] = {76, 78, 81, 86, 89, 93};
+        std::fprintf(stdout,
+                     "[cframe] tick=%d move=%s nclip=%zu anchor=%d pxA=%.2f "
+                     "wx=%.2f xarg=%.2f solver_world=%d\n",
+                     ia_ticks_,
+                     current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                     nclip, static_cast<int>(anchor_u),
+                     static_cast<double>(px[anchor_u]),
+                     static_cast<double>(world_x_), static_cast<double>(x),
+                     solver_world_ ? 1 : 0);
+        for (int i : kIds) {
+            if (static_cast<std::size_t>(i) >= n) continue;
+            std::fprintf(stdout,
+                         "[cframe]   i=%-3d pos=(%.2f,%.2f) px=(%.2f,%.2f) "
+                         "sol=(%.2f,%.2f)\n",
+                         i, static_cast<double>(pos_[static_cast<std::size_t>(i) * 2]),
+                         static_cast<double>(pos_[static_cast<std::size_t>(i) * 2 + 1]),
+                         static_cast<double>(px[static_cast<std::size_t>(i)]),
+                         static_cast<double>(py[static_cast<std::size_t>(i)]),
+                         static_cast<double>(sol_ma_[static_cast<std::size_t>(i) * 3]),
+                         static_cast<double>(sol_ma_[static_cast<std::size_t>(i) * 3 + 1]));
+        }
+        std::fflush(stdout);
+    }
     // JS `dv.ia` (L840) drops z when it skins the mesh (`Xg[a++] = d.x;
     // Xg[a++] = d.y`), so no per-bone depth is retained for drawing — the
     // triangles draw in XML document order (see build_vertices).
