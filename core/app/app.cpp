@@ -42,6 +42,12 @@
 
 namespace sf2::app {
 
+// [probe, authorised] True while `ScreenManager::render` walks the stack, so a
+// sound dispatched from a RENDER path can be identified (the Dojo hub's stance
+// swishes were being dispatched during its render — see
+// `Screen::covers_below`).
+bool g_render_phase = false;
+
 namespace {
 
 std::vector<std::uint8_t> read_file_bytes(const std::string& path) {

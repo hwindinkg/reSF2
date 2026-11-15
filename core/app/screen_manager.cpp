@@ -10,6 +10,11 @@
 
 namespace sf2::app {
 
+// [probe, authorised] True while `ScreenManager::render` walks the stack (set
+// by `render` below, defined in app.cpp) — lets a sound dispatched from a
+// RENDER path be identified.
+extern bool g_render_phase;
+
 namespace {
 
 // JS scene names for the quest journal (`xn.iOa`, JS_MAP L432): Results has
@@ -328,6 +333,7 @@ void ScreenManager::dump_ui_state() {
 }
 
 void ScreenManager::render(App& app) {
+    g_render_phase = true;
     // Skip the screens BELOW the topmost `covers_below()` screen: the fight's
     // location layers are opaque, so the Dojo hub underneath must not be drawn
     // (it cost ~9 ms/frame — the "fps dropped to 20" report).
@@ -343,6 +349,7 @@ void ScreenManager::render(App& app) {
             stack_[i]->render(app);
         }
     }
+    g_render_phase = false;
 }
 
 } // namespace sf2::app

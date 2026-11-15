@@ -20,6 +20,12 @@
 #include "scene/fight_camera_sya.hpp"
 #include "scene/shared_rng.hpp"
 
+// [probe] Set while `ScreenManager::render` walks the stack (app.cpp) — lets a
+// sound dispatch be attributed to a render path.
+namespace sf2::app {
+extern bool g_render_phase;
+}
+
 namespace sf2::scene {
 
 // `[hitaudit]` process-wide probe switch (see fight.hpp).
@@ -1058,9 +1064,10 @@ void FightController::dispatch_move_actions(
             // JS `ta.ak(a.name, a.ceb, a.volume)` L1264: the name resolves
             // through `ta.WBa`; a miss plays NOTHING (logged as `<none>`).
             const char* stem = sf2::audio::sfx_stem_for_js(act->name.c_str());
-            std::fprintf(stdout, "[sfx] F%d %s %s %s name=%s stem=%s\n", frame_,
+            std::fprintf(stdout, "[sfx] F%d %s %s %s name=%s stem=%s rp=%d\n", frame_,
                          owner.name.c_str(), why, act->kind.c_str(), act->name.c_str(),
-                         stem != nullptr ? stem : "<none>");
+                         stem != nullptr ? stem : "<none>",
+                         sf2::app::g_render_phase ? 1 : 0);
             std::fflush(stdout);
             if (stem != nullptr) sf2::audio::AudioEngine::instance().play(act->name, act->looped);
             continue;
