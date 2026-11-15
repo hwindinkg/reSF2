@@ -129,6 +129,14 @@ public:
     // `SF2_AUDIO_LATENCY=1`). The port also self-polls it on every play/music
     // trigger, so it is measurable without any app-loop hook.
     void latency_tick();
+    // [FIX headless determinism — JS `Ss.pxb` L100223] The JS throttles a
+    // repeated cue by `J.now()/1000` = `Date.now()` (the WALL clock). The port's
+    // headless loop runs UNCAPPED, so the same cue N frames later lands inside
+    // the 0.05 s window and is suppressed — the audio trace then depends on the
+    // RENDER cost (enabling `covers_below` "loses" sounds that are dispatched on
+    // schedule). Drive the throttle from the GAME clock (the fixed 60 Hz step):
+    // identical at 60 Hz (0.05 s = 3 frames) and deterministic everywhere.
+    void set_game_clock(double seconds);
     std::string music_track() const;
     std::uint64_t music_plays() const;
 
@@ -172,6 +180,8 @@ private:
     // JS `Ss.J7a` (-1) / `Ss.O6a` (`Hcb` true): a play that found no free
     // voice slot (2 looped + 16 one-shot) is DROPPED, never stolen.
     std::uint64_t dropped_total_ = 0;
+    // JS `Ss.pxb` throttle clock (see `set_game_clock`).
+    double game_clock_ = 0.0;
     // Audio-trace per-frame buffers (see drain_frame_plays).
     std::vector<std::pair<std::string, int>> frame_plays_;
     std::vector<std::string> frame_stops_;

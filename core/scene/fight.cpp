@@ -743,6 +743,19 @@ static int button_slot(const std::string& name) {
 void FightController::dispatch_move_actions(
     const std::vector<const sf2::scene::MoveAction*>& acts, FightFighter& owner,
     const char* why, const sf2::scene::FightContext& conds) {
+    // [probe, authorised] `SF2_TRACE_DISPATCH=1`: one line per dispatch
+    // call with the owner and the action count — used to see whether the
+    // fight update still dispatches when `covers_below` skips the hub.
+    if (std::getenv("SF2_TRACE_DISPATCH") != nullptr) {
+        static int n_disp = 0;
+        if (n_disp < 200) {
+            std::fprintf(stdout, "[disp] #%d F%d owner=%s actions=%zu\n",
+                         ++n_disp, frame_,
+                         owner.name.c_str(), acts.size());
+            std::fflush(stdout);
+        }
+    }
+
     for (const sf2::scene::MoveAction* act : acts) {
         if (act == nullptr) continue;
         const bool sound_kind = act->js_type == 2 || act->js_type == 3 || act->js_type == 4;

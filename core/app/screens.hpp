@@ -40,6 +40,7 @@
 // so the `za` chrome art resolves. A flat fallback still covers a real
 // per-frame miss (never a silent blank).
 
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -752,7 +753,9 @@ public:
     // swishes are dispatched from the hub's RENDER path, and the oracle plays
     // them. Enabling this saved 9 ms/frame (measured) but must wait until that
     // dispatch moves out of render.
-    bool covers_below() const override { return false; }
+    bool covers_below() const override {
+        return std::getenv("SF2_COVERS_BELOW") != nullptr;
+    }
 
     // JS `Dr.B()` (L2067) `L.K.$f.uF(1)`: the pause `Dr` dialog lives for the
     // screen's lifetime, so destroying the screen restores the MUSIC bus (the

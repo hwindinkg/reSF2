@@ -1500,6 +1500,9 @@ void App::update_fixed(float dt) {
     // `L.K.time += a` that `Hb.now()` adds (`Hb.getTime()` L... = `ed.getDate(
     // N$+(L.K.time-baa))`). `quest_now()`/`?Fight.TimeLeft`/`Timer` all read it.
     WarriorSave::live_clock() += static_cast<double>(dt);
+    // [FIX headless determinism] The `Ss.pxb` cue throttle reads this clock
+    // instead of the wall clock (see `AudioEngine::set_game_clock`).
+    sf2::audio::AudioEngine::instance().set_game_clock(WarriorSave::live_clock());
     // JS `Hb.Oh` listener `xx()` (L100049): `this.Zma(p.Dc)` — the energy
     // regeneration tick (`p.o.dk` toward `v.$Ca()`, one unit per `v.YE`).
     sf2::app::tick_energy(*this);

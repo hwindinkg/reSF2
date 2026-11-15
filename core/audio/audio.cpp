@@ -447,6 +447,9 @@ void latency_tick_impl(const ma_engine& engine, bool engine_ok) {
 
 }  // namespace
 
+// [FIX headless determinism] The `Ss.pxb` throttle clock (see the header).
+void AudioEngine::set_game_clock(double seconds) { game_clock_ = seconds; }
+
 // Called once per presented frame by the game loop (main.cpp driver tick).
 void AudioEngine::latency_tick() {
     if (impl_ == nullptr) return;
@@ -483,9 +486,7 @@ void AudioEngine::play(const std::string& event, bool loop) {
     // so a dead engine neither throttles nor stamps `oFa`. `rxb` is never
     // populated by shipped content, so the window is always the default.
     if (!loop) {  // JS O6a (1238636): if(b)c=true; - a LOOPED cue skips pxb
-        const double now = std::chrono::duration<double>(
-                               std::chrono::steady_clock::now().time_since_epoch())
-                               .count();
+        const double now = game_clock_;  // JS `J.now()` -> the game clock
         const double last = impl_->last_play[static_cast<std::size_t>(e)];
         if (last >= 0.0 && now - last < kSfxThrottleSeconds) {
             ++suppressed_total_;      // JS `pxb` true -> `O6a` returns -1
