@@ -3897,6 +3897,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             }
             std::fflush(stdout);
         }
+        // [probe, authorised] `SF2_NO_CLOTH_SOLVER=1`: skip the cloth
+        // integrate/relax entirely. Binary experiment for the
+        // stretched-character report: if the pose error drops, the solver
+        // is the source; if it stays, the pre-solver clip input is.
+        static const bool no_cloth_solver =
+            std::getenv("SF2_NO_CLOTH_SOLVER") != nullptr;
         const float kGrav = kGravitation / (model_hd_ * model_hd_);  // JS `Al.O9a`
         for (std::size_t i = 0; i < n; ++i) {
             const Bone& b = bones[i];
@@ -3910,6 +3916,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const bool jy = b.cloth && !b.is_macro;
             // JS `Al.sk` L583: `!c.NG && (this.nk || c.jy || oa.vc && c.vc)`.
             if (ng || !(nk_ || jy || (shock_latch_ && b.shock))) continue;
+            if (no_cloth_solver && jy) continue;
             const std::size_t i3 = i * 3;
             // JS `Vc.sk(a)` @405734 — one Verlet step (shared, JS-exact).
             Vec3 ma{sol_ma_[i3], sol_ma_[i3 + 1], sol_ma_[i3 + 2]};
@@ -3960,7 +3967,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             }
         }
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
-        for (int it = 0; it < kEdgeIters; ++it) {
+        const int edge_iters = no_cloth_solver ? 0 : kEdgeIters;
+        for (int it = 0; it < edge_iters; ++it) {
             for (std::size_t ei = 0; ei < model_.edges.size(); ++ei) {
                 const EdgeDef& e = model_.edges[ei];
                 // JS `Al.jE` (L583): `for(...){let g=c[f++]; a&&g.vc||this.fdb(g)}`

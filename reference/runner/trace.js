@@ -1300,11 +1300,11 @@ function ensureHooks(fight) {
             var sol = ftr && ftr.Nd;
             if (!sol || typeof sol.ia !== "function" || sol.__csWrapped) return;
             var orig = sol.ia;
-            var BAND = [76, 77, 78, 79, 80, 81, 91, 92];
+            var BAND = [76, 77, 78, 79, 80, 81, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95];
             sol.ia = function () {
               try {
                 var nodes = sol.oa && sol.oa.Va && sol.oa.Va.all;
-                if (nodes && nodes.length > 92) {
+                if (nodes && nodes.length > 95) {
                   var fr = -1;
                   try { fr = fight.frame; } catch (e0) { fr = -1; }
                   // The same key compare_pose aligns by: (clip, cf) = the JS
