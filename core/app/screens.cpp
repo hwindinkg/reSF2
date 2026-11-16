@@ -11892,6 +11892,37 @@ bool MapScreen::zone_pickable(std::size_t zi) const {
     return false;
 }
 
+// [probe, authorised] `SF2_TRACE_MAPDOTS=1`: the zone strip's dots in slot
+// order (the order the player sees left-to-right), with each zone's name, map
+// part, lock flag and active-battle count. Item 14 ("after the second level all
+// locations show at the bottom and the second dot opens the butcher first")
+// needs this list measured on a progressed save.
+void MapScreen::trace_zone_dots() const {
+    static bool logged = false;
+    static int last_count = -1;
+    std::size_t slot = 0;
+    int n = 0;
+    for (std::size_t i = 0; i < zones_.size(); ++i) {
+        if (zone_pickable(i)) ++n;
+    }
+    if (logged && n == last_count) return;
+    logged = true;
+    last_count = n;
+    std::fprintf(stdout, "[mapdots] %zu zone(s), %d dot(s):\n", zones_.size(),
+                 n);
+    for (std::size_t i = 0; i < zones_.size(); ++i) {
+        if (!zone_pickable(i)) continue;
+        int active = 0;
+        for (const Node& nd : zones_[i].nodes) {
+            if (nd.active) ++active;
+        }
+        std::fprintf(stdout, "[mapdots]   slot=%zu zone=%s part=%d locked=%d active=%d\n",
+                     slot++, zones_[i].name.c_str(), zones_[i].part,
+                     zones_[i].locked ? 1 : 0, active);
+    }
+    std::fflush(stdout);
+}
+
 bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {    if (zi >= zones_.size()) return false;
     std::size_t slot = 0;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
@@ -13914,6 +13945,7 @@ void MapScreen::render_impl(App& app) {
         return;
     }
     load_map_backdrops(app);  // once; silent unless frames decode
+    if (std::getenv("SF2_TRACE_MAPDOTS") != nullptr) trace_zone_dots();
     const MapMetrics mm = map_metrics(app);
     // `Vr` map strip (JS `qk.layout` L2137 / `Vr.ba` L2118): the selected
     // zone's backdrop (JS `qe.W0a` L2143 `parseInt(fileName.split(".")[1])-1`)

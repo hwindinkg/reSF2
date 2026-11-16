@@ -474,6 +474,10 @@ public:
     // neighbour draw all use this one predicate, so the zone a player can
     // swipe to is exactly a zone that shows a dot.
     bool zone_pickable(std::size_t zi) const;
+    // [probe, authorised] `SF2_TRACE_MAPDOTS=1`: log the dot strip (slot ->
+    // zone name/part/locked/active battles) so item 14's "all locations at the
+    // bottom" can be measured on a progressed save.
+    void trace_zone_dots() const;
     // The zone the map is showing (`Vr` selection; seeded from the save's
     // CurrentZone and written back on a dot tap).
     int zone_selected() const { return zone_sel_; }
