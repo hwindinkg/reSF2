@@ -10584,7 +10584,30 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             app.run_one_frame();
         }
         const std::string kind = act_probe_kind.empty() ? "act" : act_probe_kind;
-        if (kind == "buy") {
+        // The `Ib` bar is drawn UNDER the boot overlay, and the overlay's
+        // countdown is driven by the screen update — which a queued modal
+        // blocks. So for `notify` the dialog is pushed AFTER the boot sequence
+        // has settled (below), not here.
+        const bool want_notify = (kind == "notify");
+        if (want_notify) {
+            // nothing to queue yet
+        } else if (kind == "buy") {
+            // The `Ib` notification bar with its OK plate (JS `Ib` L1910
+            // `Bb("EButtonWhite")` + `Bb.V` dark ink). Item 5 ("the OK button
+            // colour is wrong"): the bar's caption was drawn WHITE on the light
+            // `btnWhite` plate, so it read as a washed-out button. Captured to
+            // `.harness/artifacts/notify_probe.png`.
+            sf2::app::EngineDialog d;
+            d.type = "Notification";
+            d.lines.push_back(
+                "Not enough coins to buy this item.");
+            sf2::app::QuestAction noop;
+            noop.tag = "NoOp";
+            d.button_actions.push_back(noop);
+            d.button_text = "OK";
+            d.button_color = "White";
+            app.quest_engine().push_dialog_for_test(std::move(d));
+        } else if (kind == "buy") {
             // The shop purchase confirm (JS `Xc.$hb` -> `Wb.openDialog(350)` ->
             // `ph`), built exactly like `ShopScreen::open_buy_confirm` does, so
             // its plate COLOUR/size can be captured outside the shop flow.
@@ -10700,13 +10723,49 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         } else {
             app.quest_engine().debug_force_act_overlay("Act I{br}Hero Reborn");
         }
-        for (int i = 0; i < 3; ++i) {
+        // A `notification` is drawn UNDER the boot overlay, and the overlay's
+        // countdown is driven by the screen update that a queued modal blocks —
+        // so settle the boot FIRST, then queue the dialog.
+        int settle = 3;
+        if (want_notify) {
+            // Headless mode (a) skips the boot/loader overlay and (b) forces one
+            // fixed step per frame, so the boot countdown actually runs (an
+            // interactive hidden window presents far faster than 60 Hz, so most
+            // frames carry no fixed step and the overlay never ends — measured:
+            // the splash was still up after 1800 present frames).
+            app.set_headless_frames(100000);
+            app.set_dialog_observe(true);  // headless hides modals unless observed
+            for (int i = 0; i < 200; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            // The `Ib` notification bar with its OK plate (JS `Ib` L1910
+            // `Bb("EButtonWhite")` + `Bb.V` dark ink). Item 5 ("the OK button
+            // colour is wrong"): the bar's caption was drawn WHITE on the light
+            // `btnWhite` plate, so it read as a washed-out button.
+            sf2::app::EngineDialog d;
+            d.type = "Notification";
+            d.lines.push_back("Not enough coins to buy this item.");
+            sf2::app::QuestAction noop;
+            noop.tag = "NoOp";
+            d.button_actions.push_back(noop);
+            d.button_text = "OK";
+            d.button_color = "White";
+            app.quest_engine().push_dialog_for_test(std::move(d));
+            for (int i = 0; i < 60; ++i) {  // 0.5 s `Ib` reveal + settle
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            settle = 0;
+        }
+        for (int i = 0; i < settle; ++i) {
             glfwPollEvents();
             app.run_one_frame();
         }
         const std::string out = ".harness/artifacts/" +
                                 std::string(kind == "multiline" ? "dialog_probe.png"
                                           : kind == "buy"     ? "buy_probe.png"
+                                          : kind == "notify"  ? "notify_probe.png"
                                                               : "act_probe.png");
         app.capture_png(out);
         std::fprintf(stdout, "[actprobe] captured %s\n", out.c_str());

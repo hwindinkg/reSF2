@@ -2870,7 +2870,18 @@ bool load_sliced_atlas(App& app) {
                 break;
             }
         }
-        if (json_path.empty()) return false;
+        if (json_path.empty()) {
+            // [FIX silent fallback — item 5] Nothing in the log said why the
+            // dialog plates came out as the flat `draw_flat_button(0.6,0.5,0.3)`
+            // box ("the OK button is the wrong colour"): every failure path here
+            // returned false silently. Name it instead.
+            std::fprintf(stderr,
+                         "[ui] sliced atlas MISSING: no sliced.*.json in '%s' -> "
+                         "dialog plates fall back to the flat colour\n",
+                         dir.c_str());
+            std::fflush(stderr);
+            return false;
+        }
         sf2::data::Texture tex;
         bool decoded = false;
         for (const std::string& ext : {".ktx", ".dds", ".webp", ".png"}) {
@@ -2885,7 +2896,14 @@ bool load_sliced_atlas(App& app) {
             }
             if (decoded) break;
         }
-        if (!decoded) return false;
+        if (!decoded) {
+            std::fprintf(stderr,
+                         "[ui] sliced atlas MISSING: no decodable sliced.* texture "
+                         "in '%s' -> dialog plates fall back to the flat colour\n",
+                         dir.c_str());
+            std::fflush(stderr);
+            return false;
+        }
         const GLuint gl = app.renderer().texture_for("sliced_atlas", tex);
         if (gl == 0) return false;
         std::ifstream in(json_path, std::ios::binary);
@@ -2900,7 +2918,11 @@ bool load_sliced_atlas(App& app) {
         std::fflush(stdout);
         ok = true;
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "[ui] sliced atlas load failed: %s\n", e.what());
+        std::fprintf(stderr,
+                     "[ui] sliced atlas load failed: %s -> dialog plates fall "
+                     "back to the flat colour\n",
+                     e.what());
+        std::fflush(stderr);
     }
     return ok;
 }
@@ -3111,8 +3133,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             draw_flat_button(app, "OK", lx(450.0f), ly(185.0f), 100.0f * c, 72.0f * c, 0.3f,
                              0.5f, 0.3f, false);
         }
+        // [FIX OK caption — item 5, "the OK button colour is wrong"] The caption
+        // was WHITE on the `btnWhite` plate, i.e. invisible washed-out text on a
+        // light button. JS `Bb.V(a)` (L1844) sets `this.label.La(Z.sc)` for
+        // EVERY `Bb` plate — (0.184,0.145,0.106), the same dark ink the dialog
+        // plates and the shop TRY plate use (item 7 had the identical root).
         draw_ui_label(app, lx(400.0f), ly(173.0f), 100.0f * c, 24.0f * c, "OK", 0.8f,
-                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                      UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
     if (clipping) ren.pop_clip();  // `Ib.open` reveal mask (see top)
 }
