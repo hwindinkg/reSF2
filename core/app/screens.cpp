@@ -9999,7 +9999,17 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
     // wrong button shape).
     constexpr float kBbNodeScale = 125.0f / 112.0f;
     const float art_c = h > 0.0f ? h / 125.0f : 1.0f;  // design -> screen
-    const float art_w = 600.0f * kBbNodeScale * art_c;
+    // [FIX plate width — measured] JS `Bb.xc(a)` sets `this.width = a` AND
+    // `this.Y.xc(a)`: the sprite itself is widened to the BUTTON's width, so
+    // the art box is exactly the layout width this helper receives (`600` for a
+    // two-plate row, `650` for a lone primary via `xc(width + 50)`). Drawing it
+    // 600*125/112 wide made every plate ~10 px too wide — measured on
+    // `dojo_sensei` (bright-plate bbox, threshold 185): oracle 255 px, port
+    // 265 px; with the layout width the port matches. `SF2_PLATE_OLD_W=1`
+    // restores the old box for A/B.
+    static const bool plate_old_w =
+        std::getenv("SF2_PLATE_OLD_W") != nullptr;
+    const float art_w = plate_old_w ? 600.0f * kBbNodeScale * art_c : w;
     const float art_h = 222.0f * art_c;
     // [FIX plate height — measured] The art height is the sprite's OWN height
     // scaled by the od layout factor only; multiplying it by `Pb(125)`/112 as
@@ -10012,7 +10022,6 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
     static const bool plate_old_h =
         std::getenv("SF2_PLATE_OLD_H") != nullptr;
     const float art_h_draw = plate_old_h ? 222.0f * kBbNodeScale * art_c : art_h;
-    (void)w;  // the layout width (600) is not the art width (669.6)
     if (!(load_sliced_atlas(app) &&
           draw_bb_plate(app, quest_button_frame(color, primary), cx, cy,
                         art_w, art_h_draw, 1.0f, false))) {
@@ -10064,7 +10073,7 @@ struct QuestDialogRow {
 
 constexpr float kDialogBtnGap = 32.0f;   // `od.EF` L1899: width/2 + 32
 constexpr float kOdBtnPrimaryX = 550.0f;  // `rI` L1948 `850 - 600/2`
-constexpr float kOdBtnLonePrimaryX = 500.0f;   // `rI` `ya - 50`
+constexpr float kOdBtnLonePrimaryX = 475.0f;   // `rI` `ya - 50`, ya = 850 - 650/2 = 525
 constexpr float kOdBtnLonePrimaryW = 650.0f;   // `rI` `xc(width + 50)`
 constexpr float kOdBtnSecondaryX = -70.0f;     // `rI` `ya - 20 - (600+600)/2`
 constexpr float kOdBtnLoneSecondaryX = -310.0f;  // `rI` `(1680-600)/2 - 850`
