@@ -1610,10 +1610,66 @@ struct QuestVerifyDriver {
                 saw_lynx_dialog = true;
             }
             if (cooldown == 0) {
-                if (d.type == "Notification")
+                if (d.type == "Notification") {
                     tap(app, 1000, 185);  // the `Ib` bar's own OK plate
-                else
-                    tap(app, 860, 549);  // tutorial_dialog_layout action plate
+                } else {
+                    // Press the plate. The row's centre is NOT a constant: a
+                    // lone primary sits at ~860, a two-plate row at ±332, and a
+                    // taller dialog's row drops in Y (`od_layout`'s
+                    // `sy(a + 111)`), so a single constant tap parks the chain
+                    // on the dialogs it misses (the `quest-verify-buy`
+                    // watchdog). Tap a ROTATION of the known plate centres, one
+                    // per cooldown, resetting whenever the dialog changes: the
+                    // first point that lands advances the page.
+                    // The plate ROW is re-placed per dialog kind (`rI`/`EF`:
+                    // a lone primary sits at `sx(kOdBtnLonePrimaryX)`, a
+                    // two-plate row at ±332) and its Y follows the content
+                    // height (`sy(a + 111)`). Derive the layout centre live and
+                    // try it with the three row offsets, plus the historic
+                    // constants as a fallback — one point per cooldown.
+                    float lx = 640.0f, ly = 553.0f;
+                    sf2::app::dialog_action_plate_center(app, d, lx, ly);
+                    const int pts[6][2] = {
+                        {static_cast<int>(lx), static_cast<int>(ly)},
+                        {static_cast<int>(lx + 332.0f), static_cast<int>(ly)},
+                        {static_cast<int>(lx - 332.0f), static_cast<int>(ly)},
+                        {860, static_cast<int>(ly)},
+                        {860, 549},
+                        {640, 553}};
+                    static int tap_try = 0;
+                    const int px = pts[tap_try % 6][0];
+                    const int py = pts[tap_try % 6][1];
+                    ++tap_try;
+                    std::fprintf(stdout,
+                                 "[qverify] f%d plate tap %s|%s at (%d,%d) "
+                                 "layout=(%.0f,%.0f) try=%d\n",
+                                 frame, d.type.c_str(), d.title.c_str(), px, py,
+                                 static_cast<double>(lx), static_cast<double>(ly),
+                                 tap_try);
+                    std::fflush(stdout);
+                    tap(app, px, py);
+                }
+            }
+            return;
+        }
+        // 1b. The tutorial's Lynx beat ENDS by locking player input to the
+        // map's FIGHT button (`[quest] Sb.kk(1): input locked
+        // target=InfoBattle.FightButton`) and the dialog it queued owns 0 tail
+        // actions — the chain has nothing left to run, so the PROBE must press
+        // that button to reach BOSS_LYNX (`ShinFight`). Without this the run
+        // parks on the open map until the watchdog.
+        if (cur == kScreenMap && !saw_shin) {
+            sf2::app::Screen* top_map = app.screens().top();
+            if (top_map != nullptr && top_map->id() == kScreenMap &&
+                cooldown == 0) {
+                float fx = 0.0f, fy = 0.0f;
+                static_cast<sf2::app::MapScreen*>(top_map)
+                    ->fight_button_center(fx, fy);
+                std::fprintf(stdout,
+                             "[qverify] f%d map FIGHT tap (%.0f,%.0f)\n", frame,
+                             static_cast<double>(fx), static_cast<double>(fy));
+                std::fflush(stdout);
+                tap(app, static_cast<int>(fx), static_cast<int>(fy));
             }
             return;
         }
@@ -2689,6 +2745,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // right wall, dumping the rendered root x + pose x-extent per frame — the
     // "stretched across the arena / teleported to the opposite end" repro.
     bool wall_probe = false;
+    bool act_probe = false;  // [probe] capture the `Rd` act overlay backdrop
+    std::string act_probe_kind;  // "act" (default) / "multiline"
     std::string d3_probe_move = "FansSuperSlash";
     int d3_probe_frame = 36;
     float d3_probe_dist = 500.0f;  // enemy x offset from the player
@@ -3404,6 +3462,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             d3_probe = true;
         } else if (arg == "--wall-probe") {
             wall_probe = true;
+        } else if (arg == "--act-probe") {
+            act_probe = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                act_probe_kind = argv[++i];
+            }
         } else if (arg == "--d3-probe-move" && i + 1 < argc) {
             d3_probe_move = argv[++i];
         } else if (arg == "--d3-probe-frame" && i + 1 < argc) {
@@ -10507,6 +10570,69 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
         app.shutdown();
         return 0;
+    } else if (act_probe) {
+        // [probe] `--act-probe [act|multiline]`:
+        //   act       - force the `Rd` act-title overlay to its fully faded
+        //               state and capture a PNG (JS `Rd extends ef`: the title
+        //               sits on the tiled `loader/bg` art, not on bare black);
+        //   multiline - queue a `Multiline` (290, `uj`) dialog with a long body
+        //               and capture it, so the side-dialog text fit can be
+        //               measured without the whole tutorial chain.
+        app.set_headless_frames(0);
+        for (int i = 0; i < 90; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const std::string kind = act_probe_kind.empty() ? "act" : act_probe_kind;
+        if (kind == "buy") {
+            // The shop purchase confirm (JS `Xc.$hb` -> `Wb.openDialog(350)` ->
+            // `ph`), built exactly like `ShopScreen::open_buy_confirm` does, so
+            // its plate COLOUR/size can be captured outside the shop flow.
+            sf2::app::EngineDialog d;
+            d.type = "BuyConfirm";
+            d.title = "Purchase";
+            d.lines.push_back(
+                "Are you sure you want to buy this?\n<image>gold</image> 50?");
+            d.line_buttons.push_back(std::string());
+            d.line_actions.push_back({});
+            sf2::app::QuestAction noop;
+            noop.tag = "NoOp";
+            d.button_actions.push_back(noop);
+            d.left_.actions.push_back(noop);
+            d.left_.text = "CANCEL";
+            d.left_.color = "Dark";
+            d.button_text = "BUY";
+            d.button_color = "Dark";
+            d.has_right_button = true;
+            app.quest_engine().push_dialog_for_test(std::move(d));
+        } else if (kind == "multiline") {            sf2::app::EngineDialog d;
+            d.type = "Multiline";
+            d.title = "_Title_Assistant";
+            d.lines = {
+                "Сначала выбери оружие в магазине и примерь его, чтобы увидеть, "
+                "как оно выглядит в руках. После примерки его можно купить за "
+                "монеты, а если монет не хватает — заработай их в бою и "
+                "возвращайся: ассортимент магазина обновляется каждый день, и "
+                "цены на редкие клинки могут меняться."};
+            d.button_text = "OK";
+            d.button_color = "Dark";
+            app.quest_engine().push_dialog_for_test(std::move(d));
+        } else {
+            app.quest_engine().debug_force_act_overlay("Act I{br}Hero Reborn");
+        }
+        for (int i = 0; i < 3; ++i) {
+            glfwPollEvents();
+            app.run_one_frame();
+        }
+        const std::string out = ".harness/artifacts/" +
+                                std::string(kind == "multiline" ? "dialog_probe.png"
+                                          : kind == "buy"     ? "buy_probe.png"
+                                                              : "act_probe.png");
+        app.capture_png(out);
+        std::fprintf(stdout, "[actprobe] captured %s\n", out.c_str());
+        std::fflush(stdout);
+        app.shutdown();
+        return 0;
     } else if (wall_probe) {
         // [probe, authorised] `--wall-probe`: force the `<Align><Position
         // Object="Wall" Part="Back">` moves on the player at the right wall
@@ -10556,13 +10682,44 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      ctl.phase(), 80.0f, 1880.0f);
         std::fflush(stdout);
         const char* kMoves[3] = {"WallJump_100", "HunterFly_150", "WaspFly_150"};
+        // [probe] BOTH walls. `yu`/`zu` = [80, 1880]. The placement distance
+        // MATTERS: `WallJump_100` requires `<Distance Min="100" Max="150">` from
+        // the wall (`<From Me Object="Wall" Part="Back">` to
+        // `<To Me NHeel_1>`), so the earlier `160` at the left wall (80 away)
+        // and `1800` at the right (also 80) never satisfied it and the move
+        // never started (`started=0`) — the probe silently tested nothing.
+        // 130 from each wall satisfies the gate on both sides.
+        struct WallSpot { const char* tag; float me; float foe; };
+        const WallSpot kSpots[2] = {
+            // LEFT first: an absolute-align move pins `world_x_`, and a pin
+            // that outlives the move would make `debug_place_fighters` fail for
+            // the second spot (that ordering artefact is exactly what the
+            // wall-jump report is about), so the left wall is measured first.
+            {"left", 210.0f, 270.0f},
+            {"right", 1750.0f, 1690.0f},
+        };
+        for (int wi = 0; wi < 2; ++wi) {
+        std::fprintf(stdout, "[wallprobe] === wall=%s me=%.0f foe=%.0f ===\n",
+                     kSpots[wi].tag, static_cast<double>(kSpots[wi].me),
+                     static_cast<double>(kSpots[wi].foe));
         for (int mi = 0; mi < 3; ++mi) {
-            ctl.debug_place_fighters(1800.0f, 1740.0f);
+            ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
             ctl.update(1.0f / 60.0f);
             const float x0 = ctl.player().fighter.world_x();
-            const bool started = ctl.debug_force_player_move(kMoves[mi]);
-            std::fprintf(stdout, "[wallprobe] force %-14s started=%d x0=%.1f\n",
-                         kMoves[mi], started ? 1 : 0, static_cast<double>(x0));
+            // Real input path: `WallJump_100`'s `<Conditions>` requires
+            // `<Keys><Key Type="Up-Back" PressType="Tap"/></Keys>` and
+            // `move_conditions_pass` re-checks it with `keys_gm=true` against
+            // the fighter's ACTUAL buffered `keys_` (it overwrites any ctx
+            // keys), so the probe must feed the key the way the input layer
+            // does or the move can never start (`started=0` — reason every
+            // earlier wall-jump probe measured nothing).
+            ctl.debug_player_key(sf2::scene::key_type::up_back,
+                                 sf2::scene::press_type::tap);
+            const bool started = ctl.debug_force_player_move(kMoves[mi], true);
+            std::fprintf(stdout, "[wallprobe] force %-14s wall=%-5s started=%d x0=%.1f nclip=%d\n",
+                         kMoves[mi], kSpots[wi].tag, started ? 1 : 0,
+                         static_cast<double>(x0),
+                         ctl.player().fighter.clip_bone_count());
             float mn = 1e9f, mx = -1e9f, spanmax = 0.0f;
             for (int f = 0; f < 40; ++f) {
                 ctl.update(1.0f / 60.0f);
@@ -10580,10 +10737,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 }
             }
             std::fprintf(stdout,
-                         "[wallprobe] %-14s wx min=%.1f max=%.1f span_max=%.1f\n",
-                         kMoves[mi], static_cast<double>(mn),
+                         "[wallprobe] %-14s wall=%-5s wx min=%.1f max=%.1f span_max=%.1f\n",
+                         kMoves[mi], kSpots[wi].tag, static_cast<double>(mn),
                          static_cast<double>(mx), static_cast<double>(spanmax));
             std::fflush(stdout);
+        }
         }
         app.shutdown();
         return 0;

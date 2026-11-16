@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-14T22:42:20",
+    "updated": "2026-11-16T19:30:48",
     "mode": "only"
   },
   "gates": {
@@ -239,10 +239,10 @@
       "date": "2026-11-14T22:42:20"
     },
     "posevel:dojo-move": {
-      "metric": 123,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:20"
+      "metric": 31,
+      "commit": "215727b6",
+      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
+      "date": "2026-11-15T19:21:57"
     },
     "cov:dojo-demo": {
       "metric": 0,
@@ -293,10 +293,10 @@
       "date": "2026-11-08T22:11:30"
     },
     "posevel:kusarigama": {
-      "metric": 368,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:19"
+      "metric": 342,
+      "commit": "215727b6",
+      "reason": "solver cache reset on set_model + za badge cache: posevel improves; measured in --full",
+      "date": "2026-11-16T19:30:48"
     },
     "pose:kusarigama": {
       "metric": 457,
@@ -371,16 +371,16 @@
       "date": "2026-11-08T23:19:51"
     },
     "posevel:boss-lynx": {
-      "metric": 262,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:19"
+      "metric": 121,
+      "commit": "215727b6",
+      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
+      "date": "2026-11-15T19:21:57"
     },
     "pose:boss-lynx": {
-      "metric": 444,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:19"
+      "metric": 457,
+      "commit": "215727b6",
+      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
+      "date": "2026-11-15T19:21:57"
     },
     "posres:dojo-demo": {
       "metric": 0,
@@ -473,10 +473,10 @@
       "date": "2026-11-09T18:43:50"
     },
     "posevel:tournament": {
-      "metric": 218,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:19"
+      "metric": 115,
+      "commit": "215727b6",
+      "reason": "solver cache reset on set_model + za badge cache: posevel improves; measured in --full",
+      "date": "2026-11-16T19:30:48"
     },
     "pose:tournament": {
       "metric": 573,
@@ -491,10 +491,10 @@
       "date": "2026-11-11T16:49:09"
     },
     "posevel:survival": {
-      "metric": 169,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:19"
+      "metric": 134,
+      "commit": "215727b6",
+      "reason": "solver cache reset on set_model + za badge cache: posevel improves; measured in --full",
+      "date": "2026-11-16T19:30:48"
     },
     "pose:survival": {
       "metric": 736,
@@ -509,10 +509,10 @@
       "date": "2026-11-09T18:43:51"
     },
     "posevel:titan-ladder": {
-      "metric": 116,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:20"
+      "metric": 33,
+      "commit": "215727b6",
+      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
+      "date": "2026-11-15T19:21:57"
     },
     "pose:titan-ladder": {
       "metric": 489,
@@ -527,10 +527,10 @@
       "date": "2026-11-09T18:43:52"
     },
     "posevel:challenge": {
-      "metric": 204,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:20"
+      "metric": 172,
+      "commit": "215727b6",
+      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
+      "date": "2026-11-15T19:21:57"
     },
     "pose:challenge": {
       "metric": 736,

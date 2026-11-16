@@ -1342,9 +1342,9 @@ function ensureHooks(fight) {
                 if (nodes2 && nodes2.length > 95) {
                   var allNodes =
                     new URLSearchParams(window.location.search).get("clipsamples") === "all";
-                  var nband = allNodes ? nodes2.length : BAND.length;
+                  var nband = nodes2.length;  // post dump: ALL nodes
                   for (var bj = 0; bj < nband; bj++) {
-                    var ix2 = allNodes ? bj : BAND[bj];
+                    var ix2 = bj;  // post dump covers EVERY node
                     var q = nodes2[ix2] && nodes2[ix2].ma;
                     if (!q) continue;
                     console.log("[csample-post] s=" + side + " f=" + fr +

@@ -1999,12 +1999,18 @@ void App::draw_boot_splash(bool force_loader) {
         // whole node scale applies.
         if (menu_font_ != nullptr && font_tex_ != 0) {
             const std::string text = "Loading 100%";
+            // `tr.info`: JS `D(pE.ra + pE.qa()*.75)` places the text's BOTTOM
+            // on that line (`ea.D` sets the baseline of the label), so the
+            // block hangs ABOVE the logo's 75% mark. Centring it (`-th*0.5`)
+            // drew it one half-line LOWER than the oracle: measured on the
+            // fidelity captures (`loader.png`, gold ink rows) the port's text
+            // sat at y 455..491 against the oracle's 442..477, i.e. +13 px.
             const float info_cy = node_cy + (-a_off + logo_sh * 0.75f) * node_scale;
             const float scale = node_scale;
             const float tw = measure_text(*menu_font_, text, scale);
             const float th = sf2::data::measure_text_height_utf8(*menu_font_, text, scale);
             draw_text_with_font(*menu_font_, font_tex_, node_cx - tw * 0.5f,
-                                info_cy - th * 0.5f, text, scale, 209.0f / 255.0f,
+                                info_cy - th, text, scale, 209.0f / 255.0f,
                                 180.0f / 255.0f, 118.0f / 255.0f);
         }
         return;
@@ -2029,6 +2035,90 @@ void App::draw_boot_splash(bool force_loader) {
     draw_text_with_font(*splash_loading_font_, splash_loading_tex_, jo_cx - w * 0.5f,
                         jo_cy - lh * 0.5f, buf, jo_scale, 0.1843137254901961f,
                         0.1450980392156863f, 0.10588235294117647f);
+}
+
+bool App::draw_ef_backdrop(float alpha, bool with_logo) {
+    // JS `ef` ctor (L2301193): `Fc.Ed(-16777216, this.node.L)` (an OPAQUE black
+    // fill) + `this.Qa = new Ea(...)` holding TWO `R.$ E.get(817)`
+    // (`loader/bg.jpg`) sprites, the second `Hr(true)` (mirrored), laid out by
+    // `ef.layout` (`Qa.Rh(min(2, W/oYa/Eb))`, `Qa.mj(...)`). The LOADER (`ad`)
+    // and the ACT/TITLE screen (`Rd extends ef`) share this: `Rd`'s ctor runs
+    // `ef`'s, so the act title in the shipped game sits on the TILED loading
+    // backdrop, not on a bare black screen (the reported "the act text appears
+    // on a black background, no background texture").
+    if (alpha <= 0.0f) return false;
+    sf2::render::Camera cam;
+    cam.center_x = static_cast<float>(view_w_) * 0.5f;
+    cam.center_y = static_cast<float>(view_h_) * 0.5f;
+    cam.zoom = 1.0f;
+    cam.view_w = static_cast<float>(view_w_);
+    cam.view_h = static_cast<float>(view_h_);
+    cam.arena_h = static_cast<float>(view_h_);
+    cam.arena_floor = 0.0f;
+    cam.arena_center_x = static_cast<float>(view_w_) * 0.5f;
+    const float W = static_cast<float>(view_w_);
+    const float H = static_cast<float>(view_h_);
+    const float lc = W / H;
+    // NOTE: the opaque black fill that JS `Fc.Ed(-16777216,...)` puts under the
+    // art is drawn by the CALLER (`draw_quest_modal`) through the plain
+    // triangle path: a solid sprite here did not cover the screen (measured on
+    // `--act-probe`: the tiled band appeared over the live dojo instead of on
+    // black), because the solid path is not the full-screen fill the JS
+    // `Fc.Ed` quad is.
+    const float logo_sw =
+        loader_logo_w_ > 0 ? static_cast<float>(loader_logo_w_) : 1024.0f;
+    const float logo_sh =
+        loader_logo_h_ > 0 ? static_cast<float>(loader_logo_h_) : 300.0f;
+    const float node_scale = std::min(1024.0f, std::min(W, H)) / (logo_sw * 1.1f);
+    const float a_off =
+        (1.2f + ((std::clamp(lc, 0.4f, 1.0f) - 0.4f) / 0.6f) * -1.0f) * logo_sh;
+    const float node_cx = W * 0.5f;
+    const float node_cy = H * 0.5f;
+    const float art_cy = node_cy - a_off * node_scale;
+    const float oYa =
+        (loader_bg_w_ > 0 ? static_cast<float>(loader_bg_w_) : 512.0f) * 2.0f;
+    const float b_rep = node_scale > 0.0f ? W / oYa / node_scale : 1.0f;
+    const float qa_sx = std::min(2.0f, b_rep);
+    const float qa_sy = b_rep + (1.0f - lc) * 0.75f;
+    bool drew = false;
+    // The sprite push used by BOTH tiled halves (JS `R.$` on `E.get(817)` with
+    // the second `Hr(true)`), same convention as `draw_boot_splash`'s lambda.
+    auto push = [&](const char* alias, unsigned int tex, int tw, int th, float cxp,
+                    float cyp, float dw, float dh, bool flip_x) {
+        if (tex == 0 || tw <= 0 || th <= 0) return;
+        sf2::scene::Sprite s;
+        s.texture_name = alias;
+        s.frame_x = 0.0f;
+        s.frame_y = 0.0f;
+        s.frame_w = static_cast<float>(tw);
+        s.frame_h = static_cast<float>(th);
+        s.tex_w = static_cast<float>(tw);
+        s.tex_h = static_cast<float>(th);
+        s.solid = false;
+        s.color_a = alpha;
+        s.transform.set_pos(cxp, cyp);
+        s.transform.set_scale((flip_x ? -1.0f : 1.0f) * dw / static_cast<float>(tw),
+                              dh / static_cast<float>(th));
+        renderer_->draw_sprite(s, cam);
+    };
+    if (loader_bg_tex_ != 0 && loader_bg_w_ > 0 && loader_bg_h_ > 0) {
+        const float dw = static_cast<float>(loader_bg_w_) * qa_sx * node_scale;
+        const float dh = static_cast<float>(loader_bg_h_) * qa_sy * node_scale;
+        // Left half normal, right half mirrored (`Hr(true)`).
+        push("loader_bg", loader_bg_tex_, loader_bg_w_, loader_bg_h_,
+             node_cx - dw * 0.5f, art_cy, dw, dh, false);
+        push("loader_bg", loader_bg_tex_, loader_bg_w_, loader_bg_h_,
+             node_cx + dw * 0.5f, art_cy, dw, dh, true);
+        drew = true;
+    }
+    if (with_logo && loader_logo_tex_ != 0 && loader_logo_w_ > 0 &&
+        loader_logo_h_ > 0) {
+        push("loader_logo", loader_logo_tex_, loader_logo_w_, loader_logo_h_, node_cx,
+             art_cy, static_cast<float>(loader_logo_w_) * node_scale,
+             static_cast<float>(loader_logo_h_) * node_scale, false);
+        drew = true;
+    }
+    return drew;
 }
 
 void App::run_one_frame() {

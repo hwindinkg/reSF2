@@ -2189,7 +2189,17 @@ public:
     // (bypassing the Keys conditions via `ai_start_move`) and return whether
     // it started. Used to drive a specific shipped move (e.g. FansSuperSlash)
     // deterministically for the D3 union proof.
-    bool debug_force_player_move(const std::string& name);
+    bool debug_force_player_move(const std::string& name,
+                                 bool via_input = false);
+    // [probe, authorised] Feed one buffered key edge to the PLAYER through the
+    // real `Fighter::input` path. `move_conditions_pass` re-checks a move's
+    // `<Keys>` condition against the fighter's buffered `keys_` (with
+    // `keys_gm=true`), so a probe that wants to start a key-gated move (e.g.
+    // `WallJump_100`'s `<Key Type="Up-Back" PressType="Tap"/>`) must inject the
+    // key this way — `ai_start_move` alone can never satisfy it.
+    void debug_player_key(sf2::scene::key_type key, sf2::scene::press_type press) {
+        player_.fighter.input(key, press);
+    }
     // [probe, authorised] `--d3-probe`: at the player's current move frame,
     // print the attacker's part set the OLD way (the `yD(4)` interval's
     // AttackingParts only) and the NEW way (the `xqb` union over every active

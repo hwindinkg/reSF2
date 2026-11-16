@@ -468,6 +468,12 @@ public:
     // none (`Vr.HXa` L2123-2124). The draw AND the click hit-test both read
     // this, so the rect a player taps is exactly the rect that was painted.
     bool zone_dot_center(std::size_t zi, float& cx, float& cy) const;
+    // True when the zone can be SHOWN/SWIPED TO: it carries a map backdrop
+    // (`part >= 0`), is not `locked`, and renders at least one ACTIVE battle
+    // (JS `Vr.HXa` L2123-2124). The dot strip, the drag-release switch and the
+    // neighbour draw all use this one predicate, so the zone a player can
+    // swipe to is exactly a zone that shows a dot.
+    bool zone_pickable(std::size_t zi) const;
     // The zone the map is showing (`Vr` selection; seeded from the save's
     // CurrentZone and written back on a dot tap).
     int zone_selected() const { return zone_sel_; }
@@ -2147,6 +2153,17 @@ struct QuestDialogRowButton {
 // L1953); the paged `Od` shows the current page row alone (`Od.Xma` L1948).
 std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
                                                            const EngineDialog& d);
+
+// The ACTION-PLATE centre for dialog `d` (`od_layout`'s `btn_cx`/`btn_cy`, which
+// follow the dialog's own content height: the plate sits at
+// `sy(a + 222*0.5)` where `a = clamp(md*0.5, 300, 1000)`). A driver that taps
+// the plate MUST use this: the historic constant `(860, 549)` only matches the
+// SHORT dialogs (`a` clamped to its 300 minimum, e.g. the sensei one). For a
+// taller dialog (`characterLynx`, two rows) the plate drops to ~620 and the
+// constant tap misses, so the chain parks at the modal forever (the
+// `quest-verify-buy` watchdog timeout).
+void dialog_action_plate_center(App& app, const EngineDialog& d, float& x,
+                                float& y);
 
 // The `He.dhb` L1061 row id (`>=5`) of the row box under (x, y), or -1.
 // `Od.Jsb`/`Od.xx` L1948-1949 dispatch `this.Ge(row id)` on the delivery

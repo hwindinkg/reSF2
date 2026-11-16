@@ -50,6 +50,21 @@ void Fighter::set_model(const Model& model) {
     pos_.assign(model_.bones.size() * 2, 0.0f);
     playhead_ = 0;
     prepend_.clear();
+    // [FIX stale solver index caches] `ensure_solver_caches()` rebuilds ONLY
+    // when the cached SIZE differs from the model's, so re-pointing a Fighter
+    // at a DIFFERENT model with the same bone/edge counts kept the old
+    // `edge_bone_idx_`/`macro_child_idx_` and the solver then relaxed the WRONG
+    // bone pairs (the real cloth edges never ran) — a chain that drifts and
+    // stretches across the screen. `set_model` is called repeatedly on the
+    // shared preview/avatar/badge fighters (shop TryOn, dojo figures), so the
+    // caches are pure derived data and MUST be dropped with the model.
+    // [A/B switch] `SF2_NO_SETMODEL_CLEAR=1` restores the old (buggy) behaviour
+    // that kept the caches across models, for attributing gate results.
+    if (std::getenv("SF2_NO_SETMODEL_CLEAR") == nullptr) {
+        edge_bone_idx_.clear();
+        macro_child_idx_.clear();
+        macro_visiting_.clear();
+    }
 
     // [FIX stretched mesh — ragdoll solver] The game keeps the body/head
     // cloth nodes attached to the skeleton with a Verlet ragdoll solver
@@ -811,6 +826,48 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
         sol_mf_[i * 3 + 1] = (!old_seed && have_prev) ? prev_pos_[i * 2 + 1] : wy;
         sol_mf_[i * 3 + 2] = model_.bones[i].z;
     }
+    // [probe, authorised] `SF2_RD_SEED_PROBE=1`: the ragdoll SEED state — the
+    // drawn COM the bag is seeded from, the previous-frame COM the Verlet
+    // velocity is taken from, and their difference (the seed velocity). This
+    // decides whether the reported "the ragdoll flies at the attacker" comes
+    // from the seed or from the impulse.
+    const bool rd_seed_probe = std::getenv("SF2_RD_SEED_PROBE") != nullptr;
+    if (rd_seed_probe && have_pos) {
+        float mx = 0.0f;
+        int nbad = 0;
+        std::string mx_edge;
+        for (const EdgeDef& e : model_.edges) {
+            const int a1 = model_.bone_by_name(e.end1);
+            const int a2 = model_.bone_by_name(e.end2);
+            if (a1 < 0 || a2 < 0) continue;
+            const std::size_t p1 = static_cast<std::size_t>(a1) * 2;
+            const std::size_t p2 = static_cast<std::size_t>(a2) * 2;
+            if (p2 + 1 >= pos_.size()) continue;
+            const float dx = pos_[p2] - pos_[p1];
+            const float dy = pos_[p2 + 1] - pos_[p1 + 1];
+            const float d = std::sqrt(dx * dx + dy * dy);
+            const float viol = std::fabs(d - e.length);
+            if (viol > mx) {
+                mx = viol;
+                mx_edge = e.end1 + "->" + e.end2;
+            }
+            if (viol > 5.0f) ++nbad;
+        }
+        std::fprintf(stdout,
+                     "[rdseed] pre  world_x=%.2f comNow=%.2f comPrev=%.2f "
+                     "seedVel=%.2f impulseNodes=%zu edgeViolMax=%.2f nViol5=%d "
+                     "worst=%s\n",
+                     static_cast<double>(world_x_),
+                     static_cast<double>(com_axis_in(pos_, 0)),
+                     static_cast<double>(have_prev ? com_axis_in(prev_pos_, 0)
+                                                   : com_axis_in(pos_, 0)),
+                     static_cast<double>(com_axis_in(pos_, 0) -
+                                         (have_prev ? com_axis_in(prev_pos_, 0)
+                                                    : com_axis_in(pos_, 0))),
+                     pending_impulses_.size(), static_cast<double>(mx), nbad,
+                     mx_edge.c_str());
+        std::fflush(stdout);
+    }
     // JS `Lwb` (L21121) -> `Bva(b)` (L21136): `this.IH.strike(this.Bb.KD,
     // this.Bb.nJa, this.Bb.fg); this.Nd.jE()` — the impulse (`Bl.strike`, which
     // writes the endpoint nodes' `ma`) runs AFTER `Nd.start` seeded the solver
@@ -820,6 +877,19 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     // early (the reported 1-frame knockover jerk). The `jE` clamp below mirrors
     // the `Nd.jE()` that follows.
     apply_pending_impulses();
+    // [probe, authorised] `SF2_RD_SEED_PROBE`: the SOLVER-state COM right
+    // after the seed + impulse, to pin where the reported "the ragdoll flies
+    // at the attacker" is introduced.
+    if (rd_seed_probe && have_pos) {
+        std::vector<float> tmp(n * 2, 0.0f);
+        for (std::size_t i = 0; i < n; ++i) {
+            tmp[i * 2] = sol_ma_.size() == n * 3 ? sol_ma_[i * 3] : 0.0f;
+            tmp[i * 2 + 1] = sol_ma_.size() == n * 3 ? sol_ma_[i * 3 + 1] : 0.0f;
+        }
+        std::fprintf(stdout, "[rdseed] postImpulse com=%.2f\n",
+                     static_cast<double>(com_axis_in(tmp, 0)));
+        std::fflush(stdout);
+    }
     // JS `Lwb` (L21121) -> `Bva(b)` (L21136): `this.IH.strike(...);
     // this.Nd.jE()` — the ragdoll `jE` wall/floor clamp runs IMMEDIATELY at
     // ragdoll start, so a body seeded OUTSIDE the arena (the throw victim,
@@ -1726,10 +1796,35 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // no round reset (the reset teleports, then the next sample forces the
     // old x back), only attacks still worked.
     align_absolute_ = false;
+    // [A/B] `SF2_ABS_MOVE` selects how an ABSOLUTE-align clip is placed:
+    //   2 (DEFAULT) -> the clip's DELTA, anchored at the fighter's current
+    //            pose (`render_offset_` captured from the first sample,
+    //            exactly like every non-absolute move): the animation moves
+    //            the fighter by the clip's authored travel without
+    //            teleporting him onto its absolute coordinate. This is what
+    //            makes the wall jump actually move (measured `--wall-probe`
+    //            `WallJump_200`: 210 -> 268 -> 366 -> 463 -> 520 -> 537 apex,
+    //            smooth, no teleport through the wall);
+    //   1     -> JS `Te.eda` absolute placement (`ma = clip + Fk`, so the
+    //            fighter rides the clip's world coordinates — measured to
+    //            teleport the wall jump to x=-71, i.e. THROUGH the left wall);
+    //   0     -> the historical PIN (`world_x_ = align_own_x_`, the clip's
+    //            own translation is cancelled). That produced the reported
+    //            "wall jump plays its animation in place in the air and never
+    //            moves, never touching the wall" (measured: `wx` frozen at
+    //            210.0 for the whole clip).
+    static const int abs_mode = [] {
+        const char* e = std::getenv("SF2_ABS_MOVE");
+        return e == nullptr ? 2 : std::atoi(e);
+    }();
     if (align_absolute) {
         render_offset_ = 0.0f;
         render_offset_y_ = 0.0f;
-        render_offset_valid_ = true;
+        // abs_mode 2 keeps the offset INVALID so the first `sample()` captures
+        // `world - px[anchor]` (the same continuity rule every non-absolute
+        // move uses); the fighter then follows the clip's travel instead of
+        // being teleported to its authored absolute coordinate.
+        render_offset_valid_ = (abs_mode != 2);
         align_pivot_u_ = -1;
         // [throw victim] Keep the fighter where it stood: `Dl.oL` anchors the
         // clip to `parameters.position`, so the clip's absolute buffer values
@@ -1738,6 +1833,19 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         align_absolute_ = true;
         align_own_x_ = world_x_;
         align_own_y_ = world_y_;
+        if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
+            std::fprintf(stdout,
+                         "[absalign] move=%s align=(%.2f,%.2f) own=(%.2f,%.2f) "
+                         "pivot=%s pos_part=%s pos_obj=%s\n",
+                         move.name.c_str(), static_cast<double>(align_x_),
+                         static_cast<double>(align_y_),
+                         static_cast<double>(align_own_x_),
+                         static_cast<double>(align_own_y_),
+                         move.align.pivot_part.c_str(),
+                         move.align.pos_part.c_str(),
+                         move.align.pos_object.c_str());
+            std::fflush(stdout);
+        }
     } else if (move.align.has_align) {
         const int pv = model_.bone_by_name(move.align.pivot_part);
         // JS `x6` L21148-21150: `align.UE = model.w0(<Align><Pivot Part>)` —
@@ -3540,6 +3648,57 @@ void Fighter::ensure_solver_caches() {
         }
     }
     if (macro_visiting_.size() != n) macro_visiting_.assign(n, 0);
+    // [probe, authorised] `SF2_BIND_CHECK=1`: the BIND-pose edge violation of
+    // the MERGED model (`bones[].x/y/z` against `edges[].length`). A permanent
+    // offset here means the cloth chain is broken BY CONSTRUCTION (the merged
+    // node space differs from the rest lengths), not by the solver; a clean
+    // bind pose means the measured stretch is pure dynamics. Printed once.
+    static const bool bind_probe_enabled =
+        std::getenv("SF2_BIND_CHECK") != nullptr;
+    if (bind_probe_enabled) {
+        static bool bind_checked = false;
+        if (!bind_checked) {
+            bind_checked = true;
+            float mx = 0.0f;
+            int nbad = 0;
+            std::string worst;
+            float sum = 0.0f;
+            int cnt = 0;
+            for (const EdgeDef& e : model_.edges) {
+                const int a1 = model_.bone_by_name(e.end1);
+                const int a2 = model_.bone_by_name(e.end2);
+                if (a1 < 0 || a2 < 0) continue;
+                const Bone& b1 = model_.bones[static_cast<std::size_t>(a1)];
+                const Bone& b2 = model_.bones[static_cast<std::size_t>(a2)];
+                const float dx = b2.x - b1.x;
+                const float dy = b2.y - b1.y;
+                const float dz = b2.z - b1.z;
+                const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                const float viol = std::fabs(d - e.length);
+                sum += viol;
+                ++cnt;
+                if (viol > mx) {
+                    mx = viol;
+                    worst = e.end1 + "->" + e.end2;
+                }
+                if (viol > 5.0f) ++nbad;
+            }
+            std::fprintf(stdout,
+                         "[bind] bones=%zu edges=%zu meanViol=%.2f maxViol=%.2f "
+                         "nViol5=%d worst=%s\n",
+                         model_.bones.size(), model_.edges.size(),
+                         cnt > 0 ? static_cast<double>(sum / cnt) : 0.0,
+                         static_cast<double>(mx), nbad, worst.c_str());
+            std::fflush(stdout);
+        }
+    }
+}
+
+// [probe, authorised] the resolved clip's bone count (`nclip`), -1 when no
+// clip resolved. `anim_clip` is complete here, so the header only declares it.
+int Fighter::clip_bone_count() const {
+    return current_clip_ != nullptr ? static_cast<int>(current_clip_->bone_count())
+                                    : -1;
 }
 
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
@@ -3760,7 +3919,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             }
             trace_prev[this] = wx_now;
         }
-        if (align_absolute_) {
+        // [A/B] see `abs_mode` in `start_move_impl`: 0 = the historical PIN,
+        // 1 = JS absolute placement, 2 = the clip's delta from the current
+        // pose (offset captured by the `!render_offset_valid_` block above).
+        static const int abs_mode = [] {
+            const char* e = std::getenv("SF2_ABS_MOVE");
+            return e == nullptr ? 2 : std::atoi(e);
+        }();
+        if (align_absolute_ && abs_mode == 0) {
             // JS `Dl.oL(parameters.position)` (L24171-24199): the clip is
             // anchored to the fighter's OWN position, so `pos = clip -
             // clip[anchor] + own` (below) and the fighter does not ride the
@@ -3769,6 +3935,11 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         }
+        // [REJECTED by measurement] Pinning a display-only preview's x to its
+        // `Pi` seat (`preview_seat_x_`) was TRIED: it made the shop/profile
+        // captures WORSE (`shop_tab1` 11.53 -> 14.02 %pix>12, `shop_detail`
+        // 11.31 -> 13.02, `profile_tab2` 8.64 -> 11.98), i.e. the JS preview
+        // really does ride its clip's root travel. Not enabled.
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
                          "[anchor] F%d move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
@@ -3791,7 +3962,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // then floated by the clip's pivot travel (dojo `FistsStartStance-Left`
         // pivot y runs -135..-84 against a -93 spawn, i.e. +42..-9 world units
         // ≈ ±33 px at the fight zoom 1.3 — the reported float/twitch).
-        if (align_absolute_) {
+        if (align_absolute_ && abs_mode == 0) {
             world_y_ = align_own_y_;  // see the x branch above (`Dl.oL`)
         } else {
             world_y_ = py[anchor_u] + render_offset_y_;
@@ -3950,6 +4121,63 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             sol_mf_[i3 + 1] = mf.y;
             sol_mf_[i3 + 2] = mf.z;
         }
+        // [probe, authorised] `SF2_RD_SEED_PROBE`: the SOLVER-state COM after
+        // the Verlet integrate and after the edge relax, on the first ragdoll
+        // frames — pins which solver stage reverses the knockback direction.
+        auto rd_com = [&]() {
+            std::vector<float> tmp(n * 2, 0.0f);
+            for (std::size_t q = 0; q < n; ++q) {
+                tmp[q * 2] = sol_ma_[q * 3];
+                tmp[q * 2 + 1] = sol_ma_[q * 3 + 1];
+            }
+            return com_axis_in(tmp, 0);
+        };
+        static const bool rd_probe_enabled =
+            std::getenv("SF2_RD_SEED_PROBE") != nullptr;
+        const bool rd_probe =
+            rd_probe_enabled && nk_ && ragdoll_frame_count_ <= 1;
+        if (rd_probe) {
+            std::fprintf(stdout, "[rdstep] afterSk com=%.2f\n",
+                         static_cast<double>(rd_com()));
+            std::fflush(stdout);
+        }
+        // [evidence, not a fix] The ragdoll seed is the DRAWN pose, and on the
+        // BODY_SHIN cloth chain that pose is stretched far past its rest edges
+        // (measured at ragdoll start: `BODY_SHIN-MacroNode10->BODY_SHIN-Node23`
+        // +405u, 98 edges over 5u; F1814 +273u / 101 edges). The first `jE`
+        // relax of the ragdoll then projects that stretch and, because `bFa`
+        // moves only `ma` while `mf` keeps the old value, the projection
+        // becomes Verlet velocity: at F1655 the seed + impulse put the COM at
+        // 600.70 (the +400 impulse pushing the victim AWAY, correctly), the
+        // Verlet step kept it (602.65) and the first relax threw it to 554.51
+        // (−48u), which then carried the body ~250u toward the attacker.
+        // Making that projection position-only was TRIED and MEASURED: it cut
+        // the displacement ~3x (324u -> 110u worst) but did NOT flip the
+        // direction, and on the user-visible "distance to attacker after the
+        // knockdown" metric it was slightly WORSE (gap grew in 3/13 starts vs
+        // 8/23 unmodified). Reverted — the impulse, the relax formula and the
+        // seed are all JS-exact; the residual direction error tracks the cloth
+        // STRETCH (bug 1), not the knockback path.
+        // The probes stay (env-gated, no behaviour change) so the next pass can
+        // re-measure after the cloth chain is fixed.
+        // [A/B tooling — OFF by default, does NOT ship behaviour] Keeping the
+        // first ragdoll frame's constraint projection position-only (the same
+        // delta added to `mf`, so it is not converted into Verlet velocity)
+        // targets the measured −48u COM yank at ragdoll start. Measured:
+        //   knockdown-direction metric (victim COM away over +20 frames)
+        //     port unmodified 3/23 = 13% away  ->  6/13 = 46% with it
+        //     oracle 43-96% (QA-112.35)
+        //   BUT it REGRESSES the oracle-agreement gates:
+        //     `diff:dojo-move` 0 -> 126 divergences, `posres:dojo-move` 0 -> 14
+        // so it is NOT enabled. Set `SF2_RD_POSONLY=1` to A/B it.
+        // A multi-frame window was measured to destabilise the solver further
+        // (+8 frames drove displacements to +1600u), so it is ONE frame only.
+        static const bool rd_posonly =
+            std::getenv("SF2_RD_POSONLY") != nullptr;
+        std::vector<float> rd_pre_relax;
+        const bool rd_apply_posonly =
+            rd_posonly && nk_ && tick_ragdoll && ragdoll_frame_count_ == 0;
+        if (rd_apply_posonly) rd_pre_relax = sol_ma_;
         // (c) jE: 2 edge-relaxation passes (`yu.bFa` mass-weighted).
         // JS `Al.jE` (L583) cA per node: `d.cA = d.nh && !d.NG &&
         // (this.nk || d.jy || oa.vc && d.vc)` — with `nh` true for ordinary
@@ -4032,6 +4260,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 // promoted to world space: with the shipped defaults
                 // (NO == MO, so the wall clamp and P6a both short-circuit)
                 // it is a no-op, but the gate was a non-JS difference.
+                // [evidence] `fha_body` is passed the RAGDOLL clamp
+                // (`ragdoll_wall_min_/max_`), which stays 0/0 until a ragdoll
+                // starts, so during normal play its `wall_min != wall_max` gate
+                // short-circuits and the cloth is not wall-clamped. Feeding the
+                // real ARENA walls here instead was TRIED and MEASURED: it made
+                // the oracle divergence much worse (`pose:dojo-move` 555 -> 702
+                // = EVERY frame over tolerance, `pose:boss-lynx` 457 -> 736), so
+                // the oracle does NOT wall-clamp the cloth during normal play
+                // and the current gate is correct. Reverted.
                 {
                     const std::size_t idx[2] = {i1, i2};
                     const bool cax[2] = {cA1, cA2};
@@ -4088,6 +4325,13 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 }
             }
         }
+        // [A/B, env-gated] see `rd_apply_posonly`: keep that one projection
+        // position-only so it is not converted into Verlet velocity.
+        if (rd_apply_posonly && rd_pre_relax.size() == sol_ma_.size()) {
+            for (std::size_t q = 0; q < sol_ma_.size(); ++q) {
+                sol_mf_[q] += sol_ma_[q] - rd_pre_relax[q];
+            }
+        }
         if (trace_relax) {
             for (std::size_t j = 0; j < tr_idx.size(); ++j) {
                 const std::size_t k = tr_idx[j];
@@ -4104,6 +4348,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)),
                              static_cast<double>(model_.edges[k].length));
             }
+            std::fflush(stdout);
+        }
+        // [probe, authorised] `SF2_RD_SEED_PROBE`: the SOLVER COM after the
+        // edge relax — with `[rdstep] afterSk` and `[rdseed] postImpulse` this
+        // pins which solver stage reverses the knockback direction.
+        if (rd_probe) {
+            std::fprintf(stdout, "[rdstep] afterJE com=%.2f\n",
+                         static_cast<double>(rd_com()));
             std::fflush(stdout);
         }
         // JS `Al.ia` (L582) tail: `sk(); jE(); nk&&frameCount++`.

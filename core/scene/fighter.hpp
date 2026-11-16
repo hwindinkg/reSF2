@@ -589,6 +589,12 @@ public:
     bool playing() const { return current_move_ != nullptr && !move_ended_; }
     bool move_ended() const { return move_ended_; }
     int move_frame() const { return move_frame_; }
+    // [probe, authorised] The resolved clip's bone count (`nclip`): how many
+    // nodes the CLIP drives. Nodes past it stay on the cloth solver. Used by
+    // `--wall-probe` to compare a normal ability clip with one whose pose
+    // smears across the screen. Defined in fighter.cpp (`anim_clip` is only
+    // forward-declared here).
+    int clip_bone_count() const;
     // JS `jc.Lj` (`fe.init`'s `pva`): the move's `EndFrame`, or the LOADED
     // clip's frame count when `EndFrame` is absent (see `move_end_frame_`).
     // Read by the `MoveModel` (`Ow`) tween to floor its per-frame step

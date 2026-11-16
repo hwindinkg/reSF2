@@ -226,6 +226,9 @@ public:
     sf2::render::Renderer& renderer() { return *renderer_; }
     ScreenManager& screens() { return *screens_; }
     SaveSystem& save() { return *save_; }
+    // The save file this process owns (`App::init`'s `save_path`). Used by the
+    // `za` badge cache to detect a write without re-parsing the XML.
+    const std::string& save_path() const { return save_path_; }
 
     // The shared fight assets (models/moves/clips/tactics/location) —
     // loaded once at init, used by Fight/Shop/Equipment.
@@ -460,6 +463,16 @@ public:
     bool get_atlas_frame(const std::string& name, sf2::data::atlas_frame* out, int* tex_w, int* tex_h, unsigned int* gl_tex) const;
     // Draws an atlas frame centered at (cx,cy) with optional scale. Returns false if frame missing.
     bool draw_atlas_frame(const std::string& name, float cx, float cy, float scale, float alpha = 1.0f);
+    // JS `ef` (L2301193) — the VIEW BASE CLASS shared by the loader (`ad`) and
+    // the ACT/TITLE screen (`Rd extends ef`): an opaque black fill plus TWO
+    // copies of `E.get(817)` = `loader/bg.jpg` (the second mirrored) tiled
+    // across the screen — plus, for the loader only, `E.get(816)` =
+    // `loader/logo.png` and the "Loading" line. The ACT overlay must draw the
+    // SAME backdrop (`Rd` inherits `ef`'s ctor), otherwise the title sits on a
+    // bare black screen (the reported "the act text appears on a black
+    // background, no background texture"). Returns false when the loader art
+    // is not loaded (headless captures of the boot states).
+    bool draw_ef_backdrop(float alpha, bool with_logo);
 
 private:
     void poll_input();

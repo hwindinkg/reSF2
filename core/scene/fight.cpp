@@ -6770,7 +6770,8 @@ bool FightController::hit_test(FightFighter& atk, FightFighter& def,
 }
 
 // [probe, authorised] `--d3-probe`: force the named move on the PLAYER.
-bool FightController::debug_force_player_move(const std::string& name) {
+bool FightController::debug_force_player_move(const std::string& name,
+                                             bool via_input) {
     const auto it = moves_->find(name);
     if (it == moves_->end()) return false;
     sf2::scene::FightContext ctx;
@@ -6787,6 +6788,15 @@ bool FightController::debug_force_player_move(const std::string& name) {
     }
     for (const std::string& n : enemy_.fighter.active_intervals()) {
         ctx.intervals_enemy.push_back({n, enemy_.fighter.interval_type(n), true});
+    }
+    if (via_input) {
+        // Input path (JS `wd.NS` -> `Te.Skb`): the move's MAIN `<Conditions>`
+        // (Keys / CurrentAnimation / Distance) are re-checked against the live
+        // fighter state, which is what a real key press hits. The AI path
+        // (`ai=true`) evaluates only the move's `<Tactics>`, so it can never
+        // start an input-gated move such as `WallJump_100`
+        // (`<Key Type="Up-Back">` + `<Distance Min="100" Max="150">`).
+        return player_.fighter.try_start_move(it->second, ctx);
     }
     return player_.fighter.ai_start_move(it->second, ctx);
 }

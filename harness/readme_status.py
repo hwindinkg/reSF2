@@ -586,7 +586,13 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("RU/EN, fighter names and the VS intro", True),
     ]),
     ("Harness & verification", [
-        ("34 gates, `--full` exit 0", True),
+        # HONEST STATE (2026-11-16): `--full` is exit 1 on `quest-verify-buy`
+        # (the tutorial-buy driver parks and the run hits the watchdog). It was
+        # measured on this tree AND is byte-identical with the session's only
+        # behavioural switches off — a pre-existing driver gap, not a game bug
+        # (BUGS.md QA-112.40).
+        ("`--full` is exit 1 on `quest-verify-buy` (driver parks at the "
+         "dialog/map, BUGS.md QA-112.40)", False),
         ("oracle runner + `compare_state` / `compare_audio` / `ui_diff`", True),
         ("`--replay` drives one script on both sides", True),
         ("debug overlay 1-4 (AI/world/session + a perf panel with the FPS "

@@ -1248,9 +1248,20 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
         // alpha, so the text fade is folded into its colour against the black.
         const float dim_a = app.quest_engine().act_overlay_alpha();
         const float text_a = app.quest_engine().act_overlay_text_alpha();
-        const float dim[] = {0.0f,   0.0f,   kViewW, 0.0f,   0.0f,   kViewH,
-                             kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
-        ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, dim_a);
+        // JS `Rd extends ef` (L2301193): `ef`'s ctor lays an OPAQUE black fill
+        // AND two tiled `E.get(817)` = `loader/bg.jpg` sprites (the second
+        // mirrored) across the screen; `Rd` only fades `this.node`. So the act
+        // title sits on the TILED LOADING BACKDROP, not on a bare black screen
+        // (the reported "the act text appears on a black background, no
+        // background texture"). Same code path as the loader, by inheritance.
+        // The opaque black `hf` fill first (JS `Fc.Ed(-16777216)`), then the
+        // `ef` tiled art on top (see `App::draw_ef_backdrop`).
+        {
+            const float dim[] = {0.0f,   0.0f,   kViewW, 0.0f,   0.0f,   kViewH,
+                                 kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
+            ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, dim_a);
+        }
+        (void)app.draw_ef_backdrop(dim_a, /*with_logo=*/false);
         // JS `Rd.layout` (L1078843): `this.label.Fa(N.width/this.node.Eb*
         // (.9+(N.lc-.4)/1.6*-.5), 400)` — the label box is 400 tall and
         // MULTILINE (`rd(!0)`), so the localized `{br}` two-line title
@@ -4496,7 +4507,11 @@ void draw_za_chrome(App& app, ScreenId active, const int* badges = nullptr) {
         // The label is `Y.na("menu")`: UTF-8 bytes for `МЕНЮ` (0xD0 0x9C
         // 0xD0 0x95 0xD0 0x9D 0xD0 0xAE) written as escapes so the string
         // literal is independent of the compiler's source charset (MSVC).
-        draw_ui_label(app, hx, hy + hh * 0.28f, hw, hh, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE",
+        // CENTRED in the plate: the old `hy + hh*0.28` fudge pushed the ink
+        // below the plate's centre and clipped its bottom against the rail
+        // (measured on `dojo_hub`: the oracle's cap sits at the plate's
+        // vertical centre, the port's text hung ~10 px low in the same crop).
+        draw_ui_label(app, hx, hy, hw, hh, "\xD0\x9C\xD0\x95\xD0\x9D\xD0\xAE",
                       0.5f, UiAlign::Center, 0.184f, 0.145f, 0.106f);
         // `_NextScene` guidance while the column is collapsed: the `Le` art
         // is hidden (JS `NLa` L2001), so the header carries the flash — the
@@ -7639,6 +7654,7 @@ sf2::scene::PerkSetup equipped_perks(App& app, FightAssets& assets,
 
 } // namespace
 
+
 // External entry for the `--reward-probe` driver: `battle_rewards` itself has
 // internal linkage (this file's anonymous namespace), so this thin wrapper
 // gives the probe a symbol to link against.
@@ -9919,6 +9935,21 @@ const char* quest_button_frame(const std::string& color, bool primary) {
 // model, so the row's own body box is the tap target.
 constexpr int kDialogRowIdBase = 5;  // `He` ctor L1042 `this.eOa=5`
 
+// The modal's ACTION-PLATE centre (`od_layout`'s `btn_cx`/`btn_cy`). The plate
+// is horizontally centred on the panel (`sx(0)`) and sits at
+// `sy(a + 222*0.5)` with `a = clamp(md*0.5, 300, 1000)`, i.e. its Y FOLLOWS the
+// dialog's content height: a short dialog pins `a` at the 300 minimum (plate at
+// ~553, which is why the historic `(860, 549)` tap worked for the sensei
+// dialog) while a taller two-row dialog (`characterLynx`) puts it at ~620. Taps
+// driven by a constant therefore miss the Lynx plate and the quest chain parks
+// at the modal until the watchdog fires (`quest-verify-buy`).
+void dialog_action_plate_center(App& app, const EngineDialog& d, float& x,
+                                float& y) {
+    const OdLayout o = od_layout(dialog_content_md(app, d));
+    x = o.btn_cx;
+    y = o.btn_cy;
+}
+
 std::vector<QuestDialogRowButton> quest_dialog_row_buttons(App& app,
                                                            const EngineDialog& d) {
     std::vector<QuestDialogRowButton> out;
@@ -10270,8 +10301,21 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         // dialog (6 wrapped lines) put its last row UNDER the СПАСИБО plate.
         // The scroll frame ends ABOVE the plate row (`Cd` sits at
         // `a + Cd.qa/2`), so the body must not run under the buttons.
+        // [FIX side-dialog overflow, measured with `--act-probe multiline`] The
+        // old cap was `body_y + body_h` where `body_h = md*c` and `md` is the
+        // TEXT height: an 11-line body (md ~1300 design) produced a box that
+        // ran past the PANEL's bottom edge and off the screen — the reported
+        // "the text still does not fit in the side dialogs" (captured in
+        // `.harness/artifacts/dialog_probe.png`: the last line cut by the
+        // screen edge). Clip to the PANEL (`L.a` = its design half-height,
+        // `sy(+-a)` = its inner top/bottom) like the JS scroll container, and
+        // start below the panel's top edge.
+        const float panel_top = L.sy(-L.a) + 10.0f;
+        const float panel_bottom = L.sy(L.a) - 10.0f;
+        y = std::max(y, panel_top);
         const float body_bottom =
-            std::min(L.body_y + L.body_h, L.btn_cy - L.btn_h * 0.5f - 8.0f);
+            std::min(std::min(L.body_y + L.body_h, panel_bottom),
+                     L.btn_cy - L.btn_h * 0.5f - 8.0f);
         for (std::size_t i = 0; i < d.lines.size(); ++i) {
             if (y >= body_bottom) break;
             const std::string text = dialog_line_text(app, d, d.lines[i]);
@@ -11234,6 +11278,20 @@ MapScreen::MapScreen(ScreenManager& mgr) : Screen(mgr, "Map") {
         if (zones_[i].name == open_zone) zone_sel_ = static_cast<int>(i);
     }
     if (zone_sel_ < 0) zone_sel_ = 0;  // no map zone at all (degraded)
+    // The save's CurrentZone can name a zone the player cannot open yet (a
+    // locked zone, or one whose battles are all inactive). The map must land
+    // on a zone it can actually SHOW: fall back to the first swipe-pickable
+    // one, mirroring the dot strip. Without this the map opened on an
+    // unreachable zone (the reported "it opens the wrong location first").
+    if (zone_sel_ >= 0 && zones_.size() > 0 &&
+        !zone_pickable(static_cast<std::size_t>(zone_sel_))) {
+        for (std::size_t i = 0; i < zones_.size(); ++i) {
+            if (zone_pickable(i)) {
+                zone_sel_ = static_cast<int>(i);
+                break;
+            }
+        }
+    }
     // WDa/`Qr.lla` VERBATIM (JS L256/L2094). `WDa(a) = iF.get(a) != null`:
     // a battle node is ACTIVE iff the save carries a `<Battles>` record for
     // `zone|name|` (written by `J1a` L259 / `Iaa` L260-261, native
@@ -11816,18 +11874,28 @@ void MapScreen::map_button_rect(std::size_t i, float& cx, float& cy, float& w,
     }
 }
 
+// One zone may be shown / swiped to when it renders a dot AND is unlocked:
+// a map backdrop (`part >= 0`), not `locked`, and at least one ACTIVE battle
+// (JS `Vr.HXa` L2123-2124 `WDa`). Everything that selects a zone (dot strip
+// geometry, the dot tap, the drag-release switch, the neighbour draw) reads
+// THIS, so the set of reachable zones is the set of painted dots. Without the
+// `locked` term a right-to-left swipe landed the map on an unreachable zone
+// (the reported "swipe flipped it to an inaccessible second zone").
+bool MapScreen::zone_pickable(std::size_t zi) const {
+    if (zi >= zones_.size()) return false;
+    const ZoneTab& z = zones_[zi];
+    if (z.locked) return false;
+    if (z.part < 0) return false;  // no map backdrop -> not a map zone
+    for (const Node& n : z.nodes) {
+        if (n.active) return true;  // `Vr.HXa`: a battle button renders
+    }
+    return false;
+}
+
 bool MapScreen::zone_dot_center(std::size_t zi, float& cx, float& cy) const {    if (zi >= zones_.size()) return false;
     std::size_t slot = 0;
     for (std::size_t i = 0; i < zones_.size(); ++i) {
-        bool any = false;
-        for (const Node& n : zones_[i].nodes) {
-            if (n.active) {  // `Vr.HXa` L2123-2124 (`WDa`), not the button gate
-                any = true;
-                break;
-            }
-        }
-        if (!any) continue;                // no dot drawn -> no rect
-        if (zones_[i].part < 0) continue;  // no map backdrop -> not a map zone
+        if (!zone_pickable(i)) continue;  // no dot drawn -> no rect
         if (i == zi) {
             const UrLayout u = ur_layout(app(), map_metrics(app()));
             cx = u.dots_x +
@@ -12282,7 +12350,11 @@ void MapScreen::update_impl(float dt) {
                 const int step = (dx < 0.0f) ? 1 : -1;
                 for (int k = zone_sel_ + step;
                      k >= 0 && k < static_cast<int>(zones_.size()); k += step) {
-                    if (zones_[static_cast<std::size_t>(k)].part >= 0) {
+                    // Same predicate as the dot strip: a zone with no dot (no
+                    // backdrop, locked, or no active battle) is NOT a swipe
+                    // target — the reported "the swipe flips the map to an
+                    // inaccessible zone".
+                    if (zone_pickable(static_cast<std::size_t>(k))) {
                         next = k;
                         break;
                     }
@@ -13947,6 +14019,10 @@ void MapScreen::render_impl(App& app) {
         for (int dir = -1; dir <= 1; dir += 2) {
             const int zi = zone_sel_ + dir;
             if (zi < 0 || static_cast<std::size_t>(zi) >= zones_.size()) continue;
+            // Only a swipe-reachable neighbour is painted, so a locked zone
+            // never slides into view (the reported "the map shows the next,
+            // inaccessible zone").
+            if (!zone_pickable(static_cast<std::size_t>(zi))) continue;
             draw_zone_nodes(zones_[static_cast<std::size_t>(zi)],
                             pan_dx + static_cast<float>(dir) * strip_w, false);
         }
@@ -22355,6 +22431,18 @@ void ShopScreen::update_impl(float dt) {
         shop_dispatch_model_sounds(*preview_fighter_, "TryOn");
         preview_frame_ = preview_fighter_->move_frame();
         if (!preview_fighter_->preview_active()) {
+            // [probe, authorised] `SF2_PV_PROBE`: the TryOn clip's END seat vs
+            // the idle seat it returns to (`Pi.j9 = (0,-93)`). A non-zero
+            // value is the reported "after the weapon animation the character
+            // moves backward" (shop / profile previews).
+            if (std::getenv("SF2_PV_PROBE") != nullptr) {
+                std::fprintf(stdout,
+                             "[pv] TryOn end wx=%.2f wy=%.2f seat=(%.1f,%.1f)\n",
+                             static_cast<double>(preview_fighter_->world_x()),
+                             static_cast<double>(preview_fighter_->world_y()),
+                             0.0, -93.0);
+                std::fflush(stdout);
+            }
             preview_active_ = false;
             preview_fighter_.reset();
             preview_clip_ = nullptr;
@@ -23280,7 +23368,7 @@ void ShopScreen::render_impl(App& app) {
                              ah ? 0.35f : 0.25f, ah);
         }
         draw_ui_label(app, ar.J, (ar.P + ar.W) * 0.5f - 11.0f, ar.width(), 22.0f, alabel, 0.8f,
-                      UiAlign::Center, 1.0f, 1.0f, 1.0f);
+                      UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
     if (!try_draw_atlas_button(app, "Arrow", 64.0f, 40.0f, 88.0f, 48.0f, 1.0f)) {
         draw_flat_button(app, "BACK", 64.0f, 40.0f, 88.0f, 48.0f, 0.3f, 0.3f, 0.4f, false);
@@ -26081,14 +26169,12 @@ void EquipmentScreen::render_impl(App& app) {
                 if (yy + cell_h > v.W) break;
                 const float cy = yy + cell_h * 0.5f;
                 sf2::render::Renderer& rr = app.renderer();
-                const float q[] = {x0, yy + 2.0f, x1, yy + 2.0f, x1, yy + cell_h - 2.0f,
-                                   x0, yy + 2.0f, x1, yy + cell_h - 2.0f, x0, yy + cell_h - 2.0f};
-                // `hs`/`is` cell band: the oracle `profile_tab2` rows read as a
-                // warm translucent band over the parchment (was an opaque
-                // near-black quad).
-                rr.draw_triangles(q, 6, r.reward_available ? 0.40f : 0.34f,
-                                  r.reward_available ? 0.30f : 0.25f,
-                                  r.reward_available ? 0.16f : 0.14f, 0.55f);
+                // `hs`/`is` cell band: JS draws NO row plate on the achievements
+                // list — the oracle `profile_tab2` rows are the bare parchment
+                // (measured on the fidelity captures: the port's translucent
+                // quad at 0.55 alpha was a visible lighter rectangle the
+                // oracle does not have, and it dominated that state's diff).
+                // The cell is just icon + title + the `e` progress bar.
                 // Icon `is` `Ed.Fs` (L2212): `Achievements01/ach_*` on atlas
                 // 270 (`y.MQa` "Achievements01/ach_block_gold", L2470).
                 // `is.ba` (L2212) is the SAME cell layout as `ls.ba` (L2236):
@@ -26117,23 +26203,27 @@ void EquipmentScreen::render_impl(App& app) {
                 }
                 // JS `is.ba` L91806-91813: the bar `uH.D(c - uH.qa())` sits
                 // ABOVE the cell centre and the count `uy.C(e); uy.D(c*0.8);
-                // uy.ua(b*0.4); uy.Fa(a, b*0.4)` sits BELOW it, LEFT-aligned at
-                // the bar's x with the bar's width. The port had them swapped
-                // (bar below, count right-aligned above).
+                // uy.ua(b*0.4); uy.Fa(a, b*0.4)` sits BELOW it in the SAME
+                // width box as the bar, CENTRED: `uy.Ia(2)` and the JS `ea`
+                // alignment mask tests `e & 1170`, which HAS bit 1 (=2) — so 2
+                // is the CENTRE flag (2340 is the right flag). The port read
+                // `Ia(2)` as left, so the counter sat at the bar's left edge
+                // instead of under its middle (measured on the `profile_tab2`
+                // crops: oracle "0/1" centred ~663 px, port at ~597 px).
+                const float pbx = e_x;
+                const float pbh_pre = 9.0f;
+                const float pby = cy - 4.0f - pbh_pre;  // `D(c - uH.qa())`
+                const float pbw = std::max(40.0f, x1 - cell_h * 0.2f - pbx);
+                const float pbh = 9.0f;
                 const float cnt_h = cell_h * 0.4f;
-                draw_ui_label(app, e_x, cy - cell_h * 0.1f, std::max(40.0f, x1 - e_x),
-                              cnt_h, pbuf, cnt_h / 100.0f, UiAlign::Left, 0.184f, 0.145f,
+                draw_ui_label(app, pbx, cy - cell_h * 0.1f, pbw, cnt_h, pbuf,
+                              cnt_h / 100.0f, UiAlign::Center, 0.184f, 0.145f,
                               0.106f);
                 // `is.uH` progress bar (`Uf(y.eSa,y.HRa,258)` L2212): empty
                 // `pieces/achiev_progress_empty` (profile atlas, `y.eSa`) +
                 // `Level_bar` fill (misc atlas, `y.HRa`) at
                 // min(value,target)/target (`is.D1a` `uH.PT`/`DF`, L2213). The
                 // flat backing is the explicit miss fallback.
-                const float pbx = e_x;
-                const float pbh_pre = 9.0f;
-                const float pby = cy - 4.0f - pbh_pre;  // `D(c - uH.qa())`
-                const float pbw = std::max(40.0f, x1 - cell_h * 0.2f - pbx);
-                const float pbh = 9.0f;
                 const float pfrac =
                     r.target > 0 ? std::clamp(static_cast<float>(r.value) /
                                                   static_cast<float>(r.target),
@@ -29305,6 +29395,32 @@ void draw_ui_overlays(App& app) { draw_xp_hint(app); }
 // equivalents of `n5a()`/`rCa()`); moves/seals contribute 0.
 void za_nav_badge_counts(App& app, int* out /* kZaNavCount */) {
     for (int i = 0; i < kZaNavCount; ++i) out[i] = 0;
+    // [PERF, measured] This runs from the `za` CHROME DRAW, i.e. once per frame
+    // on every shell screen (dojo/shop/map/profile). It used to parse the save
+    // XML and REBUILD the whole perk tree + the achievement list every frame:
+    // the `[rnd]` split measured `scene` 10.7 ms on the dojo, 20.3 ms on the
+    // shop, 18.4 ms on the map and 16.9 ms on the profile against 3.6 ms in
+    // the fight, which has no `za` chrome — and the cost GROWS with progress
+    // (the reported "after a short session it lags badly outside battle",
+    // `frame=160.87ms render=152.05ms`). The badges only change when the save
+    // does, so cache them keyed on the save file's (mtime, size).
+    static int cached[kZaNavCount] = {0, 0, 0, 0, 0};
+    static std::filesystem::file_time_type cached_time{};
+    static std::uintmax_t cached_size = 0;
+    static bool have_cache = false;
+    {
+        const std::string& path = app.save_path();
+        std::error_code ec1, ec2;
+        const auto t = std::filesystem::last_write_time(path, ec1);
+        const auto sz = std::filesystem::file_size(path, ec2);
+        if (have_cache && !ec1 && !ec2 && t == cached_time && sz == cached_size) {
+            for (int i = 0; i < kZaNavCount; ++i) out[i] = cached[i];
+            return;
+        }
+        if (!ec1) cached_time = t;
+        if (!ec2) cached_size = sz;
+        have_cache = true;
+    }
     WarriorSave w;
     try {
         w = app.save().load();
@@ -29332,6 +29448,7 @@ void za_nav_badge_counts(App& app, int* out /* kZaNavCount */) {
         }
     }
     out[3] = prof_n;  // PROFILE row (`Mma`)
+    for (int i = 0; i < kZaNavCount; ++i) cached[i] = out[i];
 }
 
 } // namespace sf2::app

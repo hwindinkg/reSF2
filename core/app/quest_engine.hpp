@@ -887,15 +887,18 @@ public:
     // paths — the JS always ends them in `(Ib.RP=!1, this.sa())`.
     void dismiss_dialog(App& app);
 
-    // JS `hab()` L1060: any slot carries actions (`Ng`/`rh`/`Nh`/`Hj`). A
-    // dialog with no such slot advances on tap instead of firing a plate.
-    // Reads the `Wb` top (the first non-Notification), not a bar Notification.
+    // JS `hab()` L1060: a dialog "has a button" only when a slot NESTS ACTIONS
+    // (`Ng`/`rh`/`Nh`/`Hj`). An authored `<Button Type="Right">` with an empty
+    // action list still paints a plate, but pressing it has nothing to
+    // dispatch, so JS takes the buttonless path and the dialog advances on tap.
+    // Treating that slot as a live button parked the tutorial `characterLynx`
+    // dialog on its last page forever (it owns 0 actions and the chain expects
+    // the MAP's FIGHT button next) — the `quest-verify-buy` watchdog timeout.
     bool dialog_has_button() const {
         const EngineDialog* d = modal_top();
         return d != nullptr &&
-               (d->has_right_button || !d->button_actions.empty() ||
-                !d->left_.actions.empty() || !d->middle_.actions.empty() ||
-                !d->close_.actions.empty());
+               (!d->button_actions.empty() || !d->left_.actions.empty() ||
+                !d->middle_.actions.empty() || !d->close_.actions.empty());
     }
 
     // Drops every queued dialog (tutorial handoff / scene reset).
@@ -1109,6 +1112,26 @@ public:
     std::string act_text;                // current line
     std::size_t act_actions = 0;         // ActScreen overlays displayed
     bool has_act_overlay() const { return act_active; }
+    // [probe, authorised] Force the `Rd` act-title overlay to its FULLY FADED
+    // state so a capture can compare its backdrop against the oracle: JS
+    // `Rd extends ef`, and `ef`'s ctor tiles `loader/bg` behind the title.
+    void debug_force_act_overlay(const std::string& text) {
+        act_active = true;
+        act_text = text;
+        // Park the timeline in the HOLD window (steps 2-4), where both the
+        // backdrop and the title are fully opaque: `tick` recomputes the
+        // alphas from `act_elapsed`, so forcing the alphas alone is overwritten
+        // on the next fixed step.
+        act_lines.assign(1, text);
+        act_line_secs.assign(1, 1.0e6f);
+        act_hold = 1.0e6f;
+        act_elapsed = 2.5f;
+        act_total = 3.0e6f;
+        act_complete = 3.0e6f;
+        act_alpha = 1.0f;
+        act_dim_alpha = 1.0f;
+        act_text_alpha = 1.0f;
+    }
     const std::string& act_overlay_text() const { return act_text; }
     float act_overlay_alpha() const { return act_dim_alpha; }
     float act_overlay_text_alpha() const { return act_text_alpha; }
