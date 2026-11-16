@@ -10605,6 +10605,86 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             d.button_color = "Dark";
             d.has_right_button = true;
             app.quest_engine().push_dialog_for_test(std::move(d));
+        } else if (kind == "tryon") {
+            // [probe] Items 6/12: arm the shop `Pi` preview on WEAPON_KNIVES
+            // (the SAME `arm_preview` the TRY press runs, JS `Oa.Fhb` L2300 ->
+            // `Ex(a,7)`), run it to `TryOn end` and log the preview model's
+            // world x at arm / at the last clip frame / after the return to
+            // idle. A non-zero end-vs-start delta is the reported "after the
+            // weapon animation the character moves backward".
+            app.screens().push(make_screen(app.screens(), kScreenShop));
+            for (int i = 0; i < 6; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top());
+            if (shop == nullptr) {
+                std::fprintf(stdout, "[actprobe] tryon: shop screen missing\n");
+                app.shutdown();
+                return 1;
+            }
+            const std::vector<sf2::app::CatalogItem> cat =
+                sf2::app::load_catalog(app);
+            const sf2::app::CatalogItem* it = nullptr;
+            for (const auto& c : cat) {
+                if (c.name == "WEAPON_KNIVES") {
+                    it = &c;
+                    break;
+                }
+            }
+            if (it == nullptr && !cat.empty()) it = &cat.front();
+            if (it == nullptr) {
+                std::fprintf(stdout, "[actprobe] tryon: catalog empty\n");
+                app.shutdown();
+                return 1;
+            }
+            const bool armed = shop->probe_arm_preview(app, *it);
+            const float x0 = shop->preview_world_x();
+            std::fprintf(stdout,
+                         "[tryon] item=%s armed=%d x_start=%.2f frame=%d\n",
+                         it->name.c_str(), armed ? 1 : 0,
+                         static_cast<double>(x0), shop->preview_frame());
+            std::fflush(stdout);
+            float x_last = x0;
+            int f_last = shop->preview_frame();
+            int guard = 0;
+            while (shop->preview_active() && guard < 400) {
+                // Tick the SHOP directly: `app.run_one_frame()` only updates the
+                // TOP screen, and the fresh-profile tutorial chain pushes other
+                // screens over the shop — measured: the preview advance stopped
+                // at playhead 29/41 because the shop had been covered.
+                shop->update(1.0f / 60.0f);
+                x_last = shop->preview_world_x();
+                f_last = shop->preview_frame();
+                ++guard;
+            }
+            std::fprintf(stdout,
+                         "[tryon] end after %d frames: x_last=%.2f frame=%d "
+                         "active=%d delta=%.2f\n",
+                         guard, static_cast<double>(x_last), f_last,
+                         shop->preview_active() ? 1 : 0,
+                         static_cast<double>(x_last - x0));
+            std::fflush(stdout);
+            // The idle/destination model takes over when the preview ends; log
+            // its x so the SNAP (if any) is visible in the numbers.
+            for (int i = 0; i < 4; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            std::fprintf(stdout, "[tryon] after-idle (4 frames) done\n");
+            std::fflush(stdout);
+            // Advance REAL app frames so the boot overlay is gone (the shop was
+            // ticked directly above, so `boot_splash_frames_` was not counting
+            // down) and the capture shows the shop after the return.
+            for (int i = 0; i < 160; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            app.capture_png(".harness/artifacts/tryon_end.png");
+            std::fprintf(stdout, "[actprobe] captured .harness/artifacts/tryon_end.png\n");
+            std::fflush(stdout);
+            app.shutdown();
+            return 0;
         } else if (kind == "multiline") {            sf2::app::EngineDialog d;
             d.type = "Multiline";
             d.title = "_Title_Assistant";

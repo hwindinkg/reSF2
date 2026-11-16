@@ -1340,6 +1340,13 @@ public:
         arm_preview(app, it);
         return preview_active_;
     }
+    // [probe, authorised] the live preview model's world x (the `Pi` node rider).
+    // `--act-probe tryon` logs it at arm / last clip frame / after the return to
+    // idle to measure the reported "after the weapon animation the character
+    // moves backward" (items 6/12).
+    float preview_world_x() const {
+        return preview_fighter_ ? preview_fighter_->world_x() : 0.0f;
+    }
     int preview_bones() const { return static_cast<int>(preview_model_.bones.size()); }
     int preview_frame() const { return preview_frame_; }
     int preview_sub() const { return preview_fighter_ ? preview_fighter_->sub() : 0; }

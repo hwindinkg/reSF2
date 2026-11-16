@@ -2711,6 +2711,26 @@ void Fighter::advance_step() {
     // both sites see the same per-frame constant.
     const int ff = std::max(0, move_base_);  // the `Pka`/`J$a()` buffer base
     const int xh = playhead_ + 1;      // JS `Te.Xh` for THIS frame
+    // [probe, authorised] `SF2_TRACE_PREVIEW=1`: why a display-only preview clip
+    // never reports its end (`--act-probe tryon` froze at frame 29 with
+    // `preview_active()==1`, so the shop's `TryOn end -> fU()` never ran).
+    if (preview_mode_) {
+        static const bool pv_trace =
+            std::getenv("SF2_TRACE_PREVIEW") != nullptr;
+        static int pv_n = 0;
+        if (pv_trace && (pv_n++ % 30) == 0) {
+            std::fprintf(stdout,
+                         "[pvstep] playhead=%d clip_len=%d ff=%d sub=%d "
+                         "subframe=%d move_frame=%d ended=%d\n",
+                         playhead_,
+                         current_clip_ != nullptr
+                             ? static_cast<int>(current_clip_->frames.size())
+                             : -1,
+                         ff, sub_, subframe_, move_frame_,
+                         move_ended_ ? 1 : 0);
+            std::fflush(stdout);
+        }
+    }
     // `M0()`'s base is the ANIMATOR's `Mq` (`move_start_`, clamped), while
     // `ff` above is the unclamped `Skb` start frame the buffer was built from.
     move_frame_ = move_start_ + std::max(0, xh - 2);  // JS `Te.M0()`
@@ -3179,6 +3199,19 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // display model), so `f` stays `a.qx` -> `Mq` = `qx` (see `move_start_`).
     move_start_ = move_base_ = std::max(0, move.first_frame);  // JS `Mq = a.qx`
     move_frame_ = move_start_;                    // JS `M0()` at `Xh = 0`
+    // [FIX preview clip end — items 6/12] `clear_move()` zeroes
+    // `move_end_frame_`, and `start_preview_clip` never re-derived it, so the
+    // preview clip's end test never fired: measured with `--act-probe tryon`
+    // the model froze on the last frame (`frame=29` for 400 ticks),
+    // `move_ended_` stayed false and `preview_active()` therefore never went
+    // false — the shop's `TryOn end -> fU()` (re-show the body, re-seat the
+    // `Pi` model) never ran and the model stayed +160 px off its seat (the
+    // reported "after the weapons animation the character moves backward").
+    // Same rule as `start_move_impl`: `EndFrame` when authored, else the
+    // LOADED clip's frame count (JS `jc.Lj`).
+    move_end_frame_ = move.end_frame != 0
+                          ? move.end_frame
+                          : static_cast<int>(clip.frames.size());
     playhead_ = 0;                                // JS `Te.Xh = 0` (Skb)
     sub_ = std::max(1, (move.mid_frames + 1) * 1);  // JS `Gka`: (XJ+1)*HD
     subframe_ = 0;
@@ -3200,6 +3233,8 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // (probe: HighBlockProfile world_y -93 -> -29 vs the JS clip y).
     if (reseat) reseat_preview_anchor(node_x, node_y);
     preview_mode_ = true;
+    preview_seat_x_ = node_x;
+    preview_pin_x_ = move.template_tags.count("ShopTryOn") != 0;
     world_x_ = node_x;
     world_y_ = node_y;
     // The oL seat above already places the anchor in the solver state, so the
@@ -3935,6 +3970,9 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         }
+        // A TryOn (`ShopTryOn`) preview plays IN PLACE on its `Pi` seat; the
+        // idle loop keeps riding its clip (see `preview_pin_x_`).
+        if (preview_mode_ && preview_pin_x_) world_x_ = preview_seat_x_;
         // [REJECTED by measurement] Pinning a display-only preview's x to its
         // `Pi` seat (`preview_seat_x_`) was TRIED: it made the shop/profile
         // captures WORSE (`shop_tab1` 11.53 -> 14.02 %pix>12, `shop_detail`

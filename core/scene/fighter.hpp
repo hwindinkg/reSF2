@@ -505,7 +505,17 @@ public:
     void start_preview_clip(const MoveDef& move, const sf2::data::anim_clip& clip,
                             float node_x = 0.0f, float node_y = -93.0f,
                             bool reseat = true);
-    bool preview_active() const { return current_clip_ != nullptr; }
+    // True while the preview clip is still PLAYING. The old `current_clip_ !=
+    // nullptr` stayed true FOREVER once a clip was seated (`clear_move` keeps
+    // `current_clip_` cleared only at the next start), so the shop's
+    // "TryOn end -> `fU()` re-show the body / reset the `Pi` model" branch
+    // never ran: measured with `--act-probe tryon`, the preview was still
+    // `active=1` after 400 frames on a 30-frame clip and its model had ridden
+    // +163 px of clip root travel — the reported "after the knives animation
+    // the character moves backward" (items 6/12).
+    bool preview_active() const {
+        return current_clip_ != nullptr && !move_ended_;
+    }
 
     // --- move-frame action dispatch (JS `Te.Lwa` L563-564) -----------------
     // JS `xc.voice` (the fighter XML `<Voice>` attr; `Vo` ctor default ""
@@ -1466,6 +1476,15 @@ private:
     // the first sample then captures the y render offset from the `Pi` node
     // placement too. Fight moves keep the y anchor rule of `start_move_impl`.
     bool preview_mode_ = false;
+    // The `Pi` seat a TryOn (`ShopTryOn` template) preview is pinned to: the JS
+    // `Pi` model shows the item ON THE STAND, so a TryOn clip must not walk it
+    // across the shop. The IDLE loop keeps riding its clip (measured: pinning
+    // every preview made the shop captures WORSE), so only a `ShopTryOn` move
+    // is pinned. `--act-probe tryon` measured the unpinned TryOn riding +160 px
+    // (x 25.83 -> 186) and then snapping back at the clip end — the reported
+    // "after the weapons animation the character moves backward".
+    bool preview_pin_x_ = false;
+    float preview_seat_x_ = 0.0f;
     float prev_align_pivot_world_x_ = 0.0f;  // previous frame's world x of the Part
     // [B1 FIX — vertical render anchor] The y analog of `render_offset_`.
     // The JS anchor is a POSED node: `Te.eda` (L556) writes `ma = fq[mo] + j8`
