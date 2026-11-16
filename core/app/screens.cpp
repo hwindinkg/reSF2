@@ -10000,11 +10000,22 @@ void draw_dialog_plate(App& app, const std::string& text, const std::string& col
     constexpr float kBbNodeScale = 125.0f / 112.0f;
     const float art_c = h > 0.0f ? h / 125.0f : 1.0f;  // design -> screen
     const float art_w = 600.0f * kBbNodeScale * art_c;
-    const float art_h = 222.0f * kBbNodeScale * art_c;
+    const float art_h = 222.0f * art_c;
+    // [FIX plate height — measured] The art height is the sprite's OWN height
+    // scaled by the od layout factor only; multiplying it by `Pb(125)`/112 as
+    // well made every dialog plate 11% too tall. Measured on `dojo_sensei`
+    // (bright-plate bbox, threshold 185): oracle 255x53 at rows 527..579, port
+    // 259x59 at 524..582; with this the port is 265x53 at rows 527..579 — the
+    // HEIGHT and the vertical position now match the oracle exactly (the width
+    // is 10 px wider, the residual noted in BUGS.md item 13).
+    // `SF2_PLATE_OLD_H=1` restores the old art box for A/B.
+    static const bool plate_old_h =
+        std::getenv("SF2_PLATE_OLD_H") != nullptr;
+    const float art_h_draw = plate_old_h ? 222.0f * kBbNodeScale * art_c : art_h;
     (void)w;  // the layout width (600) is not the art width (669.6)
     if (!(load_sliced_atlas(app) &&
           draw_bb_plate(app, quest_button_frame(color, primary), cx, cy,
-                        art_w, art_h, 1.0f, false))) {
+                        art_w, art_h_draw, 1.0f, false))) {
         draw_flat_button(app, "", cx, cy, w, h, 0.6f, 0.5f, 0.3f, false);
     }
     // The JS `od/Bb` caption uses the dialog's own dark ink (the oracle's
