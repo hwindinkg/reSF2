@@ -24964,6 +24964,47 @@ void EquipmentScreen::update_impl(float dt) {
         }
         avatar_fighter_->advance(dt);
         avatar_frame_ = avatar_fighter_->move_frame();
+        // [probe, authorised] `SF2_TRACE_EDGES=1` on the PROFILE avatar (the last
+        // unmeasured model state): the same worst-edge stretch report the fight
+        // controller and the shop preview print, once per second.
+        {
+            static const bool avatar_edges_on =
+                std::getenv("SF2_TRACE_EDGES") != nullptr;
+            if (avatar_edges_on) {
+                static int avatar_edges_tick = 0;
+                if ((avatar_edges_tick++ % 60) == 0) {
+                    const auto& amodel = avatar_fighter_->model();
+                    const std::vector<float>& apos = avatar_fighter_->positions();
+                    float amx = 0.0f;
+                    int anbad = 0, awi = -1;
+                    std::string aworst;
+                    for (std::size_t ei = 0; ei < amodel.edges.size(); ++ei) {
+                        const auto& e = amodel.edges[ei];
+                        const int a1 = amodel.bone_by_name(e.end1);
+                        const int a2 = amodel.bone_by_name(e.end2);
+                        if (a1 < 0 || a2 < 0) continue;
+                        const std::size_t q1 = static_cast<std::size_t>(a1) * 2;
+                        const std::size_t q2 = static_cast<std::size_t>(a2) * 2;
+                        if (q2 + 1 >= apos.size()) continue;
+                        const float vx = apos[q2] - apos[q1];
+                        const float vy = apos[q2 + 1] - apos[q1 + 1];
+                        const float v = std::sqrt(vx * vx + vy * vy) - e.length;
+                        if (v > amx) {
+                            amx = v;
+                            awi = static_cast<int>(ei);
+                            aworst = e.end1 + "->" + e.end2;
+                        }
+                        if (v > 5.0f) ++anbad;
+                    }
+                    std::fprintf(stdout,
+                                 "[edges] profile-avatar max=%.1f n5=%d worst=e%d %s "
+                                 "frame=%d\n",
+                                 static_cast<double>(amx), anbad, awi,
+                                 aworst.c_str(), avatar_frame_);
+                    std::fflush(stdout);
+                }
+            }
+        }
     }
     // [Show chain] `$r.Op.pa` -> `Ad.kg` (JS `$r.mhb` L1150052 -> `vb.Zkb`
     // L1131024 -> `vb.DK` L1131507 -> `Pi.kg` -> `vb.lS` L1131503): the VIEW
