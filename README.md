@@ -4,11 +4,11 @@
 
 ![gates](https://img.shields.io/badge/gates-96%20%C2%B7%2060%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 96%
+### Readiness: 97%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-85 of 89 checklist items; every gap below is documented in BUGS.md.
+86 of 89 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **96** (60 at 0 divergences, 36 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -24,10 +24,10 @@ Gates with a baseline: **96** (60 at 0 divergences, 36 known non-zero) · refere
 | **Audio** | 🟩 | 100% | 3/3 | - |
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
-| **Harness & verification** | 🟨 | 75% | 3/4 | `--full` is exit 1 on `quest-verify-buy` (driver parks at the dialog/map, BUGS.md QA-112.40) |
-| **overall** | 🟩 | 96% | 85/89 | - |
+| **Harness & verification** | 🟩 | 100% | 4/4 | - |
+| **overall** | 🟩 | 97% | 86/89 | - |
 
-The `overall` row is every checklist item at once (85 of 89); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (86 of 89); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 

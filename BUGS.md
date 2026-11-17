@@ -13673,6 +13673,10 @@ NEW (clear enabled):  ... ShinFight=FAIL trainingFight=FAIL StoryAdvance=FAIL ->
    (`map FIGHT tap (1118,610)`).
 
 Замер: `gates.py --only quest-verify-buy` → `0 0 OK (9 pass, 0 fail, -> PASS)`,
+а затем и полный прогон: `gates.py --full` → **exit 0** (844.4 s / 758.6 s /
+772.6 s на трёх подряд деревьях), без регрессий. Поэтому доска README снова
+показывает правду (`Harness & verification` 4/4 = 100 %, общая готовность 97 %):
+раньше там стояло `False` — «`--full` is exit 1 on `quest-verify-buy`».
 `RESULT chain=PASS … LynxDialog=PASS ShinFight=PASS trainingFight=PASS
 StoryAdvance=PASS -> PASS`.
 

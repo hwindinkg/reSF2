@@ -586,13 +586,14 @@ SYSTEMS: list[tuple[str, list[tuple[str, bool]]]] = [
         ("RU/EN, fighter names and the VS intro", True),
     ]),
     ("Harness & verification", [
-        # HONEST STATE (2026-11-16): `--full` is exit 1 on `quest-verify-buy`
-        # (the tutorial-buy driver parks and the run hits the watchdog). It was
-        # measured on this tree AND is byte-identical with the session's only
-        # behavioural switches off — a pre-existing driver gap, not a game bug
-        # (BUGS.md QA-112.40).
-        ("`--full` is exit 1 on `quest-verify-buy` (driver parks at the "
-         "dialog/map, BUGS.md QA-112.40)", False),
+        # `--full` is GREEN as of 2026-11-17: the one red gate was
+        # `quest-verify-buy`, and its three roots are fixed (live plate centre in
+        # the driver, `dialog_has_button()` now requires actions like JS `hab()`,
+        # and the driver presses the map's FIGHT plate the Lynx beat locks input
+        # to). Measured: 9 pass / 0 fail -> PASS, then `--full` exit 0 (844.4 s,
+        # 758.6 s, 772.6 s on three consecutive trees). BUGS.md QA-112.40.
+        ("`--full` exit 0 over the 96 baselined gates (`quest-verify-buy` "
+         "9/9 PASS)", True),
         ("oracle runner + `compare_state` / `compare_audio` / `ui_diff`", True),
         ("`--replay` drives one script on both sides", True),
         ("debug overlay 1-4 (AI/world/session + a perf panel with the FPS "
