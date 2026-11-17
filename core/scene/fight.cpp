@@ -10523,6 +10523,22 @@ void FightController::update(float dt) {
             }
             if (wi >= 0) {
                 worst = "e" + std::to_string(wi) + " " + worst;
+                // The solver flags that decide whether `jE` relaxes this edge at
+                // all (JS `cA = nh && !NG && (nk || jy || shock)`).
+                const EdgeDef& we = model.edges[static_cast<std::size_t>(wi)];
+                const int wa = model.bone_by_name(we.end1);
+                const int wb = model.bone_by_name(we.end2);
+                auto flags = [&](int bi) {
+                    if (bi < 0) return std::string("?");
+                    const Bone& b = model.bones[static_cast<std::size_t>(bi)];
+                    std::string f;
+                    f += b.cloth ? "c" : "-";
+                    f += b.fixed ? "F" : "-";
+                    f += b.is_macro ? "M" : "-";
+                    f += b.shock ? "S" : "-";
+                    return f;
+                };
+                worst += " flags=" + flags(wa) + "/" + flags(wb);
             }
         };
         float mmx = 0.0f, emx = 0.0f;

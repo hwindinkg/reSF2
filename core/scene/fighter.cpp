@@ -4258,6 +4258,21 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         }
         constexpr int kEdgeIters = 2;  // `xd.jE` IterativeProcess
         const int edge_iters = no_cloth_solver ? 0 : kEdgeIters;
+        // [A/B, measured] `SF2_RELAX_FIRST_POSONLY=1`: on the FIRST solver ticks
+        // (`ia_ticks_ <= 2`) the relax projection is kept POSITION-ONLY by adding
+        // the same delta to `sol_mf_`, so it is not converted into Verlet
+        // velocity. Measured without it (`SF2_TRACE_RELAX=1`, edge e203 =
+        // BODY_SHIN-Node6/Node14): f=-1 pre=10.000 -> post=292.003, and the next
+        // tick starts at pre=552.546 — the projection became velocity and made
+        // the shin cloth appear stretched by 130-300 units for one or two frames
+        // (the JS never exceeds 39 on the same edge). The ragdoll-only variant of
+        // this idea (`SF2_RD_POSONLY`) REGRESSED `diff:dojo-move` 0 -> 126, so
+        // this one is env-gated and must be measured before it ships.
+        static const bool relax_first_posonly =
+            std::getenv("SF2_RELAX_FIRST_POSONLY") != nullptr;
+        const bool first_posonly = relax_first_posonly && ia_ticks_ <= 2;
+        std::vector<float> fp_pre;
+        if (first_posonly) fp_pre = sol_ma_;
         for (int it = 0; it < edge_iters; ++it) {
             for (std::size_t ei = 0; ei < model_.edges.size(); ++ei) {
                 const EdgeDef& e = model_.edges[ei];
@@ -4371,6 +4386,11 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         if (rd_apply_posonly && rd_pre_relax.size() == sol_ma_.size()) {
             for (std::size_t q = 0; q < sol_ma_.size(); ++q) {
                 sol_mf_[q] += sol_ma_[q] - rd_pre_relax[q];
+            }
+        }
+        if (first_posonly && fp_pre.size() == sol_ma_.size()) {
+            for (std::size_t q = 0; q < sol_ma_.size(); ++q) {
+                sol_mf_[q] += sol_ma_[q] - fp_pre[q];
             }
         }
         if (trace_relax) {
