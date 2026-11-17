@@ -10482,6 +10482,57 @@ void FightController::update(float dt) {
                                           enemy_.fighter.com_y()) * 0.5f));
         std::fflush(stdout);
     }
+    // [probe, authorised] `SF2_TRACE_EDGES=1`: the DRAWN pose's edge stretch —
+    // max |dist - rest| over the model's mesh edges and how many exceed 5 units,
+    // per fighter, every 15 frames. Item 2 ("the models look stretched") has no
+    // reproduction; the ragdoll-start probe already showed the seeded pose is
+    // stretched (`edgeViolMax` up to 405u, ~98 edges over 5u), so this measures
+    // the SAME quantity in the ordinary animated state to tell a ragdoll-only
+    // artefact from a pose that is stretched all the time.
+    if (std::getenv("SF2_TRACE_EDGES") != nullptr && (frame_ % 15) == 0) {
+        auto edge_stats = [](const FightFighter& f, float& mx, int& nbad,
+                             std::string& worst) {
+            mx = 0.0f;
+            nbad = 0;
+            worst.clear();
+            const auto& model = f.fighter.model();
+            const std::vector<float>& pos = f.fighter.positions();
+            for (const auto& e : model.edges) {
+                const int a1 = model.bone_by_name(e.end1);
+                const int a2 = model.bone_by_name(e.end2);
+                if (a1 < 0 || a2 < 0) continue;
+                const std::size_t p1 = static_cast<std::size_t>(a1) * 2;
+                const std::size_t p2 = static_cast<std::size_t>(a2) * 2;
+                if (p2 + 1 >= pos.size()) continue;
+                const float dx = pos[p2] - pos[p1];
+                const float dy = pos[p2 + 1] - pos[p1 + 1];
+                const float d = std::sqrt(dx * dx + dy * dy);
+                // STRETCH only: a bent pose legitimately makes an edge SHORTER
+                // than its rest chord (`NNeck->NToe_1` is neck-to-toe straight
+                // line), so |d - rest| flags every crouch. Only d > rest counts.
+                const float v = d - e.length;
+                if (v > mx) {
+                    mx = v;
+                    worst = std::to_string(a1) + ":" + e.end1 + "->" +
+                            std::to_string(a2) + ":" + e.end2;
+                }
+                if (v > 5.0f) ++nbad;
+            }
+        };
+        float mmx = 0.0f, emx = 0.0f;
+        int mn = 0, en = 0;
+        std::string mw, ew;
+        edge_stats(player_, mmx, mn, mw);
+        edge_stats(enemy_, emx, en, ew);
+        std::fprintf(stdout,
+                     "[edges] F%d me max=%.1f n5=%d rk=%d worst=%s | "
+                     "enemy max=%.1f n5=%d rk=%d worst=%s\n",
+                     frame_, static_cast<double>(mmx), mn,
+                     player_.fighter.ragdoll_active() ? 1 : 0, mw.c_str(),
+                     static_cast<double>(emx), en,
+                     enemy_.fighter.ragdoll_active() ? 1 : 0, ew.c_str());
+        std::fflush(stdout);
+    }
     // [probe, authorised] `SF2_TRACE_POS=1`: the per-frame WORLD x of both
     // fighters with the phase/round and the spawn the round reset targets. The
     // reported "positions were not reset at the round change / stuck at the
