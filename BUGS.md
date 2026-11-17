@@ -13887,6 +13887,36 @@ JS-модель `Pi` показывает предмет НА СТЕНДЕ, по
   То есть у ПРОТИВНИКА цепь `BODY_SHIN` улетает на 130–300 единиц от своего ребра
   даже в обычном бою (не в рагдолле), и то же самое видно на старте рэгдолла
   (`[rdseed] edgeViolMax=360.94 … BODY_SHIN-MacroNode10->Node23`).
+  **ВАЖНАЯ ПОПРАВКА: сравнение с оракулом ПО ИНДЕКСАМ недействительно.**
+  В самом коде порта (`FightController::dump_pose_frame`) записано: «the port's
+  merged player model carries 274 bones against the oracle's 205, so index-wise
+  comparison is meaningless». Значит приведённое ниже сопоставление
+  «JS BODY_SHIN-Node6->Node14 = 39» с портовыми 281 по номерам костей — НЕ
+  доказательство расхождения: индексы в объединённой модели (274 кости с
+  оружием/cloth-частями) и в оракульном `Va.all` (205) не совпадают.
+  Правильный путь — сопоставление ПО ИМЕНАМ, как это уже делает
+  `reference/tools/compare_pose.py` (его используют гейты `pose:*`; у него же
+  в дампе порта есть заголовок `{"t":"bones","Me":[…names…],"Enemy":[…]}`).
+  **Попытка сделать это по именам (compare_pose) — не сошлась по клипам.**
+  Снял дамп порта на том же стенде (`--dump-pose 900`, 702 кадра, 7.5 МБ, с
+  заголовком имён) и подал его в `compare_pose.py` вместе с
+  `oracle_stand_pose.jsonl`:
+  ```
+  python reference/tools/compare_pose.py --native reference/traces/native_pose.jsonl       --oracle .harness/artifacts/oracle_stand_pose.jsonl --tolerance 5       --out .harness/artifacts/pose_cmp_stand.txt
+  => frames matched: 1   coverage (matched/native): 0.1%   unaligned native: 701
+     clips never seen in oracle: fistsstartstance-left(133), spinningpunch(44), stanceidle(14) …
+  ```
+  Причина: два прогона играют разные последовательности клипов (стенд на стороне
+  оракула ушёл в броски/прыжки), а `compare_pose` выравнивает по
+  `(phase, clip, cf)`, а не по номеру кадра. Значит для пункта 2 нужен ПАРНЫЙ
+  прогон с одинаковой последовательностью клипов (как у гейтов `pose:*`, где
+  покрытие 100 %) — либо сейв/кейс игрока. Сейчас доказано только: формула
+  `bFa` и веса (`<Mass>`) совпадают с JS дословно, а портовый переходный процесс
+  на 1–2 тика реален; является ли он отличием от JS — не установлено.
+  Поэтому по пункту 2 остаётся доказанным только портовый переходный процесс
+  (см. ниже, `SF2_TRACE_RELAX` + `[edges]`), а «у JS ровно 39» надо мерить заново
+  через compare_pose, а не по индексам.
+
   Парная проверка по оракульному дампу того же боя (`.harness/artifacts/
   oracle_stand_pose.jsonl`, 2143 кадра; индексы костей берутся из пробы порта):
   ```
