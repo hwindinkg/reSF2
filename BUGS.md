@@ -14252,7 +14252,18 @@ JS-модель `Pi` показывает предмет НА СТЕНДЕ, по
   **ЗАПИСЬ «ПИНОК ПОСЛЕ СБЛИЖЕНИЯ» ПРОГНАНА — JS-нокдауна ОТ ПИНКА НЕТ (2 прогона).**
   Запись `tape_knee_oracle.txt`: короткий заход вперёд (380–520), затем направление
   ОТПУЩЕНО и Kick каждые 25 кадров (540…1300) — ровно условия `HighKneeUp`
-  (`Kick Tap` + `Distance Max=60`). Первые попытки выглядели как «оракул не
+  (`Kick Tap` + `Distance Max=60`).
+  Повторено и на КОРОТКОЙ записи (`.harness/artifacts/tape_shortkick_oracle.txt`:
+  только Kick на 400/440/480/520, без направления, `maxFrames=700`), прогон
+  удался (700 кадров, f130..829) — результат тот же:
+  ```
+  Me    : KnivesStartStanceIdle 112 | ThrowThroughTheBack 112 | TwoFootJumpKick 109
+          | DoubleJumpKick 94 | DoubleSweep 67        => HighKneeUp/HighKick НЕТ
+  Enemy : FistsStartStance-Left 133 | ThrowThroughTheBackV 125 | SweepBlock 103 …
+  скорость COM: Me max 23.81 | Enemy max 21.22 | кадров >30: 0
+  ```
+  Это уже ЧЕТВЁРТАЯ запись подряд без JS-нокдауна от пинка — эмпирически
+  устойчивый факт, а не случайность одной раскладки. Первые попытки выглядели как «оракул не
   запускается» только из-за способа захвата stdout: `OracleShell` пишет трейс
   в `reference/traces/console.log`, а не в консоль (её вывод при `*>file` пуст).
   Два реальных прогона (run 2 и run 3, 3697 и 3874 кадра) дали одинаковую картину:
