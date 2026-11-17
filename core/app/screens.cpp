@@ -22502,6 +22502,50 @@ void ShopScreen::update_impl(float dt) {
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
             preview_fighter_->advance(dt);
+            // [probe, authorised] `SF2_TRACE_EDGES=1` on the SHOP TryOn preview:
+            // the same worst-edge stretch report the fight controller prints, so
+            // item 2 ("the models look stretched") can be checked on this
+            // non-fight model too (the boss roster has no skinned model at all —
+            // it is a list of portraits). Printed once per second.
+            {
+                static const bool edges_on =
+                    std::getenv("SF2_TRACE_EDGES") != nullptr;
+                if (edges_on) {
+                    static int edges_tick = 0;
+                    if ((edges_tick++ % 60) == 0) {
+                        const auto& pmodel = preview_fighter_->model();
+                        const std::vector<float>& ppos =
+                            preview_fighter_->positions();
+                        float pmx = 0.0f;
+                        int pnbad = 0, pwi = -1;
+                        std::string pworst;
+                        for (std::size_t ei = 0; ei < pmodel.edges.size(); ++ei) {
+                            const auto& e = pmodel.edges[ei];
+                            const int a1 = pmodel.bone_by_name(e.end1);
+                            const int a2 = pmodel.bone_by_name(e.end2);
+                            if (a1 < 0 || a2 < 0) continue;
+                            const std::size_t q1 = static_cast<std::size_t>(a1) * 2;
+                            const std::size_t q2 = static_cast<std::size_t>(a2) * 2;
+                            if (q2 + 1 >= ppos.size()) continue;
+                            const float ex = ppos[q2] - ppos[q1];
+                            const float ey = ppos[q2 + 1] - ppos[q1 + 1];
+                            const float v = std::sqrt(ex * ex + ey * ey) - e.length;
+                            if (v > pmx) {
+                                pmx = v;
+                                pwi = static_cast<int>(ei);
+                                pworst = e.end1 + "->" + e.end2;
+                            }
+                            if (v > 5.0f) ++pnbad;
+                        }
+                        std::fprintf(stdout,
+                                     "[edges] shop-preview max=%.1f n5=%d "
+                                     "worst=e%d %s frame=%d\n",
+                                     static_cast<double>(pmx), pnbad, pwi,
+                                     pworst.c_str(), preview_frame_);
+                        std::fflush(stdout);
+                    }
+                }
+            }
         // No per-frame solver re-seat (see `advance_destination_model`): the
         // one-time `Pi.job` seat lives in `start_preview_clip`.
         // JS `Te.ia` -> `Te.Lwa` -> `wd.mHa` -> `wd.BNa`: dispatch this frame's
