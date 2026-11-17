@@ -4231,9 +4231,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         };
         // [probe] `SF2_TRACE_RELAX=1`: per-edge pre/post length across BOTH
         // relaxation passes, for the merged edge-index band 185..244 (skeleton
-        // ends at 193, body 193..228, head 229..276). Index-keyed so it can be
-        // compared directly with the oracle hook `?relaxTrace=1`, which samples
-        // the same band of `Nd.oa.Nl.all`.
+        // ends at 193, body 193..228, head 229..276). Index-keyed so a run can be
+        // compared against a future oracle-side dump of the same band of
+        // `Nd.oa.Nl.all`. NOTE (2026-11-17): no such oracle hook EXISTS in
+        // `reference/tools/trace_oracle.js` or `reference/runner/trace.js` (the
+        // old comment here claimed `?relaxTrace=1`; grep finds nothing), so the
+        // port side is currently the only measurement.
         const bool trace_relax =
             !not_animation_ && std::getenv("SF2_TRACE_RELAX") != nullptr;
         std::vector<std::size_t> tr_idx;

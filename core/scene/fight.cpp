@@ -10497,7 +10497,9 @@ void FightController::update(float dt) {
             worst.clear();
             const auto& model = f.fighter.model();
             const std::vector<float>& pos = f.fighter.positions();
-            for (const auto& e : model.edges) {
+            int wi = -1;
+            for (std::size_t ei = 0; ei < model.edges.size(); ++ei) {
+                const EdgeDef& e = model.edges[ei];
                 const int a1 = model.bone_by_name(e.end1);
                 const int a2 = model.bone_by_name(e.end2);
                 if (a1 < 0 || a2 < 0) continue;
@@ -10513,10 +10515,14 @@ void FightController::update(float dt) {
                 const float v = d - e.length;
                 if (v > mx) {
                     mx = v;
+                    wi = static_cast<int>(ei);
                     worst = std::to_string(a1) + ":" + e.end1 + "->" +
                             std::to_string(a2) + ":" + e.end2;
                 }
                 if (v > 5.0f) ++nbad;
+            }
+            if (wi >= 0) {
+                worst = "e" + std::to_string(wi) + " " + worst;
             }
         };
         float mmx = 0.0f, emx = 0.0f;
