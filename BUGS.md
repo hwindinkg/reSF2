@@ -13704,6 +13704,43 @@ e = b / e.weight;        c = c * e;  c += g;  a.Zs.XA(c);
 на ТОТ ЖЕ ввод (удар/бросок игрока) и сравнить `HEAD-Node112` покадрово; без
 рабочего `OracleShell` это блокер, записанный в отчёте.
 
+### QA-112.53 — «разнесло по краям»: корень в `<Align><Position Object="Wall">`, ИСПРАВЛЕНО
+
+`WallHit` — не простой клип:
+```xml
+<Move Name="WallHit" ... NoWallRepulsion="1">
+  <Align Axis="X|Z">
+    <Pivot Object="Animation"/>
+    <Position Player="Me" Object="Wall" Part="Back" ShiftX="480"/>
+  </Align>
+```
+JS `Te.Gub` (L559) для `EObjectWall` берёт `e = wall ± ShiftX` (удар в правую стену:
+`e = 1773 - 480 = 1293`), `d = 0` (пивот `Animation`), значит `Fk = e - d = 1293` и
+`ma = clip + Fk`: боец СТОИТ у стены. Новый пробник `SF2_TRACE_ALIGN=1` печатает
+ровно это: `move=WallHit ve=2 jk=3 pos=Wall/Back shift=480 d=0 e=1293 align=1293
+walls=[160,1773] wx=1741.5 mirror=-1`.
+
+Порт же по умолчанию (`abs_mode=2`) ехал по авторским координатам клипа
+(`[anchor-jump] move=WallHit px=-484 -> 1503 off=842 wx=2525`), отсюда и разлёт.
+
+**Правка:** для wall-РЕАКЦИЙ (`<Position Object="Wall">` и имя НЕ `WallJump*`) клип
+ставится абсолютно (`render_offset_ = 0` и offset ВАЛИДЕН), как в `Gub`.
+
+Замер:
+```
+до : [pos] Enemy max=2760.7  кадров |Me-Enemy|>900: 77
+после: [pos] Me max=873.7 Enemy max=1386.4 кадров>900: 3
+```
+Скоуп подтверждён замерами: абсолютная постановка ВСЕХ absolute-align клипов ломает
+цепочку квестов (`bought=0 shop=0 lynx=0`), а включение в скоуп `WallJump_*`
+телепортирует прыжок сквозь стену (`--wall-probe`: `WallJump_200 wx=-71.4` при
+арене `[160,1773]`). После правки `WallJump_200` снова идёт естественно
+(`wx 210.0 -> 268.4 -> 365.8`), цепочка `PASS` (`bought=1 shop=1 lynx=1`),
+`kick-ko` -> `[result] WIN`.
+
+Гигантский треугольник (QA-112.52) этой правкой не затронут — он про смену клипа
+и симулируемые узлы.
+
 ### QA-112.52 — гигантский треугольник: три варианта reseat измерены и ОТКАЧЕНЫ
 
 Корень из QA-112.51 подтверждён новым выводом (`[badtri]  sol i1=... solver_init=1

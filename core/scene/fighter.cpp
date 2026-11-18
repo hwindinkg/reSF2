@@ -1804,10 +1804,10 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     //            teleporting him onto its absolute coordinate. This is what
     //            makes the wall jump actually move (measured `--wall-probe`
     //            `WallJump_200`: 210 -> 268 -> 366 -> 463 -> 520 -> 537 apex,
-    //            smooth, no teleport through the wall);
-    //   1     -> JS `Te.eda` absolute placement (`ma = clip + Fk`, so the
-    //            fighter rides the clip's world coordinates — measured to
-    //            teleport the wall jump to x=-71, i.e. THROUGH the left wall);
+    //            smooth, no teleport through the wall). EXCEPTION: a
+    //            `<Position Object="Wall">` align always uses the absolute
+    //            placement (see `wall_positioned` below) — see the measurement
+    //            in that comment;
     //   0     -> the historical PIN (`world_x_ = align_own_x_`, the clip's
     //            own translation is cancelled). That produced the reported
     //            "wall jump plays its animation in place in the air and never
@@ -1824,7 +1824,26 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // `world - px[anchor]` (the same continuity rule every non-absolute
         // move uses); the fighter then follows the clip's travel instead of
         // being teleported to its authored absolute coordinate.
-        render_offset_valid_ = (abs_mode != 2);
+        //
+        // [FIX "разнесло по краям" — measured] A `<Position Object="Wall">`
+        // align is DIFFERENT: `Gub` (L559) resolves it to `wall ± ShiftX`, so the
+        // clip buffer is shifted ONTO the wall and the fighter stands there — the
+        // JS `ma = clip + Fk` placement, i.e. the offset must be 0 and VALID.
+        // Riding such a clip (abs_mode 2) is what threw the fighter across the
+        // arena: on the bamboo replay `Enemy max=2760.7, 77 frames |Me-Enemy|>900`
+        // with the delta mode against `max=1203.2, 3 frames` with the absolute
+        // placement (`SF2_ABS_MOVE=1`).
+        // Scope: only the WALL-REACTION clips (`WallHit`/`WallHitFall`). The
+        // voluntary `WallJump_*` moves use the same `<Position Object="Wall">`
+        // form, but placing them absolutely was measured to teleport the jump
+        // through the wall (`--wall-probe`: `WallJump_200 wx=-71.4` at f=1, i.e.
+        // outside the [160,1773] arena, instead of the 210 -> 268 -> ... walk), so
+        // they keep the delta mode. Placing EVERY absolute clip absolutely also
+        // broke the tutorial chain (`bought=0 shop=0 lynx=0`).
+        const bool wall_positioned = move.align.has_align &&
+                                     move.align.pos_object == "Wall" &&
+                                     move.name.compare(0, 8, "WallJump") != 0;
+        render_offset_valid_ = (abs_mode != 2) || wall_positioned;
         align_pivot_u_ = -1;
         // [throw victim] Keep the fighter where it stood: `Dl.oL` anchors the
         // clip to `parameters.position`, so the clip's absolute buffer values
