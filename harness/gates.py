@@ -1618,6 +1618,16 @@ def main(argv=None) -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
+    # [LOGS ON INTERRUPT] `--full` runs for 12-25 minutes and is often killed or
+    # times out with stdout redirected to a file; Python then buffers ~8 KB and
+    # the log ends up empty, hiding WHICH gate was running. Line buffering makes
+    # every progress line reachable immediately, so an interrupted run still says
+    # where it stopped.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
     ap = argparse.ArgumentParser(description="reSF2 gate runner (single entry).")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--fast", action="store_true")
@@ -1765,10 +1775,16 @@ def main(argv=None) -> int:
                 return 1
 
             for g in selected:
+                # [LOGS ON INTERRUPT] Announce the gate BEFORE running it and
+                # flush, so a killed run still shows which gate was in flight.
+                print(f"[gate] {g.id} ...", flush=True)
                 if g.kind == "gate":
                     r = run_flag_gate(g)
                 else:
                     r = run_diff_gate(g)
+                print(f"[gate] {g.id}: {r.verdict or '-'} "
+                      f"({r.metric if r.metric is not None else r.error or '-'})",
+                      flush=True)
                 save_guard.check(g.id)
                 if g.kind == "diff":
                     timeline[g.id] = first_divergences(

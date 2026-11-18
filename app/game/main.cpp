@@ -10584,11 +10584,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             app.run_one_frame();
         }
         const std::string kind = act_probe_kind.empty() ? "act" : act_probe_kind;
-        // The `Ib` bar is drawn UNDER the boot overlay, and the overlay's
-        // countdown is driven by the screen update — which a queued modal
-        // blocks. So for `notify` the dialog is pushed AFTER the boot sequence
-        // has settled (below), not here.
+        // Modals (dialog/buy/notify) are drawn UNDER the boot overlay, and the
+        // overlay's countdown is driven by the screen update that a queued modal
+        // blocks — so settle the boot FIRST (headless skips the overlay and
+        // forces one fixed step per frame; `dialog_observe` keeps the modal
+        // visible in headless), then queue the dialog.
         const bool want_notify = (kind == "notify");
+        const bool want_modal = (kind == "multiline" || kind == "buy");
+        if (want_modal) {
+            app.set_headless_frames(100000);
+            app.set_dialog_observe(true);
+            for (int i = 0; i < 200; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+        }
         if (want_notify) {
             // nothing to queue yet
         } else if (kind == "buy") {

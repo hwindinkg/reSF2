@@ -1052,6 +1052,24 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
     }
 }
 
+// [FIX dialog text FIT] `draw_ui_wrapped` CLIPS whatever does not fit
+// (`if (yy + line_step > y + h) break`), which is what the player reports as
+// "текст в боковых диалогах всё ещё не влазит": the last line is chopped
+// mid-sentence. The JS `ea` text node fits its box (`Sk`) instead of truncating,
+// so measure the whole body first and shrink the font (never below 55 %) until it
+// fits, then draw normally.
+void draw_ui_wrapped_fit(App& app, float x, float y, float w, float h,
+                         const std::string& text, float ua_scale, UiAlign align,
+                         float r, float g, float b, float line_factor = 1.0f) {
+    if (text.empty() || w <= 0.0f || h <= 0.0f) return;
+    float scale = ua_scale;
+    const float need = measure_ui_wrapped(app, text, w, scale, line_factor);
+    if (need > h && need > 0.0f) {
+        scale = std::clamp(ua_scale * (h / need), ua_scale * 0.55f, ua_scale);
+    }
+    draw_ui_wrapped(app, x, y, w, h, text, scale, align, r, g, b, line_factor);
+}
+
 // Helpers defined later in this file (the atlas sprite path sits after this
 // point; the `od`/`Ib` dialog art below needs it).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
@@ -10315,11 +10333,11 @@ void draw_od280_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
     float od_r = 0.12f, od_g = 0.09f, od_b = 0.06f;
     dialog_row_color(d, od_page, od_r, od_g, od_b);
-    draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, kOdBodyBoxH * L.panel.c,
-                    dialog_page_body(app, d),
-                    dialog_text_ua_scale(app, dialog_row_font_px(d, od_page, 100.0f)) *
-                        L.panel.c,
-                    UiAlign::Left, od_r, od_g, od_b, kOdBodyKc);
+    draw_ui_wrapped_fit(app, L.body_x, L.body_y, L.body_w, kOdBodyBoxH * L.panel.c,
+                        dialog_page_body(app, d),
+                        dialog_text_ua_scale(app, dialog_row_font_px(d, od_page, 100.0f)) *
+                            L.panel.c,
+                        UiAlign::Left, od_r, od_g, od_b, kOdBodyKc);
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);
 }
@@ -10363,19 +10381,40 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
         const float body_bottom =
             std::min(std::min(L.body_y + L.body_h, panel_bottom),
                      L.btn_cy - L.btn_h * 0.5f - 8.0f);
+        // [FIX side-dialog text FIT, measured from the player's screenshot] The
+        // clip above only CUT the overflow — the player still sees the last line
+        // chopped ("…Теперь тебе нужно" with no continuation). JS's `ea` text
+        // node shrinks to its box (`Sk`/fit) instead of truncating, so measure
+        // the whole body first and shrink the FONT until every row fits the
+        // available height (`body_bottom - y`); only then draw.
+        float shrink = 1.0f;
+        {
+            const float avail = body_bottom - y;
+            float need = 0.0f;
+            for (std::size_t i = 0; i < d.lines.size(); ++i) {
+                need += measure_ui_wrapped(
+                    app, dialog_line_text(app, d, d.lines[i]), kOdBodyW * c,
+                    dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
+                    kOdBodyKc);
+            }
+            if (need > avail && avail > 0.0f && need > 0.0f) {
+                shrink = std::clamp(avail / need, 0.55f, 1.0f) * 0.98f;
+            }
+        }
         for (std::size_t i = 0; i < d.lines.size(); ++i) {
             if (y >= body_bottom) break;
             const std::string text = dialog_line_text(app, d, d.lines[i]);
             const float h = measure_ui_wrapped(
                 app, text, kOdBodyW * c,
-                dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
+                dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c * shrink,
                 kOdBodyKc);
             float rr = 0.12f, gg = 0.09f, bb = 0.06f;
             dialog_row_color(d, i, rr, gg, bb);
             (void)dialog_color_tag(d.lines[i], rr, gg, bb);  // `<color=#..>`
             const float draw_h = std::min(h, body_bottom - y);
             draw_ui_wrapped(app, L.body_x, y, L.body_w, draw_h, text,
-                            dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c,
+                            dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c *
+                                shrink,
                             UiAlign::Left, rr, gg, bb, kOdBodyKc);
             y += h;
         }

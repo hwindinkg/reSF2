@@ -10555,6 +10555,79 @@ void FightController::update(float dt) {
                      enemy_.fighter.ragdoll_active() ? 1 : 0, ew.c_str());
         std::fflush(stdout);
     }
+    // [probe, authorised] `SF2_TRACE_TRIS=1`: MESH-triangle stretch — the metric
+    // that actually matches the player's screenshot (a giant black triangle from
+    // the hip across the screen). The `[edges]` probe measures CAPSULE edges; the
+    // visible deformation comes from the `<Figures Type="Triangle">` mesh, whose
+    // vertices are bones. For every active triangle it compares the LIVE longest
+    // side against the BIND longest side (scale-invariant ratio) and reports the
+    // worst one, plus how many triangles are stretched >1.5x and >2x.
+    if (std::getenv("SF2_TRACE_TRIS") != nullptr && (frame_ % 15) == 0) {
+        auto tri_stats = [](const FightFighter& f, float& worst, int& n15, int& n2,
+                            std::string& wtri) {
+            worst = 0.0f;
+            n15 = 0;
+            n2 = 0;
+            wtri.clear();
+            const auto& model = f.fighter.model();
+            const std::vector<float>& pos = f.fighter.positions();
+            const std::size_t n = model.bones.size();
+            if (pos.size() < n * 2) return;
+            auto side = [](const std::vector<float>& p, int a, int b) {
+                const float dx = p[static_cast<std::size_t>(b) * 2] -
+                                 p[static_cast<std::size_t>(a) * 2];
+                const float dy = p[static_cast<std::size_t>(b) * 2 + 1] -
+                                 p[static_cast<std::size_t>(a) * 2 + 1];
+                return std::sqrt(dx * dx + dy * dy);
+            };
+            for (std::size_t t = 0; t < model.resolved_tris.size(); ++t) {
+                if (t < model.tri_active.size() && !model.tri_active[t]) continue;
+                const TriResolved& r = model.resolved_tris[t];
+                if (r.i1 < 0 || r.i2 < 0 || r.i3 < 0) continue;
+                if (static_cast<std::size_t>(r.i1) >= n ||
+                    static_cast<std::size_t>(r.i2) >= n ||
+                    static_cast<std::size_t>(r.i3) >= n) {
+                    continue;
+                }
+                auto bind_side = [&](int a, int b) {
+                    const Bone& ba = model.bones[static_cast<std::size_t>(a)];
+                    const Bone& bb = model.bones[static_cast<std::size_t>(b)];
+                    const float dx = bb.x - ba.x;
+                    const float dy = bb.y - ba.y;
+                    return std::sqrt(dx * dx + dy * dy);
+                };
+                const float live = std::max(
+                    std::max(side(pos, r.i1, r.i2), side(pos, r.i2, r.i3)),
+                    side(pos, r.i3, r.i1));
+                const float bind = std::max(
+                    std::max(bind_side(r.i1, r.i2), bind_side(r.i2, r.i3)),
+                    bind_side(r.i3, r.i1));
+                if (bind < 1e-3f) continue;
+                const float ratio = live / bind;
+                if (ratio > worst) {
+                    worst = ratio;
+                    wtri = std::to_string(r.i1) + "," + std::to_string(r.i2) + "," +
+                           std::to_string(r.i3) + ":" +
+                           model.bones[static_cast<std::size_t>(r.i1)].name + "/" +
+                           model.bones[static_cast<std::size_t>(r.i2)].name + "/" +
+                           model.bones[static_cast<std::size_t>(r.i3)].name;
+                }
+                if (ratio > 1.5f) ++n15;
+                if (ratio > 2.0f) ++n2;
+            }
+        };
+        float mw2 = 0.0f, ew2 = 0.0f;
+        int m15 = 0, m2 = 0, e15 = 0, e2 = 0;
+        std::string mt, et;
+        tri_stats(player_, mw2, m15, m2, mt);
+        tri_stats(enemy_, ew2, e15, e2, et);
+        std::fprintf(stdout,
+                     "[tris] F%d me ratio=%.2f n15=%d n2=%d tri=%s | "
+                     "enemy ratio=%.2f n15=%d n2=%d tri=%s\n",
+                     frame_, static_cast<double>(mw2), m15, m2, mt.c_str(),
+                     static_cast<double>(ew2), e15, e2, et.c_str());
+        std::fflush(stdout);
+    }
     // [probe, authorised] `SF2_TRACE_POS=1`: the per-frame WORLD x of both
     // fighters with the phase/round and the spawn the round reset targets. The
     // reported "positions were not reset at the round change / stuck at the
