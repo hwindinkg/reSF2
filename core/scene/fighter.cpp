@@ -3889,6 +3889,38 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // Returns false when the bone has no key at that slot (the caller then
     // keeps the bind position).
     auto ctl = [&](int rel, std::size_t i, float& ox, float& oy, float& oz) -> bool {
+        // [probe] `SF2_TRACE_CTL=1`: the terms of the anchor's control-point
+        // lookup on a wall reaction, to show which of them changes between the
+        // several `sample()` calls of ONE fight frame (the reaction blend being
+        // re-applied — see BUGS.md QA-112.55).
+        auto dbg = [&](int abs_slot, int f) {
+            if (std::getenv("SF2_TRACE_CTL") == nullptr) return;
+            if (current_move_ == nullptr ||
+                current_move_->name.compare(0, 4, "Wall") != 0) {
+                return;
+            }
+            if (i != static_cast<std::size_t>(
+                         std::max(0, model_.bone_by_name(fighter_pivot_bone())))) {
+                return;
+            }
+            static int ctl_logs = 0;
+            if (ctl_logs++ > 40) return;
+            const float wsh =
+                (abs_slot >= 0 &&
+                 static_cast<std::size_t>(abs_slot) < wall_shift_.size())
+                    ? wall_shift_[static_cast<std::size_t>(abs_slot)]
+                    : 0.0f;
+            std::fprintf(stdout,
+                         "[ctl] rel=%d play=%d sub=%d frac=%.2f fbase=%d f=%d "
+                         "abs=%d wshift=%.1f align=%.1f prep0=%.1f ox=%.1f "
+                         "frame=%d\n",
+                         rel, play, subframe_, static_cast<double>(sub_frac), fbase, f,
+                         abs_slot, static_cast<double>(wsh),
+                         static_cast<double>(align_x_),
+                         prepend_.empty() ? 0.0 : static_cast<double>(prepend_[0]),
+                         static_cast<double>(ox), frame);
+            std::fflush(stdout);
+        };
         int abs_slot;
         if (interp) {
             abs_slot = play + rel;
@@ -3898,6 +3930,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 ox = prepend_[u];
                 oy = prepend_[u + 1];
                 oz = prepend_[u + 2];
+                dbg(abs_slot, -1);
                 return true;
             }
         } else {
@@ -3924,6 +3957,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         ox = mneg * fb[src].x + align_x_ - wshift;
         oy = fb[src].y + align_y_;
         oz = fb[src].z + align_z_;
+        dbg(abs_slot, f);
         return true;
     };
 
