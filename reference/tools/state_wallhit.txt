@@ -1,13 +1,14 @@
-# WallHit scenario for the ORACLE: the player HOLDS "forward" (D) for the whole
-# fight, walks to the RIGHT wall (x=1773) and stays pinned there, with the enemy
-# on his left — so the enemy's throws/knockbacks drive him INTO the wall. That is
-# what `<Move Name="WallHit">` needs: `<CurrentAnimation Name="Recoil"/>` +
-# `CanWallHit` and NNeck within 20 / NPivot within 35 of the wall.
+# WallHit scenario for the ORACLE: the player holds "back" (A = 65) so he stands
+# against the LEFT wall facing the arena, then taps Punch (K = 75) while Back is
+# held — the SF2 throw input ("Back held + Punch tap", see dojo_move.txt). The
+# throw sends the enemy over the shoulder INTO the wall behind the player, which is
+# what makes `<Move Name="WallHit">` play (its Conditions: `Recoil` + `CanWallHit`,
+# NNeck within 20 / NPivot within 35 of the wall).
 #
 # ORACLE side:
 #   shell\bin\Release\net9.0-windows\OracleShell.exe ^
 #     --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Survival" ^
-#     --input-script reference/tools/state_wallhit.txt --timeout-ms 70000
+#     --input-script reference/tools/state_wallhit.txt --timeout-ms 75000
 #
 # The hub -> Map -> FIGHT taps are copied verbatim from `state_survival.txt`.
 wait 8000
@@ -16,5 +17,14 @@ wait 1500
 tap 140 250
 wait 2500
 tap 1130 580
-atframe 30 keydown 68
-wait 45000
+# Pin to the left wall and attempt three throws into it.
+atframe 30 keydown 65
+atframe 120 keydown 75
+atframe 150 keyup 75
+atframe 240 keydown 75
+atframe 270 keyup 75
+atframe 360 keydown 75
+atframe 390 keyup 75
+atframe 480 keydown 75
+atframe 510 keyup 75
+wait 40000
