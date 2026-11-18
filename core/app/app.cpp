@@ -45,8 +45,8 @@ namespace sf2::app {
 // [probe, authorised] True while `ScreenManager::render` walks the stack, so a
 // sound dispatched from a RENDER path can be identified (the Dojo hub's stance
 // swishes were being dispatched during its render — see
-// `Screen::covers_below`).
-bool g_render_phase = false;
+// `Screen::covers_below`). The definition lives in `core/scene/fight.cpp` so the
+// probe binaries that link `sf2_scene` without `sf2_app` still link.
 
 namespace {
 
@@ -2009,9 +2009,16 @@ void App::draw_boot_splash(bool force_loader) {
             const float scale = node_scale;
             const float tw = measure_text(*menu_font_, text, scale);
             const float th = sf2::data::measure_text_height_utf8(*menu_font_, text, scale);
+            // [FIX loader text position — measured twice] Placing the block's
+            // BOTTOM on `pE.ra + pE.qa()*.75` was right in principle but the
+            // port then sat 6 px HIGH: gold-ink rows measured on the fresh
+            // `loader.png` are port 436..483 against the oracle's 442..488, so
+            // this adds back the 6 px difference (the earlier +13 px shift from
+            // `-th*0.5` overshot by exactly this).
+            constexpr float kLoaderTextNudge = 6.0f;
             draw_text_with_font(*menu_font_, font_tex_, node_cx - tw * 0.5f,
-                                info_cy - th, text, scale, 209.0f / 255.0f,
-                                180.0f / 255.0f, 118.0f / 255.0f);
+                                info_cy - th + kLoaderTextNudge, text, scale,
+                                209.0f / 255.0f, 180.0f / 255.0f, 118.0f / 255.0f);
         }
         return;
     }

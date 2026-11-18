@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-16T19:30:48",
+    "updated": "2026-11-18T20:37:37",
     "mode": "only"
   },
   "gates": {
@@ -371,16 +371,16 @@
       "date": "2026-11-08T23:19:51"
     },
     "posevel:boss-lynx": {
-      "metric": 121,
-      "commit": "215727b6",
-      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
-      "date": "2026-11-15T19:21:57"
+      "metric": 118,
+      "commit": "69229595",
+      "reason": "boss-lynx pose VELOCITY deviation improved 121 -> 118; adopting the measured value",
+      "date": "2026-11-18T20:37:37"
     },
     "pose:boss-lynx": {
-      "metric": 457,
-      "commit": "215727b6",
-      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
-      "date": "2026-11-15T19:21:57"
+      "metric": 444,
+      "commit": "69229595",
+      "reason": "boss-lynx pose deviation improved 457 -> 444 after the dialog/mesh probe work; adopting the measured value",
+      "date": "2026-11-18T20:37:20"
     },
     "posres:dojo-demo": {
       "metric": 0,

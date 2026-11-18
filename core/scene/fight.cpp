@@ -20,10 +20,15 @@
 #include "scene/fight_camera_sya.hpp"
 #include "scene/shared_rng.hpp"
 
-// [probe] Set while `ScreenManager::render` walks the stack (app.cpp) — lets a
-// sound dispatch be attributed to a render path.
+// [probe] Set while `ScreenManager::render` walks the stack - lets a sound
+// dispatch be attributed to a render path. The definition lives HERE (scene
+// layer, not `app.cpp`) because `core/scene` is also linked into the small probe
+// binaries (`scene_probe`, `fighter_probe`, `move_demo`, `fight_demo`) whose
+// solution targets do not link `sf2_app`: with the symbol in `app.cpp` those
+// targets failed to link (`LNK2019 g_render_phase`) and the harness `build` gate
+// then failed the whole run.
 namespace sf2::app {
-extern bool g_render_phase;
+bool g_render_phase = false;
 }
 
 namespace sf2::scene {
@@ -7538,6 +7543,12 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                      static_cast<double>(wall_min_), static_cast<double>(wall_max_),
                      static_cast<double>(imp.node1_disp),
                      static_cast<double>(imp.node2_disp));
+        std::fprintf(stdout,
+                     "[walls]   split b=%.3f w1=%.4f w2=%.4f endpoints=%s / %s\n",
+                     static_cast<double>(imp.split_b),
+                     static_cast<double>(imp.weight1),
+                     static_cast<double>(imp.weight2), hit_cap.end1.c_str(),
+                     hit_cap.end2.c_str());
         std::fflush(stdout);
     }
     (void)new_x;  // the displacement now lives on the endpoint NODES (below)
@@ -7574,7 +7585,8 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
         std::fprintf(stdout,
                      "[strike] F%d %s->%s ax=%.1f dx=%.1f imp=(%.2f,%.2f,%.2f) "
                      "raw_x=%.2f move=%s "
-                     "x1=%.2f x2=%.2f w1=%.5f w2=%.5f hd=%d fx=%d nk=%d frame=%d ap=%d\n",
+                     "x1=%.2f x2=%.2f w1=%.5f w2=%.5f hd=%d fx=%d nk=%d frame=%d ap=%d "
+                     "defer=%d rq=%d rp=%d dp=%d\n",
                      frame, atk.name.c_str(), def.name.c_str(),
                      atk.fighter.world_x(), def.fighter.world_x(), impulse.x,
                      impulse.y, impulse.z, iv.impulse_x,
@@ -7585,7 +7597,9 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
                      hit_cap.weight2,
                      atk.fighter.clip_mirror(), atk.fighter.facing(),
                      def.fighter.ragdoll_active() ? 1 : 0,
-                     def.fighter.ragdoll_frame_count(), apply_strike ? 1 : 0);
+                     def.fighter.ragdoll_frame_count(), apply_strike ? 1 : 0,
+                     defer_strike ? 1 : 0, def_react_queued ? 1 : 0,
+                     def_react_physics ? 1 : 0, def_physics ? 1 : 0);
         if (bag_probe) {
             const float q1x = b1 >= 0 ? def.fighter.solver_ma_x(b1) : 0.0f;
             const float q1y = b1 >= 0 ? def.fighter.solver_ma_y(b1) : 0.0f;

@@ -1123,6 +1123,20 @@ struct TourDriver {
             advance();
             return;
         }
+        // [LOGS ON INTERRUPT] A step that never sees its screen used to hang
+        // silently until the gate's 600 s timeout — the `--full` log then ended
+        // with a bare "anchor missing: [tour] ALL N STEPS DONE" and no way to
+        // tell which step stalled (measured: one run stopped after the step-8
+        // "profile->dojo" click). Print the wait state periodically so an
+        // interrupted or timed-out tour names the step, the screen it is on and
+        // the screen it is waiting for.
+        if (step_frame > 0 && (step_frame % 900) == 0) {
+            std::fprintf(stdout,
+                         "%s wait step %d/%d (%s) frame=%d screen=%d want=%d\n",
+                         tag, step + 1, count, s.label, step_frame, cur,
+                         s.expect_screen);
+            std::fflush(stdout);
+        }
         ++step_frame;
     }
 

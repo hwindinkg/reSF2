@@ -514,8 +514,15 @@ def p_cloth_hangs(text: str) -> tuple[int, str]:
 
 
 def p_kick_ko(text: str) -> tuple[int, str]:
-    """`--kick-ko` ends with `[result] WIN` (no RESULT line)."""
-    m = _need(r"^\[result\]\s+(WIN|LOSE|DRAW)\s*$", text)
+    """`--kick-ko` ends with `[result] WIN` (no RESULT line).
+
+    `LOSS` is the port's own word for a lost fight (`[result] LOSS`, printed when
+    the player is KO'd first). It was missing from this regex, so a lost fight
+    surfaced as `anchor missing: ^[result] (WIN|LOSE|DRAW)$` instead of a real
+    metric — a harness blind spot, not a game failure (measured on the run where
+    the wall-clamp experiment lost the fight).
+    """
+    m = _need(r"^\[result\]\s+(WIN|LOSE|LOSS|DRAW)\s*$", text)
     return (0 if m.group(1) == "WIN" else 1), m.group(1)
 
 

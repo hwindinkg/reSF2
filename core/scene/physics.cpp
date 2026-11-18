@@ -409,6 +409,9 @@ float apply_impulse(const HitCapsule& hit_cap, const CapsuleHit& hit,
     }
     out.node1_disp = out.node1_vec.x;
     out.node2_disp = out.node2_vec.x;
+    out.split_b = b;
+    out.weight1 = w1;
+    out.weight2 = w2;
 
     // JS `Dl.v6` @293501: `Eu = (1/VR) * Σ(node.ma * node.weight)` over ALL
     // bodies (`VR` = Σ weight). The strike moves only the two endpoint nodes,

@@ -212,6 +212,12 @@ struct ImpulseResult {
     float node1_disp = 0.0f;  // .x of node1_vec (legacy world-x feed)
     float node2_disp = 0.0f;  // .x of node2_vec
     float clamped_dx = 0.0f;  // how much the bounds clamp ate
+    // Probe-only mirrors of the `Bl.strike` split (`SF2_TRACE_WALLS`): `b`
+    // (where the hit sits along the capsule) and the two endpoint node masses
+    // the displacement is divided by. Printed, never used in the physics.
+    float split_b = 0.0f;
+    float weight1 = 1.0f;
+    float weight2 = 1.0f;
 };
 
 // `fighter_x` is the target fighter's world x (for the clamp); returns the

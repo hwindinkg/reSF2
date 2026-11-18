@@ -3970,21 +3970,22 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         }
-        // [FIX "thrown to opposite ends" — measured] `world_x_` is the RENDER
-        // anchor: `px[anchor]` is a live NODE, and `Bl.strike` writes the impulse
-        // into those nodes (`apply_impulse`'s split, up to ~650 units at
-        // F905 of the bamboo fight), so the fighter's own x rode the strike far
-        // past the arena even though `apply_impulse` clamped the ROOT correctly
-        // (`new_x=1773` of `walls=[160,1773]`) — `[pos]` showed world_x 2760.7
-        // with spawn 1068 and 77 frames where the pair sat >900 apart. JS clamps
-        // the BODY node into the walls (`Al.fha`: `b.x<NO?b.x=NO:MO<b.x&&(b.x=MO)`),
-        // so the drawn body never leaves the arena. Clamp the anchor the same way
-        // (fight only, never the shop/profile previews). `SF2_NO_WORLD_CLAMP=1`
-        // restores the old behaviour for A/B.
-        if (!preview_mode_ && arena_wall_min_ != arena_wall_max_ &&
-            std::getenv("SF2_NO_WORLD_CLAMP") == nullptr) {
-            world_x_ = std::clamp(world_x_, arena_wall_min_, arena_wall_max_);
-        }
+        // [REVERTED by measurement] Clamping the anchor into the arena walls
+        // ("thrown to opposite ends", QA-112.46) CHANGES FIGHT OUTCOMES: with the
+        // clamp the `kick-ko` probe loses the fight (`[result] LOSS`, 98 kicks),
+        // with `SF2_NO_WORLD_CLAMP=1` it wins (`[result] WIN`, 106 kicks), and the
+        // unconditional variant also broke `tutorial-chain-verify`
+        // (`bought=0 shop=0 lynx=0`). `world_x_` feeds the AI distance
+        // (`set_enemy_x`), the hit test and the camera, so the clamp must not
+        // touch it. The real root of the runaway anchor is the clip/nodes space
+        // mismatch at a reaction start (`wall_hit` animates 67 bones of a
+        // 205/456-bone model; the rest keep WORLD positions while the clip is
+        // CLIP space) — see BUGS.md QA-112.51/112.52.
+        //
+        // The KEPT, measurement-only help is `SF2_TRACE_ANCHOR=1` (which names the
+        // move and the three anchor terms) and `SF2_TRACE_BADTRI=1` (which names
+        // the stretched triangle).
+        (void)0;
         // A TryOn (`ShopTryOn`) preview plays IN PLACE on its `Pi` seat; the
         // idle loop keeps riding its clip (see `preview_pin_x_`).
         if (preview_mode_ && preview_pin_x_) world_x_ = preview_seat_x_;
@@ -4780,9 +4781,54 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
     // painter's sort by mean pose z re-ordered overlapping limbs and read as
     // "some triangles wrong" against the oracle (PORT_AUDIT_RENDER §3.3/§4.1,
     // ranked P0 #1): restore the document order exactly.
+    // [probe, authorised] `SF2_TRACE_BADTRI=1`: the player's screenshot shows a
+    // BLACK TRIANGLE spanning the whole bamboo grove. Bone traces never exceed
+    // ~110 units on this fight (measured), so the artifact has to come from the
+    // mesh build: a triangle whose vertex is not where the pose says. This
+    // reports every triangle whose DRAWN longest side exceeds 250 units (a body
+    // or cloth triangle is < 110 in the largest measured fight), with the three
+    // node names, so the offending vertex can be identified by name. Diagnostic
+    // only — no behaviour change.
+    static const bool kTraceBadTri = std::getenv("SF2_TRACE_BADTRI") != nullptr;
+    static int bad_tri_reports = 0;
     for (std::size_t i = 0; i < model_.resolved_tris.size(); ++i) {
         if (i < model_.tri_active.size() && !model_.tri_active[i]) continue;
         const TriResolved& tri = model_.resolved_tris[i];
+        if (kTraceBadTri && bad_tri_reports < 60) {
+            const float x1 = pos_[static_cast<std::size_t>(tri.i1) * 2];
+            const float y1 = pos_[static_cast<std::size_t>(tri.i1) * 2 + 1];
+            const float x2 = pos_[static_cast<std::size_t>(tri.i2) * 2];
+            const float y2 = pos_[static_cast<std::size_t>(tri.i2) * 2 + 1];
+            const float x3 = pos_[static_cast<std::size_t>(tri.i3) * 2];
+            const float y3 = pos_[static_cast<std::size_t>(tri.i3) * 2 + 1];
+            auto side = [](float ax, float ay, float bx, float by) {
+                const float dx = bx - ax, dy = by - ay;
+                return std::sqrt(dx * dx + dy * dy);
+            };
+            const float worst = std::max(std::max(side(x1, y1, x2, y2),
+                                                side(x2, y2, x3, y3)),
+                                         side(x3, y3, x1, y1));
+            if (!(worst <= 250.0f)) {  // also catches NaN
+                ++bad_tri_reports;
+                std::fprintf(stdout,
+                             "[badtri] tri=%d side=%.1f %s/", static_cast<int>(i),
+                             static_cast<double>(worst),
+                             model_.bones[static_cast<std::size_t>(tri.i1)].name.c_str());
+                std::fprintf(stdout,
+                             "%s/%s p=(%.1f,%.1f) (%.1f,%.1f) (%.1f,%.1f) "
+                             "wx=%.1f mf=%d off=(%.1f,%.1f)\n",
+                             model_.bones[static_cast<std::size_t>(tri.i2)].name.c_str(),
+                             model_.bones[static_cast<std::size_t>(tri.i3)].name.c_str(),
+                             static_cast<double>(x1), static_cast<double>(y1),
+                             static_cast<double>(x2), static_cast<double>(y2),
+                             static_cast<double>(x3), static_cast<double>(y3),
+                             static_cast<double>(world_x_),
+                             static_cast<int>(move_frame_),
+                             static_cast<double>(model_off_x_),
+                             static_cast<double>(model_off_y_));
+                std::fflush(stdout);
+            }
+        }
         // JS `Te.Gla` model-root offset (`MoveModel`): shift every posed node.
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2] + model_off_x_);
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1] + model_off_y_);
