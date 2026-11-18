@@ -1,20 +1,20 @@
-# WallHit scenario for the ORACLE, second attempt: the player HOLDS "back" for the
-# whole fight, so he stays pinned against the left wall while the enemy attacks —
-# the `<Move Name="WallHit">` reaction triggers when a hit drives a fighter into a
-# wall (its Conditions need a small wall distance to NNeck/NPivot).
+# WallHit scenario for the ORACLE: the player HOLDS "forward" (D) for the whole
+# fight, walks to the RIGHT wall (x=1773) and stays pinned there, with the enemy
+# on his left — so the enemy's throws/knockbacks drive him INTO the wall. That is
+# what `<Move Name="WallHit">` needs: `<CurrentAnimation Name="Recoil"/>` +
+# `CanWallHit` and NNeck within 20 / NPivot within 35 of the wall.
 #
 # ORACLE side:
 #   shell\bin\Release\net9.0-windows\OracleShell.exe ^
 #     --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Survival" ^
 #     --input-script reference/tools/state_wallhit.txt --timeout-ms 70000
 #
-# The hub -> Map -> FIGHT taps are copied verbatim from `state_survival.txt`
-# (measured: 2651 pose frames).
+# The hub -> Map -> FIGHT taps are copied verbatim from `state_survival.txt`.
 wait 8000
 tap 180 98
 wait 1500
 tap 140 250
 wait 2500
 tap 1130 580
-atframe 30 keydown 65
-wait 40000
+atframe 30 keydown 68
+wait 45000
