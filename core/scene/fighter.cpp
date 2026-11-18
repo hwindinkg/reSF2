@@ -3489,6 +3489,25 @@ void Fighter::compute_align(const MoveDef& move) {
     align_x_ = al.axis_x ? (ex - dx) : al.shift_x;
     align_y_ = al.axis_y ? (ey - dy) : al.shift_y;
     align_z_ = al.axis_z ? (ez - dz) : 0.0f;
+    // [probe, authorised] `SF2_TRACE_ALIGN=1`: the `<Align>` math for every move
+    // start, so a wall/root-motion placement can be compared with the JS
+    // formulas (`Gub` L557-559 + `Gla` L550) against the actual anchor.
+    if (std::getenv("SF2_TRACE_ALIGN") != nullptr) {
+        std::fprintf(stdout,
+                     "[align] move=%s ve=%d jk=%d pivot=%s/%s pos=%s/%s shift=(%.1f,%.1f) "
+                     "d=(%.1f,%.1f) e=(%.1f,%.1f) align=(%.1f,%.1f) walls=[%.1f,%.1f] "
+                     "wx=%.1f mirror=%d base=%d ref=%d\n",
+                     move.name.c_str(), ve, jk, al.pivot_object.c_str(),
+                     al.pivot_part.c_str(), al.pos_object.c_str(), al.pos_part.c_str(),
+                     static_cast<double>(al.shift_x), static_cast<double>(al.shift_y),
+                     static_cast<double>(dx), static_cast<double>(dy),
+                     static_cast<double>(ex), static_cast<double>(ey),
+                     static_cast<double>(align_x_), static_cast<double>(align_y_),
+                     static_cast<double>(arena_wall_min_),
+                     static_cast<double>(arena_wall_max_), static_cast<double>(world_x_),
+                     clip_mirror_, move_base_, align_ref_u_);
+        std::fflush(stdout);
+    }
 }
 
 // JS `Te.Iub` (L285930; called from `ia` L278104 as `this.Iub()`):
@@ -4826,6 +4845,30 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
                              static_cast<int>(move_frame_),
                              static_cast<double>(model_off_x_),
                              static_cast<double>(model_off_y_));
+                // [probe] Which side is stale: the SOLVER state (`sol_ma_`) or
+                // only the drawn `pos_`? Prints both for the three vertices plus
+                // the clip/solver flags.
+                if (sol_ma_.size() == model_.bones.size() * 3) {
+                    auto sx = [&](int bi) {
+                        return static_cast<double>(
+                            sol_ma_[static_cast<std::size_t>(bi) * 3]);
+                    };
+                    auto sy = [&](int bi) {
+                        return static_cast<double>(
+                            sol_ma_[static_cast<std::size_t>(bi) * 3 + 1]);
+                    };
+                    std::fprintf(stdout,
+                                 "[badtri]   sol i1=(%.1f,%.1f) i2=(%.1f,%.1f) "
+                                 "i3=(%.1f,%.1f) solver_init=%d world=%d nclip=%d "
+                                 "clip=%s\n",
+                                 sx(tri.i1), sy(tri.i1), sx(tri.i2), sy(tri.i2),
+                                 sx(tri.i3), sy(tri.i3), solver_init_ ? 1 : 0,
+                                 solver_world_ ? 1 : 0,
+                                 current_clip_ != nullptr
+                                     ? static_cast<int>(current_clip_->bone_count())
+                                     : -1,
+                                 current_clip_ != nullptr ? "yes" : "no");
+                }
                 std::fflush(stdout);
             }
         }
