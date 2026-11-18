@@ -1431,6 +1431,11 @@ bool Fighter::ai_start_move(const MoveDef& move, FightContext& ctx) {
 }
 
 bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
+    // [FIX off-arena reaction entry] Snapshot the CURRENT (pre-move) world
+    // position: `build_prepend` needs it to express the entry pose in the frame
+    // of an absolutely-placed (wall) clip.
+    prev_move_world_x_ = world_x_;
+    prev_move_world_y_ = world_y_;
     if (ai) {
         // [probe, authorised] `SF2_TRACE_MOVELIST=1`: an AI start of a move
         // that is NOT in this fighter's own list (`hb_`) is the JS
@@ -3731,6 +3736,35 @@ void Fighter::build_prepend(const MoveDef& move) {
         prepend_[u1] = sol_ma_[u] + vx;
         prepend_[u1 + 1] = sol_ma_[u + 1] + vy;
         prepend_[u1 + 2] = sol_ma_[u + 2] + vz;
+    }
+    // [FIX off-arena reaction entry] A `<Position Object="Wall">` clip is placed
+    // ABSOLUTELY at `wall ± ShiftX` (the JS `Gub`), so its clip slots are already
+    // in the drawn frame while the `qrb` prepend above is still the PREVIOUS
+    // clip's frame. Because the world anchor equals `px` for such a clip, the
+    // entry blend then draws the fighter OUTSIDE the arena for its first frames:
+    // measured `[anchor-jump] move=WallHit px=-625.22 off=0.00 prev=216.80` and
+    // `move=WallHitFall px=-833.73 prev=190.00` — the residual
+    // `|Me-Enemy|>900` frames. Re-express the prepend rigidly by pinning its
+    // pivot slot to the fighter's current world position (only when that pose is
+    // actually outside the walls, so a normal entry is untouched).
+    const bool wall_abs = move.align.has_align && move.align.pos_object == "Wall" &&
+                          move.name.compare(0, 8, "WallJump") != 0;
+    if (wall_abs && arena_wall_max_ > arena_wall_min_) {
+        const int au = model_.bone_by_name(fighter_pivot_bone());
+        if (au >= 0 && static_cast<std::size_t>(au) < nclip) {
+            const std::size_t ua = static_cast<std::size_t>(au) * 3;
+            const float p0x = prepend_[ua];
+            if (p0x < arena_wall_min_ || p0x > arena_wall_max_) {
+                const float dx = prev_move_world_x_ - p0x;
+                const float dy = prev_move_world_y_ - prepend_[ua + 1];
+                if (std::fabs(dx) > 0.5f || std::fabs(dy) > 0.5f) {
+                    for (std::size_t u = 0; u + 2 < prepend_.size(); u += 3) {
+                        prepend_[u] += dx;
+                        prepend_[u + 1] += dy;
+                    }
+                }
+            }
+        }
     }
 }
 

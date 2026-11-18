@@ -1592,6 +1592,11 @@ private:
     // (L558-559) and the `<Velocity>` x seed (`Skb` L552 `this.DM.x*=b`).
     int clip_mirror_ = 1;
     float world_x_ = 0.0f, world_y_ = 0.0f; // fighter anchor (pivot world pos)
+    // [FIX off-arena reaction entry] The fighter's world position when a move
+    // starts, so a `<Position Object="Wall">` clip can re-express the `qrb`
+    // prepend (still in the PREVIOUS clip's frame) into the clip's own frame.
+    float prev_move_world_x_ = 0.0f;
+    float prev_move_world_y_ = 0.0f;
     float time_scale_ = 1.0f;  // anim timescale (SlowModel KT channel — single; hU noted)
     float model_hd_ = 1.0f;    // JS `KT`->`NMa` model scale (`HD()`, `Al.O9a`)
     float scale_acc_ = 0.0f;   // timescale fractional accumulator

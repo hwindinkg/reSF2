@@ -1801,7 +1801,25 @@ struct QuestVerifyDriver {
                 // shared chrome's `za_update`); from a sub-screen (Shop/Map/
                 // Profile) press BACK first, then use the column.
                 if (cur != kScreenDojo) {
-                    tap(app, 64, 40);
+                    // [driver robustness] A nav flash is answerable ONLY on the
+                    // Dojo hub, so leave the sub-screen. A leftover FIGHT /
+                    // RESULTS screen used to get a BACK tap forever (the fight
+                    // ignores it) — measured with the wall-clip pose change:
+                    // endless `injected click (64, 40)` and `shop=0 bought=0
+                    // mapStep=0`. Handle those screens with their own buttons.
+                    if (cur == kScreenResults) {
+                        tap(app, 640, 360);  // the results OK plate
+                    } else if (cur == kScreenFight) {
+                        sf2::app::Screen* t = app.screens().top();
+                        float cx = 640.0f, cy = 360.0f;
+                        if (t != nullptr) {
+                            static_cast<sf2::app::FightScreen*>(t)
+                                ->next_button_center(cx, cy);
+                        }
+                        tap(app, static_cast<int>(cx), static_cast<int>(cy));
+                    } else {
+                        tap(app, 64, 40);  // BACK to the hub
+                    }
                     return;
                 }
                 static const int kRowY[5] = {126, 231, 337, 442, 548};
@@ -1824,7 +1842,21 @@ struct QuestVerifyDriver {
                     return;  // wait for `StoryTutorialBossFight`'s Lynx dialog
                 }
                 if (cur != kScreenDojo) {
-                    tap(app, 64, 40);  // BACK to the hub
+                    // [driver robustness] see the nav-flash branch above: leave a
+                    // leftover FIGHT/RESULTS screen with ITS button, not BACK.
+                    if (cur == kScreenResults) {
+                        tap(app, 640, 360);
+                    } else if (cur == kScreenFight) {
+                        sf2::app::Screen* t = app.screens().top();
+                        float cx = 640.0f, cy = 360.0f;
+                        if (t != nullptr) {
+                            static_cast<sf2::app::FightScreen*>(t)
+                                ->next_button_center(cx, cy);
+                        }
+                        tap(app, static_cast<int>(cx), static_cast<int>(cy));
+                    } else {
+                        tap(app, 64, 40);  // BACK to the hub
+                    }
                 } else {
                     static const int kRowY[5] = {126, 231, 337, 442, 548};
                     if (nav_toggle) {
