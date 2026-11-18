@@ -1,10 +1,15 @@
-# WallHit scenario for the ORACLE (player walks into the wall, then stands there
-# so the enemy's attacks produce the `<Move Name="WallHit">` reaction — the state
-# that shows the port's giant-triangle and "thrown to opposite ends" reports).
+# WallHit scenario for the ORACLE, second attempt: the player HOLDS "back" for the
+# whole fight, so he stays pinned against the left wall while the enemy attacks —
+# the `<Move Name="WallHit">` reaction triggers when a hit drives a fighter into a
+# wall (its Conditions need a small wall distance to NNeck/NPivot).
 #
-# The hub -> Map -> FIGHT taps are copied VERBATIM from `state_survival.txt`
-# (that script is measured: 2651 pose frames). The walk uses the documented
-# SHARED form `atframe <fight frame> keydown|keyup <keyCode>`; 65 = A = Back.
+# ORACLE side:
+#   shell\bin\Release\net9.0-windows\OracleShell.exe ^
+#     --query "postTutorial=1&skipFightNone=1&maxFrames=6000&battle=Survival" ^
+#     --input-script reference/tools/state_wallhit.txt --timeout-ms 70000
+#
+# The hub -> Map -> FIGHT taps are copied verbatim from `state_survival.txt`
+# (measured: 2651 pose frames).
 wait 8000
 tap 180 98
 wait 1500
@@ -12,5 +17,4 @@ tap 140 250
 wait 2500
 tap 1130 580
 atframe 30 keydown 65
-atframe 200 keyup 65
 wait 40000

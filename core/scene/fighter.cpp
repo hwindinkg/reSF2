@@ -984,6 +984,50 @@ void Fighter::ragdoll_stop() {
             sol_mf_[i + 1] -= solver_base_y_;
         }
     }
+    // [probe, authorised] `SF2_TRACE_CLOTHSPACE=1`: the ragdoll->clip space
+    // conversion for the SIMULATED nodes (the ones a clip does not animate, i.e.
+    // `i >= clip.bone_count()`), with the base it subtracts and the anchor it
+    // keeps continuous. This is the direct measurement for the giant-triangle
+    // defect: the cloth is displaced ~416 units at a reaction start, and the two
+    // attempted translations (per-switch seat, align-delta) both moved the error
+    // instead of removing it, so the source has to be shown, not guessed.
+    if (std::getenv("SF2_TRACE_CLOTHSPACE") != nullptr) {
+        static int cs_logs = 0;
+        if (cs_logs < 12 && sol_ma_.size() >= model_.bones.size() * 3) {
+            ++cs_logs;
+            const int anchor_b = model_.bone_by_name(fighter_pivot_bone());
+            std::fprintf(stdout,
+                         "[clothspace] STOP frame=%d move=%s base=(%.1f,%.1f) "
+                         "solver_init=%d anchor=%s sol=(%.1f,%.1f)\n",
+                         ragdoll_frame_count_,
+                         current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                         static_cast<double>(solver_base_x_),
+                         static_cast<double>(solver_base_y_), solver_init_ ? 1 : 0,
+                         fighter_pivot_bone().c_str(),
+                         anchor_b >= 0
+                             ? static_cast<double>(
+                                   sol_ma_[static_cast<std::size_t>(anchor_b) * 3])
+                             : 0.0,
+                         anchor_b >= 0
+                             ? static_cast<double>(
+                                   sol_ma_[static_cast<std::size_t>(anchor_b) * 3 + 1])
+                             : 0.0);
+            const char* names[4] = {"HEAD-Node112", "HEAD-Node118", "HEAD-Node124",
+                                    "BODY_SHIN-Node5"};
+            for (int k = 0; k < 4; ++k) {
+                const int bi = model_.bone_by_name(names[k]);
+                if (bi < 0) continue;
+                const std::size_t u = static_cast<std::size_t>(bi) * 3;
+                std::fprintf(stdout,
+                             "[clothspace]   %-16s sol=(%.1f,%.1f) mf=(%.1f,%.1f)\n",
+                             names[k], static_cast<double>(sol_ma_[u]),
+                             static_cast<double>(sol_ma_[u + 1]),
+                             static_cast<double>(sol_mf_[u]),
+                             static_cast<double>(sol_mf_[u + 1]));
+            }
+            std::fflush(stdout);
+        }
+    }
     // JS `Al.stop()` (L582) is EXACTLY `{this.nk=!1; this.frameCount=0}` — it
     // does NOT touch the node `ma`/`mf` or any render anchor. The resuming
     // `Te.eda` (L282908) overwrites every clip-driven node itself
@@ -4124,7 +4168,56 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 sol_ma_[i * 3 + 2] = pz[i];
             }
         }
-        // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) runs exactly
+        // [probe, authorised] `SF2_TRACE_CLOTHSPACE=1`: the SOLVER state of the
+    // simulated (non-clip) nodes on every frame of a wall reaction — the window
+    // where the giant-triangle tear appears (`[badtri]` at `mf=2..4`). Prints the
+    // clip, the clip's bone count, the anchor and three cloth nodes, so a jump is
+    // visible frame by frame instead of inferred from a later pose.
+    if (std::getenv("SF2_TRACE_CLOTHSPACE") != nullptr && current_move_ != nullptr &&
+        current_move_->name.compare(0, 4, "Wall") == 0 &&
+        sol_ma_.size() >= model_.bones.size() * 3) {
+        static int cs_frames = 0;
+        if (cs_frames < 24) {
+            ++cs_frames;
+            auto sx = [&](const char* nm, float& ox, float& oy) {
+                const int bi = model_.bone_by_name(nm);
+                if (bi < 0) return;
+                ox = sol_ma_[static_cast<std::size_t>(bi) * 3];
+                oy = sol_ma_[static_cast<std::size_t>(bi) * 3 + 1];
+            };
+            const int ab = model_.bone_by_name(fighter_pivot_bone());
+            float ax = 0, ay = 0, c1x = 0, c1y = 0, c2x = 0, c2y = 0;
+            if (ab >= 0) {
+                ax = sol_ma_[static_cast<std::size_t>(ab) * 3];
+                ay = sol_ma_[static_cast<std::size_t>(ab) * 3 + 1];
+            }
+            sx("HEAD-MacroNode108", c1x, c1y);
+            sx("HEAD-Node112", c2x, c2y);
+            std::fprintf(stdout,
+                         "[clothsample] move=%s mf=%d frame=%d clip=%d nclip=%d world=%d "
+                         "anchor=(%.1f,%.1f) macro108=(%.1f,%.1f) node112=(%.1f,%.1f) "
+                         "gap=%.1f align=(%.1f,%.1f) off=(%.1f,%.1f) j8=(%.1f,%.1f) "
+                         "pxa=(%.1f,%.1f)\n",
+                         current_move_->name.c_str(), move_frame_, frame,
+                         current_clip_ != nullptr ? 1 : 0,
+                         current_clip_ != nullptr
+                             ? static_cast<int>(current_clip_->bone_count())
+                             : -1,
+                         solver_world_ ? 1 : 0, static_cast<double>(ax),
+                         static_cast<double>(ay), static_cast<double>(c1x),
+                         static_cast<double>(c1y), static_cast<double>(c2x),
+                         static_cast<double>(c2y),
+                         static_cast<double>(std::hypot(c1x - c2x, c1y - c2y)),
+                         static_cast<double>(align_x_), static_cast<double>(align_y_),
+                         static_cast<double>(render_offset_),
+                         static_cast<double>(render_offset_y_),
+                         static_cast<double>(j8_x_), 0.0,
+                         static_cast<double>(px[anchor_u]),
+                         static_cast<double>(py[anchor_u]));
+            std::fflush(stdout);
+        }
+    }
+    // [FIX stretched mesh — JS-faithful] `Al.ia()` (L582) runs exactly
         // ONE solver step per 60 Hz frame: `sk(); jE();`. The invented
         // 600-step warmup (PORT_AUDIT_RENDER §2.4 candidate 1; absent from
         // JS) is removed.
