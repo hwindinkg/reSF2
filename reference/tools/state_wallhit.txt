@@ -1,0 +1,16 @@
+# WallHit scenario for the ORACLE (player walks into the wall, then stands there
+# so the enemy's attacks produce the `<Move Name="WallHit">` reaction — the state
+# that shows the port's giant-triangle and "thrown to opposite ends" reports).
+#
+# The hub -> Map -> FIGHT taps are copied VERBATIM from `state_survival.txt`
+# (that script is measured: 2651 pose frames). The walk uses the documented
+# SHARED form `atframe <fight frame> keydown|keyup <keyCode>`; 65 = A = Back.
+wait 8000
+tap 180 98
+wait 1500
+tap 140 250
+wait 2500
+tap 1130 580
+atframe 30 keydown 65
+atframe 200 keyup 65
+wait 40000
