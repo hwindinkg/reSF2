@@ -7522,6 +7522,24 @@ void FightController::apply_hit(FightFighter& atk, FightFighter& def,
     const float new_x =
         sf2::scene::apply_impulse(hit_cap, ch, impulse, def.fighter.world_x(),
                                   wall_min_, wall_max_, imp);
+    // [probe, authorised] `SF2_TRACE_WALLS=1`: the knockback clamp — what
+    // `apply_impulse` thinks the walls are, where the clamped root lands, and
+    // where the fighter actually is. Item "thrown to opposite ends": the enemy's
+    // world_x reached 2760.7 with spawn 1068, so this prints whether the clamp
+    // even ran (`clamped_dx`) and how far the ROOT moved.
+    if (std::getenv("SF2_TRACE_WALLS") != nullptr && apply_strike) {
+        std::fprintf(stdout,
+                     "[walls] F%d %s imp=(%.1f,%.1f,%.1f) world_x=%.1f new_x=%.1f "
+                     "clamped=%.1f walls=[%.1f,%.1f] n1=%.1f n2=%.1f\n",
+                     frame_, def.name.c_str(), static_cast<double>(impulse.x),
+                     static_cast<double>(impulse.y), static_cast<double>(impulse.z),
+                     static_cast<double>(def.fighter.world_x()),
+                     static_cast<double>(new_x), static_cast<double>(imp.clamped_dx),
+                     static_cast<double>(wall_min_), static_cast<double>(wall_max_),
+                     static_cast<double>(imp.node1_disp),
+                     static_cast<double>(imp.node2_disp));
+        std::fflush(stdout);
+    }
     (void)new_x;  // the displacement now lives on the endpoint NODES (below)
     // JS `Bl.strike` (L587-588): `a.sx.XA(l)` / `a.Zs.XA(c)` add the
     // impulse-split vectors to the endpoint nodes' WORLD `ma` directly. While

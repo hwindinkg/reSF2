@@ -3970,6 +3970,21 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         }
+        // [FIX "thrown to opposite ends" — measured] `world_x_` is the RENDER
+        // anchor: `px[anchor]` is a live NODE, and `Bl.strike` writes the impulse
+        // into those nodes (`apply_impulse`'s split, up to ~650 units at
+        // F905 of the bamboo fight), so the fighter's own x rode the strike far
+        // past the arena even though `apply_impulse` clamped the ROOT correctly
+        // (`new_x=1773` of `walls=[160,1773]`) — `[pos]` showed world_x 2760.7
+        // with spawn 1068 and 77 frames where the pair sat >900 apart. JS clamps
+        // the BODY node into the walls (`Al.fha`: `b.x<NO?b.x=NO:MO<b.x&&(b.x=MO)`),
+        // so the drawn body never leaves the arena. Clamp the anchor the same way
+        // (fight only, never the shop/profile previews). `SF2_NO_WORLD_CLAMP=1`
+        // restores the old behaviour for A/B.
+        if (!preview_mode_ && arena_wall_min_ != arena_wall_max_ &&
+            std::getenv("SF2_NO_WORLD_CLAMP") == nullptr) {
+            world_x_ = std::clamp(world_x_, arena_wall_min_, arena_wall_max_);
+        }
         // A TryOn (`ShopTryOn`) preview plays IN PLACE on its `Pi` seat; the
         // idle loop keeps riding its clip (see `preview_pin_x_`).
         if (preview_mode_ && preview_pin_x_) world_x_ = preview_seat_x_;
