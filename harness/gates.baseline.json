@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "updated": "2026-11-18T20:37:37",
+    "updated": "2026-11-19T18:52:53",
     "mode": "only"
   },
   "gates": {
@@ -509,16 +509,16 @@
       "date": "2026-11-09T18:43:51"
     },
     "posevel:titan-ladder": {
-      "metric": 33,
-      "commit": "215727b6",
-      "reason": "macro-velocity fix (mf=JS Fl.seb) moves posevel metrics; boss-lynx pose re-captured oracle",
-      "date": "2026-11-15T19:21:57"
+      "metric": 44,
+      "commit": "f1586678",
+      "reason": "accepted trade-off with pose:titan-ladder (reaction-entry cloth carry, arena-gated): removes the player-reported head triangle in the bamboo fight",
+      "date": "2026-11-19T18:52:53"
     },
     "pose:titan-ladder": {
-      "metric": 489,
-      "commit": "9ce8f097",
-      "reason": "measurement coverage, not quality: dump_pose_frame no longer writes the idle lead-in rows (phase 0) that the oracle never writes, so the aligner pairs EVERY frame (268->368 pairs per campaign scenario, 568->702 for dojo-move) and ~100 previously uncompared frames now enter the metric; those frames carry the already-documented cloth/chain divergence. diff:* stayed 0, audio unchanged, kick-ko WIN, verify-input 7/7.",
-      "date": "2026-11-14T22:42:20"
+      "metric": 510,
+      "commit": "f1586678",
+      "reason": "accepted trade-off: the reaction-entry cloth carry (arena-gated) removes the player-reported head triangle in the bamboo fight (SF2_TRACE_BADTRI HEAD reports 8 -> 0, worst 758 -> 373); titan-ladder cloth pose drift rises 489 -> 510",
+      "date": "2026-11-19T18:52:31"
     },
     "sub:challenge": {
       "metric": 0,

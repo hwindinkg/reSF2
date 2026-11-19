@@ -4298,6 +4298,52 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // are NOT moved by the solver (they keep their `Te.eda` pose). The
         // old native integrated every non-fixed non-macro bone, dragging the
         // posed skeleton off the clip (the stretched mesh).
+        // [FIX reaction-start mesh tear — teleport-sized entries, REAL arenas]
+        // A reaction clip ENTERS from the previous pose over `sub_` frames; at a
+        // `WallHit` start the animated prefix was measured moving ~240 units per
+        // sample (`[clothsample] gap 46 -> 414 -> 748`) while the simulated cloth
+        // stays and the JS-exact relax closes only ~1 % per pass (macro mass
+        // 0.00117 vs cloth 0.1). Normal play never moves the anchor that fast
+        // (measured < 20/frame), so a MAGNITUDE gate isolates the entry: the
+        // simulated nodes are carried by the same delta (a rigid translation
+        // keeps the mesh intact). Gated on a REAL arena (`arena_wall_max_ >
+        // arena_wall_min_`): in the dojo/training scene the carry changed the
+        // fight flow (measured `mapStep=0`, the quest chain stopped reaching the
+        // Map) because `sol_ma_` feeds the COM the AI reads. Measured in the
+        // bamboo fight: the player-reported head triangle (416-758) disappears.
+        constexpr float kCarryJump = 150.0f;
+        const bool real_arena = arena_wall_max_ > arena_wall_min_;
+        if (real_arena && prev_anchor_px_valid_ && anchor_u < n && nclip < n) {
+            const float jdx = px[anchor_u] - prev_anchor_px_;
+            const float jdy = py[anchor_u] - prev_anchor_py_;
+            if (std::fabs(jdx) > kCarryJump || std::fabs(jdy) > kCarryJump) {
+                for (std::size_t i2 = nclip; i2 < n; ++i2) {
+                    sol_ma_[i2 * 3] += jdx;
+                    sol_ma_[i2 * 3 + 1] += jdy;
+                    sol_mf_[i2 * 3] += jdx;
+                    sol_mf_[i2 * 3 + 1] += jdy;
+                }
+                if (std::getenv("SF2_TRACE_CLOTHSPACE") != nullptr) {
+                    static int carry_logs = 0;
+                    if (carry_logs < 20) {
+                        ++carry_logs;
+                        std::fprintf(stdout,
+                                     "[clothcarry] move=%s mf=%d jump=(%.1f,%.1f)\n",
+                                     current_move_ != nullptr
+                                         ? current_move_->name.c_str()
+                                         : "-",
+                                     move_frame_, static_cast<double>(jdx),
+                                     static_cast<double>(jdy));
+                        std::fflush(stdout);
+                    }
+                }
+            }
+        }
+        if (anchor_u < n) {
+            prev_anchor_px_ = px[anchor_u];
+            prev_anchor_py_ = py[anchor_u];
+            prev_anchor_px_valid_ = true;
+        }
         // [probe, authorised] `SF2_TRACE_CLIPSAMPLES=1`: the PRE-SOLVER chain
         // positions - `sol_ma_` right after the clip write above and before
         // `sk()`/`jE()` run. The oracle probe (`?clipsamples=1`) snapshots the
