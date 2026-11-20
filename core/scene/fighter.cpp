@@ -4238,7 +4238,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         (void)0;
         // A TryOn (`ShopTryOn`) preview plays IN PLACE on its `Pi` seat; the
         // idle loop keeps riding its clip (see `preview_pin_x_`).
-        if (preview_mode_ && preview_pin_x_) world_x_ = preview_seat_x_;
+        // [FIX B7 "после надевания ножей персонажа откидывает назад"] The idle
+        // preview used to ride its clip's ROOT MOTION: `world_x_` came from the
+        // clip-space pivot (`px[anchor]`), so the shipped stance clip drifted the
+        // DRAWN body ~33 units away from the `Pi.J9` seat — measured with the
+        // drawn-pose probe (`[tryon] pivot_x`: before +2.10, after the knives
+        // stance -31.37; the JS re-seats `Pi.job`/`oL` at J9 on every update).
+        // The try-on clip itself is exempt (`preview_pin_x_`), exactly as before.
+        if (preview_mode_) {
+            world_x_ = preview_seat_x_;
+        }
         // [REJECTED by measurement] Pinning a display-only preview's x to its
         // `Pi` seat (`preview_seat_x_`) was TRIED: it made the shop/profile
         // captures WORSE (`shop_tab1` 11.53 -> 14.02 %pix>12, `shop_detail`

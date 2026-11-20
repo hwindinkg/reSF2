@@ -1351,6 +1351,20 @@ public:
     float preview_world_x() const {
         return preview_fighter_ ? preview_fighter_->world_x() : 0.0f;
     }
+    // [probe, authorised] Drawn-pose x bounds of whichever model is on screen
+    // (TryOn preview, else the idle destination model). `world_x_` is 0 for a
+    // display-only preview, so this is the only honest seat metric.
+    bool preview_pose_bounds(float& lo, float& hi, float* pivot_x = nullptr) const {
+        if (preview_fighter_ &&
+            preview_fighter_->debug_pose_x_bounds(lo, hi, pivot_x)) {
+            return true;
+        }
+        if (backdrop_fighter_ &&
+            backdrop_fighter_->debug_pose_x_bounds(lo, hi, pivot_x)) {
+            return true;
+        }
+        return false;
+    }
     int preview_bones() const { return static_cast<int>(preview_model_.bones.size()); }
     int preview_frame() const { return preview_frame_; }
     int preview_sub() const { return preview_fighter_ ? preview_fighter_->sub() : 0; }

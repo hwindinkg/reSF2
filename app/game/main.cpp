@@ -10733,6 +10733,30 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 app.shutdown();
                 return 1;
             }
+            // [FIX B7 measurement] `preview_world_x()` is 0 for a display-only
+            // preview, so the old probe could never see the reported "после
+            // надевания ножей персонажа откидывает чуть назад". Measure the
+            // DRAWN pose (`pos_` -> build_vertices) instead: its x bounds before
+            // the TRY, at the TryOn clip's last frame and after the return to
+            // idle. Two different models are on screen (idle `backdrop_fighter_`
+            // vs TryOn `preview_fighter_`), so a bounds shift between the 1st and
+            // 3rd reading is exactly the seat jump the player sees.
+            float pivot_seat = 0.0f;  // last pivot x seen while the clip played
+            const auto pose = [&](const char* tag) {
+                float lo = 0.0f, hi = 0.0f, piv = 0.0f;
+                const bool ok = shop->preview_pose_bounds(lo, hi, &piv);
+                std::fprintf(stdout,
+                             "[tryon] %-10s pose_lo=%.2f pose_hi=%.2f centre=%.2f "
+                             "pivot_x=%.2f (ok=%d frame=%d)\n",
+                             tag, static_cast<double>(lo), static_cast<double>(hi),
+                             static_cast<double>((lo + hi) * 0.5f),
+                             static_cast<double>(piv), ok ? 1 : 0,
+                             shop->preview_frame());
+                std::fflush(stdout);
+                pivot_seat = piv;
+                return piv;
+            };
+            const float c_before = pose("before");
             const bool armed = shop->probe_arm_preview(app, *it);
             const float x0 = shop->preview_world_x();
             std::fprintf(stdout,
@@ -10751,14 +10775,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 shop->update(1.0f / 60.0f);
                 x_last = shop->preview_world_x();
                 f_last = shop->preview_frame();
+                // Sample the DRAWN seat every frame: the preview fighter is
+                // destroyed the moment the clip ends, so reading it afterwards
+                // measures the idle model instead (the first version of this
+                // probe did exactly that and reported a zero delta).
+                pose("clip");
                 ++guard;
             }
+            const float c_last = pivot_seat;
             std::fprintf(stdout,
                          "[tryon] end after %d frames: x_last=%.2f frame=%d "
-                         "active=%d delta=%.2f\n",
+                         "active=%d delta=%.2f pose_delta=%.2f\n",
                          guard, static_cast<double>(x_last), f_last,
                          shop->preview_active() ? 1 : 0,
-                         static_cast<double>(x_last - x0));
+                         static_cast<double>(x_last - x0),
+                         static_cast<double>(c_last - c_before));
             std::fflush(stdout);
             // The idle/destination model takes over when the preview ends; log
             // its x so the SNAP (if any) is visible in the numbers.
@@ -10767,6 +10798,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 app.run_one_frame();
             }
             std::fprintf(stdout, "[tryon] after-idle (4 frames) done\n");
+            std::fflush(stdout);
+            const float c_after = pose("after-idle");
+            std::fprintf(stdout,
+                         "[tryon] SEAT: before=%.2f last=%.2f after=%.2f  "
+                         "jump_last=%.2f jump_idle=%.2f\n",
+                         static_cast<double>(c_before), static_cast<double>(c_last),
+                         static_cast<double>(c_after),
+                         static_cast<double>(c_last - c_before),
+                         static_cast<double>(c_after - c_before));
             std::fflush(stdout);
             // Advance REAL app frames so the boot overlay is gone (the shop was
             // ticked directly above, so `boot_splash_frames_` was not counting

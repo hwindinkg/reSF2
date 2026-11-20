@@ -964,6 +964,31 @@ public:
     float arena_wall_max() const { return arena_wall_max_; }
     // [probe, authorised] Max x-extent of the rendered pose (`pos_`) — the
     // "stretched across the arena" metric for `--wall-probe`.
+    // [probe, authorised] The DRAWN pose's x bounds (`pos_`, the input of
+    // `build_vertices`). The shop/profile TryOn report ("после надевания ножей
+    // персонажа откидывает чуть назад") is a SEAT shift of the drawn model, and
+    // `world_x_` stays 0 for a display-only preview, so the pose itself must be
+    // measured.
+    bool debug_pose_x_bounds(float& lo, float& hi, float* pivot_x = nullptr) const {
+        if (pos_.size() < 2) return false;
+        lo = hi = pos_[0];
+        for (std::size_t i = 1; i * 2 < pos_.size(); ++i) {
+            const float v = pos_[i * 2];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        if (pivot_x != nullptr) {
+            // The PIVOT node is the node the placement anchors to, so its drawn x
+            // is the fighter's SEAT: the honest metric for "the character is
+            // thrown backwards" (a clip with a different stance changes the bbox
+            // but not the pivot).
+            const int pi = model_.bone_by_name(fighter_pivot_bone());
+            *pivot_x = (pi >= 0 && static_cast<std::size_t>(pi) * 2 < pos_.size())
+                           ? pos_[static_cast<std::size_t>(pi) * 2]
+                           : (lo + hi) * 0.5f;
+        }
+        return true;
+    }
     float debug_bone_span_x() const {
         if (pos_.size() < 2) return 0.0f;
         float lo = pos_[0], hi = pos_[0];

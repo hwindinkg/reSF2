@@ -22662,6 +22662,22 @@ void ShopScreen::update_impl(float dt) {
             preview_fighter_.reset();
             preview_clip_ = nullptr;
             preview_frame_ = 0;
+            // [FIX B7 "после надевания ножей персонажа откидывает назад"] The
+            // TryOn model and the idle model are TWO fighters with independent
+            // clip phases. Ending the try-on only swapped the drawn model back:
+            // the idle one resumed from the state it was frozen in (its clip kept
+            // its root motion), so the character appeared ~33 units BEHIND where
+            // he stood before the try-on. Measured with the drawn-pose probe
+            // (`[tryon] pivot_x`: before +2.10 -> after -31.37). The JS `Pi` never
+            // resumes a frozen state: `fU()` re-shows the body and the `Pi` state
+            // is re-entered (`Pi.Ex` -> `new wd` + `job`/`oL`), which seats the
+            // model on `J9 = (0,-93)` again. Re-enter the destination state here
+            // the same way.
+            if (backdrop_fighter_ != nullptr && backdrop_move_ != nullptr &&
+                backdrop_idle_ != nullptr && !backdrop_idle_->frames.empty()) {
+                backdrop_fighter_->start_preview_clip(*backdrop_move_, *backdrop_idle_);
+                backdrop_fighter_->advance(0.0f);
+            }
             // JS `Pi.wia` L446 -> `Oa.yS` L2300 -> `fU()`: the body is shown
             // again (`this.bB.node.Rc(!0)`) when the TryOn clip ends.
             if (body_hidden_) {
@@ -23545,9 +23561,20 @@ void ShopScreen::render_impl(App& app) {
             // - the reported "the outline appeared but did not cover the whole
             // button". Draw the sliced plate (identical geometry to the
             // `btnGreen` plate above) so the flash spans the whole M8 button.
+            // [FIX B6 flashing buy button — player report "при моргании под ней
+            // просвечивается ещё одна текстура кнопки по меньше"] `draw_bb_plate`
+            // derives its cap scale as `min(w/nat_w, h/nat_h)` = `bh/222` = 0.25,
+            // so the 300x222 highlight art was drawn at a QUARTER size — a smaller
+            // button-shaped texture glowing inside/behind the plate. The JS only
+            // sets `this.Tk.xc(this.width)` -> `scale_x = w/fa.x`, i.e. a
+            // HORIZONTAL stretch with `scale_y` left at 1 (the art's own height),
+            // centred on the plate. Reproduce exactly that with a filled stretch
+            // of the frame at its NATURAL height.
+            float hl_w = 300.0f, hl_h = 222.0f;
+            atlas_source_size(app, "highlightButton", 300.0f, 222.0f, &hl_w, &hl_h);
             if (!(load_sliced_atlas(app) &&
-                  draw_bb_plate(app, "highlightButton", cx0 + cw0 * 0.5f, py, cw0, bh,
-                                ui_flash_alpha(app)))) {
+                  try_draw_atlas_button(app, "highlightButton", cx0 + cw0 * 0.5f, py,
+                                        cw0, hl_h, ui_flash_alpha(app), /*fill=*/true))) {
                 draw_flash_tint(app, cx0 + cw0 * 0.5f, py, cw0, bh);
             }
         }

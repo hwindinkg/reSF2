@@ -48,9 +48,9 @@ The `overall` row is every checklist item at once (86 of 89); a system row count
 
 | Module | Lines | Files |
 |---|---:|---:|
-| `core/app` | 49066 | 18 |
-| `core/scene` | 42065 | 35 |
-| `app/game` | 12639 | 1 |
+| `core/app` | 49107 | 18 |
+| `core/scene` | 42099 | 35 |
+| `app/game` | 12679 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1308 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (86 of 89); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **113770** | |
+| **total** | **113885** | |
 <!-- STATUS:END -->
