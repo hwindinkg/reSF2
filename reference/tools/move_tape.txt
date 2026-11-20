@@ -32,3 +32,22 @@ atframe 570 keydown 68
 atframe 660 keyup 68
 atframe 670 keydown 76
 atframe 700 keyup 76
+
+# Throw attempts (Back held + Punch tap = the SF2 throw input) and a second
+# movement lap, so the port and the oracle both play the THROW clips.
+atframe 710 keydown 65
+atframe 720 keydown 75
+atframe 750 keyup 75
+atframe 800 keyup 65
+atframe 810 keydown 68
+atframe 900 keyup 68
+atframe 910 keydown 65
+atframe 920 keydown 75
+atframe 950 keyup 75
+atframe 1000 keyup 65
+atframe 1010 keydown 76
+atframe 1040 keyup 76
+atframe 1050 keydown 65
+atframe 1060 keydown 75
+atframe 1090 keyup 75
+atframe 1140 keyup 65
