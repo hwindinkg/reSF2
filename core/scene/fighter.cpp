@@ -5218,6 +5218,13 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
             float vy[3] = {pos_[static_cast<std::size_t>(tri.i1) * 2 + 1] + model_off_y_,
                            pos_[static_cast<std::size_t>(tri.i2) * 2 + 1] + model_off_y_,
                            pos_[static_cast<std::size_t>(tri.i3) * 2 + 1] + model_off_y_};
+            float pre_longest = 0.0f;
+            for (int e = 0; e < 3; ++e) {
+                const int q0 = e, q1 = (e + 1) % 3;
+                const float ddx = vx[q1] - vx[q0];
+                const float ddy = vy[q1] - vy[q0];
+                pre_longest = std::max(pre_longest, std::sqrt(ddx * ddx + ddy * ddy));
+            }
             for (int e = 0; e < 3; ++e) {
                 const int p0 = e, p1 = (e + 1) % 3;
                 const float dx = vx[p1] - vx[p0];
@@ -5231,9 +5238,9 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
                 vx[p1] -= nx * half;
                 vy[p1] -= ny * half;
             }
-            if (std::getenv("SF2_TRACE_BADTRI") != nullptr) {
+            if (std::getenv("SF2_TRACE_BADTRI") != nullptr && pre_longest > kMaxFigSide) {
                 static int proj_logs = 0;
-                if (proj_logs < 20) {
+                if (proj_logs < 200) {
                     ++proj_logs;
                     float mx = 0.0f;
                     for (int e2 = 0; e2 < 3; ++e2) {
@@ -5242,8 +5249,10 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
                         const float ddy = vy[q1] - vy[q0];
                         mx = std::max(mx, std::sqrt(ddx * ddx + ddy * ddy));
                     }
-                    std::fprintf(stdout, "[proj] tri=%d drawn_longest=%.1f\n",
-                                 static_cast<int>(i), static_cast<double>(mx));
+                    std::fprintf(stdout,
+                                 "[proj] tri=%d pre=%.1f drawn_longest=%.1f\n",
+                                 static_cast<int>(i), static_cast<double>(pre_longest),
+                                 static_cast<double>(mx));
                     std::fflush(stdout);
                 }
             }
