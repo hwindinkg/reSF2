@@ -10412,10 +10412,10 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
             dialog_row_color(d, i, rr, gg, bb);
             (void)dialog_color_tag(d.lines[i], rr, gg, bb);  // `<color=#..>`
             const float draw_h = std::min(h, body_bottom - y);
-            draw_ui_wrapped(app, L.body_x, y, L.body_w, draw_h, text,
-                            dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c *
-                                shrink,
-                            UiAlign::Left, rr, gg, bb, kOdBodyKc);
+            draw_ui_wrapped_fit(app, L.body_x, y, L.body_w, draw_h, text,
+                                dialog_text_ua_scale(app, dialog_row_font_px(d, i, 100.0f)) * c *
+                                    shrink,
+                                UiAlign::Left, rr, gg, bb, kOdBodyKc);
             y += h;
         }
     } else {
@@ -10423,10 +10423,15 @@ void draw_uj290_dialog(App& app, sf2::render::Renderer& ren, const EngineDialog&
             d.lines.empty() ? 0 : (d.page < d.lines.size() ? d.page : d.lines.size() - 1);
         float rr = 0.12f, gg = 0.09f, bb = 0.06f;
         dialog_row_color(d, uj_page, rr, gg, bb);
-        draw_ui_wrapped(app, L.body_x, L.body_y, L.body_w, L.body_h,
-                        dialog_page_body(app, d),
-                        dialog_text_ua_scale(app, dialog_row_font_px(d, uj_page, 100.0f)) * c,
-                        UiAlign::Left, rr, gg, bb, kOdBodyKc);
+        // [FIX side-dialog text — player screenshot] This body used the CLIPPING
+        // draw, so a body that wraps to more lines than the box is cut
+        // mid-sentence (reported: "Сначала покажи, как ты двигаешься!" with the
+        // last line half outside the plank). The fit variant measures first and
+        // shrinks the font (never below 55 %) until the whole body fits.
+        draw_ui_wrapped_fit(app, L.body_x, L.body_y, L.body_w, L.body_h,
+                            dialog_page_body(app, d),
+                            dialog_text_ua_scale(app, dialog_row_font_px(d, uj_page, 100.0f)) * c,
+                            UiAlign::Left, rr, gg, bb, kOdBodyKc);
     }
     draw_dialog_extras(app, L, d);
     draw_dialog_buttons(app, d, anim);

@@ -1893,6 +1893,12 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
                                      move.align.pos_object == "Wall" &&
                                      move.name.compare(0, 8, "WallJump") != 0;
         render_offset_valid_ = (abs_mode != 2) || wall_positioned;
+        // [FIX wall-reaction placement — player report] `wall ± ShiftX` teleported
+        // the fighter to the CENTRE of the arena from the left wall (ShiftX=480 on
+        // a 1600-wide arena) and off-screen from the right. A wall reaction has to
+        // play where he already stands, so the placement is PINNED to his own
+        // position for the clip (the same pin `abs_mode 0` applies, per move).
+        wall_pin_ = wall_positioned;
         align_pivot_u_ = -1;
         // [throw victim] Keep the fighter where it stood: `Dl.oL` anchors the
         // clip to `parameters.position`, so the clip's absolute buffer values
@@ -4111,7 +4117,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const char* e = std::getenv("SF2_ABS_MOVE");
             return e == nullptr ? 2 : std::atoi(e);
         }();
-        if (align_absolute_ && abs_mode == 0) {
+        if (align_absolute_ && (abs_mode == 0 || wall_pin_)) {
             // JS `Dl.oL(parameters.position)` (L24171-24199): the clip is
             // anchored to the fighter's OWN position, so `pos = clip -
             // clip[anchor] + own` (below) and the fighter does not ride the
@@ -5056,8 +5062,12 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
             if (!(worst <= 250.0f)) {  // also catches NaN
                 ++bad_tri_reports;
                 std::fprintf(stdout,
-                             "[badtri] tri=%d side=%.1f %s/", static_cast<int>(i),
-                             static_cast<double>(worst),
+                             "[badtri] tri=%d side=%.1f move=%s mf=%d play=%d %s/",
+                             static_cast<int>(i), static_cast<double>(worst),
+                             current_move_ != nullptr
+                                 ? current_move_->name.c_str()
+                                 : "-",
+                             static_cast<int>(move_frame_), playhead_xh(),
                              model_.bones[static_cast<std::size_t>(tri.i1)].name.c_str());
                 std::fprintf(stdout,
                              "%s/%s p=(%.1f,%.1f) (%.1f,%.1f) (%.1f,%.1f) "

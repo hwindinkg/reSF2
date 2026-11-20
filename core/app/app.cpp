@@ -2039,8 +2039,14 @@ void App::draw_boot_splash(bool force_loader) {
     const float w = measure_text(*splash_loading_font_, buf, jo_scale);
     const float lh = std::max(
         1.0f, static_cast<float>(splash_loading_font_->line_height) * jo_scale);
+    // [FIX preloader text — player screenshot] `jo_cy` is the SCROLL'S BOTTOM edge
+    // (`scroll_top + scroll_h`) and the text was CENTRED on it (`- lh*0.5`), so
+    // half of "Загрузка NN%" hung below the wooden plank and looked cut
+    // (reported: "текст загрузки находится ниже плашки, он должен быть выше").
+    // Anchor the text's BOTTOM to that edge, so the whole line sits ON the plank
+    // at its lower border, as in the original.
     draw_text_with_font(*splash_loading_font_, splash_loading_tex_, jo_cx - w * 0.5f,
-                        jo_cy - lh * 0.5f, buf, jo_scale, 0.1843137254901961f,
+                        jo_cy - lh, buf, jo_scale, 0.1843137254901961f,
                         0.1450980392156863f, 0.10588235294117647f);
 }
 

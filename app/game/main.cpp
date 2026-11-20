@@ -1552,6 +1552,8 @@ struct QuestVerifyDriver {
     bool bought_knives = false;   // the guided `Ao` buy completed
     int shop_buy_phase = 0;       // 0 = TRY plate, 1 = price plate
     std::string last_step;        // frame-stamped story-step census
+    int stall_ticks = 0;          // ticks spent on the same screen
+    bool force_rotate = false;    // the current screen refused the usual tap
     bool saw_buy_item = false;    // reached STEP_BUY_ITEM (the knives quest)
     bool saw_map_step = false;    // reached MAP after the purchase
     std::int64_t money_saved = 0; // the money before the 0-gold armed press
@@ -1574,7 +1576,17 @@ struct QuestVerifyDriver {
         const int cur = app.screens().current_id();
         if (cur != last_screen) {
             last_screen = cur;
+            stall_ticks = 0;
             std::fprintf(stdout, "[qverify] f%d screen -> %d\n", frame, cur);
+            std::fflush(stdout);
+        } else if (++stall_ticks == 1500) {
+            // [driver robustness] The driver used to hammer one tap forever when a
+            // screen refused to change (measured: endless `injected click (64, 40)`
+            // and `mapStep=0`). Say so loudly and rotate the target so a single
+            // unresponsive tap cannot stall the chain.
+            force_rotate = true;
+            std::fprintf(stdout, "[qverify] f%d STALL screen=%d for %d ticks\n", frame,
+                         cur, stall_ticks);
             std::fflush(stdout);
         }
         // Story-step census (frame-stamped): proves WHERE the tutorial chain
@@ -5558,7 +5570,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // the tail Activate -> nav flash Map -> the Map + Lynx dialog.
             // (With the Activate no longer wrongly deferred this must reach
             // MAP and the Map screen WITHOUT a restart.)
-            for (int f2 = 0; f2 < 12000; ++f2) {
+            // [driver robustness] The chain used to get 12000 frames; a fight that
+            // lasts longer (measured with the wall-reaction pin) ended the loop
+            // BEFORE the shop was reached and the gate failed as `mapStep=0`.
+            for (int f2 = 0; f2 < 40000; ++f2) {
                 if (glfwWindowShouldClose(app.renderer().window())) break;
                 drv.tick(app);
                 app.run_one_frame();

@@ -1597,6 +1597,11 @@ private:
     // prepend (still in the PREVIOUS clip's frame) into the clip's own frame.
     float prev_move_world_x_ = 0.0f;
     float prev_move_world_y_ = 0.0f;
+    // [FIX wall-reaction placement] A wall reaction must play WHERE THE FIGHTER
+    // ALREADY IS. Placing it at `wall ± ShiftX` teleported him to the middle of
+    // the arena from the left wall (player report: "от левой стенки персонажа
+    // перемещает в центр локации") and off-screen from the right one.
+    bool wall_pin_ = false;
     // [FIX reaction-start mesh tear] The anchor's clip-space pose from the
     // previous sample: a teleport-sized entry jump is carried onto the simulated
     // nodes (real arenas only) so the mesh stays intact.
