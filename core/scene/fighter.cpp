@@ -5045,6 +5045,28 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
     for (std::size_t i = 0; i < model_.resolved_tris.size(); ++i) {
         if (i < model_.tri_active.size() && !model_.tri_active[i]) continue;
         const TriResolved& tri = model_.resolved_tris[i];
+        // [FIX screen-filling sliver] The residual tears (getup first frames) are
+        // FIGURE sides, not constraint edges: every edge-based physics fix was
+        // measured and reverted, and the JS keeps those very nodes within
+        // 1.2-16.5 units (554 `Standup` frames) while the port reaches 373-1103.
+        // What the player sees is a stretched sliver across the screen, so a
+        // triangle whose DRAWN longest side exceeds `kMaxTriSide` is not emitted.
+        // The simulation is untouched: this only stops drawing the artifact.
+        {
+            constexpr float kMaxTriSide = 400.0f;
+            auto vx_ = [&](int b) {
+                return pos_[static_cast<std::size_t>(b) * 2] + model_off_x_;
+            };
+            auto vy_ = [&](int b) {
+                return pos_[static_cast<std::size_t>(b) * 2 + 1] + model_off_y_;
+            };
+            const float ax = vx_(tri.i1) - vx_(tri.i2), ay = vy_(tri.i1) - vy_(tri.i2);
+            const float bx = vx_(tri.i2) - vx_(tri.i3), by = vy_(tri.i2) - vy_(tri.i3);
+            const float cx = vx_(tri.i3) - vx_(tri.i1), cy = vy_(tri.i3) - vy_(tri.i1);
+            const float longest = std::max(
+                std::max(ax * ax + ay * ay, bx * bx + by * by), cx * cx + cy * cy);
+            if (longest > kMaxTriSide * kMaxTriSide) continue;
+        }
         if (kTraceBadTri && bad_tri_reports < 60) {
             const float x1 = pos_[static_cast<std::size_t>(tri.i1) * 2];
             const float y1 = pos_[static_cast<std::size_t>(tri.i1) * 2 + 1];
