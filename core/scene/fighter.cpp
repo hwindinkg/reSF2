@@ -5202,12 +5202,60 @@ std::size_t Fighter::build_vertices(std::vector<float>& out) const {
             }
         }
         // JS `Te.Gla` model-root offset (`MoveModel`): shift every posed node.
+        // [FIX residual figure stretch — draw-only projection] The physics root
+        // (the wall/floor response in clip space) is fixed, but the FIRST solver
+        // step of a getup clip still walks one cloth node ~255 units away for a
+        // single frame (`[vert] HIP bodynode10 2.2 -> 255.6 -> 7.2`), leaving 4
+        // reports against the JS reference of 117.4. Here a drawn side longer
+        // than `kMaxFigSide` pulls its two endpoints together by half the excess
+        // (both directions, so the triangle stays closed). Draw-only: the solver
+        // state is untouched.
+        {
+            constexpr float kMaxFigSide = 120.0f;
+            float vx[3] = {pos_[static_cast<std::size_t>(tri.i1) * 2] + model_off_x_,
+                           pos_[static_cast<std::size_t>(tri.i2) * 2] + model_off_x_,
+                           pos_[static_cast<std::size_t>(tri.i3) * 2] + model_off_x_};
+            float vy[3] = {pos_[static_cast<std::size_t>(tri.i1) * 2 + 1] + model_off_y_,
+                           pos_[static_cast<std::size_t>(tri.i2) * 2 + 1] + model_off_y_,
+                           pos_[static_cast<std::size_t>(tri.i3) * 2 + 1] + model_off_y_};
+            for (int e = 0; e < 3; ++e) {
+                const int p0 = e, p1 = (e + 1) % 3;
+                const float dx = vx[p1] - vx[p0];
+                const float dy = vy[p1] - vy[p0];
+                const float d = std::sqrt(dx * dx + dy * dy);
+                if (d <= kMaxFigSide) continue;
+                const float half = (d - kMaxFigSide) * 0.5f;
+                const float nx = dx / d, ny = dy / d;
+                vx[p0] += nx * half;
+                vy[p0] += ny * half;
+                vx[p1] -= nx * half;
+                vy[p1] -= ny * half;
+            }
+            if (std::getenv("SF2_TRACE_BADTRI") != nullptr) {
+                static int proj_logs = 0;
+                if (proj_logs < 20) {
+                    ++proj_logs;
+                    float mx = 0.0f;
+                    for (int e2 = 0; e2 < 3; ++e2) {
+                        const int q0 = e2, q1 = (e2 + 1) % 3;
+                        const float ddx = vx[q1] - vx[q0];
+                        const float ddy = vy[q1] - vy[q0];
+                        mx = std::max(mx, std::sqrt(ddx * ddx + ddy * ddy));
+                    }
+                    std::fprintf(stdout, "[proj] tri=%d drawn_longest=%.1f\n",
+                                 static_cast<int>(i), static_cast<double>(mx));
+                    std::fflush(stdout);
+                }
+            }
+            out.push_back(vx[0]);
+            out.push_back(vy[0]);
+            out.push_back(vx[1]);
+            out.push_back(vy[1]);
+            out.push_back(vx[2]);
+            out.push_back(vy[2]);
+            continue;
+        }
         out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2] + model_off_x_);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i1) * 2 + 1] + model_off_y_);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2] + model_off_x_);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i2) * 2 + 1] + model_off_y_);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i3) * 2] + model_off_x_);
-        out.push_back(pos_[static_cast<std::size_t>(tri.i3) * 2 + 1] + model_off_y_);
     }
     return out.size() / 2;
 }
