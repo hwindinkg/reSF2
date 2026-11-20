@@ -1907,6 +1907,25 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         align_absolute_ = true;
         align_own_x_ = world_x_;
         align_own_y_ = world_y_;
+        throw_pin_ = false;
+        // [FIX throw distance — measured pair] During a throw the JS keeps the two
+        // fighters ~92 units apart (root |dx| median on the boss-lynx stand, max
+        // 223.7) while the port held them 412 (max 521): a THROW-VICTIM clip is
+        // anchored to the THROWER, not to the victim's own place. Measured on the
+        // same fight: `ThrowThroughTheBack`/`...V` frames are 189 in the port.
+        // Place the victim on the THROWER's position for such a clip (the clip's
+        // own authored offset then does the rest), keeping the pair where the
+        // animation expects it.
+        if (opponent_ != nullptr &&
+            (move.name.find("Throw") != std::string::npos ||
+             move.file_name.find("throw") != std::string::npos)) {
+            // Measured pair: JS keeps the throw pair ~92 units apart (median) with
+            // a 223.7 maximum; the port held 412/521 because the victim stayed at
+            // his own place. Pin the victim's placement to the THROWER.
+            align_own_x_ = opponent_->world_x();
+            align_own_y_ = opponent_->world_y();
+            throw_pin_ = true;
+        }
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
                          "[absalign] move=%s align=(%.2f,%.2f) own=(%.2f,%.2f) "
@@ -4117,7 +4136,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const char* e = std::getenv("SF2_ABS_MOVE");
             return e == nullptr ? 2 : std::atoi(e);
         }();
-        if (align_absolute_ && (abs_mode == 0 || wall_pin_)) {
+        if (align_absolute_ && (abs_mode == 0 || wall_pin_ || throw_pin_)) {
             // JS `Dl.oL(parameters.position)` (L24171-24199): the clip is
             // anchored to the fighter's OWN position, so `pos = clip -
             // clip[anchor] + own` (below) and the fighter does not ride the
