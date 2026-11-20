@@ -10891,7 +10891,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fprintf(stdout, "[wallprobe] phase=%d walls=[%.0f,%.0f]\n",
                      ctl.phase(), 80.0f, 1880.0f);
         std::fflush(stdout);
-        const char* kMoves[3] = {"WallJump_100", "HunterFly_150", "WaspFly_150"};
+        // [probe] The WALL REACTIONS are the player-reported case ("от левой
+        // стенки персонажа перемещает в центр локации"): `WallHit`/`WallHitFall`
+        // carry `<Align><Position Object="Wall" Part="Back">` like the wall jumps,
+        // but they END IN A RAGDOLL, so the world promotion in `ragdoll_start`
+        // decides where the body lands. They start unconditionally (no key gate),
+        // so they are appended to the forced set and tracked for longer.
+        const char* kMoves[5] = {"WallJump_100", "HunterFly_150", "WaspFly_150",
+                                 "WallHit", "WallHitFall"};
+        const int kMoveFrames[5] = {40, 40, 40, 90, 120};
         // [probe] BOTH walls. `yu`/`zu` = [80, 1880]. The placement distance
         // MATTERS: `WallJump_100` requires `<Distance Min="100" Max="150">` from
         // the wall (`<From Me Object="Wall" Part="Back">` to
@@ -10912,7 +10920,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fprintf(stdout, "[wallprobe] === wall=%s me=%.0f foe=%.0f ===\n",
                      kSpots[wi].tag, static_cast<double>(kSpots[wi].me),
                      static_cast<double>(kSpots[wi].foe));
-        for (int mi = 0; mi < 3; ++mi) {
+        for (int mi = 0; mi < 5; ++mi) {
             ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
             ctl.update(1.0f / 60.0f);
             const float x0 = ctl.player().fighter.world_x();
@@ -10931,7 +10939,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          static_cast<double>(x0),
                          ctl.player().fighter.clip_bone_count());
             float mn = 1e9f, mx = -1e9f, spanmax = 0.0f;
-            for (int f = 0; f < 40; ++f) {
+            for (int f = 0; f < kMoveFrames[mi]; ++f) {
                 ctl.update(1.0f / 60.0f);
                 const float wx = ctl.player().fighter.world_x();
                 const float sp = ctl.player().fighter.debug_bone_span_x();

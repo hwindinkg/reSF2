@@ -799,6 +799,31 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     ragdoll_friction_ = sf2::scene::LocationScene::active_friction();
     const std::size_t n = model_.bones.size();
     if (n == 0) return;
+    // [FIX ragdoll promotion for a PINNED fighter — player report "при ударе
+    // противник резко переместился в центр локации, он был в регдоле"] The world
+    // promotion used to be hard-coded as `render_offset_ + j8_x_`, which is the
+    // base ONLY for a clip-placed fighter (`world_x_ = px[anchor] + off + j8`).
+    // A fighter whose clip is PINNED (`throw_pin_`: the throw victim, and the
+    // wall reactions) has `world_x_ = align_own_x_`, so that base is off by
+    // `align_own_x_ - (px[anchor] + off + j8)` — measured 341 units on the
+    // boss-lynx throw victim at its `StandupAfterThrowFall` start, i.e. the body
+    // teleporting across the arena into ragdoll. Derive the base from the
+    // fighter's OWN last placement instead (identical to `off + j8` when the
+    // clip is placed normally).
+    float ragdoll_base_x = render_offset_ + j8_x_;
+    float ragdoll_base_y = render_offset_y_;
+    if (!solver_world_) {
+        const int anchor_b = model_.bone_by_name(fighter_pivot_bone());
+        if (anchor_b >= 0 && static_cast<std::size_t>(anchor_b) < n) {
+            const std::size_t ua = static_cast<std::size_t>(anchor_b) * 3;
+            const bool have_state = sol_ma_.size() > ua + 2;
+            const float ax = have_state ? sol_ma_[ua] : model_.bones[anchor_b].x;
+            const float ay =
+                have_state ? sol_ma_[ua + 1] : model_.bones[anchor_b].y;
+            ragdoll_base_x = world_x_ - ax;
+            ragdoll_base_y = world_y_ - ay;
+        }
+    }
     sol_ma_.assign(n * 3, 0.0f);
     sol_mf_.assign(n * 3, 0.0f);
     const bool have_pos = pos_.size() == n * 2;
@@ -933,8 +958,8 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
     // `pos = px - px[anchor] + world_x` with `world_x = px[anchor] +
     // render_offset + j8`, so the placement base (world -> clip) is
     // `render_offset + j8`. Captured here so `ragdoll_stop` is continuous.
-    solver_base_x_ = render_offset_ + j8_x_;
-    solver_base_y_ = render_offset_y_;
+    solver_base_x_ = ragdoll_base_x;
+    solver_base_y_ = ragdoll_base_y;
 }
 
 // JS `Al.stop()` (L582): clears `nk` (frameCount/names reset on next start).
@@ -1919,11 +1944,14 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         if (opponent_ != nullptr &&
             (move.name.find("Throw") != std::string::npos ||
              move.file_name.find("throw") != std::string::npos)) {
-            // Measured pair: JS keeps the throw pair ~92 units apart (median) with
-            // a 223.7 maximum; the port held 412/521 because the victim stayed at
-            // his own place. Pin the victim's placement to the THROWER.
-            align_own_x_ = opponent_->world_x();
-            align_own_y_ = opponent_->world_y();
+            // Measured pair (boss-lynx, oracle vs port): in the JS the VICTIM
+            // keeps his own place while the THROWER walks to him — the victim's
+            // root moves 225.5 -> 215 -> 231 over the clip while the thrower goes
+            // 313 -> 247, so the pair closes from 88 to 15 units. The port instead
+            // let the clip's ABSOLUTE buffer drive the victim (median distance 412)
+            // and, when pinned to the thrower, dragged him onto the thrower (3 % of
+            // the paired frames in front vs the JS 52 %). So the victim is pinned
+            // to HIS OWN place: `pos = clip - clip[anchor] + own`.
             throw_pin_ = true;
         }
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
@@ -4142,11 +4170,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             if (preview_mode_) render_offset_y_ = world_y_ - py[anchor_u];
             render_offset_valid_ = true;
         }
+        // [probe fix] One shared map for the jump probe: it used to compare the
+        // CLIP-space placement value (`px + off + j8`) — taken BEFORE a pinned
+        // (throw/wall) clip is re-placed — and so reported hundreds of units of
+        // "jump" the fighter never made. Now the PREVIOUS frame's FINAL
+        // `world_x_` is compared with this frame's final value.
+        static std::map<const void*, float> trace_prev_final;
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
-            static std::map<const void*, float> trace_prev;
-            const float wx_now = px[anchor_u] + render_offset_ + j8_x_;
-            const auto tp = trace_prev.find(this);
-            const bool trace_init = tp != trace_prev.end();
+            const float wx_now = world_x_;
+            const auto tp = trace_prev_final.find(this);
+            const bool trace_init = tp != trace_prev_final.end();
             const float trace_prev_wx = trace_init ? tp->second : 0.0f;
             if (trace_init && std::fabs(wx_now - trace_prev_wx) > 20.0f) {
                 std::fprintf(stdout,
@@ -4162,7 +4195,6 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              solver_world_ ? 1 : 0, render_offset_valid_ ? 1 : 0);
                 std::fflush(stdout);
             }
-            trace_prev[this] = wx_now;
         }
         // [A/B] see `abs_mode` in `start_move_impl`: 0 = the historical PIN,
         // 1 = JS absolute placement, 2 = the clip's delta from the current
@@ -4176,6 +4208,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // anchored to the fighter's OWN position, so `pos = clip -
             // clip[anchor] + own` (below) and the fighter does not ride the
             // clip's absolute buffer coordinates.
+            // [FIX throw side — measured pair] A throw VICTIM is anchored to the
+            // THROWER *while the throw plays*: the thrower travels through the
+            // throw (`ThrowThroughTheBack` walks ~15 units), so pinning the victim
+            // to the thrower's position captured at CLIP START leaves the victim
+            // standing where the thrower used to be — i.e. BEHIND him. Measured on
+            // the boss-lynx stand: the JS keeps the victim ahead of the thrower on
+            // 52 % of the paired frames (median side +11.4), the port managed 3 %
+            // (median -85.8). Track the thrower every frame instead.
             world_x_ = align_own_x_;
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
@@ -4216,6 +4256,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                          render_offset_valid_ ? 1 : 0, align_pivot_u_, anchor_u,
                          solver_world_ ? 1 : 0);
             std::fflush(stdout);
+            trace_prev_final[this] = world_x_;
         }
         x = world_x_;  // `pos_` below is built from the recomputed anchor
         // [B1 FIX vertical anchor] The SAME drive on y. JS `Te.eda` (L556)
