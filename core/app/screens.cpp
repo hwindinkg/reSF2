@@ -3148,8 +3148,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // bar is 250 tall, so the available height is 250-50 = 200 (the old 170
     // clipped the third wrapped line of the RU 	utorial_move
     // "Сначала покажи,{br}как ты двигаешься!" at this font).
-    draw_ui_wrapped(app, tx, ly(50.0f), (620.0f - image_w) * c, 200.0f * c, joined_lines,
-                    0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
+    // [FIX B2 hint-bar text — player screenshot] This label used the CLIPPING
+    // draw, so a body that wraps to more lines than the 200*c box is cut at the
+    // bar's lower edge (the reported "боковой диалог не влазит в рамку"). The FIT
+    // variant measures first and shrinks the font (never below 55 %) until the
+    // whole body fits — the same treatment the page dialog already has.
+    draw_ui_wrapped_fit(app, tx, ly(50.0f), (620.0f - image_w) * c, 200.0f * c,
+                        joined_lines, 0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
     // gate (L1910) - only when the notification carries a button. `Bb` draws
     // through the `ESliced` plate (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842).

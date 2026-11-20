@@ -10650,7 +10650,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // blocks — so settle the boot FIRST (headless skips the overlay and
         // forces one fixed step per frame; `dialog_observe` keeps the modal
         // visible in headless), then queue the dialog.
-        const bool want_notify = (kind == "notify");
+        const bool want_notify = (kind == "notify" || kind == "hint");
         const bool want_modal =
             (kind == "multiline" || kind == "buy" || kind == "tutorial");
         if (want_modal) {
@@ -10780,6 +10780,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
             app.shutdown();
             return 0;
+        } else if (kind == "hint") {
+            // [probe] The `Ib` hint bar with the player's exact tutorial line and
+            // the sensei portrait: the SIDE dialog of his B2 screenshot.
+            sf2::app::EngineDialog d;
+            d.type = "Notification";
+            d.image = "sensei";
+            d.lines.push_back("Сначала покажи, \nкак ты двигаешься!");
+            sf2::app::QuestAction noop;
+            noop.tag = "NoOp";
+            d.button_actions.push_back(noop);
+            d.button_text = "OK";
+            d.button_color = "White";
+            app.quest_engine().push_dialog_for_test(std::move(d));
         } else if (kind == "tutorial") {
             // [probe] The player's B2 screenshot text, verbatim from the RU
             // table: `tutorial_move` = "Сначала покажи, \nкак ты двигаешься!"
@@ -10829,7 +10842,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // `btnWhite` plate, so it read as a washed-out button.
             sf2::app::EngineDialog d;
             d.type = "Notification";
-            d.lines.push_back("Not enough coins to buy this item.");
+            if (kind == "hint") {
+                // [probe] The player's B2 line, verbatim, in the `Ib` hint bar
+                // with the sensei portrait.
+                d.image = "sensei";
+                d.lines.push_back("Сначала покажи, \nкак ты двигаешься!");
+            } else {
+                d.lines.push_back("Not enough coins to buy this item.");
+            }
             sf2::app::QuestAction noop;
             noop.tag = "NoOp";
             d.button_actions.push_back(noop);
