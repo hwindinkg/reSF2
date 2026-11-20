@@ -10651,7 +10651,8 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // forces one fixed step per frame; `dialog_observe` keeps the modal
         // visible in headless), then queue the dialog.
         const bool want_notify = (kind == "notify");
-        const bool want_modal = (kind == "multiline" || kind == "buy");
+        const bool want_modal =
+            (kind == "multiline" || kind == "buy" || kind == "tutorial");
         if (want_modal) {
             app.set_headless_frames(100000);
             app.set_dialog_observe(true);
@@ -10779,6 +10780,18 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
             app.shutdown();
             return 0;
+        } else if (kind == "tutorial") {
+            // [probe] The player's B2 screenshot text, verbatim from the RU
+            // table: `tutorial_move` = "Сначала покажи, \nкак ты двигаешься!"
+            // (the localization carries a RAW newline). Renders through the
+            // `Multiline` (`uj`) path with the sensei portrait.
+            sf2::app::EngineDialog d;
+            d.type = "Multiline";
+            d.title = "_Title_Assistant";
+            d.lines = {"Сначала покажи, \nкак ты двигаешься!"};
+            d.button_text = "OK";
+            d.button_color = "Dark";
+            app.quest_engine().push_dialog_for_test(std::move(d));
         } else if (kind == "multiline") {            sf2::app::EngineDialog d;
             d.type = "Multiline";
             d.title = "_Title_Assistant";

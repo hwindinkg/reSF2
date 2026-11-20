@@ -1105,7 +1105,7 @@ void draw_od_base(App& app, sf2::render::Renderer& ren, const OdPanel& p,
 // defaults; repeating them is an error).
 bool load_sliced_atlas(App& app);
 bool draw_bb_plate(App& app, const std::string& frame_name, float cx, float cy, float w,
-                   float h, float alpha, bool flip_x);
+                   float h, float alpha = 1.0f, bool flip_x = false, float cap_scale = 0.0f);
 void draw_flat_button(App& app, const std::string& label, float cx, float cy, float w, float h,
                       float r, float g, float b, bool hovered);
 // The Regular dialog's action plate (a `He.dhb` slot) drawn through the
@@ -2183,7 +2183,7 @@ void draw_flat_button(App& app, const std::string& label, float cx, float cy, fl
 
 bool draw_sliced_plate(App& app, const std::string& frame_name, float cx, float cy,
                        float w, float h, float l, float t, float r, float b,
-                       float alpha, bool flip_x = false);
+                       float alpha, bool flip_x = false, float cap_scale = 0.0f);
 void draw_atlas_region(App& app, const std::string& frame_name, float fx, float fy,
                        float fw, float fh, float tw, float th, float cx, float cy,
                        float dw, float dh, float alpha, bool flip_x);
@@ -2508,7 +2508,7 @@ void draw_atlas_region(App& app, const std::string& frame_name, float fx, float 
 
 bool draw_sliced_plate(App& app, const std::string& frame_name, float cx, float cy, float w,
                        float h, float l, float t, float r, float b, float alpha,
-                       bool flip_x) {
+                       bool flip_x, float cap_scale) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -2534,6 +2534,14 @@ bool draw_sliced_plate(App& app, const std::string& frame_name, float cx, float 
     // One uniform border scale: caps never stretch to fit (the old bug), they
     // are only shrunk when the destination is smaller than the border sum.
     float k = std::min(1.0f, std::min(w / nat_w, h / nat_h));
+    // [FIX `Bb` plate caps — measured against the oracle] The `Bb` buttons
+    // (`EButtonWhite` & co) are authored 600x112 but their ATLAS frame is
+    // 300x222, so deriving the cap scale from `nat_h` (222) shrinks the caps to
+    // `h/222` — measured on the map FIGHT plate: visible 195x28 where the
+    // oracle's is 248x55. The JS scales the sprite uniformly by the NODE scale
+    // (`Pb(c*.2)` -> `la(h/112)`), so the caller passes that scale in and the
+    // 9-slice reproduces the oracle exactly.
+    if (cap_scale > 0.0f) k = cap_scale;
     if (l + r > 0.0f) k = std::min(k, w / (l + r));
     if (t + b > 0.0f) k = std::min(k, h / (t + b));
     const float sx[4] = {0.0f, l, nat_w - r, nat_w};
@@ -2561,7 +2569,7 @@ bool draw_sliced_plate(App& app, const std::string& frame_name, float cx, float 
 // height. Insets: L=(fa.x/2|0)-2, T=0, R=fa.x-L-4, B=0 -> a 3-column / 1-row
 // slice. Used by every `Bb` text button (`EButtonWhite/Dark/Beige`).
 bool draw_bb_plate(App& app, const std::string& frame_name, float cx, float cy, float w,
-                   float h, float alpha = 1.0f, bool flip_x = false) {
+                   float h, float alpha, bool flip_x, float cap_scale) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -2574,7 +2582,8 @@ bool draw_bb_plate(App& app, const std::string& frame_name, float cx, float cy, 
     if (nat_w <= 0.0f) return false;
     const float l = static_cast<float>(static_cast<int>(nat_w) / 2 - 2);
     const float r = nat_w - l - 4.0f;
-    return draw_sliced_plate(app, frame_name, cx, cy, w, h, l, 0.0f, r, 0.0f, alpha, flip_x);
+    return draw_sliced_plate(app, frame_name, cx, cy, w, h, l, 0.0f, r, 0.0f, alpha, flip_x,
+                             cap_scale);
 }
 
 // Lazily registers the `res/ui/scroll.*` atlas (JS asset id 254) — the `od`
@@ -5857,6 +5866,14 @@ MapFightButtonRect map_fight_button_rect(const MapMetrics& mm) {
     const float body_w = cw - 2.0f * d;
     const float body_h = mm.content_h - f;
     MapFightButtonRect r;
+    // [FIX B8 fight-button shape — measured against the oracle `map_zone1`]
+    // The `Bb` plate's ART is 300x222 inside a 600x112 DESIGN node: the visible
+    // lens occupies 111 of the 222 art rows, so drawing it into a `c*.2`-tall
+    // box shows a 28 px sliver (the port's plate measured 195x28 against the
+    // oracle's 248x55) with the caption spilling out. `r.h` stays the VISIBLE
+    // plate height (it is also the hit rect), and the draw uses twice that — the
+    // art box — so the 9-slice lands at k = min(1, w/300, h/222) = 0.5 and the
+    // plate measures 247x55.
     r.h = cw * 0.2f;                        // `tj.Pb(c*.2)`
     r.w = 600.0f * (r.h / 112.0f);          // `Bb` ctor `xc(600)`
     r.cx = body_x + body_w * 0.5f;
@@ -13908,6 +13925,24 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     const MapFightButtonRect fb = map_fight_button_rect(mm);
     const float btn_h = fb.h;
     const float btn_w = fb.w;
+    if (std::getenv("SF2_TRACE_FIGHTBTN") != nullptr) {
+        static bool once = false;
+        if (!once) {
+            once = true;
+            sf2::data::atlas_frame _fr;
+            int _tw = 0, _th = 0;
+            unsigned int _gl = 0;
+            const bool have = app.get_atlas_frame("btnWhite", &_fr, &_tw, &_th, &_gl);
+            std::fprintf(stdout,
+                         "[fightbtn] rect cx=%.1f cy=%.1f w=%.1f h=%.1f | btnWhite "
+                         "frame=%d src=%dx%d packed=%dx%d off=%d,%d\n",
+                         static_cast<double>(fb.cx), static_cast<double>(fb.cy),
+                         static_cast<double>(fb.w), static_cast<double>(fb.h),
+                         have ? 1 : 0, _fr.source_w, _fr.source_h, _fr.w, _fr.h,
+                         _fr.offset_x, _fr.offset_y);
+            std::fflush(stdout);
+        }
+    }
     const float btn_cx = fb.cx;
     const float btn_cy = fb.cy;
     // JS `Bb` (L1842) draws its sprite (`btnWhite`, atlas frame 300x222)
@@ -13927,8 +13962,16 @@ void draw_map_info_panel(App& app, const MapScreen::Node* node, const MapMetrics
     // {<name>}`) the caption changes; the port always draws `startFight`.
     bool btn_drawn = false;
     if (load_sliced_atlas(app)) {
-        btn_drawn = try_draw_atlas_button(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h,
-                                          1.0f, /*fill=*/true);
+        // [FIX B8 fight-button shape — player screenshot + oracle] This plate
+        // used the plain non-uniform stretch, which squashed the 300x222 art into
+        // the 55.9 px box: the visible face measured 195x28 against the oracle's
+        // 248x55, i.e. a thin sliver with the caption spilling out of it (the
+        // reported "кнопка в бой всё ещё неправильной формы"). The JS `Bb` plate
+        // is the 9-slice `Ec((fa.x/2|0)-2, 0, 4, fa.y|0)` scaled by the NODE
+        // scale `h/112`, so the caps keep the art's proportions and only the
+        // 4 px middle strip stretches — that is `draw_bb_plate` with `cap_scale`.
+        btn_drawn = draw_bb_plate(app, "btnWhite", btn_cx, btn_cy, btn_w, btn_h * 2.0f,
+                                  1.0f, /*flip_x=*/false);
     }
     if (!btn_drawn) {
         draw_flat_button(app, "^startFight^", btn_cx, btn_cy, btn_w, btn_h, 0.35f, 0.45f,
