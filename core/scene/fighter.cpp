@@ -4031,6 +4031,41 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         anchor = 0;
     }
     const std::size_t anchor_u = static_cast<std::size_t>(anchor);
+    // [probe, authorised] `SF2_TRACE_VERT=1`: one vertex's full path on the
+    // getup frame (`Standup mf=7`): the solver state right after the clip
+    // write and right before the drawn pose is taken, for the two nodes of the
+    // measured bad triangle. Answers where the 375-unit gap is introduced.
+    auto vert_probe = [&](const char* stage) {
+        if (std::getenv("SF2_TRACE_VERT") == nullptr) return;
+        if (current_move_ == nullptr) return;
+        if (current_move_->name.compare(0, 7, "Standup") != 0) return;
+        if (move_frame_ < 6 || move_frame_ > 8) return;
+        static int vp_logs = 0;
+        if (vp_logs > 30) return;
+        ++vp_logs;
+        const int a = model_.bone_by_name("NAnkle_2");
+        const int b = model_.bone_by_name("BODY-Node18");
+        if (a < 0 || b < 0) return;
+        const std::size_t ua = static_cast<std::size_t>(a) * 3;
+        const std::size_t ub = static_cast<std::size_t>(b) * 3;
+        const float dx = sol_ma_[ub] - sol_ma_[ua];
+        const float dy = sol_ma_[ub + 1] - sol_ma_[ua + 1];
+        std::fprintf(stdout,
+                     "[vert] %-10s move=%s mf=%d nclip=%zu sol_a=(%.1f,%.1f) "
+                     "sol_b=(%.1f,%.1f) d=%.1f pos_a=(%.1f,%.1f) pos_b=(%.1f,%.1f)\n",
+                     stage, current_move_->name.c_str(),
+                     static_cast<int>(move_frame_), nclip,
+                     static_cast<double>(sol_ma_[ua]),
+                     static_cast<double>(sol_ma_[ua + 1]),
+                     static_cast<double>(sol_ma_[ub]),
+                     static_cast<double>(sol_ma_[ub + 1]),
+                     static_cast<double>(std::sqrt(dx * dx + dy * dy)),
+                     static_cast<double>(pos_[static_cast<std::size_t>(a) * 2]),
+                     static_cast<double>(pos_[static_cast<std::size_t>(a) * 2 + 1]),
+                     static_cast<double>(pos_[static_cast<std::size_t>(b) * 2]),
+                     static_cast<double>(pos_[static_cast<std::size_t>(b) * 2 + 1]));
+        std::fflush(stdout);
+    };
 
     std::vector<float> px(n), py(n), pz(n);
     for (std::size_t i = 0; i < n; ++i) {
@@ -4314,7 +4349,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // ONE solver step per 60 Hz frame: `sk(); jE();`. The invented
         // 600-step warmup (PORT_AUDIT_RENDER §2.4 candidate 1; absent from
         // JS) is removed.
-        // (b) sk: Verlet integrate (grav 0.4 = `xd.fDa`).
+        vert_probe("after-clip");
+    // (b) sk: Verlet integrate (grav 0.4 = `xd.fDa`).
         // [FIX stretched mesh — cloth-only] JS `Al.sk` @296832 gates EVERY
         // body on `this.nk` (ragdoll-active, set ONLY by `Al.start` @296449
         // from `Lwb` @260135 = ragdoll start): `... && (this.nk || c.jy ||
@@ -4623,6 +4659,21 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                         // touched the floor (1030 lines per boss-probe run) and
                         // its `fflush` was a per-frame write syscall (the
                         // reported ragdoll lag). The mutation itself is kept.
+                        // [FIX getup cloth pinned to the wall — measured] The
+                        // ragdoll walls (`ragdoll_wall_min_/max_`) are WORLD space
+                        // and are set once at `ragdoll_start` (160/1773 in the
+                        // bamboo arena); they stay set afterwards, while the
+                        // solver is back in CLIP space. Applying `fha` with them
+                        // then pins every cloth endpoint to the WORLD wall
+                        // coordinate: measured on the getup frame
+                        // `[vert] move=Standup mf=7 sol_b=(160.0,...)` —
+                        // x exactly 160 (the wall) while its neighbour is at -213,
+                        // a 373-unit figure side that grows to 447 and more. The
+                        // JS `Al.fha` only runs for `cA` nodes while the ragdoll
+                        // owns the body, and the port's own comment above says the
+                        // clip-space solver is authored inside the arena — so the
+                        // response must be skipped outside the world solver.
+                        if (!solver_world_) continue;
                         (void)sf2::scene::fha_body(
                             sol_ma_[u], sol_ma_[u + 1], sol_ma_[u + 2],
                             sol_mf_[u], sol_mf_[u + 2], bones[idx[k]].collisible,
@@ -4911,6 +4962,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     } else {
     const float anchor_y = py[anchor_u];
     const float dy = y - anchor_y;
+    vert_probe("pre-draw");
     for (std::size_t i = 0; i < n; ++i) {
         pos_[i * 2] = px[i] - px[anchor_u] + x;
         pos_[i * 2 + 1] = py[i] + dy;
