@@ -1865,6 +1865,9 @@ void App::draw_boot_splash(bool force_loader) {
     float jo_cx = ui_cam.center_x;
     float jo_cy = ui_cam.center_y + static_cast<float>(view_h_) * 0.25f;
     float jo_scale = 1.0f;
+    // [FIX preloader text] Height of the wooden plank, so the "Loading NN%" line
+    // can be centred ON it (the JS `Jo` node is as tall as the scroll).
+    float jo_scroll_h = 0.0f;
     const float W = static_cast<float>(view_w_);
     const float H = static_cast<float>(view_h_);
     const float lc = W / H;  // N.lc
@@ -1940,6 +1943,7 @@ void App::draw_boot_splash(bool force_loader) {
             // by `ea.a1` (ja/ko/ru 0.8, else 1 — L65/L1931/L2484); `Qh.print`
             // L1631 divides by `charset.eF`.
             jo_scale = (scroll_h * 0.4f * ui_text_scale()) / static_cast<float>(eF);
+            jo_scroll_h = scroll_h;
             jo_cx = (W * 0.5f - scroll_w * 0.5f) + scroll_w * 0.75f * 0.5f;
             jo_cy = scroll_top + scroll_h;
         }
@@ -2039,15 +2043,16 @@ void App::draw_boot_splash(bool force_loader) {
     const float w = measure_text(*splash_loading_font_, buf, jo_scale);
     const float lh = std::max(
         1.0f, static_cast<float>(splash_loading_font_->line_height) * jo_scale);
-    // [FIX preloader text — player screenshot] `jo_cy` is the SCROLL'S BOTTOM edge
-    // (`scroll_top + scroll_h`) and the text was CENTRED on it (`- lh*0.5`), so
-    // half of "Загрузка NN%" hung below the wooden plank and looked cut
-    // (reported: "текст загрузки находится ниже плашки, он должен быть выше").
-    // Anchor the text's BOTTOM to that edge, so the whole line sits ON the plank
-    // at its lower border, as in the original.
+    // [FIX preloader text — second player screenshot, 21.11] The text must sit in
+    // the MIDDLE of the wooden plank: "надпись загрузки всё ещё не по центру
+    // плашки". `jo_cy` is the scroll's BOTTOM edge (`scroll_top + scroll_h`), the
+    // plank spans `scroll_h` above it, so the centred line is half a plank up from
+    // that edge (the JS `Jo` node is `Fa(za*.75, qa)` — as TALL as the scroll, its
+    // text centred inside it).
     draw_text_with_font(*splash_loading_font_, splash_loading_tex_, jo_cx - w * 0.5f,
-                        jo_cy - lh, buf, jo_scale, 0.1843137254901961f,
-                        0.1450980392156863f, 0.10588235294117647f);
+                        jo_cy - jo_scroll_h * 0.5f - lh * 0.5f, buf, jo_scale,
+                        0.1843137254901961f, 0.1450980392156863f,
+                        0.10588235294117647f);
 }
 
 bool App::draw_ef_backdrop(float alpha, bool with_logo) {
