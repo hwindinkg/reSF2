@@ -10938,6 +10938,52 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             }
             app.shutdown();
             return 0;
+        } else if (kind == "profile") {
+            // [probe] Item 14: the LEVEL-2 profile the player photographed in the
+            // oracle. Seed his numbers (level 2, 182 coins, 50 rubies), open the
+            // Profile and capture EVERY tab, so the "second plate" / quest tab can
+            // be compared frame to frame.
+            app.set_headless_frames(100000);
+            app.set_dialog_observe(true);
+            for (int i = 0; i < 200; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            try {
+                sf2::app::WarriorSave w = app.save().load();
+                w.level = 2;
+                w.money = 182;
+                w.bonus = 50;
+                app.save().save(w);
+                std::fprintf(stdout, "[actprobe] profile save level=%d money=%lld bonus=%d\n",
+                             w.level, static_cast<long long>(w.money),
+                             static_cast<int>(w.bonus));
+                std::fflush(stdout);
+            } catch (const std::exception&) {
+            }
+            app.screens().push(make_screen(app.screens(), kScreenProfile));
+            for (int i = 0; i < 20; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            // The shipped tab strip (see the fidelity-tour table above):
+            // y=672.5, x = 461.1 / 580.4 / 699.7 / 818.9 (tab 1 = MOVES).
+            const float kTabX[4] = {461.1f, 580.4f, 699.7f, 818.9f};
+            for (int t = 0; t < 4; ++t) {
+                app.inject_click(kTabX[t], 672.5f, 3);
+                for (int i = 0; i < 14; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                }
+                char name[64];
+                std::snprintf(name, sizeof(name),
+                              ".harness/artifacts/profile_lvl2_tab%d.png", t);
+                app.capture_png(name);
+                std::fprintf(stdout, "[actprobe] captured %s\n", name);
+                std::fflush(stdout);
+            }
+            app.shutdown();
+            return 0;
         } else if (kind == "hint") {
             // [probe] The `Ib` hint bar with the player's exact tutorial line and
             // the sensei portrait: the SIDE dialog of his B2 screenshot.
