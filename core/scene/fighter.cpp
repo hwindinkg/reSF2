@@ -1914,9 +1914,15 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // outside the [160,1773] arena, instead of the 210 -> 268 -> ... walk), so
         // they keep the delta mode. Placing EVERY absolute clip absolutely also
         // broke the tutorial chain (`bought=0 shop=0 lynx=0`).
+        // [FIX wall jump teleport — player log 20261121_181924] `WallJump_*` was
+        // EXCLUDED here, so it rode the clip's absolute buffer with one stale
+        // offset: measured in his own fight `WallJump_200` 358.8 -> 1172.5 in four
+        // frames (+814) and `WallJump_50` 1882.9 -> 2534.2 (OUTSIDE the bamboo
+        // arena [160,1773]) - exactly his "от левой стенки в центр, от правой
+        // непонятно куда, пропадает". A wall move must play where the fighter
+        // already stands; the clip's own root motion still carries the body.
         const bool wall_positioned = move.align.has_align &&
-                                     move.align.pos_object == "Wall" &&
-                                     move.name.compare(0, 8, "WallJump") != 0;
+                                     move.align.pos_object == "Wall";
         render_offset_valid_ = (abs_mode != 2) || wall_positioned;
         // [FIX wall-reaction placement — player report] `wall ± ShiftX` teleported
         // the fighter to the CENTRE of the arena from the left wall (ShiftX=480 on
