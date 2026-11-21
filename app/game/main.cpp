@@ -10700,6 +10700,15 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             d.button_color = "Dark";
             d.has_right_button = true;
             app.quest_engine().push_dialog_for_test(std::move(d));
+            // [FIX probe] The `od` open tween is 0.25 s (~15 frames at 60 Hz,
+            // `dc.kYa` scale 0.8 -> 1.0 + alpha 0 -> 1). Capturing 3 frames after
+            // the push photographed the dialog mid-enter with its panel still
+            // scaled/faded out of frame — that is why the B6(b) plate could not be
+            // inspected. Let the tween finish here.
+            for (int i = 0; i < 40; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
         } else if (kind == "tryon") {
             // [probe] Items 6/12: arm the shop `Pi` preview on WEAPON_KNIVES
             // (the SAME `arm_preview` the TRY press runs, JS `Oa.Fhb` L2300 ->
@@ -10835,6 +10844,52 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             app.capture_png(".harness/artifacts/shop_flash.png");
             std::fprintf(stdout, "[actprobe] captured .harness/artifacts/shop_flash.png\n");
             std::fflush(stdout);
+            // [probe] B6(b): open the REAL buy-confirm dialog through the shop's
+            // own path (`ShopScreen::open_buy_confirm` -> `ph`/`kOd350`), wait out
+            // the 0.25 s open tween, and capture, so the OK plate can be compared
+            // instead of reading the source only. The queue path
+            // (`push_dialog_for_test`) drew a panel off-frame because the
+            // programmatic confirm holds its own dialog object, not a queued one.
+            if (auto* shop = static_cast<sf2::app::ShopScreen*>(app.screens().top())) {
+                const std::vector<sf2::app::CatalogItem> cat =
+                    sf2::app::load_catalog(app);
+                const sf2::app::CatalogItem* pick = nullptr;
+                for (const auto& c : cat) {
+                    if (c.name == "WEAPON_KNIVES") {
+                        pick = &c;
+                        break;
+                    }
+                }
+                if (pick == nullptr && !cat.empty()) pick = &cat.front();
+                if (pick != nullptr) {
+                    // The probe boots a FRESH profile (money 0), so the shop's own
+                    // funds gate (`Pa.iwa` -> `transaction`, JS L93372) refuses to
+                    // open the dialog. Fund the save first: the dialog itself is
+                    // what is being photographed.
+                    try {
+                        sf2::app::WarriorSave w = app.save().load();
+                        if (w.money < 100000) {
+                            w.money = 100000;
+                            app.save().save(w);
+                            std::fprintf(stdout, "[actprobe] probe funds money=100000\n");
+                            std::fflush(stdout);
+                        }
+                    } catch (const std::exception&) {
+                    }
+                    const bool opened = shop->open_buy_confirm(app, *pick, false);
+                    std::fprintf(stdout, "[actprobe] buy confirm opened=%d item=%s\n",
+                                 opened ? 1 : 0, pick->name.c_str());
+                    std::fflush(stdout);
+                    for (int i = 0; i < 45; ++i) {
+                        glfwPollEvents();
+                        app.run_one_frame();
+                    }
+                    app.capture_png(".harness/artifacts/shop_confirm.png");
+                    std::fprintf(stdout,
+                                 "[actprobe] captured .harness/artifacts/shop_confirm.png\n");
+                    std::fflush(stdout);
+                }
+            }
             app.shutdown();
             return 0;
         } else if (kind == "hint") {

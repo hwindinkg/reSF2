@@ -3135,17 +3135,54 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             const float bar_h_px = kBarH * c;
             const float rod_w = bar_h_px * (42.0f / 225.0f);
             const float rod_h = bar_h_px * (202.0f / 225.0f);
-            // `Zh` (L1872) builds a rod from `roll_end`/`roll_center`; the
-            // renderer has no rotation for sprite sub-rects yet, so the end grain
-            // is drawn straight (`roll_end`) at the oracle-measured box: 42 px
-            // wide, 202 px tall at a 225 px bar height.
-            if (rod_w > 0.0f) {
-                try_draw_atlas_button(app, "roll_end", lx(0.0f) - rod_w * 0.5f,
-                                      ly(kBarH * 0.5f), rod_w, rod_h, 1.0f,
-                                      /*fill=*/true);
-                try_draw_atlas_button(app, "roll_end", lx(kBarW) + rod_w * 0.5f,
-                                      ly(kBarH * 0.5f), rod_w, rod_h, 1.0f,
-                                      /*fill=*/true, /*flip_x=*/true);
+            // [FIX B2 rolled end — oracle `oracle_ib_00`] The rod is the `Zh`
+            // composite: `roll_end` (cap) + `roll_center` (stretched middle) +
+            // `roll_end` (cap), all ROTATED 90 deg for this horizontal bar. The
+            // oracle frame measures the rod at 42x202 px on a 225 px bar, with
+            // carved dark caps and gold rings (only the composite has them).
+            // `Transform::rotation` did not survive the atlas sub-rect path
+            // (measured: the rotated pieces drew nothing), so the quads are built
+            // here with explicit corners and 90-deg-mapped UVs.
+            float cap_src_w = 101.0f, cap_src_h = 114.0f;
+            atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
+            const float cap_len =
+                cap_src_h > 0.0f ? rod_w * (cap_src_w / cap_src_h) : rod_w;
+            const float mid_len = std::max(1.0f, rod_h - 2.0f * cap_len);
+            // screen TL,TR,BL,BR -> art BL,TL,TR,BR is a 90 deg CW turn; the
+            // other end is the same quad mirrored horizontally.
+            auto rod_piece = [&](const char* frame, float cx, float cy, float w,
+                                 float h, bool mirror) {
+                sf2::data::atlas_frame fr;
+                int tw = 0, th = 0;
+                unsigned int gl = 0;
+                if (!app.get_atlas_frame(frame, &fr, &tw, &th, &gl) || tw <= 0 ||
+                    th <= 0) {
+                    return;
+                }
+                float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
+                float u1 = static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+                const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
+                const float v1 =
+                    static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
+                if (mirror) std::swap(u0, u1);
+                const float xy[8] = {cx - w * 0.5f, cy - h * 0.5f,  // TL
+                                     cx + w * 0.5f, cy - h * 0.5f,  // TR
+                                     cx - w * 0.5f, cy + h * 0.5f,  // BL
+                                     cx + w * 0.5f, cy + h * 0.5f}; // BR
+                const float uv[8] = {u0, v1, u0, v0, u1, v1, u1, v0};
+                app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f,
+                                                  1.0f);
+            };
+            for (int side = 0; side < 2; ++side) {
+                const bool mirror = side != 0;
+                const float rod_cx =
+                    side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
+                const float cy = ly(kBarH * 0.5f);
+                rod_piece("roll_end", rod_cx, cy - rod_h * 0.5f + cap_len * 0.5f,
+                          rod_w, cap_len, mirror);
+                rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror);
+                rod_piece("roll_end", rod_cx, cy + rod_h * 0.5f - cap_len * 0.5f,
+                          rod_w, cap_len, mirror);
             }
         }
     }
