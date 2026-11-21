@@ -10069,7 +10069,6 @@ void FightController::update(float dt) {
             bus_.clear_frame_events();
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
-
             // Hit detection + damage (JS `ca.Enb` + `Cgb`). Gated on the
             // player's round-over latch `kh` exactly as `ca.Hnb` (L389):
             // `if(!this.kc.kh) for(this.Enb(), this.Bg.Bx(), ...)` — once
@@ -10208,6 +10207,94 @@ void FightController::update(float dt) {
             // pass above read the PREVIOUS frame's values, so snapshot after.
             snapshot_capsule_ends(player_);
             snapshot_capsule_ends(enemy_);
+            // [FIX "противник оказался за спиной игрока" — the player's log
+            // `20261121_181924`] This port had NO body-vs-body separation (JS
+            // `Te.Iub`): his fight has 56 side-order flips with the fighters
+            // 0.9-1.8 units apart (f=312 `StandupBack` 941.3 vs `DoubleStepForward`
+            // 943.1, f=322, f=355) - they pass THROUGH each other and the enemy
+            // ends up behind the player. The floor is MEASURED, not guessed: over
+            // the oracle's whole melee Survival trace (1066 phase-2 frames) the
+            // closest pair is |dx| = 38.5 and ZERO frames are below 20.
+            //
+            // Applied at the very END of the frame, after the hit pass and the
+            // capsule snapshot, to the DRAWN pose only: the fight logic
+            // (`world_x_` -> hit test, AI distance, camera) is bit-identical, and
+            // the correction uses THIS frame's final positions, so the floor is
+            // exact in the frame it is needed (computing it before the movement
+            // left 9 frames under the floor; a reaction starting mid-frame also
+            // re-samples `pos_`, which wiped an earlier correction).
+            {
+                constexpr float kMinSep = 38.5f;
+                // Re-arm the SIDE only when the pair is clearly apart; in melee
+                // the side stays latched. Without the latch the raw `dx` sign
+                // crossed on the close frame and the push reversed - measured:
+                // drawn |dCOM| 58.1 -> 11.5 -> 5.0 -> 0.3 -> 82.5, an 80-unit
+                // visual jump in one frame (`HighKick`/`HighBlock`).
+                constexpr float kResyncSep = 140.0f;
+                const bool sep_off = std::getenv("SF2_NO_SEP") != nullptr;  // A/B probe
+                float push_p = 0.0f;
+                float push_e = 0.0f;
+                const bool pinned = player_.fighter.body_pinned() ||
+                                    enemy_.fighter.body_pinned();
+                if (!sep_off && !pinned) {
+                    const float dx = enemy_.fighter.world_x() - player_.fighter.world_x();
+                    const float ad = std::fabs(dx);
+                    if (ad > kResyncSep || !sep_dir_valid_) {
+                        last_sep_dir_ = dx >= 0.0f ? 1.0f : -1.0f;
+                        sep_dir_valid_ = true;
+                    }
+                    if (ad < kMinSep) {
+                        const float push = (kMinSep - ad) * 0.5f;
+                        push_p = -last_sep_dir_ * push;
+                        push_e = last_sep_dir_ * push;
+                    }
+                }
+                player_.fighter.set_sep_bias_x(push_p);
+                enemy_.fighter.set_sep_bias_x(push_e);
+                player_.fighter.shift_pose_x(push_p);
+                enemy_.fighter.shift_pose_x(push_e);
+                if (std::getenv("SF2_TRACE_SEP") != nullptr) {
+                    float plo = 0.0f, phi = 0.0f, elo = 0.0f, ehi = 0.0f;
+                    float ppiv = 0.0f, epiv = 0.0f;
+                    player_.fighter.debug_pose_x_bounds(plo, phi, &ppiv);
+                    enemy_.fighter.debug_pose_x_bounds(elo, ehi, &epiv);
+                    std::fprintf(stdout,
+                                 "[sepd] F%lld root=%.1f dpiv=%.1f drawn=%.1f "
+                                 "push=(%.1f,%.1f) pinned=%d\n",
+                                 static_cast<long long>(frame_),
+                                 static_cast<double>(std::fabs(
+                                     enemy_.fighter.world_x() -
+                                     player_.fighter.world_x())),
+                                 static_cast<double>(std::fabs(epiv - ppiv)),
+                                 static_cast<double>(std::fabs(
+                                     enemy_.fighter.debug_pose_com_x() -
+                                     player_.fighter.debug_pose_com_x())),
+                                 static_cast<double>(push_p), static_cast<double>(push_e),
+                                 pinned ? 1 : 0);
+                    std::fflush(stdout);
+                }
+            }
+            if (std::getenv("SF2_TRACE_SEP") != nullptr) {
+                float plo = 0.0f, phi = 0.0f, elo = 0.0f, ehi = 0.0f;
+                float ppiv = 0.0f, epiv = 0.0f;
+                player_.fighter.debug_pose_x_bounds(plo, phi, &ppiv);
+                enemy_.fighter.debug_pose_x_bounds(elo, ehi, &epiv);
+                std::fprintf(stdout, "[sepd] F%lld root=%.1f drawn=%.1f b=(%.1f,%.1f) "
+                             "pin=(%d,%d) piv=%.1f dpiv=%.1f\n",
+                             static_cast<long long>(frame_),
+                             static_cast<double>(std::fabs(enemy_.fighter.world_x() -
+                                                          player_.fighter.world_x())),
+                             static_cast<double>(std::fabs(
+                                 enemy_.fighter.debug_pose_com_x() -
+                                 player_.fighter.debug_pose_com_x())),
+                             static_cast<double>(player_.fighter.sep_bias_x()),
+                             static_cast<double>(enemy_.fighter.sep_bias_x()),
+                             player_.fighter.body_pinned() ? 1 : 0,
+                             enemy_.fighter.body_pinned() ? 1 : 0,
+                             static_cast<double>(ppiv),
+                             static_cast<double>(std::fabs(epiv - ppiv)));
+                std::fflush(stdout);
+            }
             break;
         }
         case fight_phase::end_stance: {

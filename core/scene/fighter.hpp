@@ -840,6 +840,29 @@ public:
         world_y_ = y;
     }
     float world_x() const { return world_x_; }
+    // [FIX "противник оказался за спиной игрока" — the player's own fight log]
+    // The JS keeps a hard floor between the two bodies: measured over the whole
+    // melee Survival trace (`reference/traces/console.log`, 1066 phase-2 frames)
+    // the oracle's closest pair is |dx| = 38.5 (p1 = 40.3, ZERO frames below 20),
+    // while this port went down to 1.2 - the bodies stood inside each other, which
+    // is exactly the 56 side-order flips in his log (f=312/322/355 at 0.9-1.8
+    // units). The controller resolves the overlap at the END of the frame and the
+    // correction goes into the DRAWN pose only (not into `world_x_`), so hit
+    // tests, AI distance and the camera stay bit-identical.
+    void set_sep_bias_x(float b) { sep_bias_x_ = b; }
+    float sep_bias_x() const { return sep_bias_x_; }
+    // Shift the DRAWN pose only (`pos_`), after the placement: the controller
+    // applies the body separation at the END of the frame, so the correction is
+    // exact in the frame it is needed and `world_x_` (hit tests, AI distance,
+    // camera) stays untouched.
+    void shift_pose_x(float d) {
+        if (d == 0.0f) return;
+        for (std::size_t i = 0; i < pos_.size(); i += 2) pos_[i] += d;
+    }
+    // A throw victim and a wall reaction are placed deliberately; do not fight
+    // their placement.
+    bool body_pinned() const { return throw_pin_ || wall_pin_; }
+    float sep_bias_x_ = 0.0f;
     float world_y() const { return world_y_; }
     // Debug/probe accessor: the clip->world placement constant (see
     // `render_offset_`). Test-only; no simulation reads it.

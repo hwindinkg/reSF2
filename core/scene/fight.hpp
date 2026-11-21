@@ -2441,6 +2441,10 @@ private:
     // round reset must rebuild the original moveset.
     std::vector<sf2::scene::OwnedItem> player_kit_;
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
+    // [FIX body separation] the side used when the pair is EXACTLY coincident
+    // (|dx| == 0, no sign to split on) - keeps the split from flickering.
+    float last_sep_dir_ = 1.0f;
+    bool sep_dir_valid_ = false;
     std::deque<HitLogEntry> hit_log_;  // last 8 hits (debug overlay)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
     AnimStart player_anim_start_;  // [dojo lesson] see take_player_anim_start
