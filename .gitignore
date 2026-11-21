@@ -18,7 +18,10 @@ user.xml
 .codegraph/
 .env
 .flowdeck/
-.opencode/
+.opencode/*
+!.opencode/plugins/
+!.opencode/commands/
+!.opencode/package.json
 .planning/
 .qoder/
 HANDOFF.md
@@ -40,7 +43,7 @@ build_headless/
 build_test/
 check_xml.py
 debug_out.txt
-docs/
+# docs/ holds the GitHub Pages dashboard (progress.svg, history.svg) - tracked
 download/
 dz_decoder.obj
 engine/game/_build_game_cpp.py
@@ -161,11 +164,6 @@ test_v3_21_air_attack_chain.txt.log
 test_v3_22_op_block_during_attack.txt.log
 test_v3_23_walk_punch_walk.txt.log
 tests/test_output.txt
-tools/Marmalade-Modding/
-tools/S3ELoader/
-tools/dzip.exe
-tools/extract_dz.dcl
-tools/il2cpp/
 upload/
 worklog.md
 Shadow.Fight.2.2.46.0.30000121.armeabi-v7a.apks
@@ -185,3 +183,54 @@ reference/extracted/
 
 # Native port: runtime save files
 reference/saves/
+
+# Code-only repo: binary assets excluded (kept in 'old' branch history)
+*.png
+*.jpg
+*.atf
+*.bin
+*.wav
+*.mp3
+*.mp4
+*.ogg
+*.m4a
+*.dds
+*.webp
+*.ktx
+*.exe
+*.dll
+*.pdb
+*.ico
+*.sf2
+*.jsonl
+
+# Legacy asset dump (superseded by code-only snapshot; binaries live in 'old' history)
+/assets/
+build_head/
+# Gate runner runtime state (artifacts, samples, save backup, lock)
+.harness/
+
+# Project-local temp root (browser profiles, ad-hoc probe scratch)
+.harness/tmp/
+
+# --- not needed to COMPILE the port (kept on disk, out of the repo) ---------
+# Agent scratch / planning notes / MCP config
+.planning/
+.opencode/
+.mcp.json
+# The C# OracleShell (verification host for the browser oracle, not part of the
+# C++ port build). Rebuild it locally with dotnet build shell.
+shell/
+
+# --- not needed to COMPILE the port or to render README --------------------
+# The published repo is the source tree + the README dashboard. Everything
+# below stays on disk locally (the gates and the oracle harness still run
+# from it) but is out of the repository:
+AGENTS.md
+BUGS.md
+play.cmd
+.github/
+harness/
+reference/
+# Archives / stray bundles
+*.zip
