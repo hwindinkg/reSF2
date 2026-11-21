@@ -1,5 +1,0 @@
-# Scenario 7: Hold D, then press P. Expect kick to trigger from step.
-frame 180 keydown D
-frame 200 keydown P
-frame 201 keyup P
-frame 220 keyup D

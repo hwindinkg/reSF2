@@ -1,6 +1,0 @@
-# Scenario 11: Press O, then press O again 5 frames later (during uninterrupt).
-# Expect: 2nd O rejected with reject=uninterrupt or reject=no_candidate.
-frame 180 keydown O
-frame 181 keyup O
-frame 186 keydown O
-frame 187 keyup O

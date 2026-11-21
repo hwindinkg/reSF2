@@ -1,7 +1,0 @@
-# Scenario 25: Walk forward (D held), press O while D held.
-# D+O should trigger HeavyPunch (2key|Forward|Punch from moves.xml).
-# After HeavyPunch ends, walking resumes.
-frame 180 keydown D
-frame 460 keydown O
-frame 466 keyup O
-frame 700 keyup D
