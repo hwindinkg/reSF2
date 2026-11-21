@@ -3113,16 +3113,17 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     const float mid_h = std::max(kBarH - 2.0f * kPaperCap, 10.0f);  // 190
     bool drew = false;
     if (load_scroll_atlas(app)) {
-        drew = try_draw_atlas_button(app, "paper_edge_left", lx(kBarW * 0.5f),
-                                     ly(kPaperCap * 0.5f), kBarW * c, kPaperCap * c,
+        // [FIX B2 bar height — measured against `oracle_ib_00`] The bar shows ONLY
+        // the `paper` band: template matching puts the port's bar at the oracle's
+        // position (top strip dx=+1 dy=0, left band dx=0 dy=+2) but 11 px shorter,
+        // and the oracle's visible paper spans 100..271 = 172 px = the 190-px
+        // `paper` band at c=0.9 (190*0.9 = 171), NOT the 250 (with the two 30-px
+        // `paper_edge_*` rails) the port drew. The rails are shared by the `od`
+        // panel and are not part of this bar's face in the original.
+        drew = try_draw_atlas_button(app, "paper", lx(kBarW * 0.5f),
+                                     ly(kPaperCap + mid_h * 0.5f), kBarW * c, mid_h * c,
                                      1.0f, /*fill=*/true);
         if (drew) {
-            try_draw_atlas_button(app, "paper", lx(kBarW * 0.5f),
-                                  ly(kPaperCap + mid_h * 0.5f), kBarW * c, mid_h * c,
-                                  1.0f, /*fill=*/true);
-            try_draw_atlas_button(app, "paper_edge_right", lx(kBarW * 0.5f),
-                                  ly(kPaperCap + mid_h + kPaperCap * 0.5f), kBarW * c,
-                                  kPaperCap * c, 1.0f, /*fill=*/true);
             // [FIX B2 left scroll cap — oracle capture
             // `reference/traces/ui/oracle_ib_00.png`] The bar is a long SCROLL and
             // its ends carry the ROD (`roll_end`, the art the `Zh` composite uses).
@@ -3219,8 +3220,11 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // bar's lower edge (the reported "боковой диалог не влазит в рамку"). The FIT
     // variant measures first and shrinks the font (never below 55 %) until the
     // whole body fits — the same treatment the page dialog already has.
+    // [FIX B2 label size — measured against `oracle_ib_00`] The oracle sets this
+    // line in THREE rows (glyph height ~30 px); at ua 0.75 the port set FOUR
+    // (~34 px) and the last row left the bar. 0.75 * 30/34 = 0.66.
     draw_ui_wrapped_fit(app, tx, ly(50.0f), (620.0f - image_w) * c, 200.0f * c,
-                        joined_lines, 0.75f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
+                        joined_lines, 0.66f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
     // gate (L1910) - only when the notification carries a button. `Bb` draws
     // through the `ESliced` plate (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842).
