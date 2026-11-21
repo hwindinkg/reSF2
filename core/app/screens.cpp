@@ -21354,7 +21354,14 @@ bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
     buy_dlg_->left_.text = loc(app, "CANCEL", "CANCEL");
     buy_dlg_->left_.color = "Dark";
     buy_dlg_->button_text = loc(app, "shopBuy", "BUY");
-    buy_dlg_->button_color = "Dark";
+    // [FIX B6(b) — player screenshots of the oracle] The confirm row is
+    // ОТМЕНА (brown `btnDark`) + КУПИТЬ (**WHITE** `btnWhite`): the oracle frame
+    // (`reference/traces/ui/oracle_sh_c2000.png` and the player's capture) shows
+    // the white plate on the RIGHT and the brown one on the left. The earlier
+    // "both are EButtonDark" reading came from the port's own probe, which had
+    // photographed the dialog before the second plate existed; the oracle's
+    // single visible plate in my capture was the CANCEL one.
+    buy_dlg_->button_color = "White";
     buy_dlg_->has_right_button = true;
     buy_confirm_ = true;
     std::fprintf(stdout, "[shop] Xc.$hb -> dlgBuy %s (%s %lld)\n", bit.name.c_str(),

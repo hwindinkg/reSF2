@@ -1944,7 +1944,13 @@ void App::draw_boot_splash(bool force_loader) {
             // L1631 divides by `charset.eF`.
             jo_scale = (scroll_h * 0.4f * ui_text_scale()) / static_cast<float>(eF);
             jo_scroll_h = scroll_h;
-            jo_cx = (W * 0.5f - scroll_w * 0.5f) + scroll_w * 0.75f * 0.5f;
+            // [FIX loader text "не по центру" — player report, 3rd time] The JS
+            // `Jo` node is `Fa(za*.75, qa)` anchored at the scroll's LEFT edge, so
+            // its centre lands at 37.5 % of the plank and the line reads
+            // left-shifted inside the wooden plate (the player's screenshot shows
+            // the ink hugging the left third). Centre it on the PLANK, which is
+            // itself centred on the screen (`draw_tex` at `W*0.5`).
+            jo_cx = W * 0.5f;
             jo_cy = scroll_top + scroll_h;
         }
     }
