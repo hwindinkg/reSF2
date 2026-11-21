@@ -1649,6 +1649,12 @@ private:
     // collapsed to 73.6 while the JS stayed at 83.8).
     float throw_own_x_ = 0.0f;
     float throw_ref_x_ = 0.0f;
+    // [FIX throw pair — two JS references] The pair separation is derived from the
+    // distance at the clip START: the oracle keeps ~45 in a melee throw (his own
+    // fight: port 4.9) and ~92 from a wide start (BOSS_LYNX: port 63), so the
+    // target is the start distance clamped into that band, on the victim's side.
+    float throw_side_ = 1.0f;
+    float throw_target_ = 0.0f;
     // [FIX reaction-start mesh tear] The anchor's clip-space pose from the
     // previous sample: a teleport-sized entry jump is carried onto the simulated
     // nodes (real arenas only) so the mesh stays intact.
