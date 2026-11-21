@@ -50,7 +50,7 @@ The `overall` row is every checklist item at once (86 of 89); a system row count
 |---|---:|---:|
 | `core/app` | 49383 | 18 |
 | `core/scene` | 42417 | 35 |
-| `app/game` | 12871 | 1 |
+| `app/game` | 12886 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1308 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (86 of 89); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **114671** | |
+| **total** | **114686** | |
 <!-- STATUS:END -->
