@@ -2508,6 +2508,21 @@ static int run_roster_probe(App& app) {
 }
 
 int main(int argc, char** argv) {
+    // [probe] BUILD STAMP. A report is only comparable when the log says WHICH
+    // build produced it: the player's 20261121_223103 log was recorded BEFORE the
+    // wall-jump / jitter / scroll fixes and then evaluated as "nothing changed".
+    // Print the running binary's identity as the very first line of every run.
+    {
+        std::error_code ec;
+        const std::string exe = (argc > 0 && argv[0] != nullptr) ? argv[0] : "";
+        const auto sz = std::filesystem::file_size(exe, ec);
+        const auto mt = std::filesystem::last_write_time(exe, ec);
+        std::fprintf(stdout, "[build] exe=%s size=%llu mtime=%lld\n", exe.c_str(),
+                     static_cast<unsigned long long>(ec ? 0ull : sz),
+                     static_cast<long long>(
+                         ec ? 0ll : mt.time_since_epoch().count()));
+        std::fflush(stdout);
+    }
     std::string res_root = "reference/www/res";
     std::string save_path = "reference/saves/save.xml";
     int headless = 0;
