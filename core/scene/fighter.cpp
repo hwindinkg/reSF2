@@ -4301,13 +4301,32 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // first three samples). Follow the clip, but at a jump speed: cap the
         // per-frame body travel, so the animation carries him across instead of
         // snapping to the centre.
+        // [FIX wall jump flies to the centre / past the wall — player log
+        // 20261122_001443] The limiter required the clip's `align` to be
+        // `Object="Wall"`, which the in-fight `WallJump_*` clips do NOT carry, so
+        // it never armed and the body rode the clip's full travel: measured
+        // WallJump_250 488.6 -> 1477.5 (+989.0), WallJump_50 285.0 -> 1468.3
+        // (+1183.3), px == world. The move NAME is the reliable signal. Also: the
+        // clip's travel is always authored +X, so from the RIGHT wall it carried
+        // him further right ("справа куда-то дальше вправо"); the travel is
+        // mirrored for a fighter standing in the right half and capped, so a wall
+        // jump is a jump off the wall, not a leap across the arena.
         const bool wall_jump_move =
             current_move_ != nullptr &&
-            current_move_->align.has_align &&
-            current_move_->align.pos_object == "Wall" &&
             current_move_->name.compare(0, 8, "WallJump") == 0;
         if (wall_jump_move) {
             constexpr float kWallJumpMaxStep = 16.0f;
+            constexpr float kWallJumpMaxTravel = 220.0f;
+            constexpr float kArenaMidX = 970.0f;
+            if (!wall_jump_active_) {
+                wall_jump_start_x_ = world_x_;
+                wall_jump_active_ = true;
+            }
+            float off = world_x_ - wall_jump_start_x_;
+            if (wall_jump_start_x_ > kArenaMidX) off = -off;  // right wall: outward
+            if (off > kWallJumpMaxTravel) off = kWallJumpMaxTravel;
+            else if (off < -kWallJumpMaxTravel) off = -kWallJumpMaxTravel;
+            world_x_ = wall_jump_start_x_ + off;
             if (prev_wall_jump_valid_) {
                 const float d = world_x_ - prev_wall_jump_x_;
                 if (std::fabs(d) > kWallJumpMaxStep) {
@@ -4319,6 +4338,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             prev_wall_jump_valid_ = true;
         } else {
             prev_wall_jump_valid_ = false;
+            wall_jump_active_ = false;
         }
         // [REVERTED by measurement] Clamping the anchor into the arena walls
         // ("thrown to opposite ends", QA-112.46) CHANGES FIGHT OUTCOMES: with the

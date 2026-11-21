@@ -1682,6 +1682,8 @@ private:
     // [FIX wall-jump travel] rate limiter for the voluntary `WallJump_*` move
     float prev_wall_jump_x_ = 0.0f;
     bool prev_wall_jump_valid_ = false;
+    float wall_jump_start_x_ = 0.0f;
+    bool wall_jump_active_ = false;
 
     // [FIX throw distance] A throw-VICTIM clip is anchored to the THROWER: the
     // pair must stay ~92 units apart (JS median measured on the boss-lynx stand)
