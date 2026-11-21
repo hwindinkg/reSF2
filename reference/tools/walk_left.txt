@@ -1,5 +1,0 @@
-# Walk LEFT (keyCode 65 = 'A' -> Back(7) with the enemy on the right) held for
-# a long time: used to measure whether the root-motion accumulator `j8_x_`
-# grows unbounded at the wall, and what the round reset does to it.
-atframe 300 keydown 65
-atframe 1100 keyup 65

@@ -221,3 +221,16 @@ build_head/
 # The C# OracleShell (verification host for the browser oracle, not part of the
 # C++ port build). Rebuild it locally with dotnet build shell.
 shell/
+
+# --- not needed to COMPILE the port or to render README --------------------
+# The published repo is the source tree + the README dashboard. Everything
+# below stays on disk locally (the gates and the oracle harness still run
+# from it) but is out of the repository:
+AGENTS.md
+BUGS.md
+play.cmd
+.github/
+harness/
+reference/
+# Archives / stray bundles
+*.zip
