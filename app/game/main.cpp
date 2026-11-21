@@ -10820,6 +10820,23 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
             app.shutdown();
             return 0;
+        } else if (kind == "shopflash") {
+            // [probe] The player's B6 capture: the shop with the guided-buy
+            // flash ACTIVE (the tutorial's `StoryTutorialBuyItem` arm), so the
+            // highlight can be compared before/after the quarter-size fix
+            // (`SF2_OLD_HL=1` draws the old version).
+            app.set_headless_frames(100000);
+            app.screens().push(make_screen(app.screens(), kScreenShop));
+            app.quest_engine().set_guided_lock_for_test("ShopBuy");
+            for (int i = 0; i < 90; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
+            app.capture_png(".harness/artifacts/shop_flash.png");
+            std::fprintf(stdout, "[actprobe] captured .harness/artifacts/shop_flash.png\n");
+            std::fflush(stdout);
+            app.shutdown();
+            return 0;
         } else if (kind == "hint") {
             // [probe] The `Ib` hint bar with the player's exact tutorial line and
             // the sensei portrait: the SIDE dialog of his B2 screenshot.

@@ -23601,9 +23601,24 @@ void ShopScreen::render_impl(App& app) {
             // of the frame at its NATURAL height.
             float hl_w = 300.0f, hl_h = 222.0f;
             atlas_source_size(app, "highlightButton", 300.0f, 222.0f, &hl_w, &hl_h);
-            if (!(load_sliced_atlas(app) &&
-                  try_draw_atlas_button(app, "highlightButton", cx0 + cw0 * 0.5f, py,
-                                        cw0, hl_h, ui_flash_alpha(app), /*fill=*/true))) {
+            // [A/B, measurement only] `SF2_OLD_HL=1` restores the pre-fix 9-slice
+            // draw so both versions can be captured and compared.
+            const bool old_hl = std::getenv("SF2_OLD_HL") != nullptr;
+            const bool hl_ok =
+                load_sliced_atlas(app) &&
+                (old_hl ? draw_bb_plate(app, "highlightButton", cx0 + cw0 * 0.5f, py,
+                                        cw0, bh, ui_flash_alpha(app))
+                        : try_draw_atlas_button(app, "highlightButton",
+                                                cx0 + cw0 * 0.5f, py, cw0, hl_h,
+                                                ui_flash_alpha(app), /*fill=*/true));
+            if (std::getenv("SF2_TRACE_HL") != nullptr) {
+                std::fprintf(stdout, "[hl] old=%d w=%.1f h=%.1f alpha=%.2f ok=%d\n",
+                             old_hl ? 1 : 0, static_cast<double>(cw0),
+                             static_cast<double>(old_hl ? bh : hl_h),
+                             static_cast<double>(ui_flash_alpha(app)), hl_ok ? 1 : 0);
+                std::fflush(stdout);
+            }
+            if (!hl_ok) {
                 draw_flash_tint(app, cx0 + cw0 * 0.5f, py, cw0, bh);
             }
         }

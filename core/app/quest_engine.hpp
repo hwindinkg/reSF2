@@ -1207,6 +1207,13 @@ public:
     // `kk(a)` stores the overlay flag in `Xva`; `db.aa` then runs the guided
     // control when `Xva&&tk`, the normal press when `!Xva&&Nf`, and NOTHING
     // otherwise � so a locked overlay enables ONLY the armed control.
+    // [probe, authorised] Arm the guided lock from a headless capture so the
+    // shop's flashing buy plate (`controls_locked() && lock_target()=="ShopBuy"`)
+    // can be photographed and compared against the pre-fix drawing.
+    void set_guided_lock_for_test(const std::string& target) {
+        controls_locked_ = true;
+        lock_target_ = target;
+    }
     bool controls_locked() const { return controls_locked_; }
     const std::string& lock_target() const { return lock_target_; }
     // `db.aa` predicate: unlocked -> every control may activate; locked -> only
