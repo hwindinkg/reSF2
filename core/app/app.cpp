@@ -1369,13 +1369,29 @@ void App::poll_input() {
     for (const int glfw_key : kFightKeys) {
         const bool now_down = glfwGetKey(renderer_->window(), glfw_key) == GLFW_PRESS;
         const bool was_down = fight_keys_down_.count(glfw_key) != 0;
+        // [probe] `SF2_TRACE_INPUT=1`: record every fight-key edge in the ORACLE
+        // tape's units (`atframe <fight.frame> keydown|keyup <code>`), so the
+        // player's own fight can be replayed in the JS build with
+        // `OracleShell --input-script`. GLFW letter keys equal their ASCII codes,
+        // which is what the JS key map uses (D=68, K=75, L=76, ...), so the
+        // recorded code is directly usable in a tape.
+        auto record_edge = [&](int code, bool down) {
+            if (std::getenv("SF2_TRACE_INPUT") == nullptr) return;
+            const int f = sf2::scene::trace_fight_frame();
+            if (f < 0) return;
+            std::fprintf(stdout, "atframe %d %s %d\n", f, down ? "keydown" : "keyup",
+                         code);
+            std::fflush(stdout);
+        };
         if (now_down && !was_down) {
             fight_keys_down_.insert(glfw_key);
+            record_edge(glfw_key, true);
             if (screens_ != nullptr && screens_->top() != nullptr) {
                 screens_->top()->on_key(glfw_key, true);
             }
         } else if (!now_down && was_down) {
             fight_keys_down_.erase(glfw_key);
+            record_edge(glfw_key, false);
             if (screens_ != nullptr && screens_->top() != nullptr) {
                 screens_->top()->on_key(glfw_key, false);
             }

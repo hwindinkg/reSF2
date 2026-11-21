@@ -3148,6 +3148,7 @@ float Fighter::anim_time() const {
 // `sample()` uses (`nclip == 0`), so `sol_ma_` steps and `pos_` follows.
 // `g_trace_fight_frame` is defined at the top of this file (probe only).
 void set_trace_fight_frame(int f) { g_trace_fight_frame = f; }
+int trace_fight_frame() { return g_trace_fight_frame; }
 void Fighter::sample_bind_pose() {
     sf2::data::anim_clip bind_clip;
     bind_clip.frames.resize(1);
@@ -4375,11 +4376,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // really does ride its clip's root travel. Not enabled.
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
-                         "[anchor] F%d move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
+                         "[anchor] F%d move=%s mf=%d px=%.2f off=%.2f j8=%.2f wx=%.2f "
                          "off_valid=%d align_u=%d anchor_u=%d solver=%d com=%.1f "
                          "id=%p\n",
                          g_trace_fight_frame,
                          current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                         static_cast<int>(move_frame_),
                          static_cast<double>(px[anchor_u]),
                          static_cast<double>(render_offset_),
                          static_cast<double>(j8_x_), static_cast<double>(world_x_),

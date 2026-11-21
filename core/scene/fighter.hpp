@@ -1878,4 +1878,7 @@ private:
 };
 
 void set_trace_fight_frame(int f);
+// [probe] the fight frame last published by the controller, so the INPUT recorder
+// can stamp keys in the oracle tape's `atframe <fight.frame>` units.
+int trace_fight_frame();
 } // namespace sf2::scene
