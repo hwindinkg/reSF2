@@ -3204,12 +3204,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                     side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
                 const float cy = ly(kBarH * 0.5f);
                 rod_piece("roll_end", rod_cx, cy - rod_h * 0.5f + cap_len * 0.5f,
-                          rod_w, cap_len, mirror, /*flip_v=*/false);
+                          rod_w, cap_len, mirror, /*flip_v=*/true);
                 rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
                           /*flip_v=*/false);
                 // the bottom cap is the top one turned around: ring at the bottom
                 rod_piece("roll_end", rod_cx, cy + rod_h * 0.5f - cap_len * 0.5f,
-                          rod_w, cap_len, mirror, /*flip_v=*/true);
+                          rod_w, cap_len, mirror, /*flip_v=*/false);
             }
         }
     }
