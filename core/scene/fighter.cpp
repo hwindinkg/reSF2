@@ -4174,6 +4174,27 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                          solver_world_ ? 1 : 0);
             std::fflush(stdout);
         }
+        // [probe, authorised] `SF2_TRACE_CAP=1`: what the placement-offset
+        // recomputation actually sees on a clip change - the previous frame's
+        // FINAL world (tracked below), the `world_x_` it would use, and the
+        // clip-space anchor. Decides the correct fix for the +-320 px teleports.
+        static std::map<const void*, float> cap_prev_final;
+        if (std::getenv("SF2_TRACE_CAP") != nullptr) {
+            const auto it = cap_prev_final.find(this);
+            std::fprintf(stdout,
+                         "[cap] F%d move=%s valid=%d clip_changed=%d world=%.2f "
+                         "prev_final=%.2f px_anchor=%.2f off=%.2f solver=%d\n",
+                         g_trace_fight_frame,
+                         current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                         render_offset_valid_ ? 1 : 0,
+                         (current_clip_ != nullptr) ? 1 : 0,
+                         static_cast<double>(world_x_),
+                         static_cast<double>(it == cap_prev_final.end() ? 0.0f
+                                                                       : it->second),
+                         static_cast<double>(px[anchor_u]),
+                         static_cast<double>(render_offset_), solver_world_ ? 1 : 0);
+            std::fflush(stdout);
+        }
         if (!render_offset_valid_) {
             // No `<Align>` (JS `Gla(0,0,0)` shifts nothing): hold the anchor
             // itself continuous.
@@ -4270,7 +4291,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
                          "[anchor] F%d move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
-                         "off_valid=%d align_u=%d anchor_u=%d solver=%d com=%.1f\n",
+                         "off_valid=%d align_u=%d anchor_u=%d solver=%d com=%.1f "
+                         "id=%p\n",
                          g_trace_fight_frame,
                          current_move_ != nullptr ? current_move_->name.c_str() : "-",
                          static_cast<double>(px[anchor_u]),
@@ -4286,10 +4308,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              const std::size_t nb = pos_.size() / 2;
                              for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
                              return static_cast<float>(acc / static_cast<double>(nb));
-                         }()));
+                         }()),
+                         static_cast<const void*>(this));
             std::fflush(stdout);
             trace_prev_final[this] = world_x_;
         }
+        cap_prev_final[this] = world_x_;
         x = world_x_;  // `pos_` below is built from the recomputed anchor
         // [B1 FIX vertical anchor] The SAME drive on y. JS `Te.eda` (L556)
         // writes `ma = fq[mo] + j8` for every clip bone, so NPivot's y rides
