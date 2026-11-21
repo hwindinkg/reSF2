@@ -1953,6 +1953,10 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // the paired frames in front vs the JS 52 %). So the victim is pinned
             // to HIS OWN place: `pos = clip - clip[anchor] + own`.
             throw_pin_ = true;
+            // [FIX throw pair placement] Remember where the victim and the
+            // thrower stood, so the victim can ride the thrower's TRAVEL.
+            throw_own_x_ = world_x_;
+            throw_ref_x_ = opponent_->world_x();
         }
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
@@ -4251,6 +4255,15 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // the boss-lynx stand: the JS keeps the victim ahead of the thrower on
             // 52 % of the paired frames (median side +11.4), the port managed 3 %
             // (median -85.8). Track the thrower every frame instead.
+            if (throw_pin_ && opponent_ != nullptr) {
+                // [FIX throw pair placement — measured] Standing still made the
+                // pair collapse (73.6 against the JS 83.8 by the clip's end) while
+                // the thrower walks through the throw. Keep the victim's own place
+                // and add the thrower's DELTA since the clip start, which is what
+                // the JS pair does (`ThrowThroughTheBack` 313 -> 247 with the
+                // victim 225 -> 231).
+                align_own_x_ = throw_own_x_ + (opponent_->world_x() - throw_ref_x_);
+            }
             world_x_ = align_own_x_;
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;

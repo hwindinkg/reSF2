@@ -1632,6 +1632,13 @@ private:
     // pair must stay ~92 units apart (JS median measured on the boss-lynx stand)
     // instead of the victim staying where he stood (port median 412).
     bool throw_pin_ = false;
+    // [FIX throw pair placement] The victim keeps his own place AND rides the
+    // thrower's travel: JS holds the pair ~83-92 units apart for the whole clip
+    // (`ThrowThroughTheBack` 313 -> 247 while the victim goes 225 -> 231), so the
+    // victim must follow the thrower's DELTA, not stand still (the port's pair
+    // collapsed to 73.6 while the JS stayed at 83.8).
+    float throw_own_x_ = 0.0f;
+    float throw_ref_x_ = 0.0f;
     // [FIX reaction-start mesh tear] The anchor's clip-space pose from the
     // previous sample: a teleport-sized entry jump is carried onto the simulated
     // nodes (real arenas only) so the mesh stays intact.
