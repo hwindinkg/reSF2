@@ -1921,8 +1921,19 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // arena [160,1773]) - exactly his "от левой стенки в центр, от правой
         // непонятно куда, пропадает". A wall move must play where the fighter
         // already stands; the clip's own root motion still carries the body.
-        const bool wall_positioned = move.align.has_align &&
-                                     move.align.pos_object == "Wall";
+        // [FIX wall-jump plays IN PLACE — player log 20261121_223103] The previous
+        // fix pinned EVERY Wall-aligned move to the fighter's position, so the
+        // voluntary `WallJump_*` played its animation with the root stuck:
+        // measured in his fight `WallJump_250` 93 frames root 385.0 -> 385.0 and
+        // `WallJump_50` 98 frames 1676.4 -> 1676.4 while the clip buffer moved
+        // +1064.6 / -592.0. The pin is for the REACTIONS (`WallHit*`, which must
+        // not teleport to `wall ± ShiftX`); a jump has to travel with its clip.
+        // The clip's first frames cover ~500 units, which is the old "teleport to
+        // the centre", so the travel is rate-limited to a jump speed below.
+        const bool wall_move =
+            move.align.has_align && move.align.pos_object == "Wall";
+        const bool wall_jump_move = wall_move && move.name.compare(0, 8, "WallJump") == 0;
+        const bool wall_positioned = wall_move && !wall_jump_move;
         render_offset_valid_ = (abs_mode != 2) || wall_positioned;
         // [FIX wall-reaction placement — player report] `wall ± ShiftX` teleported
         // the fighter to the CENTRE of the arena from the left wall (ShiftX=480 on
@@ -4283,6 +4294,31 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             world_x_ = align_own_x_;
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
+        }
+        // [FIX wall-jump teleport / no-motion — same player log] A `WallJump_*`
+        // clip covers ~1000 units, ~500 of them in its first 4 frames (measured
+        // on `WallJump_250`: px -449.9 -> +614.8 with -301.6/-54.1/+193.2 in the
+        // first three samples). Follow the clip, but at a jump speed: cap the
+        // per-frame body travel, so the animation carries him across instead of
+        // snapping to the centre.
+        const bool wall_jump_move =
+            current_move_ != nullptr &&
+            current_move_->align.has_align &&
+            current_move_->align.pos_object == "Wall" &&
+            current_move_->name.compare(0, 8, "WallJump") == 0;
+        if (wall_jump_move) {
+            constexpr float kWallJumpMaxStep = 16.0f;
+            if (prev_wall_jump_valid_) {
+                const float d = world_x_ - prev_wall_jump_x_;
+                if (std::fabs(d) > kWallJumpMaxStep) {
+                    world_x_ = prev_wall_jump_x_ +
+                               (d > 0.0f ? kWallJumpMaxStep : -kWallJumpMaxStep);
+                }
+            }
+            prev_wall_jump_x_ = world_x_;
+            prev_wall_jump_valid_ = true;
+        } else {
+            prev_wall_jump_valid_ = false;
         }
         // [REVERTED by measurement] Clamping the anchor into the arena walls
         // ("thrown to opposite ends", QA-112.46) CHANGES FIGHT OUTCOMES: with the

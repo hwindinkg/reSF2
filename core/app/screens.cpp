@@ -3162,11 +3162,19 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
             const float cap_len =
                 cap_src_h > 0.0f ? rod_w * (cap_src_w / cap_src_h) : rod_w;
-            const float mid_len = std::max(1.0f, rod_h - 2.0f * cap_len);
+            // 3 px overlap so the caps and the middle never show a seam
+            const float mid_len = std::max(1.0f, rod_h - 2.0f * cap_len + 3.0f);
             // screen TL,TR,BL,BR -> art BL,TL,TR,BR is a 90 deg CW turn; the
             // other end is the same quad mirrored horizontally.
+            // [FIX scroll rod: mirrored bottom cap + gap — player report with the
+            // side-dialog screenshot] The bottom cap reused the TOP cap's V mapping,
+            // so its carved edge/gold ring sat at the top (the "отзеркалена" look),
+            // and the stretched middle stopped exactly at the cap boxes, leaving a
+            // seam on the bottom side. `flip_v` turns the bottom cap around (ring
+            // outward, as the JS `Zh` composite) and the middle is drawn with a
+            // small overlap so the rod reads as one piece.
             auto rod_piece = [&](const char* frame, float cx, float cy, float w,
-                                 float h, bool mirror) {
+                                 float h, bool mirror, bool flip_v) {
                 sf2::data::atlas_frame fr;
                 int tw = 0, th = 0;
                 unsigned int gl = 0;
@@ -3180,11 +3188,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const float v1 =
                     static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
                 if (mirror) std::swap(u0, u1);
+                float vv0 = v0, vv1 = v1;
+                if (flip_v) std::swap(vv0, vv1);
                 const float xy[8] = {cx - w * 0.5f, cy - h * 0.5f,  // TL
                                      cx + w * 0.5f, cy - h * 0.5f,  // TR
                                      cx - w * 0.5f, cy + h * 0.5f,  // BL
                                      cx + w * 0.5f, cy + h * 0.5f}; // BR
-                const float uv[8] = {u0, v1, u0, v0, u1, v1, u1, v0};
+                const float uv[8] = {u0, vv1, u0, vv0, u1, vv1, u1, vv0};
                 app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f,
                                                   1.0f);
             };
@@ -3194,10 +3204,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                     side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
                 const float cy = ly(kBarH * 0.5f);
                 rod_piece("roll_end", rod_cx, cy - rod_h * 0.5f + cap_len * 0.5f,
-                          rod_w, cap_len, mirror);
-                rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror);
+                          rod_w, cap_len, mirror, /*flip_v=*/false);
+                rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
+                          /*flip_v=*/false);
+                // the bottom cap is the top one turned around: ring at the bottom
                 rod_piece("roll_end", rod_cx, cy + rod_h * 0.5f - cap_len * 0.5f,
-                          rod_w, cap_len, mirror);
+                          rod_w, cap_len, mirror, /*flip_v=*/true);
             }
         }
     }

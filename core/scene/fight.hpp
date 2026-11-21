@@ -2445,6 +2445,9 @@ private:
     // (|dx| == 0, no sign to split on) - keeps the split from flickering.
     float last_sep_dir_ = 1.0f;
     bool sep_dir_valid_ = false;
+    // [FIX jitter] the push actually applied last frame (eased toward the target)
+    float sep_push_p_ = 0.0f;
+    float sep_push_e_ = 0.0f;
     std::deque<HitLogEntry> hit_log_;  // last 8 hits (debug overlay)
     FightFighter enemy_;           // JS `Zb` (params) + `pb` (fighter)
     AnimStart player_anim_start_;  // [dojo lesson] see take_player_anim_start

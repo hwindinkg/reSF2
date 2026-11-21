@@ -875,6 +875,10 @@ public:
         return n.find("Throw") != std::string::npos && n.size() > 1 && n.back() == 'V';
     }
     bool body_pinned() const { return throw_victim_now() || wall_pin_; }
+    // [FIX jitter at the punching bag — player report] A `NotAnimation` dummy has
+    // no AI and never moves on its own; pushing the player away from it made the
+    // body wobble a couple of pixels while walking past it.
+    bool is_dummy() const { return not_animation_; }
     bool throw_pin_flag() const { return throw_victim_now(); }  // probe only
     bool wall_pin_flag() const { return wall_pin_; }            // probe only
     float sep_bias_x_ = 0.0f;
@@ -1675,6 +1679,9 @@ private:
     // the arena from the left wall (player report: "от левой стенки персонажа
     // перемещает в центр локации") and off-screen from the right one.
     bool wall_pin_ = false;
+    // [FIX wall-jump travel] rate limiter for the voluntary `WallJump_*` move
+    float prev_wall_jump_x_ = 0.0f;
+    bool prev_wall_jump_valid_ = false;
 
     // [FIX throw distance] A throw-VICTIM clip is anchored to the THROWER: the
     // pair must stay ~92 units apart (JS median measured on the boss-lynx stand)

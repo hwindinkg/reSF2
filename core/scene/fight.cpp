@@ -10235,7 +10235,9 @@ void FightController::update(float dt) {
                 float push_p = 0.0f;
                 float push_e = 0.0f;
                 const bool pinned = player_.fighter.body_pinned() ||
-                                    enemy_.fighter.body_pinned();
+                                    enemy_.fighter.body_pinned() ||
+                                    player_.fighter.is_dummy() ||
+                                    enemy_.fighter.is_dummy();
                 // Measure the DISTANCE ON THE DRAWN POSE (`pivot_x` of each
                 // fighter), not on `world_x_`: the drawn pivot is offset from the
                 // root by the clip pose, so a root-based push left 3 of 598 frames
@@ -10268,6 +10270,24 @@ void FightController::update(float dt) {
                         push_e = -s;
                     }
                 }
+                // [FIX jitter — player report "странные дёргания / перемещение по
+                // оси X на пару пикселей"] The push used to jump straight to the
+                // frame's target and the measured sign/attainment flipped between
+                // frames (178-251 direction reversals per fighter in his log).
+                // Ease the applied push toward the target at <=3 units/frame: the
+                // floor is reached within a few frames and the drawn body stops
+                // wobbling. The target itself is still the exact signed solve.
+                const auto ease = [](float cur, float tgt) {
+                    constexpr float kMaxStep = 3.0f;
+                    float d = tgt - cur;
+                    if (d > kMaxStep) d = kMaxStep;
+                    else if (d < -kMaxStep) d = -kMaxStep;
+                    return cur + d;
+                };
+                sep_push_p_ = ease(sep_push_p_, push_p);
+                sep_push_e_ = ease(sep_push_e_, push_e);
+                push_p = sep_push_p_;
+                push_e = sep_push_e_;
                 player_.fighter.set_sep_bias_x(push_p);
                 enemy_.fighter.set_sep_bias_x(push_e);
                 player_.fighter.shift_pose_x(push_p);
