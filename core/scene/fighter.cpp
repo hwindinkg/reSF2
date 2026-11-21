@@ -1947,9 +1947,20 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // Place the victim on the THROWER's position for such a clip (the clip's
         // own authored offset then does the rest), keeping the pair where the
         // animation expects it.
-        if (opponent_ != nullptr &&
-            (move.name.find("Throw") != std::string::npos ||
-             move.file_name.find("throw") != std::string::npos)) {
+        // [FIX over-broad throw pin — measured on BOSS_LYNX] The old test matched
+        // ANY move containing "Throw", which includes the THROWER
+        // (`ThrowForward`), the whole post-throw chain (`StandupAfterThrowFall`,
+        // `AfterThrowFall`, `PhysicalAfterThrow`) and `LossThrowBack`. Both
+        // fighters then pinned each other to `thrower + 45..92` at the same time,
+        // so the pair stayed glued for 85 % of the fight (measured 1940 of 2274
+        // frames pinned) and the body separation was disabled for almost the whole
+        // fight. The VICTIM clips are exactly the four names ending in `V`
+        // (`ThrowForwardV`, `ThrowSuplexV`, `ThrowThroughTheBackV`,
+        // `TitanThrowForwardV`), so require that suffix.
+        const bool throw_victim =
+            move.name.find("Throw") != std::string::npos &&
+            move.name.size() > 1 && move.name.back() == 'V';
+        if (opponent_ != nullptr && throw_victim) {
             // Measured pair (boss-lynx, oracle vs port): in the JS the VICTIM
             // keeps his own place while the THROWER walks to him — the victim's
             // root moves 225.5 -> 215 -> 231 over the clip while the thrower goes
@@ -4253,7 +4264,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const char* e = std::getenv("SF2_ABS_MOVE");
             return e == nullptr ? 2 : std::atoi(e);
         }();
-        if (align_absolute_ && (abs_mode == 0 || wall_pin_ || throw_pin_)) {
+        if (align_absolute_ && (abs_mode == 0 || wall_pin_ || throw_victim_now())) {
             // JS `Dl.oL(parameters.position)` (L24171-24199): the clip is
             // anchored to the fighter's OWN position, so `pos = clip -
             // clip[anchor] + own` (below) and the fighter does not ride the
@@ -4266,7 +4277,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // the boss-lynx stand: the JS keeps the victim ahead of the thrower on
             // 52 % of the paired frames (median side +11.4), the port managed 3 %
             // (median -85.8). Track the thrower every frame instead.
-            if (throw_pin_ && opponent_ != nullptr) {
+            if (throw_victim_now() && opponent_ != nullptr) {
                 align_own_x_ = opponent_->world_x() + throw_side_ * throw_target_;
             }
             world_x_ = align_own_x_;

@@ -861,7 +861,22 @@ public:
     }
     // A throw victim and a wall reaction are placed deliberately; do not fight
     // their placement.
-    bool body_pinned() const { return throw_pin_ || wall_pin_; }
+    // [FIX latched throw pin — measured] `throw_pin_` is set at a clip START, but
+    // the post-throw chain (`StandupAfterThrowFall`, ...) does not go through that
+    // path, so the flag stayed ON: measured on BOSS_LYNX the player was "the throw
+    // victim" for 1940 of 2274 fight frames while actually playing `HighBlock`,
+    // which kept the pair glued and disabled the body separation. Derive it from
+    // the CURRENT clip instead - only the four victim clips end in `V`
+    // (`ThrowForwardV`, `ThrowSuplexV`, `ThrowThroughTheBackV`,
+    // `TitanThrowForwardV`).
+    bool throw_victim_now() const {
+        if (current_move_ == nullptr) return false;
+        const std::string& n = current_move_->name;
+        return n.find("Throw") != std::string::npos && n.size() > 1 && n.back() == 'V';
+    }
+    bool body_pinned() const { return throw_victim_now() || wall_pin_; }
+    bool throw_pin_flag() const { return throw_victim_now(); }  // probe only
+    bool wall_pin_flag() const { return wall_pin_; }            // probe only
     float sep_bias_x_ = 0.0f;
     float world_y() const { return world_y_; }
     // Debug/probe accessor: the clip->world placement constant (see

@@ -10236,17 +10236,36 @@ void FightController::update(float dt) {
                 float push_e = 0.0f;
                 const bool pinned = player_.fighter.body_pinned() ||
                                     enemy_.fighter.body_pinned();
-                if (!sep_off && !pinned) {
-                    const float dx = enemy_.fighter.world_x() - player_.fighter.world_x();
+                // Measure the DISTANCE ON THE DRAWN POSE (`pivot_x` of each
+                // fighter), not on `world_x_`: the drawn pivot is offset from the
+                // root by the clip pose, so a root-based push left 3 of 598 frames
+                // below the JS floor (min pivot 31.4). Manypivoting on the drawn
+                // pivot makes the corrected distance exact, and the shift moves
+                // `pos_` rigidly, so the applied push changes the measured
+                // distance 1:1 (each side gets half of the deficit).
+                float plo = 0.0f, phi = 0.0f, elo = 0.0f, ehi = 0.0f;
+                float ppiv = 0.0f, epiv = 0.0f;
+                const bool have_b =
+                    player_.fighter.debug_pose_x_bounds(plo, phi, &ppiv) &&
+                    enemy_.fighter.debug_pose_x_bounds(elo, ehi, &epiv);
+                if (!sep_off && !pinned && have_b) {
+                    const float dx = epiv - ppiv;
                     const float ad = std::fabs(dx);
                     if (ad > kResyncSep || !sep_dir_valid_) {
                         last_sep_dir_ = dx >= 0.0f ? 1.0f : -1.0f;
                         sep_dir_valid_ = true;
                     }
                     if (ad < kMinSep) {
-                        const float push = (kMinSep - ad) * 0.5f;
-                        push_p = -last_sep_dir_ * push;
-                        push_e = last_sep_dir_ * push;
+                        // Solve for the SIGNED distance directly: after shifting
+                        // `push_p`/`push_e` the pair must read `dir * kMinSep`. With
+                        // the symmetric `(deficit/2)` form the two frames where the
+                        // drawn order had already CROSSED (dx opposite the latched
+                        // side) pushed the bodies further through each other -
+                        // measured min 31.4 on 3 frames. This form is exact for
+                        // both signs and keeps the latched side.
+                        const float s = (dx - last_sep_dir_ * kMinSep) * 0.5f;
+                        push_p = s;
+                        push_e = -s;
                     }
                 }
                 player_.fighter.set_sep_bias_x(push_p);
@@ -10260,7 +10279,7 @@ void FightController::update(float dt) {
                     enemy_.fighter.debug_pose_x_bounds(elo, ehi, &epiv);
                     std::fprintf(stdout,
                                  "[sepd] F%lld root=%.1f dpiv=%.1f drawn=%.1f "
-                                 "push=(%.1f,%.1f) pinned=%d\n",
+                                 "push=(%.1f,%.1f) pinned=%d flags=%d%d%d%d\n",
                                  static_cast<long long>(frame_),
                                  static_cast<double>(std::fabs(
                                      enemy_.fighter.world_x() -
@@ -10270,7 +10289,11 @@ void FightController::update(float dt) {
                                      enemy_.fighter.debug_pose_com_x() -
                                      player_.fighter.debug_pose_com_x())),
                                  static_cast<double>(push_p), static_cast<double>(push_e),
-                                 pinned ? 1 : 0);
+                                 pinned ? 1 : 0,
+                                 player_.fighter.throw_pin_flag() ? 1 : 0,
+                                 player_.fighter.wall_pin_flag() ? 1 : 0,
+                                 enemy_.fighter.throw_pin_flag() ? 1 : 0,
+                                 enemy_.fighter.wall_pin_flag() ? 1 : 0);
                     std::fflush(stdout);
                 }
             }
