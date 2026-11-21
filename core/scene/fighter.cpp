@@ -4160,6 +4160,20 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // `world_x_` — a different node's swing — which is the intro-stance drift
     // (~19u at the idle start) this fixes.
     if (interp && current_move_ != nullptr && !solver_world_) {
+        if (std::getenv("SF2_TRACE_OFFSET") != nullptr) {
+            std::fprintf(stdout,
+                         "[offset] F%d move=%s valid=%d px_anchor=%.2f world=%.2f "
+                         "off=%.2f off_y=%.2f solver=%d\n",
+                         g_trace_fight_frame,
+                         current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                         render_offset_valid_ ? 1 : 0,
+                         static_cast<double>(px[anchor_u]),
+                         static_cast<double>(world_x_),
+                         static_cast<double>(render_offset_),
+                         static_cast<double>(render_offset_y_),
+                         solver_world_ ? 1 : 0);
+            std::fflush(stdout);
+        }
         if (!render_offset_valid_) {
             // No `<Align>` (JS `Gla(0,0,0)` shifts nothing): hold the anchor
             // itself continuous.
@@ -4256,14 +4270,23 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
                          "[anchor] F%d move=%s px=%.2f off=%.2f j8=%.2f wx=%.2f "
-                         "off_valid=%d align_u=%d anchor_u=%d solver=%d\n",
+                         "off_valid=%d align_u=%d anchor_u=%d solver=%d com=%.1f\n",
                          g_trace_fight_frame,
                          current_move_ != nullptr ? current_move_->name.c_str() : "-",
                          static_cast<double>(px[anchor_u]),
                          static_cast<double>(render_offset_),
                          static_cast<double>(j8_x_), static_cast<double>(world_x_),
                          render_offset_valid_ ? 1 : 0, align_pivot_u_, anchor_u,
-                         solver_world_ ? 1 : 0);
+                         solver_world_ ? 1 : 0,
+                         // [player hint] the DRAWN pose's COM (what the eye sees),
+                         // not just the root `world_x_`.
+                         static_cast<double>([&] {
+                             if (pos_.size() < 2) return 0.0f;
+                             double acc = 0.0;
+                             const std::size_t nb = pos_.size() / 2;
+                             for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
+                             return static_cast<float>(acc / static_cast<double>(nb));
+                         }()));
             std::fflush(stdout);
             trace_prev_final[this] = world_x_;
         }

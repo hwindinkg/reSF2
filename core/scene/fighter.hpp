@@ -1627,6 +1627,7 @@ private:
     // the arena from the left wall (player report: "от левой стенки персонажа
     // перемещает в центр локации") and off-screen from the right one.
     bool wall_pin_ = false;
+
     // [FIX throw distance] A throw-VICTIM clip is anchored to the THROWER: the
     // pair must stay ~92 units apart (JS median measured on the boss-lynx stand)
     // instead of the victim staying where he stood (port median 412).
