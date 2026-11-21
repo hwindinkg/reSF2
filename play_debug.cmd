@@ -1,19 +1,21 @@
 @echo off
 rem ============================================================================
-rem  play_debug.cmd - the SAME launch as play.cmd, but boots the FIRST BOSS
-rem  fight and writes EVERY trace the port can produce into
-rem  .harness\debug_logs\<timestamp>\ :
+rem  play_debug.cmd - the SAME launch as play.cmd, but boots a fight (FIRST BOSS
+rem  by default) with EVERY trace on, so the developer can analyse YOUR fight:
 rem
-rem    fight_log.txt        - stdout/stderr: every [anchor]/[pos]/[align]/[cap]/
-rem                           [ragdoll]/[hit]/[rdoll] line: model positions,
-rem                           drawn-pose COM, clip placement, ragdoll state,
-rem                           hits, wall reactions, stretched triangles
+rem    fight_log.txt        - per frame: [anchor] (model position, clip
+rem                           placement, drawn-pose COM, solver state), [pos],
+rem                           [align], [cap], [ragdoll]/[rdseed], hits, wall
+rem                           reactions, stretched triangles, cloth edges
 rem    native_pose.jsonl    - EVERY bone of BOTH fighters, EVERY fight frame
-rem    native_state.jsonl   - the fight state (rules, callouts, capsules, AI)
+rem    native_state.jsonl   - fight state (rules, callouts, capsules, AI)
+rem    native_audio.jsonl   - the audio event stream for the same frames
+rem    summary.txt          - a first-pass COM-jump table (so you can see the
+rem                           event was captured) - optional, needs python
 rem
-rem  Play the fight as usual (walk, hit the enemy, THROW him, push him into a
-rem  wall, let him knock you down), then CLOSE the game window. The script then
-rem  copies the dumps next to the log and prints the folder to send back.
+rem  HOW TO USE: run it, play the fight (hit, THROW, push into a wall, get
+rem  knocked down), close the window. The script then zips the folder and
+rem  prints its path - send that zip.
 rem
 rem  Usage:
 rem    play_debug.cmd                     first boss (BOSS_LYNX, bamboo grove)
@@ -57,7 +59,9 @@ set SF2_DEBUG_LOG=1
 echo.
 echo   Fight: %BATTLE%  location: %LOC%   (full trace on)
 echo   Log folder: %OUT%
-echo   Play the fight, then close the window.
+echo.
+echo   Play the fight: hit the enemy, THROW him, push him into a wall,
+echo   let him knock you down. Then CLOSE the window.
 echo.
 
 "%ROOT%build\app\game\Release\game.exe" "%ROOT%reference\www\res" "%ROOT%reference\saves\save.xml" --windowed --fight --battle %BATTLE% --zone ZONE_1 --fight-ordinal 0 --location %LOC% --dump-pose 6000 --dump-state 6000 > "%OUT%\fight_log.txt" 2>&1
@@ -66,8 +70,22 @@ copy /y "%ROOT%reference\traces\native_pose.jsonl" "%OUT%\" >nul 2>&1
 copy /y "%ROOT%reference\traces\native_state.jsonl" "%OUT%\" >nul 2>&1
 copy /y "%ROOT%reference\traces\native_audio.jsonl" "%OUT%\" >nul 2>&1
 
-echo.
-echo   Done. Send the whole folder:  %OUT%
-dir /b "%OUT%"
+rem --- first-pass analysis: did the fight capture any drawn-pose jumps? ----
+if exist "%ROOT%reference\tools\pose_com_jumps.py" (
+    python "%ROOT%reference\tools\pose_com_jumps.py" "%OUT%\fight_log.txt" > "%OUT%\summary.txt" 2>&1
+    echo.
+    type "%OUT%\summary.txt"
+)
+
+rem --- one file to send ----------------------------------------------------
+for %%F in ("%OUT%") do set "OUTNAME=%%~nxF"
+where tar >nul 2>&1 && tar -a -c -f "%OUT%.zip" -C "%ROOT%.harness\debug_logs" "%OUTNAME%" >nul 2>&1
+if exist "%OUT%.zip" (
+    echo.
+    echo   Done. Send this file:  %OUT%.zip
+) else (
+    echo.
+    echo   Done. Send this folder:  %OUT%
+)
 echo.
 pause
