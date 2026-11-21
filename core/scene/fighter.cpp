@@ -4323,11 +4323,18 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 wall_jump_start_x_ = world_x_;
                 wall_jump_active_ = true;
             }
-            float off = world_x_ - wall_jump_start_x_;
-            if (wall_jump_start_x_ > kArenaMidX) off = -off;  // right wall: outward
-            if (off > kWallJumpMaxTravel) off = kWallJumpMaxTravel;
-            else if (off < -kWallJumpMaxTravel) off = -kWallJumpMaxTravel;
-            world_x_ = wall_jump_start_x_ + off;
+            // [FIX wall jump still leaving through the wall — player log
+            // 20261122_005930] The mirror keyed on the clip's own travel sign,
+            // which is authored +X; for the third jump (start 1743.0, arena ends
+            // 1880) it still carried him to 1963.0, i.e. OUT of the arena. The
+            // direction is now derived from the ARENA SIDE, never from the clip:
+            // a wall jump always travels toward the arena centre, capped at 220,
+            // so it can never cross a wall regardless of what the clip authored.
+            const float dir_to_mid = (kArenaMidX - wall_jump_start_x_) >= 0.0f ? 1.0f : -1.0f;
+            float mag = world_x_ - wall_jump_start_x_;
+            if (mag < 0.0f) mag = -mag;
+            if (mag > kWallJumpMaxTravel) mag = kWallJumpMaxTravel;
+            world_x_ = wall_jump_start_x_ + dir_to_mid * mag;
             if (prev_wall_jump_valid_) {
                 const float d = world_x_ - prev_wall_jump_x_;
                 if (std::fabs(d) > kWallJumpMaxStep) {
