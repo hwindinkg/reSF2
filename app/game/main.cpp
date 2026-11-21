@@ -10885,7 +10885,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             if (kind == "hint") {
                 // [probe] The player's B2 line, verbatim, in the `Ib` hint bar
                 // with the sensei portrait.
-                d.image = "sensei";
+                d.image = "character_sensei";  // the shipped asset (the port
+                // resolves `_small` via `strip_small`); "sensei" alone resolved to
+                // nothing and the label slid left out of the plate.
                 d.lines.push_back("Сначала покажи, \nкак ты двигаешься!");
             } else {
                 d.lines.push_back("Not enough coins to buy this item.");

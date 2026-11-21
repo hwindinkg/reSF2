@@ -1,0 +1,25 @@
+# ORACLE run for B2: the SIDE plate (`Ib` notification bar) with the sensei
+# portrait and the `tutorial_move` line («Сначала покажи, как ты двигаешься!»).
+# `--query postTutorial=0` boots the stock fresh-profile tutorial (see
+# reference/www/index.html), then a series of centred taps walks the Sensei
+# beats; `shot <name>` captures reference/traces/ui/oracle_<name>.png.
+wait 9000
+shot ib_00
+tap 640 600
+wait 2500
+shot ib_01
+tap 640 600
+wait 2500
+shot ib_02
+tap 640 600
+wait 2500
+shot ib_03
+tap 640 600
+wait 3000
+shot ib_04
+tap 640 600
+wait 3000
+shot ib_05
+tap 640 600
+wait 4000
+shot ib_06

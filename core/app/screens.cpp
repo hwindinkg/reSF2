@@ -785,8 +785,9 @@ struct UiWrap {
 
 // Forward (defined after the dialog art below).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
-                           float w, float h, float alpha, bool fill, bool flip_x,
-                           bool top_left);
+                           float w, float h, float alpha = 1.0f, bool fill = false,
+                           bool flip_x = false, bool top_left = false,
+                           float rot_deg = 0.0f);
 
 // Replaces every `<image ...>name</image>` with 0x01 and records the runs in
 // order. `<image y=-0.1 s=0.6>level</image>` parses both attrs. Plain text
@@ -1073,8 +1074,8 @@ void draw_ui_wrapped_fit(App& app, float x, float y, float w, float h,
 // Helpers defined later in this file (the atlas sprite path sits after this
 // point; the `od`/`Ib` dialog art below needs it).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy,
-                           float w, float h, float alpha = 1.0f, bool fill = false,
-                           bool flip_x = false, bool top_left = false);
+                           float w, float h, float alpha, bool fill,
+                           bool flip_x, bool top_left, float rot_deg);
 bool load_scroll_atlas(App& app);
 // JS `oe` user image (`res/users/images/<name>.png`, L1823). Defined with the
 // item-image helpers below; the `Ib` bar needs it for the dialog portrait.
@@ -2222,7 +2223,8 @@ void draw_xp_hint(App& app) {
 // `Ga()`/button case (`db`/`Le`/`Qr`). `top_left=true` anchors its LEFT/TOP
 // edge at (cx,cy) - the plain `R.$` case (`wr`/`xr` icons, progress bars).
 bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, float cy, float w, float h,
-                           float alpha, bool fill, bool flip_x, bool top_left) {
+                           float alpha, bool fill, bool flip_x, bool top_left,
+                           float rot_deg) {
     sf2::data::atlas_frame fr;
     int tw = 0, th = 0;
     unsigned int gl = 0;
@@ -2295,6 +2297,9 @@ bool try_draw_atlas_button(App& app, const std::string& frame_name, float cx, fl
             s.transform.set_scale(sc, sc);
         }
     }
+    // [rotation] The `Zh` scroll's rod pieces are authored HORIZONTAL and are
+    // drawn rotated 90 deg for a vertical rod end (JS `Wg`).
+    if (rot_deg != 0.0f) s.transform.rotation = rot_deg;
     // JS `Hr(!0)` (flipX, e.g. the right `roll_end` cap of `Zh` L1872): mirror
     // the quad on x. No face culling — a flipped winding still draws.
     if (flip_x) {
@@ -3118,6 +3123,30 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             try_draw_atlas_button(app, "paper_edge_right", lx(kBarW * 0.5f),
                                   ly(kPaperCap + mid_h + kPaperCap * 0.5f), kBarW * c,
                                   kPaperCap * c, 1.0f, /*fill=*/true);
+            // [FIX B2 left scroll cap — oracle capture
+            // `reference/traces/ui/oracle_ib_00.png`] The bar is a long SCROLL and
+            // its ends carry the ROD (`roll_end`, the art the `Zh` composite uses).
+            // Measured on the oracle frame at 1280x720: the rod is 42 px wide and
+            // 202 px tall (bar height 225 px), sitting just outside the paper body,
+            // i.e. `roll_w = bar_h*42/225`, `roll_h = bar_h*202/225`, centred on the
+            // bar's end. The port drew only the `Fg` paper rails, so the plate began
+            // with a hard vertical cut — the reported «слева у рамки нет текстуры
+            // свитка».
+            const float bar_h_px = kBarH * c;
+            const float rod_w = bar_h_px * (42.0f / 225.0f);
+            const float rod_h = bar_h_px * (202.0f / 225.0f);
+            // `Zh` (L1872) builds a rod from `roll_end`/`roll_center`; the
+            // renderer has no rotation for sprite sub-rects yet, so the end grain
+            // is drawn straight (`roll_end`) at the oracle-measured box: 42 px
+            // wide, 202 px tall at a 225 px bar height.
+            if (rod_w > 0.0f) {
+                try_draw_atlas_button(app, "roll_end", lx(0.0f) - rod_w * 0.5f,
+                                      ly(kBarH * 0.5f), rod_w, rod_h, 1.0f,
+                                      /*fill=*/true);
+                try_draw_atlas_button(app, "roll_end", lx(kBarW) + rod_w * 0.5f,
+                                      ly(kBarH * 0.5f), rod_w, rod_h, 1.0f,
+                                      /*fill=*/true, /*flip_x=*/true);
+            }
         }
     }
     if (!drew) {
