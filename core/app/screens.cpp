@@ -3162,8 +3162,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
             const float cap_len =
                 cap_src_h > 0.0f ? rod_w * (cap_src_w / cap_src_h) : rod_w;
-            // 3 px overlap so the caps and the middle never show a seam
-            const float mid_len = std::max(1.0f, rod_h - 2.0f * cap_len + 3.0f);
+            // [rod profile — measured against oracle_ib_00.png] The 3 px overlap
+            // painted over the caps' dark end rings (the atlas `roll_end` is dark
+            // at BOTH ends: row means 28/41 ... 26/16), which is why the port's
+            // 64-bin profile had no dark band at 12 % and 75 % (87 / 132 vs the
+            // oracle's 48 / 84). Back to exact lengths, no overlap.
+            const float mid_len = std::max(1.0f, rod_h - 2.0f * cap_len);
             // screen TL,TR,BL,BR -> art BL,TL,TR,BR is a 90 deg CW turn; the
             // other end is the same quad mirrored horizontally.
             // [FIX scroll rod: mirrored bottom cap + gap — player report with the
