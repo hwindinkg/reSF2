@@ -1526,6 +1526,12 @@ public:
     // the dialog callback (`ZYa` -> `Pa.iwa`) deducts money, saves and fires
     // `QUEST_EVENT_PURCHASE`.
     bool open_buy_confirm(App& app, const CatalogItem& bit, bool ruby = false);
+    // [FIX "не хватает денег" dialog — player screenshot 4] `Pa.iwa` failure
+    // (`Bv(a,2)`) shows Мэй's notice: `characterMay` title, the
+    // `dlgNotEnoughGoldMessage` body with her portrait, a Dark CANCEL and a
+    // GREEN BUY plate. The port only logged the failure before.
+    bool open_not_enough_dialog(App& app, const CatalogItem& bit, bool ruby = false);
+    bool not_enough_dialog() const { return not_enough_; }
     bool buy_confirm_open() const { return buy_confirm_; }
     // The confirm plate (probe/verify) — runs the deferred purchase.
     bool buy_confirm_accept(App& app);
@@ -1540,6 +1546,8 @@ private:
     std::string last_countdown_;  // [probe] the `Tl` countdown of the last render
     CatalogItem buy_item_;
     std::shared_ptr<EngineDialog> buy_dlg_;
+    // the visible dialog is the "not enough money" notice, not the buy confirm
+    bool not_enough_ = false;
 };
 
 // The Profile — native `vb` (JS L2189-2201, `dJ()==7`): a tabbed screen with

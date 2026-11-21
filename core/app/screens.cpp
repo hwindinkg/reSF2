@@ -21325,6 +21325,8 @@ bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
         log_purchase_fired("PurchaseUnsuccessful",
                            app.quest_engine().purchase_unsuccessful(app, bit.name,
                                                                    ruby ? 1 : 2));
+        // [FIX] and SHOW the notice (Мэй + Green BUY), not just a log line.
+        open_not_enough_dialog(app, bit, ruby);
         return false;
     }
     buy_item_ = bit;
@@ -21370,8 +21372,42 @@ bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
     return true;
 }
 
+bool ShopScreen::open_not_enough_dialog(App& app, const CatalogItem& bit, bool ruby) {
+    (void)bit;
+    buy_dlg_ = std::make_shared<EngineDialog>();
+    // `Pa.Bv(a,2)` -> `Xc.<notice>`: the Mai dialog (player screenshot 4) is the
+    // `uj` (290) layout with her portrait, so it is a `Multiline`.
+    buy_dlg_->type = "Multiline";
+    buy_dlg_->title = loc(app, "characterMay", "МЭЙ");
+    buy_dlg_->image = "character_may_1";
+    buy_dlg_->lines.push_back(
+        loc(app, ruby ? "dlgNotEnoughGemsMessage" : "dlgNotEnoughGoldMessage",
+            "Ты можешь заработать монеты в боях или купить их."));
+    buy_dlg_->line_buttons.push_back(std::string());
+    buy_dlg_->line_actions.push_back({});
+    QuestAction noop;
+    noop.tag = "NoOp";
+    buy_dlg_->button_actions.push_back(noop);  // GREEN BUY
+    buy_dlg_->left_.actions.push_back(noop);   // Dark CANCEL
+    buy_dlg_->left_.text = loc(app, "CANCEL", "CANCEL");
+    buy_dlg_->left_.color = "Dark";
+    buy_dlg_->button_text = loc(app, "shopBuy", "BUY");
+    buy_dlg_->button_color = "Green";
+    buy_dlg_->has_right_button = true;
+    buy_confirm_ = true;
+    not_enough_ = true;
+    std::fprintf(stdout, "[shop] not-enough dialog (%s)\n", ruby ? "ruby" : "gold");
+    std::fflush(stdout);
+    return true;
+}
+
 bool ShopScreen::buy_confirm_accept(App& app) {
     buy_confirm_ = false;
+    if (not_enough_) {  // the notice's BUY only dismisses it
+        not_enough_ = false;
+        buy_dlg_.reset();
+        return true;
+    }
     if (buy_item_.name.empty()) return false;
     return purchase_price_plate(app, buy_item_);
 }

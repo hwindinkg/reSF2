@@ -10907,6 +10907,33 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     std::fprintf(stdout,
                                  "[actprobe] captured .harness/artifacts/shop_confirm.png\n");
                     std::fflush(stdout);
+                    // [probe] the "not enough money" notice: drain the coins and
+                    // press the price plate again, so `Pa.iwa` fails and the
+                    // Мэй dialog opens (player screenshot 4).
+                    shop->buy_confirm_cancel();
+                    try {
+                        sf2::app::WarriorSave w0 = app.save().load();
+                        w0.money = 0;
+                        app.save().save(w0);
+                    } catch (const std::exception&) {
+                    }
+                    for (int i = 0; i < 5; ++i) {
+                        glfwPollEvents();
+                        app.run_one_frame();
+                    }
+                    const bool again = shop->open_buy_confirm(app, *pick, false);
+                    std::fprintf(stdout,
+                                 "[actprobe] not-enough path opened=%d (dialog=%d)\n",
+                                 again ? 1 : 0, shop->not_enough_dialog() ? 1 : 0);
+                    std::fflush(stdout);
+                    for (int i = 0; i < 45; ++i) {
+                        glfwPollEvents();
+                        app.run_one_frame();
+                    }
+                    app.capture_png(".harness/artifacts/shop_notenough.png");
+                    std::fprintf(stdout,
+                                 "[actprobe] captured .harness/artifacts/shop_notenough.png\n");
+                    std::fflush(stdout);
                 }
             }
             app.shutdown();
