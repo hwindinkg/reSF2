@@ -10844,6 +10844,25 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             app.capture_png(".harness/artifacts/shop_flash.png");
             std::fprintf(stdout, "[actprobe] captured .harness/artifacts/shop_flash.png\n");
             std::fflush(stdout);
+            // [probe] scrollbar thumb: capture the shop at the TOP of the list and
+            // after scrolling to row 3, so the thumb's travel can be measured.
+            if (auto* shop2 = static_cast<sf2::app::ShopScreen*>(app.screens().top())) {
+                shop2->probe_scroll_select(app, 0, 0);
+                for (int i = 0; i < 3; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                }
+                app.capture_png(".harness/artifacts/shop_scroll0.png");
+                shop2->probe_scroll_select(app, 0, 3);
+                for (int i = 0; i < 3; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                }
+                app.capture_png(".harness/artifacts/shop_scroll1.png");
+                std::fprintf(stdout,
+                             "[actprobe] captured shop_scroll0/1 (thumb travel probe)\n");
+                std::fflush(stdout);
+            }
             // [probe] B6(b): open the REAL buy-confirm dialog through the shop's
             // own path (`ShopScreen::open_buy_confirm` -> `ph`/`kOd350`), wait out
             // the 0.25 s open tween, and capture, so the OK plate can be compared

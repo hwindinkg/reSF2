@@ -1425,6 +1425,16 @@ private:
     float drag_delta_ = 0.0f;  // `p_` (drag displacement, L1888)
     float drag_prev_ = 0.0f;   // previous local y (velocity source)
     float drag_vel_ = 0.0f;    // `ub = jM[0].y*.01` (L1888) -> fling
+    // [FIX player report "ползунок не двигается"] The `Gg` scrollbar THUMB on the
+    // right rail: derived from `scroll_y_`/`lo`/`hi` every update so it follows
+    // the list, and hit-tested so it can be dragged (`scroll_state_ == 7`).
+    float thumb_x_ = 0.0f;      // centre x
+    float thumb_y_ = 0.0f;      // top edge
+    float thumb_w_ = 0.0f;
+    float thumb_h_ = 0.0f;
+    float thumb_rail_y_ = 0.0f;  // track top
+    float thumb_rail_h_ = 0.0f;  // track height
+    bool thumb_valid_ = false;
     // Shop tabs (JS `vj.E0` category ids 1..5 → `vj.ifa` tab lists, Oa L1168).
     // tab_ indexes kShopTabs (0 = Weapon); tab_hover_ is the tab hover.
     // seen_ is the last save snapshot (owned/equipped markers, refreshed in

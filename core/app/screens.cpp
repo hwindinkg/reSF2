@@ -22382,6 +22382,67 @@ void ShopScreen::update_impl(float dt) {
         nrows > 0 ? -(static_cast<float>(nrows - 1) * sl.cell_step) + uz : uz;
     const float lo = std::min(min_off, max_off);              // state 5 target
     const float hi = max_off;
+    // [FIX player report "ползунок не двигается"] Thumb geometry from the list
+    // state: the track is the viewer's right rail, the thumb's height is the
+    // visible fraction of the content, its top runs from `hi` (list top) to `lo`.
+    {
+        thumb_valid_ = false;
+        if (nrows > 1 && hi > lo) {
+            const float rail_w = std::max(6.0f, sl.scroll_inset * 0.45f);
+            const float rail_x = sl.viewer.N - sl.scroll_inset * 0.5f;
+            const float content_h = static_cast<float>(nrows) * sl.cell_step;
+            float th = sl.list_h * (sl.list_h / std::max(content_h, 1.0f));
+            th = std::clamp(th, 40.0f, sl.list_h);
+            const float f = std::clamp((hi - scroll_y_) / (hi - lo), 0.0f, 1.0f);
+            thumb_x_ = rail_x;
+            thumb_w_ = rail_w;
+            thumb_rail_y_ = sl.cell_top;
+            thumb_rail_h_ = sl.list_h;
+            thumb_h_ = th;
+            thumb_y_ = sl.cell_top + f * (sl.list_h - th);
+            thumb_valid_ = true;
+        }
+    }
+    if (std::getenv("SF2_TRACE_SHOPSCROLL") != nullptr) {
+        static int sc_logs = 0;
+        if (sc_logs < 400) {
+            ++sc_logs;
+            std::fprintf(stdout,
+                         "[shopscroll] tab=%d nrows=%d scroll_y=%.1f lo=%.1f hi=%.1f "
+                         "thumb_valid=%d thumb_y=%.1f thumb_h=%.1f rail_y=%.1f rail_h=%.1f "
+                         "state=%d\n",
+                         tab_, nrows, static_cast<double>(scroll_y_),
+                         static_cast<double>(lo), static_cast<double>(hi),
+                         thumb_valid_ ? 1 : 0, static_cast<double>(thumb_y_),
+                         static_cast<double>(thumb_h_),
+                         static_cast<double>(thumb_rail_y_),
+                         static_cast<double>(thumb_rail_h_), scroll_state_);
+            std::fflush(stdout);
+        }
+    }
+    if (scroll_state_ == 7) {
+        // dragging the thumb: map its travel straight onto `scroll_y_`
+        if (p.down && thumb_valid_) {
+            const float span = thumb_rail_h_ - thumb_h_;
+            const float f = span > 0.0f
+                                ? std::clamp((static_cast<float>(p.y) -
+                                              thumb_rail_y_ - thumb_h_ * 0.5f) / span,
+                                             0.0f, 1.0f)
+                                : 0.0f;
+            scroll_y_ = std::clamp(hi - f * (hi - lo), lo, hi);
+            scroll_target_ = scroll_y_;
+            scroll_vel_ = 0.0f;
+        } else {
+            scroll_state_ = 0;
+        }
+    } else if (scroll_state_ == 0 && thumb_valid_ && p.down &&
+               static_cast<float>(p.x) >= thumb_x_ - thumb_w_ * 0.5f &&
+               static_cast<float>(p.x) <= thumb_x_ + thumb_w_ * 0.5f &&
+               static_cast<float>(p.y) >= thumb_y_ &&
+               static_cast<float>(p.y) <= thumb_y_ + thumb_h_) {
+        scroll_state_ = 7;   // grab the thumb instead of the list
+        scroll_vel_ = 0.0f;
+    }
     if (scroll_tab_ != tab_ || scroll_count_ != nrows) {
         scroll_tab_ = tab_;              // Gg.VK/ba (L1891/L1885): first cell
         scroll_count_ = nrows;           // centred on a fresh list.
@@ -23164,6 +23225,17 @@ void ShopScreen::render_impl(App& app) {
         }
     }
     ren.pop_clip();  // end the `Gg` scroller viewer mask
+    // [FIX player report "ползунок не двигается"] draw the thumb where the update
+    // computed it, so it tracks the list and shows the drag position.
+    if (thumb_valid_) {
+        const ShopRect rail{thumb_x_ - thumb_w_ * 0.5f, thumb_rail_y_,
+                            thumb_x_ + thumb_w_ * 0.5f,
+                            thumb_rail_y_ + thumb_rail_h_};
+        quad(rail, 0.10f, 0.07f, 0.05f, 0.55f);
+        const ShopRect th{thumb_x_ - thumb_w_ * 0.5f, thumb_y_,
+                          thumb_x_ + thumb_w_ * 0.5f, thumb_y_ + thumb_h_};
+        quad(th, 0.74f, 0.63f, 0.44f, 0.95f);
+    }
     // `bc` item-detail panel (JS `hi(1,!1)` docked right, `Oa.init` L2290;
     // `Ne` content L2243-2260). Background = `y.rM` = "info_panel_h" from the
     // scroll atlas (id 254), scaled to the panel width (`hi.Pn` L2311
