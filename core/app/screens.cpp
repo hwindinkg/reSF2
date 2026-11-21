@@ -21340,7 +21340,15 @@ bool ShopScreen::open_buy_confirm(App& app, const CatalogItem& bit, bool ruby) {
                            app.quest_engine().purchase_unsuccessful(app, bit.name,
                                                                    ruby ? 1 : 2));
         // [FIX] and SHOW the notice (Мэй + Green BUY), not just a log line.
-        open_not_enough_dialog(app, bit, ruby);
+        // [FIX guided flow] The tutorial's `StoryTutorialBuyItem` drives this
+        // purchase with injected clicks; a modal that consumes one of them
+        // desyncs the chain (measured: `quest-verify-buy` inside `--full` failed
+        // `LynxDialog/ShinFight/trainingFight/StoryAdvance` while the same binary
+        // passed standalone). The guided flow keeps the log only; a real player
+        // press still gets the dialog.
+        if (!app.quest_engine().controls_locked()) {
+            open_not_enough_dialog(app, bit, ruby);
+        }
         return false;
     }
     buy_item_ = bit;
@@ -22215,6 +22223,9 @@ void ShopScreen::update_impl(float dt) {
     // The type-350 BUY confirmation (`ph`) is `Wb`'s top dialog: its plates own
     // the input while it is up (`od.EF` row -> `He.dhb`: Left = CANCEL,
     // Right = `shopBuy` -> `ZYa` -> `Pa.iwa`).
+    if (buy_confirm_ && not_enough_ && app().quest_engine().controls_locked()) {
+        buy_confirm_cancel();  // the guided chain owns the UI again
+    }
     if (buy_confirm_) {
         const App::PointerState& bp = app().pointer();
         if (bp.pressed && buy_dlg_ != nullptr) {

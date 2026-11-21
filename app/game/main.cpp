@@ -11191,10 +11191,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                          static_cast<double>(x0),
                          ctl.player().fighter.clip_bone_count());
             float mn = 1e9f, mx = -1e9f, spanmax = 0.0f;
+            float com_prev = ctl.player().fighter.debug_pose_com_x();
+            float com_jump = 0.0f;
+            const char* com_at = "-";
             for (int f = 0; f < kMoveFrames[mi]; ++f) {
                 ctl.update(1.0f / 60.0f);
                 const float wx = ctl.player().fighter.world_x();
                 const float sp = ctl.player().fighter.debug_bone_span_x();
+                // [player hint] the drawn pose, not the root
+                const float com = ctl.player().fighter.debug_pose_com_x();
+                if (std::fabs(com - com_prev) > com_jump) {
+                    com_jump = std::fabs(com - com_prev);
+                    const auto* cm2 = ctl.player().fighter.current_move();
+                    com_at = cm2 != nullptr ? cm2->name.c_str() : "-";
+                }
+                com_prev = com;
                 if (wx < mn) mn = wx;
                 if (wx > mx) mx = wx;
                 if (sp > spanmax) spanmax = sp;
@@ -11207,9 +11218,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 }
             }
             std::fprintf(stdout,
-                         "[wallprobe] %-14s wall=%-5s wx min=%.1f max=%.1f span_max=%.1f\n",
+                         "[wallprobe] %-14s wall=%-5s wx min=%.1f max=%.1f span_max=%.1f "
+                         "com_jump_max=%.1f at=%s\n",
                          kMoves[mi], kSpots[wi].tag, static_cast<double>(mn),
-                         static_cast<double>(mx), static_cast<double>(spanmax));
+                         static_cast<double>(mx), static_cast<double>(spanmax),
+                         static_cast<double>(com_jump), com_at);
             std::fflush(stdout);
         }
         }

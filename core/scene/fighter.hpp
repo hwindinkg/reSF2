@@ -989,6 +989,16 @@ public:
         }
         return true;
     }
+    // [probe] The DRAWN pose's COM x (`pos_`), i.e. what the eye sees on screen -
+    // the metric the player's "the mesh teleports" report is about (root
+    // `world_x_` alone never showed it).
+    float debug_pose_com_x() const {
+        if (pos_.size() < 2) return 0.0f;
+        double acc = 0.0;
+        const std::size_t nb = pos_.size() / 2;
+        for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
+        return static_cast<float>(acc / static_cast<double>(nb));
+    }
     float debug_bone_span_x() const {
         if (pos_.size() < 2) return 0.0f;
         float lo = pos_[0], hi = pos_[0];
