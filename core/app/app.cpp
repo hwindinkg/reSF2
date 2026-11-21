@@ -2061,7 +2061,7 @@ void App::draw_boot_splash(bool force_loader) {
                         0.10588235294117647f);
 }
 
-bool App::draw_ef_backdrop(float alpha, bool with_logo) {
+bool App::draw_ef_backdrop(float alpha, bool with_logo, bool cover) {
     // JS `ef` ctor (L2301193): `Fc.Ed(-16777216, this.node.L)` (an OPAQUE black
     // fill) + `this.Qa = new Ea(...)` holding TWO `R.$ E.get(817)`
     // (`loader/bg.jpg`) sprites, the second `Hr(true)` (mirrored), laid out by
@@ -2125,7 +2125,15 @@ bool App::draw_ef_backdrop(float alpha, bool with_logo) {
                               dh / static_cast<float>(th));
         renderer_->draw_sprite(s, cam);
     };
-    if (loader_bg_tex_ != 0 && loader_bg_w_ > 0 && loader_bg_h_ > 0) {
+    if (loader_bg_tex_ != 0 && loader_bg_w_ > 0 && loader_bg_h_ > 0 && cover) {
+        // [FIX act backdrop] full-screen cover: two halves of (W/2, H)
+        push("loader_bg", loader_bg_tex_, loader_bg_w_, loader_bg_h_,
+             node_cx - W * 0.25f, node_cy, W * 0.5f, H, false);
+        push("loader_bg", loader_bg_tex_, loader_bg_w_, loader_bg_h_,
+             node_cx + W * 0.25f, node_cy, W * 0.5f, H, true);
+        drew = true;
+    }
+    if (loader_bg_tex_ != 0 && loader_bg_w_ > 0 && loader_bg_h_ > 0 && !cover) {
         const float dw = static_cast<float>(loader_bg_w_) * qa_sx * node_scale;
         const float dh = static_cast<float>(loader_bg_h_) * qa_sy * node_scale;
         // Left half normal, right half mirrored (`Hr(true)`).

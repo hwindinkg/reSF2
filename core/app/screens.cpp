@@ -1001,7 +1001,8 @@ float measure_rich_line(App& app, const std::string& text, float ua) {
 
 void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                      const std::string& text, float ua_scale, UiAlign align,
-                     float r, float g, float b, float line_factor = 1.0f) {
+                     float r, float g, float b, float line_factor = 1.0f,
+                     float alpha = 1.0f) {
     if (text.empty() || w <= 0.0f || h <= 0.0f) return;
     const UiWrap wr = wrap_ui_text(app, text, w, ua_scale, line_factor);
     const float line_step = wr.line_step;
@@ -1020,7 +1021,7 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                 plain.erase(std::remove(plain.begin(), plain.end(), '\x01'), plain.end());
             }
             draw_ui_label(app, x, yy, w, line_step, plain, ua_scale, align, r, g, b,
-                          1.0f, /*fit=*/false);
+                          alpha, /*fit=*/false);
         } else {
             // JS rich-text: text runs interleaved with inline `<image>` sprites.
             float cx = x;
@@ -1031,7 +1032,7 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
                     ln.substr(p, ph == std::string::npos ? std::string::npos : ph - p);
                 if (!seg.empty()) {
                     draw_ui_label(app, cx, yy, w, line_step, seg, ua_scale, UiAlign::Left,
-                                  r, g, b, 1.0f, /*fit=*/false);
+                                  r, g, b, alpha, /*fit=*/false);
                     if (font != nullptr && scale > 0.0f) {
                         cx += app.measure_text(*font, seg, scale);
                     }
@@ -1061,14 +1062,16 @@ void draw_ui_wrapped(App& app, float x, float y, float w, float h,
 // fits, then draw normally.
 void draw_ui_wrapped_fit(App& app, float x, float y, float w, float h,
                          const std::string& text, float ua_scale, UiAlign align,
-                         float r, float g, float b, float line_factor = 1.0f) {
+                         float r, float g, float b, float line_factor = 1.0f,
+                         float alpha = 1.0f) {
     if (text.empty() || w <= 0.0f || h <= 0.0f) return;
     float scale = ua_scale;
     const float need = measure_ui_wrapped(app, text, w, scale, line_factor);
     if (need > h && need > 0.0f) {
         scale = std::clamp(ua_scale * (h / need), ua_scale * 0.55f, ua_scale);
     }
-    draw_ui_wrapped(app, x, y, w, h, text, scale, align, r, g, b, line_factor);
+    draw_ui_wrapped(app, x, y, w, h, text, scale, align, r, g, b, line_factor,
+                    alpha);
 }
 
 // Helpers defined later in this file (the atlas sprite path sits after this
@@ -1280,7 +1283,13 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
                                  kViewW, 0.0f,   kViewW, kViewH, 0.0f,   kViewH};
             ren.draw_triangles(dim, 6, 0.0f, 0.0f, 0.0f, dim_a);
         }
-        (void)app.draw_ef_backdrop(dim_a, /*with_logo=*/false);
+        // [FIX act backdrop — player report] `draw_ef_backdrop`'s loader tiling
+        // leaves a horizontal BAND (two tiles ~1280x450 at 16:9), so behind it
+        // the black fill showed above/below and the art read as a squashed copy
+        // ("за фоном видно сжатую сверху и снизу копию фона"). The act screen
+        // needs the art to COVER the screen, so the tiles are stretched to
+        // (W/2, H) each.
+        (void)app.draw_ef_backdrop(dim_a, /*with_logo=*/false, /*cover=*/true);
         // JS `Rd.layout` (L1078843): `this.label.Fa(N.width/this.node.Eb*
         // (.9+(N.lc-.4)/1.6*-.5), 400)` — the label box is 400 tall and
         // MULTILINE (`rd(!0)`), so the localized `{br}` two-line title
@@ -1298,12 +1307,17 @@ void draw_quest_modal(App& app, sf2::render::Renderer& ren, bool is_top = true) 
         // showed (black) before the background. JS `wa(0)` = a fully transparent
         // node, so draw NOTHING until the fade starts.
         if (text_a > 0.0f) {
+            // [FIX act title alpha — player report "текст становится не
+            // полупрозрачным, а чёрным"] The fade was folded into the RGB, so a
+            // fading title darkened towards BLACK on the bright backdrop. The
+            // text path takes a real alpha now, so the gold keeps its colour and
+            // only its opacity follows the node's `wa`.
             draw_ui_wrapped(app, kViewW * 0.05f, kViewH * 0.42f, kViewW * 0.9f,
                             400.0f,
                             loc(app, app.quest_engine().act_overlay_text(),
                                 app.quest_engine().act_overlay_text()),
-                            0.9f, UiAlign::Center, 0.8196f * text_a, 0.7059f * text_a,
-                            0.4627f * text_a);
+                            0.9f, UiAlign::Center, 0.8196f, 0.7059f, 0.4627f, 1.0f,
+                            text_a);
         }
     }
 }

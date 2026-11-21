@@ -10976,7 +10976,20 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             d.button_color = "Dark";
             app.quest_engine().push_dialog_for_test(std::move(d));
         } else {
+            // [FIX probe] The act overlay is drawn UNDER the boot splash, so the
+            // 90-frame settle above still left it hidden behind the loader (the
+            // capture showed "Загрузка 88%"). Run the boot out first, exactly
+            // like the modal path, then force the act title.
+            app.set_headless_frames(100000);
+            for (int i = 0; i < 220; ++i) {
+                glfwPollEvents();
+                app.run_one_frame();
+            }
             app.quest_engine().debug_force_act_overlay("Act I{br}Hero Reborn");
+            for (int i = 0; i < 12; ++i) {  // let the fade reach its mid-point
+                glfwPollEvents();
+                app.run_one_frame();
+            }
         }
         // A `notification` is drawn UNDER the boot overlay, and the overlay's
         // countdown is driven by the screen update that a queued modal blocks —

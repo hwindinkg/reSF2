@@ -472,7 +472,7 @@ public:
     // bare black screen (the reported "the act text appears on a black
     // background, no background texture"). Returns false when the loader art
     // is not loaded (headless captures of the boot states).
-    bool draw_ef_backdrop(float alpha, bool with_logo);
+    bool draw_ef_backdrop(float alpha, bool with_logo, bool cover = false);
 
 private:
     void poll_input();
