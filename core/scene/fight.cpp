@@ -10277,17 +10277,23 @@ void FightController::update(float dt) {
                 // Ease the applied push toward the target at <=3 units/frame: the
                 // floor is reached within a few frames and the drawn body stops
                 // wobbling. The target itself is still the exact signed solve.
-                const auto ease = [](float cur, float tgt) {
-                    constexpr float kMaxStep = 3.0f;
-                    float d = tgt - cur;
-                    if (d > kMaxStep) d = kMaxStep;
-                    else if (d < -kMaxStep) d = -kMaxStep;
-                    return cur + d;
-                };
-                sep_push_p_ = ease(sep_push_p_, push_p);
-                sep_push_e_ = ease(sep_push_e_, push_e);
-                push_p = sep_push_p_;
-                push_e = sep_push_e_;
+                // [FIX jitter, second pass — measured] Capping the change at 3
+                // units/frame removed the wobble but let fast crossings slip under
+                // the floor (BOSS_LYNX unpinned min 38.5 -> 1.8 on 12 frames). The
+                // correction must be IMMEDIATE (a raw pair jump is compensated in
+                // the same frame, which is what keeps the drawn pair continuous),
+                // while SUB-PIXEL re-targeting is what the eye reads as trembling:
+                // so snap whenever the target moves by >= 0.5 units and otherwise
+                // keep the applied value untouched.
+                constexpr float kSepDeadband = 0.5f;
+                if (std::fabs(push_p - sep_push_p_) >= kSepDeadband ||
+                    std::fabs(push_e - sep_push_e_) >= kSepDeadband) {
+                    sep_push_p_ = push_p;
+                    sep_push_e_ = push_e;
+                } else {
+                    push_p = sep_push_p_;
+                    push_e = sep_push_e_;
+                }
                 player_.fighter.set_sep_bias_x(push_p);
                 enemy_.fighter.set_sep_bias_x(push_e);
                 player_.fighter.shift_pose_x(push_p);
