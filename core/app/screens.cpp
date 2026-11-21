@@ -3207,12 +3207,21 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const float rod_cx =
                     side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
                 const float cy = ly(kBarH * 0.5f);
-                rod_piece("roll_end", rod_cx, cy - rod_h * 0.5f + cap_len * 0.5f,
+                // [rod composite — measured against oracle_ib_00.png] The oracle's
+                // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
+                // (64-bin bins 1 / 5-6 = 48 / 84). Measured insets: bottom 8 % puts
+                // the lower band at 76-89 (target 84); the top needs a smaller one,
+                // 4 %, or it overshoots.
+                const float cap_inset_top = rod_h * 0.04f;
+                const float cap_inset_bot = rod_h * 0.08f;
+                rod_piece("roll_end", rod_cx,
+                          cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
                           rod_w, cap_len, mirror, /*flip_v=*/true);
                 rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
                           /*flip_v=*/false);
                 // the bottom cap is the top one turned around: ring at the bottom
-                rod_piece("roll_end", rod_cx, cy + rod_h * 0.5f - cap_len * 0.5f,
+                rod_piece("roll_end", rod_cx,
+                          cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f,
                           rod_w, cap_len, mirror, /*flip_v=*/false);
             }
         }
