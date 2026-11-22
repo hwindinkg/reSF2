@@ -8006,6 +8006,8 @@ static void trace_fight_cloth(const FightFighter& f, int frame) {
 }
 
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
+    // [FIX trace key] the SLOT side, owned by the controller (never copied)
+    sf2::scene::set_trace_side(me.is_player ? 0 : 1);
     trace_fight_cloth(me, frame_);
     // [probe, authorised] SF2_TRACE_WEAPON: the weapon rig — the weapon nodes'
     // drawn model positions vs their BIND values, plus the live clip. A weapon

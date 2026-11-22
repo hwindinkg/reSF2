@@ -3150,6 +3150,9 @@ float Fighter::anim_time() const {
 // `g_trace_fight_frame` is defined at the top of this file (probe only).
 void set_trace_fight_frame(int f) { g_trace_fight_frame = f; }
 int trace_fight_frame() { return g_trace_fight_frame; }
+static int g_trace_side = -1;
+void set_trace_side(int side) { g_trace_side = side; }
+int trace_side() { return g_trace_side; }
 void Fighter::sample_bind_pose() {
     sf2::data::anim_clip bind_clip;
     bind_clip.frames.resize(1);
@@ -4392,7 +4395,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             std::fprintf(stdout,
                          "[anchor] F%d move=%s mf=%d px=%.2f off=%.2f j8=%.2f wx=%.2f "
                          "off_valid=%d align_u=%d anchor_u=%d solver=%d com=%.1f "
-                         "id=%p\n",
+                         "id=%p uid=%d side=%d\n",
                          g_trace_fight_frame,
                          current_move_ != nullptr ? current_move_->name.c_str() : "-",
                          static_cast<int>(move_frame_),
@@ -4410,7 +4413,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
                              return static_cast<float>(acc / static_cast<double>(nb));
                          }()),
-                         static_cast<const void*>(this));
+                         static_cast<const void*>(this), uid_, g_trace_side);
             std::fflush(stdout);
             trace_prev_final[this] = world_x_;
         }

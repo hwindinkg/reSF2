@@ -1679,6 +1679,11 @@ private:
     // the arena from the left wall (player report: "от левой стенки персонажа
     // перемещает в центр локации") and off-screen from the right one.
     bool wall_pin_ = false;
+    // [probe] Stable per-instance key for the traces. `id=%p` prints a SHARED
+    // pointer (one value appears for two different fighters on the same frame),
+    // so every per-fighter metric built on it was an artifact.
+    static int next_uid() { static int n = 0; return ++n; }
+    int uid_ = next_uid();
     // [FIX wall-jump travel] rate limiter for the voluntary `WallJump_*` move
     float prev_wall_jump_x_ = 0.0f;
     bool prev_wall_jump_valid_ = false;
@@ -1880,6 +1885,13 @@ private:
 };
 
 void set_trace_fight_frame(int f);
+// [FIX trace key] The `[anchor]` identity must come from the FIGHT SLOT, not
+// from a Fighter member: `id=%p` prints a shared pointer and the per-object uid
+// is copied with the object (measured: one id/uid printed for two different
+// fighters on the same frame - BackKick wx 1613.96 and ShortJumpKick wx 1078.57
+// at f=761), so every per-fighter metric built on them was an artifact.
+void set_trace_side(int side);
+int trace_side();
 // [probe] the fight frame last published by the controller, so the INPUT recorder
 // can stamp keys in the oracle tape's `atframe <fight.frame>` units.
 int trace_fight_frame();
