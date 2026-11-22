@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
 #include <cstdlib>
 #include <map>
 #include <set>
@@ -532,6 +534,37 @@ void FightController::init_locks(
                           battle.enemy_not_ai, battle.enemy_not_animation,
                           enemy_model, merged_perk_names(perks.enemy_refs),
                           merged_perk_names(perks.learned_refs, perks.player_refs));
+    // [replay] load the tape (path from the env so no CLI plumbing is needed)
+    if (const char* tape = std::getenv("SF2_REPLAY_LOG")) {
+        std::ifstream in(tape);
+        std::string line;
+        int n = 0;
+        while (std::getline(in, line)) {
+            int f = 0, slot = 0;
+            char clip[128] = {0};
+            float cl = 0.0f;
+            // atframe <F> move <A|B> <Clip> [clamp:<dx>]
+            if (std::sscanf(line.c_str(), "atframe %d move %c %127s", &f, &clip[0],
+                            clip + 1) >= 3) {
+                slot = (clip[0] == 'A') ? 0 : 1;
+                char* p = clip + 1;
+                char* m = std::strstr(p, "clamp:");
+                if (m != nullptr) {
+                    cl = static_cast<float>(std::atof(m + 6));
+                    *m = '\0';
+                }
+                ReplayEntry e;
+                e.slot = slot;
+                e.clip = p;
+                e.clamp_dx = cl;
+                replay_log_[f].push_back(e);
+                ++n;
+            }
+        }
+        replay_log_active_ = n > 0;
+        std::fprintf(stdout, "[replay] tape=%s entries=%d\n", tape, n);
+        std::fflush(stdout);
+    }
     // [FIX Phase 4b — manual control] The player is MANUAL: no AiController,
     // no auto-attack. The input path (player_input -> Fighter::input ->
     // try_select_move) drives the player's moves; the enemy keeps the AI.
@@ -10090,6 +10123,30 @@ void FightController::update(float dt) {
             bus_.clear_frame_events();
             update_fighter(player_, enemy_, dt);
             update_fighter(enemy_, player_, dt);
+            // [replay] force the tape's clips for this fight frame
+            if (replay_log_active_) {
+                const auto rit = replay_log_.find(static_cast<int>(frame_));
+                if (rit != replay_log_.end()) {
+                    for (const ReplayEntry& e : rit->second) {
+                        FightFighter& target = (e.slot == 0) ? player_ : enemy_;
+                        FightFighter& other = (e.slot == 0) ? enemy_ : player_;
+                        const auto mv = moves_->find(e.clip);
+                        if (mv == moves_->end()) continue;
+                        if (e.clamp_dx != 0.0f) {
+                            target.fighter.set_world_pos(
+                                target.fighter.world_x() - e.clamp_dx,
+                                target.fighter.world_y());
+                        }
+                        sf2::scene::FightContext c;
+                        c.roll01 = [this]() { return draw01(); };
+                        c.stage = static_cast<sf2::scene::round_stage>(phase_);
+                        c.anims_me = anim_names_of(target.fighter);
+                        c.anims_enemy = anim_names_of(other.fighter);
+                        fill_ctx_geometry(c, target, other);
+                        target.fighter.ai_start_move(mv->second, c);
+                    }
+                }
+            }
             // Hit detection + damage (JS `ca.Enb` + `Cgb`). Gated on the
             // player's round-over latch `kh` exactly as `ca.Hnb` (L389):
             // `if(!this.kc.kh) for(this.Enb(), this.Bg.Bx(), ...)` — once

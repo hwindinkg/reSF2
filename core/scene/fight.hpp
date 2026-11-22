@@ -2443,6 +2443,17 @@ private:
     FightFighter player_;          // JS `kc` (params) + `yb` (fighter)
     // [FIX body separation] the side used when the pair is EXACTLY coincident
     // (|dx| == 0, no sign to split on) - keeps the split from flickering.
+    // [replay] `SF2_REPLAY_LOG=<tape>`: force each fighter's clip on its
+    // `atframe`, so the player's own fight can be reproduced deterministically
+    // (the tape is built by `reference/tools/log_to_tape.py`).
+    struct ReplayEntry {
+        int slot = 0;
+        std::string clip;
+        float clamp_dx = 0.0f;
+    };
+    std::map<int, std::vector<ReplayEntry>> replay_log_;
+    bool replay_log_active_ = false;
+
     float last_sep_dir_ = 1.0f;
     bool sep_dir_valid_ = false;
     // [FIX jitter] the push actually applied last frame (eased toward the target)
