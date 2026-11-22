@@ -3125,6 +3125,13 @@ void FightController::rules_begin_round(int round) {
     // `Da.pg.jf()`, L97744) - the OWNED `DaPrng` unless a caller injected an
     // override (the demo/probe path).
     {
+        // [ORDER MATTERS — audit via rust-anything `analyze`: the JS iterates an
+        // ARRAY (`this.oX`, `DKa` L38401), so the RNG draws happen in XML order]
+        // `std::map<int, ...>` iterates by ascending id, which is the SAME order
+        // here only because `next_group++` (quest_engine.cpp) assigns the ids in
+        // XML parse order. Do NOT switch this to `unordered_map`: the groups share
+        // ONE `Da.pg` stream, so a different order swaps the picks (the open
+        // "wrong member of the group" report).
         std::map<int, std::vector<int>> groups;  // group -> distinct choices
         for (const FightRule& r : rules_) {
             if (r.random_group < 0) continue;
