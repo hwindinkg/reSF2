@@ -4290,9 +4290,17 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // the boss-lynx stand: the JS keeps the victim ahead of the thrower on
             // 52 % of the paired frames (median side +11.4), the port managed 3 %
             // (median -85.8). Track the thrower every frame instead.
-            if (throw_victim_now() && opponent_ != nullptr) {
-                align_own_x_ = opponent_->world_x() + throw_side_ * throw_target_;
-            }
+            // [FIX throw spacing — the player's answer + the JS] `Dl.oL`
+            // (L24171-24199) places the victim at `pos = clip - clip[anchor] +
+            // parameters.position`, i.e. at ITS OWN place: the clip's own buffer
+            // supplies the spacing, which is why the gap differs per animation
+            // ("дальше / с другой стороны / ближе в зависимости от анимации").
+            // The previous thrower+constant clamp forced every throw to 45..92 and
+            // the thrower+authored-offset variant overshot to 112 (JS 92.2).
+            // Nothing to do per frame: `align_own_x_` is already the victim's own
+            // x captured at the clip start.
+            (void)throw_side_;
+            (void)throw_target_;
             world_x_ = align_own_x_;
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;

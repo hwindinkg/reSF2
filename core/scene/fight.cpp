@@ -10234,10 +10234,11 @@ void FightController::update(float dt) {
                 const bool sep_off = std::getenv("SF2_NO_SEP") != nullptr;  // A/B probe
                 float push_p = 0.0f;
                 float push_e = 0.0f;
+                // [FIX "груша это же тоже противник" — player answer] The dummy
+                // exemption is gone: a bag is a body like any other, so the pair
+                // separation applies to it too (the 0.5 deadband keeps it smooth).
                 const bool pinned = player_.fighter.body_pinned() ||
-                                    enemy_.fighter.body_pinned() ||
-                                    player_.fighter.is_dummy() ||
-                                    enemy_.fighter.is_dummy();
+                                    enemy_.fighter.body_pinned();
                 // Measure the DISTANCE ON THE DRAWN POSE (`pivot_x` of each
                 // fighter), not on `world_x_`: the drawn pivot is offset from the
                 // root by the clip pose, so a root-based push left 3 of 598 frames
