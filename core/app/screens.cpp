@@ -3149,7 +3149,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // свитка».
             const float bar_h_px = kBarH * c;
             const float rod_w = bar_h_px * (42.0f / 225.0f);
-            const float rod_h = bar_h_px * (202.0f / 225.0f);
+            const float rod_h = bar_h_px * (208.0f / 225.0f);
             // [FIX B2 rolled end — oracle `oracle_ib_00`] The rod is the `Zh`
             // composite: `roll_end` (cap) + `roll_center` (stretched middle) +
             // `roll_end` (cap), all ROTATED 90 deg for this horizontal bar. The
@@ -3178,7 +3178,8 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // outward, as the JS `Zh` composite) and the middle is drawn with a
             // small overlap so the rod reads as one piece.
             auto rod_piece = [&](const char* frame, float cx, float cy, float w,
-                                 float h, bool mirror, bool flip_v) {
+                                 float h, bool mirror, bool flip_v, float vf0,
+                                 float vf1) {
                 sf2::data::atlas_frame fr;
                 int tw = 0, th = 0;
                 unsigned int gl = 0;
@@ -3192,7 +3193,11 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const float v1 =
                     static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
                 if (mirror) std::swap(u0, u1);
-                float vv0 = v0, vv1 = v1;
+                // [rod cap crop] use only the OUTER half of the cap sprite: the
+                // art is dark on BOTH edges, and the inner dark band was the
+                // measured mismatch (rows y≈125/264 vs the oracle's 91-103).
+                float vv0 = v0 + (v1 - v0) * vf0;
+                float vv1 = v0 + (v1 - v0) * vf1;
                 if (flip_v) std::swap(vv0, vv1);
                 const float xy[8] = {cx - w * 0.5f, cy - h * 0.5f,  // TL
                                      cx + w * 0.5f, cy - h * 0.5f,  // TR
@@ -3206,7 +3211,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const bool mirror = side != 0;
                 const float rod_cx =
                     side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
-                const float cy = ly(kBarH * 0.5f);
+                const float cy = ly(kBarH * 0.5f) + 3.0f;  // +3 px: the port rod ended ~5 px short
                 // [rod composite — measured against oracle_ib_00.png] The oracle's
                 // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
                 // (64-bin bins 1 / 5-6 = 48 / 84). Measured insets: bottom 8 % puts
@@ -3219,13 +3224,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const float cap_ov = 18.0f;
                 rod_piece("roll_end", rod_cx,
                           cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f - 9.0f,
-                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true);
+                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f);
                 rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
-                          /*flip_v=*/false);
+                          /*flip_v=*/false, 0.0f, 1.0f);
                 // the bottom cap is the top one turned around: ring at the bottom
                 rod_piece("roll_end", rod_cx,
                           cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f + 9.0f,
-                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/false);
+                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/false, 0.5f, 1.0f);
             }
         }
     }
