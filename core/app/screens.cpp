@@ -3167,7 +3167,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // at BOTH ends: row means 28/41 ... 26/16), which is why the port's
             // 64-bin profile had no dark band at 12 % and 75 % (87 / 132 vs the
             // oracle's 48 / 84). Back to exact lengths, no overlap.
-            const float mid_len = std::max(1.0f, rod_h - 2.0f * cap_len);
+            const float mid_len = rod_h;  /* centre spans the whole rod; caps on top (oracle composite) */
             // screen TL,TR,BL,BR -> art BL,TL,TR,BR is a 90 deg CW turn; the
             // other end is the same quad mirrored horizontally.
             // [FIX scroll rod: mirrored bottom cap + gap — player report with the
@@ -3212,8 +3212,8 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // (64-bin bins 1 / 5-6 = 48 / 84). Measured insets: bottom 8 % puts
                 // the lower band at 76-89 (target 84); the top needs a smaller one,
                 // 4 %, or it overshoots.
-                const float cap_inset_top = rod_h * 0.04f;
-                const float cap_inset_bot = rod_h * 0.08f;
+                const float cap_inset_top = 0.0f;
+                const float cap_inset_bot = 0.0f;
                 rod_piece("roll_end", rod_cx,
                           cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
                           rod_w, cap_len, mirror, /*flip_v=*/true);
