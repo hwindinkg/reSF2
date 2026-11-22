@@ -2169,13 +2169,13 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // (`this.da.ia()` -> `this.Nd.ia()`, L499) — ONE solver step per 60 Hz
     // frame. This port's move start is driven by the fight controller
     // (`Fighter::start_move_impl` <- `ai_start_move`/`try_start_move`), which
-    // runs BEFORE the same frame's `advance()`/`advance_step()` (the `wd.ia`
+    // runs BEFORE the same frame's `advance()`/`advance_step(slot)` (the `wd.ia`
     // equivalent). Sampling here stepped the `Al` cloth solver a SECOND time
     // on every move-start frame, desyncing the stateful non-clip bodies (the
     // BODY ankle cloth 76..81 and the head cloth 86..93) from the oracle — the
     // persistent ~12 u idle-cloth offset (compare_pose: bone 77 34.7% /
     // 79 30.6% / 81 31.0% over tolerance -> 0%). The JS has no such step, so
-    // drop it: the frame's own `advance_step()` `sample_current()` supplies the
+    // drop it: the frame's own `advance_step(slot)` `sample_current()` supplies the
     // pose (and the single solver step).
     return true;
 }
@@ -2737,7 +2737,7 @@ std::string Fighter::process_reaction_queues(sf2::scene::FightContext& ctx,
 //     -> trace F336..F390 = 55 frames = (21-3)*3+1           [exact]
 // The old code advanced move_frame_ 1 per step => 3x TOO FAST. The native
 // now advances a subframe counter and samples the interpolated pose.
-void Fighter::advance(float dt) {
+void Fighter::advance(float dt, int slot) {
     (void)dt;  // fixed 60 Hz - one frame per call (JS 1/60 step)
     // Frame-action drain: the actions collected by the sub-steps of THIS
     // advance() are what the caller dispatches (JS `Te.Lwa` L563-564 runs
@@ -2789,10 +2789,10 @@ void Fighter::advance(float dt) {
     }
     scale_acc_ = 0.0f;   // no fractional accumulator (JS `mo` is an integer)
     sub_frac_ = 0.0f;    // no fractional re-pose
-    advance_step();
+    advance_step(slot);
 }
 
-void Fighter::advance_step() {
+void Fighter::advance_step(int slot) {
     // JS `Te.ia` L22797: `this.M2++` runs on EVERY `da.ia()` tick, before the
     // `this.Pe` branch. `da.ia()` itself is gated on `parameters.QD` (L499),
     // so a NotAnimation fighter (QD false) never ticks `M2`.
@@ -3040,7 +3040,7 @@ void Fighter::advance_step() {
     // clip's first dumped frame — the measured first-frame spike (idle
     // cf=2 max 196, intro cf=11 max 80). Sample `fq[subframe_]` first, then
     // advance, so the sampled `t=(subframe_+1)/sub` is the JS `fq[subframe_]`.
-    sample_current();
+    sample_current(slot);
     ++subframe_;
     if (subframe_ >= sub) {
         subframe_ = 0;
@@ -3139,7 +3139,10 @@ float Fighter::bone_world_x(const std::string& name, int facing) const {
     return kNoBoneX;  // JS `Ic` falls through to `return null` -> `Wea` miss
 }
 
-void Fighter::sample_current() {
+static int g_trace_slot = -1;
+
+void Fighter::sample_current(int slot) {
+    g_trace_slot = slot;
     if (current_clip_ != nullptr) {
         // [F10] The `sample()` mirror argument is the CLIP MIRROR (`Te.FX` /
         // `hd()`), not the `b6a` facing lock.
@@ -4457,7 +4460,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
                              return static_cast<float>(acc / static_cast<double>(nb));
                          }()),
-                         static_cast<const void*>(this), uid_, trace_player_ ? 0 : 1);
+                         static_cast<const void*>(this), uid_, g_trace_slot);
             std::fflush(stdout);
             trace_prev_final[this] = world_x_;
         }

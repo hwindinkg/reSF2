@@ -8711,7 +8711,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
         const float v = static_cast<float>(std::atof(tf));
         if (v > 0.0f && !me.is_player) me.fighter.set_time_scale(v);
     }
-    me.fighter.advance(dt);
+    me.fighter.advance(dt, me.is_player ? 0 : 1);
     // [FIX interval-edge frame] JS raises the interval edges from the clip
     // frame that just advanced (EStopIntervalEvent after wd.ia), so the
     // prev/cur comparison must run AFTER Fighter::advance. It ran before, and
@@ -8914,7 +8914,7 @@ void FightController::update_fighter(FightFighter& me, FightFighter& foe, float 
                 me.last_decision = "auto:" + move_name;
             }
         }
-        me.fighter.advance(0.0f);
+        me.fighter.advance(0.0f, me.is_player ? 0 : 1);
     }
 
     // The AI update (JS `de.ia` via `wd.Anb`/`Ykb`, L499-500:

@@ -472,8 +472,10 @@ public:
     // Advances the current clip one frame (60 Hz). Updates active intervals
     // (Start/End), transitions to idle when the clip ends (JS `Te.ia`
     // L547-548: `Xh+2 >= len` -> stop). Samples the pose at move_frame.
-    void advance(float dt);
-    void advance_step();  // one fixed sub-step (timescale loop calls this)
+    // [FIX trace key] `slot` (0 = player_, 1 = enemy_) is passed down from the
+    // controller so `[anchor]` can print a key that no copy can break.
+    void advance(float dt, int slot = -1);
+    void advance_step(int slot = -1);  // one fixed sub-step
 
     // --- display preview playback (`Pi.Ex` L2301 -> `wd.ia` -> `Te.ia`) -----
     // Seats a DISPLAY-ONLY clip so the caller drives it through the SAME
@@ -1843,7 +1845,7 @@ private:
     // `a[c].first<e&&a[c].second<e` test (`e` = `Kh(2).size`).
     int mirror_swap_src(int i, std::size_t zclip) const;
     void build_prepend(const MoveDef& move);
-    void sample_current();
+    void sample_current(int slot = -1);
     // JS `ia` (L499) clip-less cadence: `Nd.ia()` (the ragdoll solver) runs
     // every frame even when `parameters.QD` skips the clip advance. Samples
     // the 1-frame, bone-less bind clip so the solver/placement path of
