@@ -8007,7 +8007,11 @@ static void trace_fight_cloth(const FightFighter& f, int frame) {
 }
 
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
-    // [FIX trace key] the SLOT side, owned by the controller (never copied)
+    // [FIX trace key] stamp BOTH live fighters every pass: they may be re-created
+    // after init, so a one-off stamp at init never reached them (measured: two
+    // fighters printed under side=0).
+    player_.fighter.set_trace_player(true);
+    enemy_.fighter.set_trace_player(false);
     sf2::scene::set_trace_side(me.is_player ? 0 : 1);
     // [diagnostic] `SF2_TRACE_SLOT=1`: who is "me" in this pass. The [anchor]
     // lines print side=0 for BOTH fighters (BackKick and ShortJumpKick at
@@ -10283,9 +10287,14 @@ void FightController::update(float dt) {
                         // side) pushed the bodies further through each other -
                         // measured min 31.4 on 3 frames. This form is exact for
                         // both signs and keeps the latched side.
-                        const float s = (dx - last_sep_dir_ * kMinSep) * 0.5f;
+                        // [FIX "противник двигается за игроком" — player report]
+                        // The push used to be SYMMETRIC, so when the player walked
+                        // into the pair the opponent's (and the bag's) DRAWN body
+                        // slid along with him. One-sided now: only the player is
+                        // displaced, the opponent keeps its own position.
+                        const float s = (dx - last_sep_dir_ * kMinSep);
                         push_p = s;
-                        push_e = -s;
+                        push_e = 0.0f;
                     }
                 }
                 // [FIX jitter — player report "странные дёргания / перемещение по
