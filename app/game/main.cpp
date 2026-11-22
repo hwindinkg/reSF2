@@ -11183,6 +11183,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             {"left", 210.0f, 270.0f},
             {"right", 1750.0f, 1690.0f},
         };
+        int wide_frames = 0;
         for (int wi = 0; wi < 2; ++wi) {
         std::fprintf(stdout, "[wallprobe] === wall=%s me=%.0f foe=%.0f ===\n",
                      kSpots[wi].tag, static_cast<double>(kSpots[wi].me),
@@ -11241,6 +11242,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // stretched across the arena (the player's "разнесло" symptom);
                 // print EVERY such frame with its move so the culprit is named.
                 if (sp > 600.0f) {
+                    ++wide_frames;
                     const auto* cm = ctl.player().fighter.current_move();
                     std::fprintf(stdout,
                                  "[wallprobe] WIDE f=%2d mv=%-14s span=%.1f wx=%.1f "
@@ -11260,6 +11262,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             std::fflush(stdout);
         }
         }
+        // [gate `wall-span`] one number for the whole probe: how many frames of
+        // the drawn pose were wider than 600 units (a body is ~180, so those are
+        // the frames where the mesh is stretched / a node sits in the wrong space).
+        std::fprintf(stdout, "[wallprobe] summary wides=%d\n", wide_frames);
+        std::fflush(stdout);
         app.shutdown();
         return 0;
     } else if (d3_probe) {
