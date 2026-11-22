@@ -1679,6 +1679,16 @@ private:
     // the arena from the left wall (player report: "от левой стенки персонажа
     // перемещает в центр локации") and off-screen from the right one.
     bool wall_pin_ = false;
+    // [FIX trace key] The side must survive COPYING (unlike `uid`) and must not
+    // be an ambient global (update_fighter samples the opponent too, so the
+    // opponent's pose was printed with the caller's side). `is_player` is
+    // semantic, so a copy of the player is still the player.
+    bool trace_player_ = false;
+
+  public:
+    void set_trace_player(bool p) { trace_player_ = p; }
+
+  private:
     // [probe] Stable per-instance key for the traces. `id=%p` prints a SHARED
     // pointer (one value appears for two different fighters on the same frame),
     // so every per-fighter metric built on it was an artifact.

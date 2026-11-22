@@ -4413,7 +4413,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
                              return static_cast<float>(acc / static_cast<double>(nb));
                          }()),
-                         static_cast<const void*>(this), uid_, g_trace_side);
+                         static_cast<const void*>(this), uid_, trace_player_ ? 0 : 1);
             std::fflush(stdout);
             trace_prev_final[this] = world_x_;
         }

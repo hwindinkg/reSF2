@@ -2249,6 +2249,7 @@ FightFighter FightController::make_fighter(
     FightFighter f;
     f.name = nm;
     f.is_player = is_player;
+    f.fighter.set_trace_player(is_player);
     // JS `ra.Hza` (L28883): the move list is built by testing every move's
     // `<Locks>` against a ctx whose perk lists are `Ae.EA` = the fighter's
     // OWN live set (`a.Kf().parameters.Wk()` — the FULL merged learned +
@@ -8008,6 +8009,16 @@ static void trace_fight_cloth(const FightFighter& f, int frame) {
 void FightController::update_fighter(FightFighter& me, FightFighter& foe, float dt) {
     // [FIX trace key] the SLOT side, owned by the controller (never copied)
     sf2::scene::set_trace_side(me.is_player ? 0 : 1);
+    // [diagnostic] `SF2_TRACE_SLOT=1`: who is "me" in this pass. The [anchor]
+    // lines print side=0 for BOTH fighters (BackKick and ShortJumpKick at
+    // f=758-761), so the is_player flag itself is suspect.
+    if (std::getenv("SF2_TRACE_SLOT") != nullptr) {
+        std::fprintf(stdout, "[slot] F%d me=%s is_player=%d side=%d | foe=%s is_player=%d\n",
+                     static_cast<int>(frame_), me.name.c_str(),
+                     me.is_player ? 1 : 0, me.is_player ? 0 : 1, foe.name.c_str(),
+                     foe.is_player ? 1 : 0);
+        std::fflush(stdout);
+    }
     trace_fight_cloth(me, frame_);
     // [probe, authorised] SF2_TRACE_WEAPON: the weapon rig — the weapon nodes'
     // drawn model positions vs their BIND values, plus the live clip. A weapon
