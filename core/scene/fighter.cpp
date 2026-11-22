@@ -2046,6 +2046,27 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // sample (the buffer's slot-2 reference is the raw clip frame).
             const float off_old = render_offset_;
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            // [probe] `SF2_TRACE_ALIGN=1`: the numbers behind an <Align> clip
+            // start. At a MID-FRAME clip switch the offset is computed against
+            // `sol_ma_` (the pose BEFORE the switch), which is what throws the
+            // body to the new clip's absolute placement (measured 542 units on
+            // BackKick -> ShortJumpKick at f=760).
+            if (std::getenv("SF2_TRACE_ALIGN") != nullptr) {
+                std::fprintf(stdout,
+                             "[align2] F%d move=%s sol_au=%.1f sol_pu=%.1f "
+                             "prev_world_pu=%.1f world=%.1f off=%.1f "
+                             "px_anchor_now=%.1f\n",
+                             g_trace_fight_frame, move.name.c_str(),
+                             static_cast<double>(sol_ma_[au * 3]),
+                             static_cast<double>(sol_ma_[pu * 3]),
+                             static_cast<double>(prev_align_pivot_world_x_),
+                             static_cast<double>(world_x_),
+                             static_cast<double>(render_offset_),
+                             static_cast<double>(pos_.size() > au * 2
+                                                     ? pos_[au * 2]
+                                                     : -1.0f));
+                std::fflush(stdout);
+            }
             if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
                 float raw_d = sol_ma_[pu * 3];
                 if (current_clip_ != nullptr && !current_clip_->frames.empty()) {
