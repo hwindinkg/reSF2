@@ -4641,7 +4641,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // bamboo fight: the player-reported head triangle (416-758) disappears.
         constexpr float kCarryJump = 150.0f;
         const bool real_arena = arena_wall_max_ > arena_wall_min_;
-        if (real_arena && prev_anchor_px_valid_ && anchor_u < n && nclip < n) {
+        if (real_arena && prev_anchor_px_valid_ && anchor_u < n && nclip < n &&
+            !nk_) {
             const float jdx = px[anchor_u] - prev_anchor_px_;
             const float jdy = py[anchor_u] - prev_anchor_py_;
             if (std::fabs(jdx) > kCarryJump || std::fabs(jdy) > kCarryJump) {
