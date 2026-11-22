@@ -3160,8 +3160,14 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // here with explicit corners and 90-deg-mapped UVs.
             float cap_src_w = 101.0f, cap_src_h = 114.0f;
             atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w, &cap_src_h);
+            // [rod caps — measured against oracle_ib_00.png] The cap is a PIECE OF
+            // ART, so its drawn height must preserve the sprite's aspect:
+            // h = w * src_h/src_w. The formula had src_w/src_h, i.e. it SQUASHED
+            // every cap to 78 % of its natural height, and that is visible: the
+            // oracle's dark end rings take 58 of the rod's 267 rows (22 %), the
+            // port's only 36 (13 %). Natural proportions give ~51 rows.
             const float cap_len =
-                cap_src_h > 0.0f ? rod_w * (cap_src_w / cap_src_h) : rod_w;
+                cap_src_w > 0.0f ? rod_w * (cap_src_h / cap_src_w) : rod_w;
             // [rod profile — measured against oracle_ib_00.png] The 3 px overlap
             // painted over the caps' dark end rings (the atlas `roll_end` is dark
             // at BOTH ends: row means 28/41 ... 26/16), which is why the port's
