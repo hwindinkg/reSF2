@@ -10898,9 +10898,17 @@ void FightController::update(float dt) {
                      static_cast<double>(battle_.enemy_spawn_x));
         std::fflush(stdout);
     }
-    camera_.framing(player_.fighter.com_x(), player_.fighter.com_y(),
-                    enemy_.fighter.com_x(), enemy_.fighter.com_y(), 1280.0f, 720.0f,
-                    pnx);
+    // [FIX camera sees the pair separation — measured with `cam:tournament`]
+    // `com_x()` is the mass-weighted centroid of the DRAWN nodes, so the
+    // separation push (a rigid `pos_` shift) moved the camera target: the gate
+    // read 19/368 camera frames over tolerance with the ONE-SIDED push, 1/368
+    // with the symmetric one (which keeps the midpoint) and 1/368 with the
+    // separation switched off entirely (`SF2_NO_SEP`). The push is a render
+    // correction only - the code says so two hundred lines up ("camera does not
+    // change") - so subtract exactly what was added before framing.
+    camera_.framing(player_.fighter.com_x() - sep_push_p_,
+                    player_.fighter.com_y(), enemy_.fighter.com_x() - sep_push_e_,
+                    enemy_.fighter.com_y(), 1280.0f, 720.0f, pnx);
 
     // The HUD state.
     hud_.set_hp(player_.hp, player_.max_hp, enemy_.hp, enemy_.max_hp);

@@ -3222,11 +3222,18 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // 3 px overscan: the cap art's dark outer rows must land inside
                 // the sampled strip (oracle tips 7/27 vs the port's 55/58)
                 const float cap_ov = 18.0f;
+                // [FIX scroll rod: the top cap was INVISIBLE — player report,
+                // measured row-by-row at the rod's own column] `mid_len` is the
+                // whole rod height, and the centre used to be drawn AFTER the top
+                // cap, so it painted over it: the measured dark run at the top was
+                // 0 rows while the bottom cap (drawn after the centre) showed 36.
+                // Both caps are the same sprite, so the composite is correct only
+                // when both ends read the same. Centre FIRST, caps on top.
+                rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
+                          /*flip_v=*/false, 0.0f, 1.0f);
                 rod_piece("roll_end", rod_cx,
                           cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f - 9.0f,
                           rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f);
-                rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
-                          /*flip_v=*/false, 0.0f, 1.0f);
                 // the bottom cap is the top one turned around: ring at the bottom
                 rod_piece("roll_end", rod_cx,
                           cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f + 9.0f,
