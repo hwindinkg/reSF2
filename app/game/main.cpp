@@ -11154,9 +11154,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 ++pguard;
             }
         }
-        ctl.set_bounds(80.0f, 1880.0f, 0.0f);  // the dojo walls (`yu`/`zu`)
+        // [probe] `SF2_WALL_PROBE_BOUNDS="min,max"` runs the same cases in another
+        // arena: the OracleShell wall-jump trace is the BAMBOO fight (`zu`=1773),
+        // so a depth comparison against it must use the same walls, not the dojo's.
+        float wall_lo = 80.0f, wall_hi = 1880.0f;  // the dojo walls (`yu`/`zu`)
+        if (const char* wb = std::getenv("SF2_WALL_PROBE_BOUNDS")) {
+            float a = 0.0f, b2 = 0.0f;
+            if (std::sscanf(wb, "%f,%f", &a, &b2) == 2 && b2 > a) {
+                wall_lo = a;
+                wall_hi = b2;
+            }
+        }
+        ctl.set_bounds(wall_lo, wall_hi, 0.0f);
         std::fprintf(stdout, "[wallprobe] phase=%d walls=[%.0f,%.0f]\n",
-                     ctl.phase(), 80.0f, 1880.0f);
+                     ctl.phase(), static_cast<double>(wall_lo),
+                     static_cast<double>(wall_hi));
         std::fflush(stdout);
         // [probe] The WALL REACTIONS are the player-reported case ("от левой
         // стенки персонажа перемещает в центр локации"): `WallHit`/`WallHitFall`
@@ -11164,8 +11176,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // but they END IN A RAGDOLL, so the world promotion in `ragdoll_start`
         // decides where the body lands. They start unconditionally (no key gate),
         // so they are appended to the forced set and tracked for longer.
-        const char* kMoves[5] = {"WallJump_100", "HunterFly_150", "WaspFly_150",
-                                 "WallHit", "WallHitFall"};
+        // `SF2_WALL_PROBE_MOVE=<name>` replaces the figure list with ONE move, so a
+        // port run can be compared with an oracle trace of the SAME variant (the
+        // OracleShell trace picked WallJump_200/250 by itself).
+        const char* only_move = std::getenv("SF2_WALL_PROBE_MOVE");
+        const char* kMoves[5] = {
+            only_move != nullptr ? only_move : "WallJump_100", "HunterFly_150",
+            "WaspFly_150", "WallHit", "WallHitFall"};
         const int kMoveFrames[5] = {40, 40, 40, 90, 120};
         // [probe] BOTH walls. `yu`/`zu` = [80, 1880]. The placement distance
         // [ORACLE REFERENCE — measured, so the asymmetry is not guessed] The two
