@@ -3214,15 +3214,18 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // 4 %, or it overshoots.
                 const float cap_inset_top = 0.0f;
                 const float cap_inset_bot = 0.0f;
+                // 3 px overscan: the cap art's dark outer rows must land inside
+                // the sampled strip (oracle tips 7/27 vs the port's 55/58)
+                const float cap_ov = 6.0f;
                 rod_piece("roll_end", rod_cx,
-                          cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
-                          rod_w, cap_len, mirror, /*flip_v=*/true);
+                          cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f - 3.0f,
+                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true);
                 rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
                           /*flip_v=*/false);
                 // the bottom cap is the top one turned around: ring at the bottom
                 rod_piece("roll_end", rod_cx,
-                          cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f,
-                          rod_w, cap_len, mirror, /*flip_v=*/false);
+                          cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f + 3.0f,
+                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/false);
             }
         }
     }
