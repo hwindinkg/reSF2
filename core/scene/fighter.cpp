@@ -1941,6 +1941,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // play where he already stands, so the placement is PINNED to his own
         // position for the clip (the same pin `abs_mode 0` applies, per move).
         wall_pin_ = wall_positioned;
+        wall_align_done_ = false;  // [EObjectWall] re-align per clip
         align_pivot_u_ = -1;
         // [throw victim] Keep the fighter where it stood: `Dl.oL` anchors the
         // clip to `parameters.position`, so the clip's absolute buffer values
@@ -4312,6 +4313,28 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // him further right ("справа куда-то дальше вправо"); the travel is
         // mirrored for a fighter standing in the right half and capped, so a wall
         // jump is a jump off the wall, not a leap across the arena.
+        // [FIX EObjectWall — the diagnosed root of the wall-jump ramp] A
+        // Wall-aligned clip is placed by SHIFTING ITS BUFFER onto the wall
+        // (`sf2.readable.js` L23403 `Fk.x = e - d.x` -> L22953 `Gla -> jc.shift`).
+        // Without that shift the authored buffer sits far outside the arena (his
+        // log 20261122_013011: px starts at -644.9 with walls [80,1880]), so
+        // `wall_repulsion_step()` (= JS `Iub`) shoves it back ~150-245 units per
+        // frame and the drawn pose flies while the root crawls. Placing the buffer
+        // on the wall once removes the shove entirely and puts the jump where the
+        // player triggered it.
+        {
+            const bool wall_move =
+                current_move_ != nullptr && current_move_->align.has_align &&
+                current_move_->align.pos_object == "Wall";
+            if (wall_move && !wall_align_done_ && arena_wall_max_ > arena_wall_min_) {
+                wall_align_done_ = true;
+                const float mid = (arena_wall_min_ + arena_wall_max_) * 0.5f;
+                const float wall_ref =
+                    (world_x_ <= mid) ? arena_wall_min_ : arena_wall_max_;
+                render_offset_ += wall_ref - world_x_;
+                world_x_ = wall_ref;
+            }
+        }
         // [FIX wall jump — ported from the JS, not tuned] `Te.eda`/`Gla`
         // (sf2.readable.js L22953 `Gla -> jc.shift`, L23367-23406 `EObjectWall`)
         // place a Wall clip by SHIFTING ITS BUFFER and then let the body follow

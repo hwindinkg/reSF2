@@ -1684,6 +1684,8 @@ private:
     bool prev_wall_jump_valid_ = false;
     float wall_jump_start_x_ = 0.0f;
     bool wall_jump_active_ = false;
+    // [EObjectWall] one-shot per clip: the buffer is placed ON the wall
+    bool wall_align_done_ = false;
 
     // [FIX throw distance] A throw-VICTIM clip is anchored to the THROWER: the
     // pair must stay ~92 units apart (JS median measured on the boss-lynx stand)
