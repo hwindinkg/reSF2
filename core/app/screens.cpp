@@ -3222,6 +3222,24 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // 3 px overscan: the cap art's dark outer rows must land inside
                 // the sampled strip (oracle tips 7/27 vs the port's 55/58)
                 const float cap_ov = 18.0f;
+                // [rod invariant — gate `ui-rod`] `mid_len` is the WHOLE rod, so
+                // the centre must be drawn BEFORE the caps: drawn after them it
+                // paints them over. That is not theory — the top cap was invisible
+                // for exactly that reason (measured: 0 dark rows at the top end vs
+                // 36 at the bottom, which was drawn last). Pixel comparisons of
+                // this dialog are unreliable (the caption overlaps the rod), so the
+                // gate asserts the draw order itself, which is the only thing that
+                // separates a correct composite from a flat rod.
+                const bool rod_check = std::getenv("SF2_ROD_CHECK") != nullptr;
+                std::string rod_order;
+                auto piece = [&](const char* frame, float px, float py, float pw,
+                                 float ph, bool pmirror, bool pflip, float pvf0,
+                                 float pvf1) {
+                    rod_piece(frame, px, py, pw, ph, pmirror, pflip, pvf0, pvf1);
+                    if (rod_check) {
+                        rod_order += std::strcmp(frame, "roll_center") == 0 ? 'C' : 'c';
+                    }
+                };
                 // [FIX scroll rod: the top cap was INVISIBLE — player report,
                 // measured row-by-row at the rod's own column] `mid_len` is the
                 // whole rod height, and the centre used to be drawn AFTER the top
@@ -3229,15 +3247,26 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // 0 rows while the bottom cap (drawn after the centre) showed 36.
                 // Both caps are the same sprite, so the composite is correct only
                 // when both ends read the same. Centre FIRST, caps on top.
-                rod_piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
-                          /*flip_v=*/false, 0.0f, 1.0f);
-                rod_piece("roll_end", rod_cx,
-                          cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f - 9.0f,
-                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f);
+                piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
+                      /*flip_v=*/false, 0.0f, 1.0f);
+                piece("roll_end", rod_cx,
+                      cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f - 9.0f,
+                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f);
                 // the bottom cap is the top one turned around: ring at the bottom
-                rod_piece("roll_end", rod_cx,
-                          cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f + 9.0f,
-                          rod_w, cap_len + cap_ov, mirror, /*flip_v=*/false, 0.5f, 1.0f);
+                piece("roll_end", rod_cx,
+                      cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f + 9.0f,
+                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/false, 0.5f, 1.0f);
+                if (rod_check) {
+                    // once per side, so the probe's stdout stays readable
+                    static bool rod_reported[2] = {false, false};
+                    if (side >= 0 && side < 2 && !rod_reported[side]) {
+                        rod_reported[side] = true;
+                        std::fprintf(stdout, "[rod] side=%d order=%s verdict=%s\n",
+                                     side, rod_order.c_str(),
+                                     rod_order == "Ccc" ? "PASS" : "FAIL");
+                        std::fflush(stdout);
+                    }
+                }
             }
         }
     }
