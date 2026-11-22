@@ -3971,6 +3971,29 @@ int Fighter::clip_bone_count() const {
 void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                      float y, int mirror_sign, bool interp, int first_frame,
                      int playhead, float sub_frac, bool tick_ragdoll) {
+    // [probe] `SF2_TRACE_OFF=1`: which offset is in force at the sample and
+    // whether it will be captured now. Three different edits to the capture path
+    // produced bit-identical steps (535.1/7, 245.1/5), so the offset for those
+    // clips is set on ANOTHER path - this line names it.
+    if (std::getenv("SF2_TRACE_OFF") != nullptr && g_trace_fight_frame >= 750 &&
+        g_trace_fight_frame <= 765) {
+        std::fprintf(stdout,
+                     "[offs] F%d move=%s x=%.1f off=%.1f valid=%d abs=%d pin=%d has_align=%d "
+                     "mode_pivot=%s\n",
+                     g_trace_fight_frame,
+                     current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                     static_cast<double>(x), static_cast<double>(render_offset_),
+                     render_offset_valid_ ? 1 : 0, align_absolute_ ? 1 : 0,
+                     wall_pin_ ? 1 : 0,
+                     (current_move_ != nullptr &&
+                      current_move_->align.has_align)
+                         ? 1
+                         : 0,
+                     current_move_ != nullptr
+                         ? current_move_->align.pos_object.c_str()
+                         : "-");
+        std::fflush(stdout);
+    }
     if (clip.frames.empty()) {
         return;
     }
