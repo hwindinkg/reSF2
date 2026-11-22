@@ -11244,12 +11244,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 if (sp > 600.0f) {
                     ++wide_frames;
                     const auto* cm = ctl.player().fighter.current_move();
+                    float lox = 0.0f, hix = 0.0f;
+                    int loi = -1, hii = -1;
+                    ctl.player().fighter.debug_pose_extremes(&lox, &loi, &hix, &hii);
                     std::fprintf(stdout,
                                  "[wallprobe] WIDE f=%2d mv=%-14s span=%.1f wx=%.1f "
-                                 "com=%.1f\n",
+                                 "com=%.1f lo=%s(%.0f) hi=%s(%.0f)\n",
                                  f, cm != nullptr ? cm->name.c_str() : "-",
                                  static_cast<double>(sp), static_cast<double>(wx),
-                                 static_cast<double>(com));
+                                 static_cast<double>(com),
+                                 ctl.player().fighter.debug_bone_name(loi),
+                                 static_cast<double>(lox),
+                                 ctl.player().fighter.debug_bone_name(hii),
+                                 static_cast<double>(hix));
                     std::fflush(stdout);
                 }
             }

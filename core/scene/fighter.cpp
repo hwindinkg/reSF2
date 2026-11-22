@@ -1028,6 +1028,16 @@ void Fighter::ragdoll_stop() {
             sol_mf_[i + 1] -= solver_base_y_;
         }
     }
+    // [FIX getup stretch — gate `wall-span`, measured] The cloth CARRY keeps the
+    // simulated nodes in step with a clip-driven prefix by adding the anchor's
+    // per-frame delta (`px[anchor] - prev_anchor_px`). Across the ragdoll->clip
+    // space change that delta is the WHOLE world offset: measured on the getup
+    // `px[anchor]` went 1793 (world) -> -19 (clip), the carry therefore moved the
+    // head-cloth chain `HEAD-Node117` to `sol=3558` (~1750 off the body) and the
+    // edge relax hauled it back over ~6 frames with the drawn span at 1937
+    // (`wall-span` 11 stretched frames, all in `Standup`). Drop the carry's
+    // anchor here: the next frame re-arms it in the ONE space both sides share.
+    prev_anchor_px_valid_ = false;
     // [probe, authorised] `SF2_TRACE_CLOTHSPACE=1`: the ragdoll->clip space
     // conversion for the SIMULATED nodes (the ones a clip does not animate, i.e.
     // `i >= clip.bone_count()`), with the base it subtracts and the anchor it
@@ -5259,6 +5269,39 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
     // (buffer), `sol_ma_` (solver), the anchor and `world_x_`. Explains the
     // measured 4 -> 40 unit jump at the first clip frame (nclip=67, so the clip
     // does not write these nodes).
+    // [probe] `SF2_STOP_PROBE=1`: the ragdoll->clip handoff. Prints the base the
+    // stop converted with and the SAME node in all three spaces (solver, clip
+    // placement, drawn) on the first frames of the getup, so a node left in the
+    // wrong space is visible by name instead of inferred from the pose extent.
+    static int stop_probe_logs = 0;
+    if (std::getenv("SF2_STOP_PROBE") != nullptr && current_move_ != nullptr &&
+        current_move_->name.compare(0, 5, "Stand") == 0 && stop_probe_logs < 12 &&
+        debug_bone_span_x() > 600.0f) {
+        ++stop_probe_logs;
+        const int hi_b = model_.bone_by_name("HEAD-Node117");
+        float sx = 0.0f, cx2 = 0.0f, pxs = 0.0f;
+        if (hi_b >= 0 && static_cast<std::size_t>(hi_b) < n) {
+            const std::size_t u = static_cast<std::size_t>(hi_b);
+            if (sol_ma_.size() > u * 3 + 1) sx = sol_ma_[u * 3];
+            if (px.size() > u) cx2 = px[u];
+            if (pos_.size() > u * 2) pxs = pos_[u * 2];
+        }
+        std::fprintf(stdout,
+                     "[stopprobe] tick=%d world=%d mv=%s base=%.1f anch_px=%.1f "
+                     "anch_world=%.1f n117 sol=%.1f px=%.1f pos=%.1f "
+                     "wall=[%.0f,%.0f]\n",
+                     ia_ticks_, solver_world_ ? 1 : 0,
+                     current_move_->name.c_str(),
+                     static_cast<double>(solver_base_x_),
+                     static_cast<double>(px.size() > static_cast<std::size_t>(anchor_u)
+                                             ? px[static_cast<std::size_t>(anchor_u)]
+                                             : 0.0f),
+                     static_cast<double>(world_x_), static_cast<double>(sx),
+                     static_cast<double>(cx2), static_cast<double>(pxs),
+                     static_cast<double>(arena_wall_min_),
+                     static_cast<double>(arena_wall_max_));
+        std::fflush(stdout);
+    }
     const char* cfa = std::getenv("SF2_CLOTH_FRAME_AT");
     const int cfa_at = cfa != nullptr ? std::atoi(cfa) : -1;
     if ((std::getenv("SF2_TRACE_CLOTH_FRAME") != nullptr && ia_ticks_ <= 6) ||

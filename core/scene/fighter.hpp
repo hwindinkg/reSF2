@@ -1053,6 +1053,31 @@ public:
         }
         return hi - lo;
     }
+    // [probe] WHICH nodes make the drawn pose wide: the extremes of `pos_` with
+    // their bone names. A pose wider than a body (~180 units) means one node sits
+    // in the wrong space, and the name is what identifies the mechanism.
+    void debug_pose_extremes(float* lo_x, int* lo_i, float* hi_x, int* hi_i) const {
+        if (lo_x) *lo_x = 0.0f;
+        if (hi_x) *hi_x = 0.0f;
+        if (lo_i) *lo_i = -1;
+        if (hi_i) *hi_i = -1;
+        if (pos_.size() < 2) return;
+        float lo = pos_[0], hi = pos_[0];
+        int li = 0, hii = 0;
+        for (std::size_t i = 1; i * 2 < pos_.size(); ++i) {
+            const float v = pos_[i * 2];
+            if (v < lo) { lo = v; li = static_cast<int>(i); }
+            if (v > hi) { hi = v; hii = static_cast<int>(i); }
+        }
+        if (lo_x) *lo_x = lo;
+        if (hi_x) *hi_x = hi;
+        if (lo_i) *lo_i = li;
+        if (hi_i) *hi_i = hii;
+    }
+    const char* debug_bone_name(int i) const {
+        if (i < 0 || static_cast<std::size_t>(i) >= model_.bones.size()) return "-";
+        return model_.bones[static_cast<std::size_t>(i)].name.c_str();
+    }
     // JS `sI` (L491/L498/L511): the number of landed hits this fighter has
     // TAKEN (`Bb.ep = (sI==0)` then `sI++`). `ca.Cgb` L396 gates the
     // Punchbag's forced reaction on `a.model.sI == v.Qxa`

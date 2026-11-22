@@ -2,7 +2,7 @@
 
 <!-- STATUS:START -->
 
-![gates](https://img.shields.io/badge/gates-98%20%C2%B7%2061%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
+![gates](https://img.shields.io/badge/gates-98%20%C2%B7%2062%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
 ### Readiness: 97%
 
@@ -10,7 +10,7 @@
 
 86 of 89 checklist items; every gap below is documented in BUGS.md.
 
-Gates with a baseline: **98** (61 at 0 divergences, 37 known non-zero) · reference: the shipped `sf2.readable.js`
+Gates with a baseline: **98** (62 at 0 divergences, 36 known non-zero) · reference: the shipped `sf2.readable.js`
 
 | System | | Readiness | Checks | Gaps |
 |---|---|---|---|---|
@@ -49,8 +49,8 @@ The `overall` row is every checklist item at once (86 of 89); a system row count
 | Module | Lines | Files |
 |---|---:|---:|
 | `core/app` | 49462 | 18 |
-| `core/scene` | 42676 | 35 |
-| `app/game` | 12912 | 1 |
+| `core/scene` | 42744 | 35 |
+| `app/game` | 12919 | 1 |
 | `core/data` | 2162 | 20 |
 | `core/audio` | 1308 | 4 |
 | `app/ai_golden` | 961 | 1 |
@@ -65,5 +65,5 @@ The `overall` row is every checklist item at once (86 of 89); a system row count
 | `app/anim_model_probe` | 335 | 1 |
 | `app/move_probe` | 296 | 1 |
 | `app/asset_explorer` | 263 | 1 |
-| **total** | **115050** | |
+| **total** | **115125** | |
 <!-- STATUS:END -->
