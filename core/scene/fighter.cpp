@@ -4312,42 +4312,18 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // him further right ("справа куда-то дальше вправо"); the travel is
         // mirrored for a fighter standing in the right half and capped, so a wall
         // jump is a jump off the wall, not a leap across the arena.
-        const bool wall_jump_move =
-            current_move_ != nullptr &&
-            current_move_->name.compare(0, 8, "WallJump") == 0;
-        if (wall_jump_move) {
-            constexpr float kWallJumpMaxStep = 16.0f;
-            constexpr float kWallJumpMaxTravel = 220.0f;
-            constexpr float kArenaMidX = 970.0f;
-            if (!wall_jump_active_) {
-                wall_jump_start_x_ = world_x_;
-                wall_jump_active_ = true;
-            }
-            // [FIX wall jump still leaving through the wall — player log
-            // 20261122_005930] The mirror keyed on the clip's own travel sign,
-            // which is authored +X; for the third jump (start 1743.0, arena ends
-            // 1880) it still carried him to 1963.0, i.e. OUT of the arena. The
-            // direction is now derived from the ARENA SIDE, never from the clip:
-            // a wall jump always travels toward the arena centre, capped at 220,
-            // so it can never cross a wall regardless of what the clip authored.
-            const float dir_to_mid = (kArenaMidX - wall_jump_start_x_) >= 0.0f ? 1.0f : -1.0f;
-            float mag = world_x_ - wall_jump_start_x_;
-            if (mag < 0.0f) mag = -mag;
-            if (mag > kWallJumpMaxTravel) mag = kWallJumpMaxTravel;
-            world_x_ = wall_jump_start_x_ + dir_to_mid * mag;
-            if (prev_wall_jump_valid_) {
-                const float d = world_x_ - prev_wall_jump_x_;
-                if (std::fabs(d) > kWallJumpMaxStep) {
-                    world_x_ = prev_wall_jump_x_ +
-                               (d > 0.0f ? kWallJumpMaxStep : -kWallJumpMaxStep);
-                }
-            }
-            prev_wall_jump_x_ = world_x_;
-            prev_wall_jump_valid_ = true;
-        } else {
-            prev_wall_jump_valid_ = false;
-            wall_jump_active_ = false;
-        }
+        // [FIX wall jump — ported from the JS, not tuned] `Te.eda`/`Gla`
+        // (sf2.readable.js L22953 `Gla -> jc.shift`, L23367-23406 `EObjectWall`)
+        // place a Wall clip by SHIFTING ITS BUFFER and then let the body follow
+        // `px` 1:1. There is no travel clamp and no per-frame body cap in the
+        // original; both only decoupled the drawn pose from the root, which is
+        // exactly the player's "прыжки от стен не касаются стен вообще" (his log
+        // 20261122_013011: px -644.9 -> +189.7 in five frames while wx went
+        // 190 -> 270). Delta placement below (offset captured at the clip start,
+        // `render_offset_valid_ = false` for a jump) already gives that shift, so
+        // the only thing this block must do is NOT interfere.
+        prev_wall_jump_valid_ = false;
+        wall_jump_active_ = false;
         // [REVERTED by measurement] Clamping the anchor into the arena walls
         // ("thrown to opposite ends", QA-112.46) CHANGES FIGHT OUTCOMES: with the
         // clamp the `kick-ko` probe loses the fight (`[result] LOSS`, 98 kicks),
