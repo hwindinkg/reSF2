@@ -11168,6 +11168,16 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                                  "WallHit", "WallHitFall"};
         const int kMoveFrames[5] = {40, 40, 40, 90, 120};
         // [probe] BOTH walls. `yu`/`zu` = [80, 1880]. The placement distance
+        // [ORACLE REFERENCE — measured, so the asymmetry is not guessed] The two
+        // walls do NOT behave the same in the ORIGINAL either: an `OracleShell`
+        // trace with `reference/tools/state_wallump.txt` shows `WallJump_200/250`
+        // at the RIGHT bamboo wall (zu=1773) travelling TOWARD it - x 1593.3 to a
+        // peak of 1761.4 (13 units short) and back to 1306.3 - because the clip's
+        // root motion is authored +X. The port's right-wall numbers below
+        // (1769.1 -> 1835.3, 45 short of its 1880 wall, then back) are the same
+        // SHAPE, so mirroring the travel by arena half stays reverted. A depth
+        // comparison needs the oracle to play the SAME variant (`WallJump_100`),
+        // which this trace does not contain.
         // MATTERS: `WallJump_100` requires `<Distance Min="100" Max="150">` from
         // the wall (`<From Me Object="Wall" Part="Back">` to
         // `<To Me NHeel_1>`), so the earlier `160` at the left wall (80 away)
