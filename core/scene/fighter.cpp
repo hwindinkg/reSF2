@@ -913,6 +913,25 @@ void Fighter::ragdoll_start(const std::string& reaction, float wall_min,
         }
         std::fprintf(stdout, "[rdseed] postImpulse com=%.2f\n",
                      static_cast<double>(com_axis_in(tmp, 0)));
+        // [probe] bbox + nodes far from the anchor: a ragdoll that "flies to the
+        // centre of the location" must show the seed or the first solver step
+        // putting nodes hundreds of units away.
+        float lo = 1e9f, hi = -1e9f;
+        int far = 0, far_i = -1;
+        for (std::size_t i = 0; i < n; ++i) {
+            const float x = sol_ma_[i * 3];
+            if (x < lo) lo = x;
+            if (x > hi) hi = x;
+            if (std::fabs(x - world_x_) > 400.0f) {
+                ++far;
+                if (far_i < 0) far_i = static_cast<int>(i);
+            }
+        }
+        std::fprintf(stdout,
+                     "[rdseed] %p seed bbox x=[%.1f,%.1f] farFromAnchor=%d "
+                     "first_i=%d n=%zu\n",
+                     static_cast<const void*>(this),
+                     static_cast<double>(lo), static_cast<double>(hi), far, far_i, n);
         std::fflush(stdout);
     }
     // JS `Lwb` (L21121) -> `Bva(b)` (L21136): `this.IH.strike(...);
@@ -4745,8 +4764,21 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         const bool rd_probe =
             rd_probe_enabled && nk_ && ragdoll_frame_count_ <= 1;
         if (rd_probe) {
-            std::fprintf(stdout, "[rdstep] afterSk com=%.2f\n",
-                         static_cast<double>(rd_com()));
+            float lo = 1e9f, hi = -1e9f;
+            int lo_i = -1, hi_i = -1;
+            for (std::size_t q = 0; q < n; ++q) {
+                const float x = sol_ma_[q * 3];
+                if (x < lo) { lo = x; lo_i = static_cast<int>(q); }
+                if (x > hi) { hi = x; hi_i = static_cast<int>(q); }
+            }
+            std::fprintf(stdout,
+                         "[rdstep] %p afterSk com=%.2f bbox=[%.1f(i%d),%.1f(i%d)] "
+                         "frames=%d world=%d nk=%d solver_init=%d\n",
+                         static_cast<const void*>(this),
+                         static_cast<double>(rd_com()), static_cast<double>(lo),
+                         lo_i, static_cast<double>(hi), hi_i,
+                         ragdoll_frame_count_, solver_world_ ? 1 : 0, nk_ ? 1 : 0,
+                         solver_init_ ? 1 : 0);
             std::fflush(stdout);
         }
         // [evidence, not a fix] The ragdoll seed is the DRAWN pose, and on the

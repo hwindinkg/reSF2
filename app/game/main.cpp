@@ -11188,6 +11188,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                      kSpots[wi].tag, static_cast<double>(kSpots[wi].me),
                      static_cast<double>(kSpots[wi].foe));
         for (int mi = 0; mi < 5; ++mi) {
+            // [probe fix] A `WallJump_*`/`WallHit*` clip leaves `wall_pin_` set
+            // (`world_x_ = align_own_x_` every frame, fighter.cpp:4354), so the
+            // teleport to the SECOND wall never took: the right-wall cases
+            // reported `x0=213.4` while the spot is 1750 - the probe silently
+            // measured the left wall twice. Clear the move first, then place.
+            ctl.debug_reset_player_move();
             ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
             ctl.update(1.0f / 60.0f);
             const float x0 = ctl.player().fighter.world_x();
@@ -11230,6 +11236,19 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                                  "[wallprobe]   f=%2d mv=%-14s wx=%.1f span=%.1f\n",
                                  f, cm != nullptr ? cm->name.c_str() : "-",
                                  static_cast<double>(wx), static_cast<double>(sp));
+                }
+                // [probe] a drawn pose wider than 600 units means the mesh is
+                // stretched across the arena (the player's "разнесло" symptom);
+                // print EVERY such frame with its move so the culprit is named.
+                if (sp > 600.0f) {
+                    const auto* cm = ctl.player().fighter.current_move();
+                    std::fprintf(stdout,
+                                 "[wallprobe] WIDE f=%2d mv=%-14s span=%.1f wx=%.1f "
+                                 "com=%.1f\n",
+                                 f, cm != nullptr ? cm->name.c_str() : "-",
+                                 static_cast<double>(sp), static_cast<double>(wx),
+                                 static_cast<double>(com));
+                    std::fflush(stdout);
                 }
             }
             std::fprintf(stdout,
