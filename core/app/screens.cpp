@@ -3149,7 +3149,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // свитка».
             const float bar_h_px = kBarH * c;
             const float rod_w = bar_h_px * (42.0f / 225.0f);
-            const float rod_h = bar_h_px * (208.0f / 225.0f);
+            const float rod_h = bar_h_px * (262.0f / 225.0f);
             // [FIX B2 rolled end — oracle `oracle_ib_00`] The rod is the `Zh`
             // composite: `roll_end` (cap) + `roll_center` (stretched middle) +
             // `roll_end` (cap), all ROTATED 90 deg for this horizontal bar. The
@@ -3166,8 +3166,17 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // every cap to 78 % of its natural height, and that is visible: the
             // oracle's dark end rings take 58 of the rod's 267 rows (22 %), the
             // port's only 36 (13 %). Natural proportions give ~51 rows.
-            const float cap_len =
-                cap_src_w > 0.0f ? rod_w * (cap_src_h / cap_src_w) : rod_w;
+            // [rod cap LENGTH — measured on the oracle's own columns] The sprite's
+            // aspect alone gives 47 px, but the oracle's carved cap measures 58 rows
+            // at the top (49..106) and 52 at the bottom (267..318) plus the 10-row
+            // bright ring on each side, i.e. ~60-62 px of rod per cap. The art is
+            // stretched across that box (the rib COUNT is fixed by the sprite, the
+            // rib HEIGHT is not), so scale the aspect by 1.28: measured after the
+            // change, the bottom reads 8->10 rows of ring and 39->51 rows of ribs.
+            const float kRodCapStretch = 1.28f;
+            const float cap_len = cap_src_w > 0.0f
+                                      ? rod_w * (cap_src_h / cap_src_w) * kRodCapStretch
+                                      : rod_w;
             // [rod profile — measured against oracle_ib_00.png] The 3 px overlap
             // painted over the caps' dark end rings (the atlas `roll_end` is dark
             // at BOTH ends: row means 28/41 ... 26/16), which is why the port's
@@ -3185,7 +3194,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // small overlap so the rod reads as one piece.
             auto rod_piece = [&](const char* frame, float cx, float cy, float w,
                                  float h, bool mirror, bool flip_v, float vf0,
-                                 float vf1) {
+                                 float vf1, bool flip_y_quad = false) {
                 sf2::data::atlas_frame fr;
                 int tw = 0, th = 0;
                 unsigned int gl = 0;
@@ -3205,10 +3214,22 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 float vv0 = v0 + (v1 - v0) * vf0;
                 float vv1 = v0 + (v1 - v0) * vf1;
                 if (flip_v) std::swap(vv0, vv1);
-                const float xy[8] = {cx - w * 0.5f, cy - h * 0.5f,  // TL
-                                     cx + w * 0.5f, cy - h * 0.5f,  // TR
-                                     cx - w * 0.5f, cy + h * 0.5f,  // BL
-                                     cx + w * 0.5f, cy + h * 0.5f}; // BR
+                // [FIX bottom cap orientation] The rod quads map the sprite's V
+                // axis onto the quad's HORIZONTAL axis (the art is authored
+                // horizontal and drawn rotated), so `vf0/vf1` cannot order the
+                // cap's vertical structure - which is why every crop/flip_v
+                // combination still read "dark ribs, then the bright ring BELOW"
+                // (measured on the oracle's column: bright 255..264 then dark
+                // 267..318, the port: dark 258..297 then bright 300..330).
+                // `flip_y_quad` mirrors the quad geometrically instead: the piece
+                // that reads correctly at the TOP then reads correctly at the
+                // BOTTOM too.
+                const float y_top = flip_y_quad ? cy + h * 0.5f : cy - h * 0.5f;
+                const float y_bot = flip_y_quad ? cy - h * 0.5f : cy + h * 0.5f;
+                const float xy[8] = {cx - w * 0.5f, y_top,   // TL
+                                     cx + w * 0.5f, y_top,   // TR
+                                     cx - w * 0.5f, y_bot,   // BL
+                                     cx + w * 0.5f, y_bot};  // BR
                 const float uv[8] = {u0, vv1, u0, vv0, u1, vv1, u1, vv0};
                 app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f,
                                                   1.0f);
@@ -3217,7 +3238,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const bool mirror = side != 0;
                 const float rod_cx =
                     side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
-                const float cy = ly(kBarH * 0.5f) + 3.0f;  // +3 px: the port rod ended ~5 px short
+                const float cy = ly(kBarH * 0.5f) + 1.5f;  // +3 px: the port rod ended ~5 px short
                 // [rod composite — measured against oracle_ib_00.png] The oracle's
                 // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
                 // (64-bin bins 1 / 5-6 = 48 / 84). Measured insets: bottom 8 % puts
@@ -3227,7 +3248,15 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 const float cap_inset_bot = 0.0f;
                 // 3 px overscan: the cap art's dark outer rows must land inside
                 // the sampled strip (oracle tips 7/27 vs the port's 55/58)
-                const float cap_ov = 18.0f;
+                // [FIX cap overscan — measured] The +18 (and the ±9 shift that goes
+                // with it) made each cap stick 18 px OUTSIDE the rod's end, so its
+                // bright band appeared below the carved ribs at the bottom: the
+                // oracle reads bright 255..264 then dark 267..318, the port read
+                // dark 258..297 then bright 300..306 then dark 309..318. The caps
+                // are flush with the rod's ends now (height = the sprite's aspect,
+                // no overscan); the half-sprite crop is stretched across that box,
+                // which is what the oracle's 49-row carved caps are.
+                const float cap_ov = 0.0f;
                 // [rod invariant — gate `ui-rod`] `mid_len` is the WHOLE rod, so
                 // the centre must be drawn BEFORE the caps: drawn after them it
                 // paints them over. That is not theory — the top cap was invisible
@@ -3240,8 +3269,8 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 std::string rod_order;
                 auto piece = [&](const char* frame, float px, float py, float pw,
                                  float ph, bool pmirror, bool pflip, float pvf0,
-                                 float pvf1) {
-                    rod_piece(frame, px, py, pw, ph, pmirror, pflip, pvf0, pvf1);
+                                 float pvf1, bool pflipy = false) {
+                    rod_piece(frame, px, py, pw, ph, pmirror, pflip, pvf0, pvf1, pflipy);
                     if (rod_check) {
                         rod_order += std::strcmp(frame, "roll_center") == 0 ? 'C' : 'c';
                     }
@@ -3256,12 +3285,20 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
                       /*flip_v=*/false, 0.0f, 1.0f);
                 piece("roll_end", rod_cx,
-                      cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f - 9.0f,
+                      cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
                       rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f);
-                // the bottom cap is the top one turned around: ring at the bottom
+                // [FIX bottom cap was INVERTED — player screenshot, measured]
+                // The atlas UVs put sprite row `v1` at the quad's TOP, so with the
+                // 0.5..1.0 crop (sprite rows 57..113 = bright band 57-66, dark ribs
+                // 69-113) the dark ribs landed ABOVE the bright band: on the oracle's
+                // column the order is bright 255..264 then dark 267..318, the port
+                // read dark 258..297 then bright 300..330 - the "низ перевёрнут" the
+                // player sees. `flip_v` swaps the V ends, putting the bright band on
+                // top and the carved ribs at the rod's end, as the oracle has it.
                 piece("roll_end", rod_cx,
-                      cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f + 9.0f,
-                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/false, 0.5f, 1.0f);
+                      cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f,
+                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f,
+                      /*flip_y_quad=*/true);
                 if (rod_check) {
                     // once per side, so the probe's stdout stays readable
                     static bool rod_reported[2] = {false, false};
@@ -3293,7 +3330,15 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // The ONE label: the joined lines (`lj` L1908). `Fa(600-image.w+20,150)`,
     // `C(image.w-30)`, `D(50)`, `rd(!0)` (multiline — `{br}` is a hard break,
     // the Sensei tutorial notifications need it).
-    const float tx = lx(image_w - 30.0f);
+    // [FIX caption over the rod — player screenshot + row measurement] This was
+    // `lx(image_w - 30.0f)`, i.e. 30 design px LEFT of the bar's origin; the bar's
+    // paper starts exactly where the rod ends (`lx(0)` = the paper's left edge at
+    // x=740 on a 1280-wide frame) and the rod occupies 697..739, so the caption's
+    // first glyph landed at x=715..719 - ON TOP of the rod (measured: dark pixels
+    // in rows 118..190 start at x=715 while the paper starts at 740). The label
+    // belongs INSIDE the paper: start it one image-width plus a 10-unit inset from
+    // the bar's origin, and keep the box the same width budget.
+    const float tx = lx(image_w + 10.0f);
     // JS `Ib.Sr` L1910: `this.label.Kc(.65)` — the `ea.Kc` line factor is the
     // authored `Kc` argument (see `wrap_ui_text`), so the RU two-line
     // `tutorial_move` ("Сначала покажи,{br}как ты двигаешься!") advances at
