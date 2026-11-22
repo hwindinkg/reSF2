@@ -2482,7 +2482,11 @@ FightFighter FightController::make_fighter(
     f.hp = f.max_hp;
     // JS `ur` L194: `Fj = NotAI==null`; the AI is created ONLY when the
     // warrior is not an AI-less dummy (and the tactic resolved).
-    if (!is_player && !not_ai && tactic_ != nullptr) {
+    // [probe] `SF2_AI_BOTH=1`: attach the AI to the PLAYER as well, so two
+    // controllers fight each other — a self-testing harness that needs no human
+    // input (the player is MANUAL by default, `fight.cpp` init comment).
+    static const bool ai_both = std::getenv("SF2_AI_BOTH") != nullptr;
+    if ((!is_player || ai_both) && !not_ai && tactic_ != nullptr) {
         f.ai = std::make_unique<sf2::scene::AiController>();
         // JS `de` L589: the AI's weapon pair is the fighter's OWN move-list
         // subtype (`Fd` L808) — not a hardcoded "Fists" — so a knives boss
