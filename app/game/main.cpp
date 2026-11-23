@@ -11206,7 +11206,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // the distance the ORACLE's own wall jump started from (`WallJump_200`
         // x=1593.3 against bamboo `zu`=1773), so a port run at the same distance
         // is comparable.
-        float spot_off = 180.0f;
+        float spot_off = 130.0f;
         if (const char* sd = std::getenv("SF2_WALL_PROBE_DIST")) {
             const float v = static_cast<float>(std::atof(sd));
             if (v > 1.0f) spot_off = v;
@@ -11223,6 +11223,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             {"right", wall_hi - spot_off, wall_hi - spot_off - 60.0f},
         };
         int wide_frames = 0;
+        int out_of_arena = 0;
         for (int wi = 0; wi < 2; ++wi) {
         std::fprintf(stdout, "[wallprobe] === wall=%s me=%.0f foe=%.0f ===\n",
                      kSpots[wi].tag, static_cast<double>(kSpots[wi].me),
@@ -11318,6 +11319,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // [probe] a drawn pose wider than 600 units means the mesh is
                 // stretched across the arena (the player's "разнесло" symptom);
                 // print EVERY such frame with its move so the culprit is named.
+                if (wx < wall_lo - 0.5f || wx > wall_hi + 0.5f) {
+                    ++out_of_arena;
+                }
                 if (sp > 600.0f) {
                     ++wide_frames;
                     const auto* cm = ctl.player().fighter.current_move();
@@ -11349,7 +11353,11 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // [gate `wall-span`] one number for the whole probe: how many frames of
         // the drawn pose were wider than 600 units (a body is ~180, so those are
         // the frames where the mesh is stretched / a node sits in the wrong space).
-        std::fprintf(stdout, "[wallprobe] summary wides=%d\n", wide_frames);
+        // [gate `wall-bounds`] the root must never leave the arena (the oracle keeps
+        // it inside on every clip: `Te.Iub` clamps to `[yu+d, zu-e]`; measured on
+        // `OracleShell`, the right-wall `WallJump_200` peaks 13 units short of zu).
+        std::fprintf(stdout, "[wallprobe] summary wides=%d outOfArena=%d\n",
+                     wide_frames, out_of_arena);
         std::fflush(stdout);
         app.shutdown();
         return 0;

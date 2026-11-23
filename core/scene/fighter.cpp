@@ -4384,6 +4384,24 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         }
+        // [FIX right-wall wall jump overshoot — measured against the ORACLE]
+        // A `WallJump_*` clip carries `px` by ~1600 units and the port follows it
+        // 1:1 (`world = px[anchor] + off`), so from the right wall the body left
+        // the arena entirely: `--wall-probe` with bamboo bounds read
+        // `wx max = 3320.2` against `zu = 1773`, and the anchor trace showed
+        // `WallJump_200 px=863..1596 off=1558.76` (= 2400..3150 unclamped).
+        // The ORIGINAL keeps the root inside the arena on every clip: `Te.Iub`
+        // (L23498) clamps the frame's root to `[yu+d, zu-e]` and shifts the nodes
+        // with it. Measured on `OracleShell` (`state_wallump.txt`): the right-wall
+        // `WallJump_200` runs 1593.3 -> peak 1761.4 (13 short of zu) -> 1306.3.
+        // Clamp the root for the wall-jump clips only (the general clamp was tried
+        // and reverted - it changes `kick-ko`), and let the drawn pose follow: the
+        // placement below uses `world_x_`, so the body moves as one.
+        if (current_move_ != nullptr && arena_wall_max_ > arena_wall_min_ &&
+            current_move_->name.compare(0, 8, "WallJump") == 0) {
+            if (world_x_ < arena_wall_min_) world_x_ = arena_wall_min_;
+            else if (world_x_ > arena_wall_max_) world_x_ = arena_wall_max_;
+        }
         // [FIX wall-jump teleport / no-motion — same player log] A `WallJump_*`
         // clip covers ~1000 units, ~500 of them in its first 4 frames (measured
         // on `WallJump_250`: px -449.9 -> +614.8 with -301.6/-54.1/+193.2 in the
