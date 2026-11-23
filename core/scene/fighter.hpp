@@ -857,8 +857,26 @@ public:
     // applies the body separation at the END of the frame, so the correction is
     // exact in the frame it is needed and `world_x_` (hit tests, AI distance,
     // camera) stays untouched.
+    // [REPLACED for the pair separation by `shift_root_x` — player report
+    // "при подходе к противнику игрок как будто застревает в нём ... это только
+    // визуально, кости идут дальше, стоит только меш"] Moving only `pos_` is
+    // exactly that symptom: the root keeps walking while the mesh is held back.
+    // Kept for callers that genuinely want a render-only nudge.
     void shift_pose_x(float d) {
         if (d == 0.0f) return;
+        for (std::size_t i = 0; i < pos_.size(); i += 2) pos_[i] += d;
+    }
+    // Move the ROOT (and therefore the whole drawn body) by `d`: a collision
+    // response the player can feel - he stops against the opponent instead of
+    // sliding his mesh through him. `render_offset_` carries it so the next
+    // sample() places `pos_` from the corrected root, and `world_x_` stays the
+    // single source for hit tests/AI/camera. Same shape as `teleport`.
+    void shift_root_x(float d) {
+        if (d == 0.0f) return;
+        render_offset_ += d;
+        render_offset_valid_ = true;
+        prev_align_pivot_world_x_ += d;
+        world_x_ += d;
         for (std::size_t i = 0; i < pos_.size(); i += 2) pos_[i] += d;
     }
     // A throw victim and a wall reaction are placed deliberately; do not fight

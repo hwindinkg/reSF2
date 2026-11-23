@@ -11202,26 +11202,61 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         // never started (`started=0`) — the probe silently tested nothing.
         // 130 from each wall satisfies the gate on both sides.
         struct WallSpot { const char* tag; float me; float foe; };
+        // [probe] The spots sit `spot_off` units off each wall - 180 by default,
+        // the distance the ORACLE's own wall jump started from (`WallJump_200`
+        // x=1593.3 against bamboo `zu`=1773), so a port run at the same distance
+        // is comparable.
+        float spot_off = 180.0f;
+        if (const char* sd = std::getenv("SF2_WALL_PROBE_DIST")) {
+            const float v = static_cast<float>(std::atof(sd));
+            if (v > 1.0f) spot_off = v;
+        }
         const WallSpot kSpots[2] = {
             // LEFT first: an absolute-align move pins `world_x_`, and a pin
             // that outlives the move would make `debug_place_fighters` fail for
             // the second spot (that ordering artefact is exactly what the
             // wall-jump report is about), so the left wall is measured first.
-            {"left", 210.0f, 270.0f},
-            {"right", 1750.0f, 1690.0f},
+            // `SF2_WALL_PROBE_DIST=<n>` moves the spots off the wall: the move's
+            // `<Distance Min="100" Max="150">` is measured to the HEEL, not to the
+            // root, so a sweep finds the window the game actually accepts.
+            {"left", wall_lo + spot_off, wall_lo + spot_off + 60.0f},
+            {"right", wall_hi - spot_off, wall_hi - spot_off - 60.0f},
         };
         int wide_frames = 0;
         for (int wi = 0; wi < 2; ++wi) {
         std::fprintf(stdout, "[wallprobe] === wall=%s me=%.0f foe=%.0f ===\n",
                      kSpots[wi].tag, static_cast<double>(kSpots[wi].me),
                      static_cast<double>(kSpots[wi].foe));
-        for (int mi = 0; mi < 5; ++mi) {
+        // `SF2_WALL_PROBE_ONLY=1`: run ONLY the first move of the list. The full
+        // sequence ends with `WallHitFall`, which leaves the fighter in a ragdoll,
+        // so the NEXT wall's jump case starts from a downed state and its buffered
+        // key expires before he can act - measured `[cond] move=WallJump_100
+        // keys_gm=0 nkeys=0 ok=0` at the right wall only. One move per run keeps
+        // the two walls comparable.
+        const int n_moves = std::getenv("SF2_WALL_PROBE_ONLY") != nullptr ? 1 : 5;
+        for (int mi = 0; mi < n_moves; ++mi) {
             // [probe fix] A `WallJump_*`/`WallHit*` clip leaves `wall_pin_` set
             // (`world_x_ = align_own_x_` every frame, fighter.cpp:4354), so the
             // teleport to the SECOND wall never took: the right-wall cases
             // reported `x0=213.4` while the spot is 1750 - the probe silently
             // measured the left wall twice. Clear the move first, then place.
             ctl.debug_reset_player_move();
+            ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
+            // [probe fix] `<Distance Object="Wall" Part="Back">` resolves the wall
+            // BEHIND the fighter from its FACING (`wall_ref_x`), and the facing
+            // follows the foe's side. One update after the teleport had not
+            // flipped it yet, so the right spot measured the FAR wall (|1593-160|
+            // = 1433, outside `Min=100 Max=150`) and no wall jump could start
+            // there while the left spot worked - a probe artefact, not the game.
+            // Settle the facing before the key is injected.
+            for (int settle = 0; settle < 8; ++settle) {
+                ctl.update(1.0f / 60.0f);
+            }
+            // The settle also lets the AI walk in and the pair separation shove the
+            // PLAYER: measured 1593 -> 1514 at the right spot, i.e. 259 units from
+            // the wall and outside `WallJump_100`'s 100..150 gate, so the jump
+            // silently could not start. Put him back on the spot AFTER the facing
+            // has locked (one update only, so he does not drift again).
             ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
             ctl.update(1.0f / 60.0f);
             const float x0 = ctl.player().fighter.world_x();
@@ -11232,9 +11267,24 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // keys), so the probe must feed the key the way the input layer
             // does or the move can never start (`started=0` — reason every
             // earlier wall-jump probe measured nothing).
-            ctl.debug_player_key(sf2::scene::key_type::up_back,
+            // [probe fix] The buffer holds RAW `sa.$h` ids and the JS mirrors the
+            // REQUIREMENT when the fighter faces left (`vm.he` L749: 2<->8, 3<->7,
+            // 4<->6; conditions.cpp `fha`). A fighter facing LEFT therefore needs
+            // the raw id 2 (Up-Forward) in the buffer to satisfy a move written as
+            // `<Key Type="Up-Back"/>` - injecting 8 there is what made the RIGHT
+            // wall silently impossible (`[cond] keys_gm=0 nkeys=0 ok=0`) while the
+            // LEFT worked. Inject the id the input layer would produce for the
+            // fighter's facing.
+            const bool foe_on_the_right = kSpots[wi].foe > kSpots[wi].me;
+            ctl.debug_player_key(foe_on_the_right ? sf2::scene::key_type::up_back
+                                                  : sf2::scene::key_type::up_forward,
                                  sf2::scene::press_type::tap);
-            const bool started = ctl.debug_force_player_move(kMoves[mi], true);
+            // `SF2_WALL_PROBE_NO_FORCE=1`: keep the injected key but do NOT force a
+            // move, so the run shows what the GAME's own input gate starts - which
+            // is what the oracle trace records.
+            const bool no_force = std::getenv("SF2_WALL_PROBE_NO_FORCE") != nullptr;
+            const bool started =
+                no_force ? false : ctl.debug_force_player_move(kMoves[mi], true);
             std::fprintf(stdout, "[wallprobe] force %-14s wall=%-5s started=%d x0=%.1f nclip=%d\n",
                          kMoves[mi], kSpots[wi].tag, started ? 1 : 0,
                          static_cast<double>(x0),

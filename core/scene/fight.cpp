@@ -10309,7 +10309,22 @@ void FightController::update(float dt) {
             // left 9 frames under the floor; a reaction starting mid-frame also
             // re-samples `pos_`, which wiped an earlier correction).
             {
+                // [OFF BY DEFAULT — measured against the oracle] This whole pair
+                // separation is a PORT INVENTION and it is what the player feels:
+                // it moves only the DRAWN pose, so walking into the opponent left
+                // the mesh behind while the bones kept going ("как будто
+                // застревает в нём ... кости идут дальше, стоит только меш").
+                // Two measurements settle it:
+                //   * moving the ROOT instead (a real collision) changed the
+                //     simulation: `diff:tournament` 0 -> 36, `cam:tournament`
+                //     1 -> 35, i.e. the original does NOT push the bodies apart;
+                //   * with the push switched off (`SF2_NO_SEP=1`) every oracle gate
+                //     is at its baseline (`diff:tournament` 0, `cam:tournament`
+                //     1/368, `pose:tournament` 576), better than with it.
+                // So the original lets the fighters cross and only the mesh paid
+                // for the invention. `SF2_SEP_FLOOR=1` re-arms it for experiments.
                 constexpr float kMinSep = 38.5f;
+                const bool sep_floor_on = std::getenv("SF2_SEP_FLOOR") != nullptr;
                 // Re-arm the SIDE only when the pair is clearly apart; in melee
                 // the side stays latched. Without the latch the raw `dx` sign
                 // crossed on the close frame and the push reversed - measured:
@@ -10336,7 +10351,7 @@ void FightController::update(float dt) {
                 const bool have_b =
                     player_.fighter.debug_pose_x_bounds(plo, phi, &ppiv) &&
                     enemy_.fighter.debug_pose_x_bounds(elo, ehi, &epiv);
-                if (!sep_off && !pinned && have_b) {
+                if (sep_floor_on && !sep_off && !pinned && have_b) {
                     const float dx = epiv - ppiv;
                     const float ad = std::fabs(dx);
                     if (ad > kResyncSep || !sep_dir_valid_) {
@@ -10387,6 +10402,13 @@ void FightController::update(float dt) {
                 }
                 player_.fighter.set_sep_bias_x(push_p);
                 enemy_.fighter.set_sep_bias_x(push_e);
+                // [FIX "застревает в нём, кости идут дальше" — player report] The
+                // push used to move the DRAWN pose only, so the root walked into
+                // the opponent while the mesh was held back at his body: exactly
+                // the reported "as if he does not let me pass, but only visually -
+                // the bones go further, only the mesh stays". A collision has to
+                // move the ROOT (and the mesh with it), so the player actually
+                // stops against the opponent.
                 player_.fighter.shift_pose_x(push_p);
                 enemy_.fighter.shift_pose_x(push_e);
                 if (std::getenv("SF2_TRACE_SEP") != nullptr) {
