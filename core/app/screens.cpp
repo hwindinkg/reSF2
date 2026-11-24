@@ -3286,7 +3286,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                       /*flip_v=*/false, 0.0f, 1.0f);
                 piece("roll_end", rod_cx,
                       cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
-                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f);
+                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f);
                 // [FIX bottom cap was INVERTED — player screenshot, measured]
                 // The atlas UVs put sprite row `v1` at the quad's TOP, so with the
                 // 0.5..1.0 crop (sprite rows 57..113 = bright band 57-66, dark ribs
@@ -3297,7 +3297,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // top and the carved ribs at the rod's end, as the oracle has it.
                 piece("roll_end", rod_cx,
                       cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f,
-                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 0.5f,
+                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f,
                       /*flip_y_quad=*/true);
                 if (rod_check) {
                     // once per side, so the probe's stdout stays readable
