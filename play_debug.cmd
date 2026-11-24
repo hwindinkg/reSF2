@@ -53,6 +53,10 @@ set SF2_TRACE_DMG=1
 set SF2_TRACE_WALLS=1
 set SF2_TRACE_WEAPON=1
 set SF2_TRACE_CAM=1
+rem [needed for the root-vs-mesh check] `[sepd] root=/dpiv=/drawn=` per frame, so a
+rem gap between the drawn body and its root can be measured from this log. Without
+rem it the "mesh sticks in the opponent" item cannot be verified on a player run.
+set SF2_TRACE_SEP=1
 rem --- per-frame JSON state (the same rows the oracle diff uses) -----------
 set SF2_DEBUG_LOG=1
 
@@ -62,6 +66,12 @@ echo   Log folder: %OUT%
 echo.
 echo   Play the fight: hit the enemy, THROW him, push him into a wall,
 echo   let him knock you down. Then CLOSE the window.
+echo.
+echo   WHAT TO DO (the three things that are still unverified):
+echo     1. walk right INTO the enemy, and separately into the BAG
+echo        (they must not slide with you; the mesh must not lag the bones)
+echo     2. land 2-3 KNOCKDOWNS (the hits that throw the body away)
+echo     3. jump off the LEFT wall and off the RIGHT wall
 echo.
 
 "%ROOT%build\app\game\Release\game.exe" "%ROOT%reference\www\res" "%ROOT%reference\saves\save.xml" --windowed --fight --battle %BATTLE% --zone ZONE_1 --fight-ordinal 0 --location %LOC% --dump-pose 6000 --dump-state 6000 > "%OUT%\fight_log.txt" 2>&1
