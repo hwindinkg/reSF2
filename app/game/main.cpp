@@ -11536,7 +11536,13 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         const bool force = mode != nullptr && std::atoi(mode) != 0;
         bool started = false;
         if (force) {
-            started = ctl.debug_force_player_move("ThrowThroughTheBack");
+            // `SF2_THROW_MOVE=<name>` covers every throw variant; the probe used
+            // to hard-code `ThrowThroughTheBack`, so a fix verified there could
+            // not be checked on `ThrowForward` / `ThrowSuplex`.
+            const char* mv = std::getenv("SF2_THROW_MOVE");
+            started = ctl.debug_force_player_move(mv != nullptr && mv[0] != '\0'
+                                                      ? std::string(mv)
+                                                      : std::string("ThrowThroughTheBack"));
         } else {
             // [reach sweep] the throw's `<Distance Max="100" Axis="X">` is a
             // BONE distance (Me `<Align><Pivot Part>` heel -> Enemy NPivot), so
@@ -11618,7 +11624,10 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             const sf2::scene::MoveDef* em = ctl.enemy().fighter.current_move();
             const std::string pn = pm != nullptr ? pm->name : std::string("-");
             const std::string en = em != nullptr ? em->name : std::string("-");
-            if (en == "ThrowThroughTheBackV") ++victim_frames;
+            if (en.size() > 1 && en.back() == 'V' &&
+                en.find("Throw") != std::string::npos) {
+                ++victim_frames;
+            }
             // [jerk probe] the max per-bone movement between consecutive
             // frames: a 1-frame whole-model stretch shows up as a spike that
             // is far above the clip's normal per-frame motion.
