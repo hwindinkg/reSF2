@@ -11556,7 +11556,40 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // (`player=-@3` for all 90 frames). Remember a gap that DID throw and
             // re-arm it before observing.
             float throw_gap = -1.0f;
+            // `SF2_THROW_GAP=<n>` skips the sweep and performs ONE attempt on a
+            // fresh controller at that gap - the real INPUT path (back-hold + punch)
+            // rather than `debug_force_player_move`, so a fix can be proven on the
+            // same gesture the player uses.
+            const char* gap_env = std::getenv("SF2_THROW_GAP");
+            const bool one_shot = gap_env != nullptr && gap_env[0] != '\0';
+            const float one_gap = one_shot ? std::strtof(gap_env, nullptr) : 0.0f;
+            if (one_shot) {
+                ctl.player_input(sf2::scene::key_type::back,
+                                 sf2::scene::press_type::release);
+                ctl.debug_reset_player_move();
+                ctl.debug_place_fighters(690.0f, 690.0f + one_gap);
+                for (int i = 0; i < 3; ++i) ctl.update(1.0f / 60.0f);
+                ctl.debug_place_fighters(690.0f, 690.0f + one_gap);
+                ctl.player_input(sf2::scene::key_type::back,
+                                 sf2::scene::press_type::tap);
+                for (int i = 0; i < 4; ++i) {
+                    ctl.debug_place_fighters(690.0f, 690.0f + one_gap);
+                    ctl.update(1.0f / 60.0f);
+                }
+                ctl.debug_place_fighters(690.0f, 690.0f + one_gap);
+                ctl.player_input(sf2::scene::key_type::punch,
+                                 sf2::scene::press_type::tap);
+                for (int i = 0; i < 3; ++i) ctl.update(1.0f / 60.0f);
+                const sf2::scene::MoveDef* m1 = ctl.player().fighter.current_move();
+                const std::string mn1 = m1 != nullptr ? m1->name : std::string("-");
+                std::fprintf(stdout, "[throwprobe] one-shot gap=%.0f -> %s\n",
+                             static_cast<double>(one_gap), mn1.c_str());
+                std::fflush(stdout);
+                started = mn1.rfind("Throw", 0) == 0;
+                throw_gap = started ? one_gap : -1.0f;
+            }
             for (const float gap : gaps) {
+                if (one_shot) break;
                 ctl.player_input(sf2::scene::key_type::back,
                                  sf2::scene::press_type::release);
                 ctl.debug_reset_player_move();
@@ -11588,7 +11621,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             }
             // Re-arm the throw at a gap that actually passes its gate, so the
             // observation loop below watches a REAL throw pair.
-            if (throw_gap > 0.0f) {
+            if (throw_gap > 0.0f && !one_shot) {
                 ctl.player_input(sf2::scene::key_type::back,
                                  sf2::scene::press_type::release);
                 ctl.debug_reset_player_move();
