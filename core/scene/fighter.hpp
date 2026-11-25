@@ -1746,6 +1746,12 @@ private:
     bool wall_jump_active_ = false;
     // [EObjectWall] one-shot per clip: the buffer is placed ON the wall
     bool wall_align_done_ = false;
+    // [FIX wall jump arc] The clip is placed ABSOLUTELY at its `<Position
+    // Object="Wall">` anchor (`Te.Gub`/EObjectWall) and the body rides the
+    // authored arc; the `qrb` prepend must then be expressed in the SAME (world)
+    // space, otherwise the first blended frames drag the root by the clip's
+    // `align` (measured +413 at the left wall, +1383 at the right).
+    bool walljump_abs_ = false;
 
     // [FIX throw distance] A throw-VICTIM clip is anchored to the THROWER: the
     // pair must stay ~92 units apart (JS median measured on the boss-lynx stand)
@@ -1758,6 +1764,16 @@ private:
     // collapsed to 73.6 while the JS stayed at 83.8).
     float throw_own_x_ = 0.0f;
     float throw_ref_x_ = 0.0f;
+    // [FIX throw animation sync — player report] The victim used to be pinned to
+    // `throw_own_x_` for the whole clip, so his root never moved: measured on
+    // `--throw-probe`, x = 750.0 on all 90 frames while his OWN clip
+    // (`throw_through_the_back_v`) carries 156.9 units of root travel, and the JS
+    // reference (oracle console trace, the same throw) flings him 216 -> 370
+    // (+154). The pin threw that away. The victim now follows the DELTA of his
+    // clip from where he stood (`align_own_x_ + px - px0`), which is exactly the
+    // authored fling, mirrored by his facing like every other clip.
+    float throw_px0_ = 0.0f;
+    bool throw_px0_valid_ = false;
     // [FIX throw pair — two JS references] The pair separation is derived from the
     // distance at the clip START: the oracle keeps ~45 in a melee throw (his own
     // fight: port 4.9) and ~92 from a wide start (BOSS_LYNX: port 63), so the

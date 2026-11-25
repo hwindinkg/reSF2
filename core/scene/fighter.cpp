@@ -1964,6 +1964,28 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         const bool wall_jump_move = wall_move && move.name.compare(0, 8, "WallJump") == 0;
         const bool wall_positioned = wall_move && !wall_jump_move;
         render_offset_valid_ = (abs_mode != 2) || wall_positioned;
+        // [FIX wall jump arc — the ground truth is the clip's own buffer]
+        // A `WallJump_*` clip carries `<Align><Position Player="Me" Object="Wall"
+        // Part="Back"/></Align>`, so the ORIGINAL places its buffer ABSOLUTELY at
+        // that wall (`Te.Gub` EObjectWall: `e = hd()==1==(cja=="Back") ? yu : zu`)
+        // and the body then rides the authored arc: measured on OracleShell, the
+        // left-wall `WallJump_250` runs 476.6 -> 172.8 (12.8 short of yu=160) ->
+        // 627.7, and the right-wall `WallJump_200` 1593.3 -> 1761.4 (11.6 short of
+        // zu=1773) -> 1306.3 — i.e. ~455 units off the wall in BOTH cases.
+        // The port instead captured a delta offset on the FIRST sample, where the
+        // buffer is still blended with the previous pose's solver-space prepend
+        // (`qrb`), so the root was dragged by the clip's `align` (160 at the left
+        // wall, 1773 at the right): measured excursion +413 at the left and
+        // +1383 at the right, which the arena clamp then froze at the wall —
+        // exactly the player's "от левой переносит в центр локации, от правой
+        // просто на месте делает". With the clip placed absolutely (`off = 0`)
+        // the buffer's own arc is followed: 160+179.7 = 339.7 at the left and
+        // 1773-179.7 = 1593.3 at the right, matching the oracle's own numbers.
+        if (wall_jump_move) {
+            render_offset_valid_ = true;
+            render_offset_ = 0.0f;
+        }
+        walljump_abs_ = wall_jump_move;
         // [FIX wall-reaction placement — player report] `wall ± ShiftX` teleported
         // the fighter to the CENTRE of the arena from the left wall (ShiftX=480 on
         // a 1600-wide arena) and off-screen from the right. A wall reaction has to
@@ -2013,6 +2035,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             throw_pin_ = true;
             throw_own_x_ = world_x_;
             throw_ref_x_ = opponent_->world_x();
+            throw_px0_valid_ = false;  // capture the clip's own arc from frame 0
             // [FIX throw pair — measured against BOTH oracle references] oracle
             // melee Survival median 45.5, oracle BOSS_LYNX 92.2; the port held 4.9
             // and 63. Keep the victim on the same SIDE he started on, at the start
@@ -3885,6 +3908,25 @@ void Fighter::build_prepend(const MoveDef& move) {
         prepend_[u1 + 1] = sol_ma_[u + 1] + vy;
         prepend_[u1 + 2] = sol_ma_[u + 2] + vz;
     }
+    // [FIX wall jump arc] The clip's slots are placed ABSOLUTELY at the Wall
+    // anchor (`align_x_` is part of `px`), while the `qrb` prepend above lives in
+    // solver space. Blending the two spaces in `px[anchor]` is what dragged the
+    // root by `align` on the clip's first frames. Re-express the prepend in the
+    // same world space (relative to the pivot, then offset to the fighter).
+    if (walljump_abs_) {
+        const int pa = model_.bone_by_name(fighter_pivot_bone());
+        if (pa >= 0 && static_cast<std::size_t>(pa) < nclip) {
+            const std::size_t ua = static_cast<std::size_t>(pa) * 3;
+            const float sdx = sol_ma_[ua] - world_x_;
+            const float sdy = sol_ma_[ua + 1] - world_y_;
+            const float sdz = sol_ma_[ua + 2];
+            for (std::size_t u = 0; u + 2 < prepend_.size(); u += 3) {
+                prepend_[u] -= sdx;
+                prepend_[u + 1] -= sdy;
+                prepend_[u + 2] -= sdz;
+            }
+        }
+    }
     // [FIX off-arena reaction entry] A `<Position Object="Wall">` clip is placed
     // ABSOLUTELY at `wall ± ShiftX` (the JS `Gub`), so its clip slots are already
     // in the drawn frame while the `qrb` prepend above is still the PREVIOUS
@@ -4311,6 +4353,36 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                                                                        : it->second),
                          static_cast<double>(px[anchor_u]),
                          static_cast<double>(render_offset_), solver_world_ ? 1 : 0);
+            // [probe] the terms the wall-jump placement is built from: the align
+            // shift (`Gla` for `<Position Object="Wall">`), the clip mirror that
+            // flips the root motion, and the clip frame - so the RAW buffer arc
+            // can be recovered as `mirror*(px - align)` at each wall.
+            float raw_clip_x = 0.0f;
+            float raw_src_x = 0.0f;
+            if (current_clip_ != nullptr && !current_clip_->frames.empty()) {
+                const auto& fb0 = current_clip_->frames[static_cast<std::size_t>(
+                    std::max(0, std::min(static_cast<int>(move_frame_),
+                                         static_cast<int>(current_clip_->frames.size()) - 1)))].bones;
+                if (anchor_u < fb0.size()) raw_clip_x = fb0[anchor_u].x;
+                int sswap = mirror_swap_src(static_cast<int>(anchor_u),
+                                            static_cast<int>(fb0.size()));
+                if (sswap < 0) sswap = static_cast<int>(anchor_u);
+                if (static_cast<std::size_t>(sswap) < fb0.size()) {
+                    raw_src_x = fb0[static_cast<std::size_t>(sswap)].x;
+                }
+            }
+            std::fprintf(stdout,
+                         "[capx] F%d move=%s align_x=%.2f mirror=%d frame=%d "
+                         "px_raw=%.2f mf=%d clip_x=%.2f src_x=%.2f\n",
+                         g_trace_fight_frame,
+                         current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                         static_cast<double>(align_x_), clip_mirror_,
+                         static_cast<int>(move_frame_),
+                         static_cast<double>((clip_mirror_ < 0 ? -1.0f : 1.0f) *
+                                             (px[anchor_u] - align_x_)),
+                         static_cast<int>(move_base_),
+                         static_cast<double>(raw_clip_x),
+                         static_cast<double>(raw_src_x));
             std::fflush(stdout);
         }
         if (!render_offset_valid_) {
@@ -4356,7 +4428,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const char* e = std::getenv("SF2_ABS_MOVE");
             return e == nullptr ? 2 : std::atoi(e);
         }();
-        if (align_absolute_ && (abs_mode == 0 || wall_pin_ || throw_victim_now())) {
+        if (align_absolute_ && (abs_mode == 0 || wall_pin_)) {
             // JS `Dl.oL(parameters.position)` (L24171-24199): the clip is
             // anchored to the fighter's OWN position, so `pos = clip -
             // clip[anchor] + own` (below) and the fighter does not ride the
@@ -4381,6 +4453,29 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             (void)throw_side_;
             (void)throw_target_;
             world_x_ = align_own_x_;
+        } else if (throw_victim_now()) {
+            // [FIX throw animation sync — player report "бросок плохо
+            // синхронизирует анимации"] The victim was pinned to `align_own_x_`
+            // for the whole clip, so his root never moved: measured on
+            // `--throw-probe`, x = 750.0 on ALL 90 frames while his own clip
+            // (`throw_through_the_back_v`) carries 156.9 units of root travel and
+            // the JS reference of the same throw flings him 216 -> 370 (+154).
+            // Follow the clip's own DELTA from where he stood (mirrored by his
+            // facing inside `px`), exactly like every other clip. The delta is
+            // captured only after the `qrb` blend has finished (`move_frame_`
+            // passes `FirstFrame`): before that `px` still carries the previous
+            // pose's solver-space prepend, and using it teleported the victim
+            // +641 units on the frame the blend ended (measured).
+            const int ff_v = std::max(0, move_base_);
+            if (!throw_px0_valid_) {
+                if (static_cast<int>(move_frame_) > ff_v) {
+                    throw_px0_ = px[anchor_u];
+                    throw_px0_valid_ = true;
+                }
+                world_x_ = align_own_x_;
+            } else {
+                world_x_ = align_own_x_ + (px[anchor_u] - throw_px0_);
+            }
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
         }
@@ -4431,7 +4526,12 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             const bool wall_move =
                 current_move_ != nullptr && current_move_->align.has_align &&
                 current_move_->align.pos_object == "Wall";
-            if (wall_move && !wall_align_done_ && arena_wall_max_ > arena_wall_min_) {
+            // `walljump_abs_` already places the clip absolutely at its Wall
+            // anchor; snapping it to the wall as well would throw away the arc's
+            // approach (measured: it forced the body onto yu/zu at the first
+            // frame, which is the "переносит к стене" half of the report).
+            if (wall_move && !walljump_abs_ && !wall_align_done_ &&
+                arena_wall_max_ > arena_wall_min_) {
                 wall_align_done_ = true;
                 const float mid = (arena_wall_min_ + arena_wall_max_) * 0.5f;
                 const float wall_ref =

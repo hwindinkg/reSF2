@@ -11544,6 +11544,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             // each gap, hold Back then tap Punch and report whether a Throw*
             // started (the punch is the fallback when the throw gate fails).
             const float gaps[] = {20.0f, 40.0f, 60.0f, 80.0f, 100.0f, 120.0f};
+            // [FIX probe] The sweep used to leave the pair at the LAST gap (120),
+            // which is outside the throw's `<Distance Max="100">`, so the 90-frame
+            // observation loop then watched a fight where no throw ever started
+            // (`player=-@3` for all 90 frames). Remember a gap that DID throw and
+            // re-arm it before observing.
+            float throw_gap = -1.0f;
             for (const float gap : gaps) {
                 ctl.player_input(sf2::scene::key_type::back,
                                  sf2::scene::press_type::release);
@@ -11569,7 +11575,34 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              static_cast<double>(gap), mn.c_str(),
                              is_throw ? "THROW" : "no throw");
                 std::fflush(stdout);
-                if (is_throw) started = true;
+                if (is_throw) {
+                    started = true;
+                    if (throw_gap < 0.0f) throw_gap = gap;
+                }
+            }
+            // Re-arm the throw at a gap that actually passes its gate, so the
+            // observation loop below watches a REAL throw pair.
+            if (throw_gap > 0.0f) {
+                ctl.player_input(sf2::scene::key_type::back,
+                                 sf2::scene::press_type::release);
+                ctl.debug_reset_player_move();
+                ctl.debug_place_fighters(690.0f, 690.0f + throw_gap);
+                for (int i = 0; i < 3; ++i) ctl.update(1.0f / 60.0f);
+                ctl.debug_place_fighters(690.0f, 690.0f + throw_gap);
+                ctl.player_input(sf2::scene::key_type::back,
+                                 sf2::scene::press_type::tap);
+                for (int i = 0; i < 4; ++i) {
+                    ctl.debug_place_fighters(690.0f, 690.0f + throw_gap);
+                    ctl.update(1.0f / 60.0f);
+                }
+                ctl.player_input(sf2::scene::key_type::punch,
+                                 sf2::scene::press_type::tap);
+                for (int i = 0; i < 2; ++i) ctl.update(1.0f / 60.0f);
+                const sf2::scene::MoveDef* rm = ctl.player().fighter.current_move();
+                std::fprintf(stdout, "[throwprobe] re-armed at gap=%.0f -> %s\n",
+                             static_cast<double>(throw_gap),
+                             rm != nullptr ? rm->name.c_str() : "-");
+                std::fflush(stdout);
             }
         }
         std::fprintf(stdout, "[throwprobe] %s ThrowThroughTheBack -> %s\n",
