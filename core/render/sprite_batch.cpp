@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "render/gl.hpp"
@@ -179,6 +180,20 @@ void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
     // an atlas frame with its own uv/size, so the rects must be compared, not
     // eyeballed.
     static const bool ui_trace = std::getenv("SF2_TRACE_UI") != nullptr;
+    // `SF2_TRACE_UI_EVERY=<n>` samples every n-th rendered frame (a whole fight
+    // would otherwise emit ~190k lines); a dialog stays on screen for many
+    // frames, so sampling keeps every UI state without the bulk.
+    static const long ui_every = [] {
+        const char* e = std::getenv("SF2_TRACE_UI_EVERY");
+        const long v = e != nullptr ? std::atol(e) : 1;
+        return v > 0 ? v : 1;
+    }();
+    if (ui_trace && (g_ui_frame % ui_every) != 0) {
+        if (!vertices_.empty() && texture != current_texture_) draw_batch();
+        current_texture_ = texture;
+        for (int i = 0; i < 6; ++i) vertices_.push_back(quad.v[i]);
+        return;
+    }
     if (ui_trace) {
         float x0 = quad.v[0].x, x1 = quad.v[0].x;
         float y0 = quad.v[0].y, y1 = quad.v[0].y;

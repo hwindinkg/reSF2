@@ -61,6 +61,9 @@ rem [UI LOG] every drawn quad: frame, order, texture, screen rect, uv, tint.
 rem Needed to compare a composite (the scroll rod caps, dialog paper) with the
 rem original's atlas assembly - positions/sizes/uv of each piece, not eyeballing.
 set SF2_TRACE_UI=1
+rem sample every 10th frame (a dialog stays up for many frames, so the
+rem UI states are all captured without 190k lines per fight)
+set SF2_TRACE_UI_EVERY=10
 rem --- per-frame JSON state (the same rows the oracle diff uses) -----------
 set SF2_DEBUG_LOG=1
 
