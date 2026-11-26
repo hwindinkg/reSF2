@@ -2096,14 +2096,31 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // `(px[pu]-px[au])*f`; keeping it after moving the mirror into the
             // buffer negated the whole `(sol_ma_[pu]-sol_ma_[au])` term and
             // threw the anchor 2x that offset off the spawn.
-            prev_align_pivot_world_x_ =
-                (sol_ma_[pu * 3] - sol_ma_[au * 3]) + world_x_;
+            // [FIX teleport after an absolutely placed clip - player log
+            // 20261126_205554] `(sol_ma_ - anchor) + world` IS the previous world
+            // position only while the last frame was placed through the SOLVER
+            // (`pos = sol - sol[anchor] + world`). After an ABSOLUTE clip (wall
+            // jump, throw) the pose comes from the clip buffer, so `sol_ma_` is in
+            // that clip's space: his log shows the jump straight after
+            // `WallJump_200@38 1289.2 -> ShortUpwardElbowStrike@2 427.2` (-862) and
+            // then `StanceIdle@3 2521.9` converging back over four frames. The
+            // DRAWN pose `pos_` already holds the true world x of every node, so
+            // read the Pivot Part from it (the variable's own definition) and fall
+            // back to the solver term only before the first drawn frame.
+            if (pos_.size() > pu * 2) {
+                prev_align_pivot_world_x_ = pos_[pu * 2];
+                prev_align_pivot_world_y_ = pos_[pu * 2 + 1];
+            } else {
+                prev_align_pivot_world_x_ =
+                    (sol_ma_[pu * 3] - sol_ma_[au * 3]) + world_x_;
+                prev_align_pivot_world_y_ =
+                    (sol_ma_[pu * 3 + 1] - sol_ma_[au * 3 + 1]) + world_y_;
+            }
             // [B1 FIX vertical anchor] `Gub` (L559) computes the SAME world
             // delta on the y axis: `f = currentNode.ma.y (+ a.eja)`,
             // `c.y = f - d.y`; `Gla` then shifts the buffer y by `Fk.y` when
             // the `<Position>` declares the Y axis (`a.dI`), else by `ShiftY`.
-            prev_align_pivot_world_y_ =
-                (sol_ma_[pu * 3 + 1] - sol_ma_[au * 3 + 1]) + world_y_;
+            // (the y value is set above, from the drawn pose when available)
             align_pivot_u_ = aur;
             // JS `Gub` (L559) reads `d` from the RAW buffer (`jc.Kh(2)` =
             // clip[FirstFrame]) and `e` from the posed node (`currentNode.ma`)
