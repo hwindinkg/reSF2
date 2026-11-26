@@ -1746,6 +1746,10 @@ private:
     bool wall_jump_active_ = false;
     // [EObjectWall] one-shot per clip: the buffer is placed ON the wall
     bool wall_align_done_ = false;
+    // [FIX runaway root at a clip start] `wall_shift_` is the `Iub` mutation of
+    // ONE clip's buffer; remember which clip it belongs to so it can never leak.
+    const void* wall_shift_clip_ = nullptr;
+    int wall_shift_base_ = -1;
     // [FIX wall jump arc] The clip is placed ABSOLUTELY at its `<Position
     // Object="Wall">` anchor (`Te.Gub`/EObjectWall) and the body rides the
     // authored arc; the `qrb` prepend must then be expressed in the SAME (world)

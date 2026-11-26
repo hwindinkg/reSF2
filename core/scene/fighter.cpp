@@ -3776,8 +3776,21 @@ void Fighter::wall_repulsion_step() {
     const int ff = std::max(0, move_base_);
     const int size = clip_len - ff + 2;  // `jc.J$a()`
     if (size <= 0) return;
-    if (wall_shift_.size() != static_cast<std::size_t>(size)) {
+    // [FIX runaway root at a clip start - the player's "резко перемещает то за
+    // пределы локации, то в центр"] `wall_shift_` emulates the JS `Iub` mutation
+    // of the CLIP BUFFER, so it belongs to ONE clip. Re-allocating only when the
+    // slot COUNT changed carried a previous clip's shift into the next clip: his
+    // log 20261126_192023 shows StanceIdle starting with `px=1411.45` while the
+    // clip's own pivot is ~-16 (`clip_x=-392.06`, `align=-408.33`) - a leftover
+    // shift of ~+1427 - so `world = px + (prev_world - sol)` threw the root to
+    // 2922.7, then 5354.8, 4623.7 ... and the Iub overflow dragged it back over
+    // the following frames. Reset on EVERY clip (pointer + base frame), and
+    // `sample()` must not apply an array from another clip either.
+    if (current_clip_ != wall_shift_clip_ || move_base_ != wall_shift_base_ ||
+        wall_shift_.size() != static_cast<std::size_t>(size)) {
         wall_shift_.assign(static_cast<std::size_t>(size), 0.0f);
+        wall_shift_clip_ = current_clip_;
+        wall_shift_base_ = move_base_;
     }
     const int c = playhead_ + 2;  // JS `this.Xh+2`
     if (c > size - 1) {
@@ -4198,7 +4211,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // `wall_shift_` is `Te.Iub`'s per-slot repulsion (`b.data[d++].x -= f`),
         // applied to the same clip-frame slots.
         float wshift = 0.0f;
-        if (interp && static_cast<std::size_t>(abs_slot) < wall_shift_.size()) {
+        if (interp && wall_shift_clip_ == current_clip_ &&
+            static_cast<std::size_t>(abs_slot) < wall_shift_.size()) {
             wshift = wall_shift_[static_cast<std::size_t>(abs_slot)];
         }
         ox = mneg * fb[src].x + align_x_ - wshift;
@@ -4493,7 +4507,14 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // and reverted - it changes `kick-ko`), and let the drawn pose follow: the
         // placement below uses `world_x_`, so the body moves as one.
         if (current_move_ != nullptr && arena_wall_max_ > arena_wall_min_ &&
-            current_move_->name.compare(0, 8, "WallJump") == 0) {
+            (current_move_->name.compare(0, 8, "WallJump") == 0 ||
+             current_move_->no_wall_repulsion)) {
+            // [FIX root leaving the arena — player log 20261126_192023]
+            // `NoWallRepulsion` clips skip the BUFFER clamp (`Te.Iub`), so nothing
+            // kept their root inside: measured on his fight the thrower reached
+            // 1800.8 against zu=1773 (+27.8) on `ThrowThroughTheBack`, and the
+            // victim's own fling has the same exposure. WallJump already needed
+            // this; the same rule now covers every `bha` clip.
             if (world_x_ < arena_wall_min_) world_x_ = arena_wall_min_;
             else if (world_x_ > arena_wall_max_) world_x_ = arena_wall_max_;
         }
