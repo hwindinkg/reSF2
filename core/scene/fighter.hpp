@@ -1750,6 +1750,12 @@ private:
     // ONE clip's buffer; remember which clip it belongs to so it can never leak.
     const void* wall_shift_clip_ = nullptr;
     int wall_shift_base_ = -1;
+    // [FIX no teleport at a clip change] Continuity guard: the root may not move
+    // more than a body's width on the frame the CLIP changes (his log
+    // 20261126_205554: -862 then +2095 then converging over four frames).
+    const void* clamp_clip_ = nullptr;
+    float clamp_prev_world_ = 0.0f;
+    bool clamp_prev_world_valid_ = false;
     // [FIX wall jump arc] The clip is placed ABSOLUTELY at its `<Position
     // Object="Wall">` anchor (`Te.Gub`/EObjectWall) and the body rides the
     // authored arc; the `qrb` prepend must then be expressed in the SAME (world)

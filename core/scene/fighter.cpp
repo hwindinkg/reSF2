@@ -2107,7 +2107,8 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // DRAWN pose `pos_` already holds the true world x of every node, so
             // read the Pivot Part from it (the variable's own definition) and fall
             // back to the solver term only before the first drawn frame.
-            if (pos_.size() > pu * 2) {
+            if (pos_.size() > pu * 2 &&
+                std::getenv("SF2_ALIGN_FROM_SOLVER") == nullptr) {
                 prev_align_pivot_world_x_ = pos_[pu * 2];
                 prev_align_pivot_world_y_ = pos_[pu * 2 + 1];
             } else {
@@ -4593,6 +4594,40 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 render_offset_ += wall_ref - world_x_;
                 world_x_ = wall_ref;
             }
+        }
+        // [FIX no teleport at a clip change - invariant, not a special case]
+        // The player still sees jumps after the placement fixes (his log
+        // 20261126_205554: WallJump_200@38 1289.2 -> ShortUpwardElbowStrike@2
+        // 427.2 -> StanceIdle@3 2521.9 converging over four frames). Every such
+        // jump happens on a CLIP CHANGE, where the new clip's placement offset is
+        // derived from a pose in another space. Rather than chase each space, the
+        // root may not move more than a body's width on the frame the clip
+        // changes: when it would, the offset is re-anchored so the clip starts
+        // exactly where the fighter stood (the same continuity the delta placement
+        // gives non-`<Align>` clips).
+        {
+            const bool clip_changed_now = (current_clip_ != clamp_clip_);
+            clamp_clip_ = current_clip_;
+            if (clip_changed_now && clamp_prev_world_valid_) {
+                constexpr float kMaxClipStartJump = 150.0f;
+                const float d = world_x_ - clamp_prev_world_;
+                if (std::fabs(d) > kMaxClipStartJump) {
+                    render_offset_ += clamp_prev_world_ - world_x_;
+                    world_x_ = clamp_prev_world_;
+                    if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
+                        std::fprintf(stdout,
+                                     "[clipjump] F%d move=%s d=%+.1f -> clamped to %.1f\n",
+                                     g_trace_fight_frame,
+                                     current_move_ != nullptr
+                                         ? current_move_->name.c_str() : "-",
+                                     static_cast<double>(d),
+                                     static_cast<double>(world_x_));
+                        std::fflush(stdout);
+                    }
+                }
+            }
+            clamp_prev_world_ = world_x_;
+            clamp_prev_world_valid_ = true;
         }
         // [FIX wall jump — ported from the JS, not tuned] `Te.eda`/`Gla`
         // (sf2.readable.js L22953 `Gla -> jc.shift`, L23367-23406 `EObjectWall`)

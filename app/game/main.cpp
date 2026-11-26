@@ -11341,6 +11341,42 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     std::fflush(stdout);
                 }
             }
+            // [REPRO of the player's sequence - his log 20261126_205554]
+            // `SF2_WALL_PROBE_ATTACK=1` interrupts the wall jump with an attack at
+            // clip frame 38 (his own transition: `WallJump_200@38 1289.2 ->
+            // ShortUpwardElbowStrike@2 427.2 -> StanceIdle@3 2521.9`) and reports
+            // the worst per-frame root jump of the whole case.
+            const bool attack_probe =
+                std::getenv("SF2_WALL_PROBE_ATTACK") != nullptr;
+            bool attacked = false;
+            float worst_jump = 0.0f;
+            const char* worst_jump_mv = "-";
+            float wx_prev_case = ctl.player().fighter.world_x();
+            for (int f = 0; f < kMoveFrames[mi]; ++f) {
+                if (attack_probe && !attacked &&
+                    ctl.player().fighter.move_frame() >= 38) {
+                    attacked = true;
+                    ctl.debug_force_player_move("ShortUpwardElbowStrike", true);
+                }
+                ctl.update(1.0f / 60.0f);
+                {
+                    const float wx_j = ctl.player().fighter.world_x();
+                    const float d_j = std::fabs(wx_j - wx_prev_case);
+                    if (d_j > worst_jump) {
+                        worst_jump = d_j;
+                        const auto* cm4 = ctl.player().fighter.current_move();
+                        worst_jump_mv = cm4 != nullptr ? cm4->name.c_str() : "-";
+                    }
+                    wx_prev_case = wx_j;
+                }
+            }
+            if (attack_probe) {
+                std::fprintf(stdout,
+                             "[wjatt] %-14s wall=%-5s worst_per_frame=%.1f at=%s\n",
+                             kMoves[mi], kSpots[wi].tag,
+                             static_cast<double>(worst_jump), worst_jump_mv);
+                std::fflush(stdout);
+            }
             std::fprintf(stdout,
                          "[wallprobe] %-14s wall=%-5s wx min=%.1f max=%.1f span_max=%.1f "
                          "com_jump_max=%.1f at=%s\n",
