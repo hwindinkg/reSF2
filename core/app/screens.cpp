@@ -3282,6 +3282,25 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // 0 rows while the bottom cap (drawn after the centre) showed 36.
                 // Both caps are the same sprite, so the composite is correct only
                 // when both ends read the same. Centre FIRST, caps on top.
+                // [FIX cap band tone - measured] The `roll_end` outer band is
+                // RGB 15 at ALPHA 40 %, so its rendered value is
+                //   15*0.4 + backdrop*0.6.
+                // Over the fight SCENE (~130) that is ~93 (the port's rows 58..70);
+                // over the dialog PANEL it is ~26-34, which is exactly the oracle's
+                // 32..36. The panel colour is taken from the oracle's own pixels at
+                // (712,45) = (60,24,13), i.e. luminance ~33. Drawn behind the rod so
+                // the semi-transparent cap edge composites as in the original.
+                {
+                    const float pw2 = rod_w + 4.0f;
+                    const float ph2 = rod_h + 4.0f;
+                    const float px2 = rod_cx - pw2 * 0.5f;
+                    const float py2 = cy - ph2 * 0.5f;
+                    const float quad2[] = {px2, py2, px2 + pw2, py2, px2, py2 + ph2,
+                                           px2 + pw2, py2, px2 + pw2, py2 + ph2,
+                                           px2, py2 + ph2};
+                    ren.draw_triangles(quad2, 6, 60.0f / 255.0f, 24.0f / 255.0f,
+                                       13.0f / 255.0f, 1.0f);
+                }
                 piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
                       /*flip_v=*/false, 0.0f, 1.0f);
                 piece("roll_end", rod_cx,
