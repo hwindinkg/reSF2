@@ -11528,7 +11528,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         }
         ctl.debug_place_fighters(690.0f, 750.0f);
         for (int i = 0; i < 4; ++i) ctl.update(1.0f / 60.0f);
-        ctl.debug_place_fighters(690.0f, 750.0f);
+        // `SF2_THROW_X=<x>` moves the pair (default 690 = dojo centre) so a throw
+        // can be staged NEXT TO A WALL: the NoWallRepulsion clips skip the buffer
+        // clamp, and the arena root clamp is what has to hold them inside.
+        float pair_x = 690.0f;
+        if (const char* px = std::getenv("SF2_THROW_X")) {
+            if (px[0] != '\0') pair_x = std::strtof(px, nullptr);
+        }
+        ctl.debug_place_fighters(pair_x, pair_x + 60.0f);
         // Drive the REAL input path: hold Back (the keyboard move path emits
         // `back` tap -> the buffered `back/hold` after the age tick), then tap
         // Punch. This is exactly what `FightScreen::on_key` feeds.

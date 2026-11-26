@@ -2036,6 +2036,22 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             throw_own_x_ = world_x_;
             throw_ref_x_ = opponent_->world_x();
             throw_px0_valid_ = false;  // capture the clip's own arc from frame 0
+            // [FIX throw pair geometry - player "не всегда стоят на нужном
+            // расстоянии или в нужной стороне"] The oracle's pair curve is
+            // INDEPENDENT of where the throw started: its episodes begin at gaps
+            // 71.1 / 134.4 / 151.8 but from 10 % on they read the same
+            // 72.5 -> 41.9 -> 11.4 -> 45.9 -> 119.6 ... The port used to place the
+            // victim at HIS OWN place + the clip's delta, so the pair inherited the
+            // start distance (its two throws read 40.4 -> 236.2 and 132.5 -> 133.1).
+            // The clip's `<Align><Position Player="Enemy" Object="Animation"/>`
+            // anchors him to the THROWER's animated position instead - place it
+            // absolutely, with the `qrb` prepend expressed in world space (the same
+            // treatment the wall jump needed). Measured: `--throw-probe` at start
+            // gaps 20 and 130 now gives the SAME curve
+            // (58.5 -> 24.8 -> 3.3 -> 23.0 -> 56.5 -> ... -> 207.4).
+            render_offset_valid_ = true;
+            render_offset_ = 0.0f;
+            walljump_abs_ = true;
             // [FIX throw pair — measured against BOTH oracle references] oracle
             // melee Survival median 45.5, oracle BOSS_LYNX 92.2; the port held 4.9
             // and 63. Keep the victim on the same SIDE he started on, at the start
