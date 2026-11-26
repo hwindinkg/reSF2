@@ -50,6 +50,11 @@ public:
     // Callers must have uploaded `texture` via the renderer's upload API.
     void add_quad(const SpriteQuad& quad, unsigned int texture);
 
+    // [UI LOG] closes the per-frame quad list (SF2_TRACE_UI=1 prints one
+    // [uiq] line per quad with frame/order/rect/uv/tint). Call once per
+    // rendered frame from the app.
+    void ui_frame_tick();
+
     // Adds a flat-color triangle list (screen-space x,y pairs, z dropped) as
     // one solid-color draw (texture 0). `verts` = 2 floats per vertex.
     void add_triangles(const float* verts, std::size_t vertex_count, float r,

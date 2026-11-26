@@ -13,6 +13,10 @@ namespace sf2::render {
 
 namespace {
 
+// [UI LOG] frame index + per-frame quad order, advanced by `ui_frame_tick()`.
+long g_ui_frame = 0;
+long g_ui_quad = 0;
+
 const char* kVertexSrc = R"GLSL(
 #version 330 core
 layout(location = 0) in vec2 a_pos;
@@ -167,6 +171,44 @@ void SpriteBatch::set_clip(bool enabled, int x, int y, int w, int h) {
 }
 
 void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
+    // [UI LOG - the player's request] `SF2_TRACE_UI=1` records EVERY quad the UI
+    // (and the world) draws: the frame index, the draw order within it, the
+    // texture, the on-screen rectangle, the source UV rectangle and the tint.
+    // That is the only way to compare a composite (the scroll rod's caps, the
+    // dialog paper) against the original's atlas: the JS builds each piece from
+    // an atlas frame with its own uv/size, so the rects must be compared, not
+    // eyeballed.
+    static const bool ui_trace = std::getenv("SF2_TRACE_UI") != nullptr;
+    if (ui_trace) {
+        float x0 = quad.v[0].x, x1 = quad.v[0].x;
+        float y0 = quad.v[0].y, y1 = quad.v[0].y;
+        float u0 = quad.v[0].u, u1 = quad.v[0].u;
+        float v0 = quad.v[0].v, v1 = quad.v[0].v;
+        for (int i = 1; i < 6; ++i) {
+            const SpriteVertex& v = quad.v[i];
+            if (v.x < x0) x0 = v.x;
+            if (v.x > x1) x1 = v.x;
+            if (v.y < y0) y0 = v.y;
+            if (v.y > y1) y1 = v.y;
+            if (v.u < u0) u0 = v.u;
+            if (v.u > u1) u1 = v.u;
+            if (v.v < v0) v0 = v.v;
+            if (v.v > v1) v1 = v.v;
+        }
+        static long ui_quad_index = 0;
+        std::fprintf(stdout,
+                     "[uiq] f=%ld i=%ld tex=%u x=%.1f y=%.1f w=%.1f h=%.1f "
+                     "u=%.4f..%.4f v=%.4f..%.4f rgba=%.2f,%.2f,%.2f,%.2f\n",
+                     g_ui_frame, g_ui_quad++, texture,
+                     static_cast<double>(x0), static_cast<double>(y0),
+                     static_cast<double>(x1 - x0), static_cast<double>(y1 - y0),
+                     static_cast<double>(u0), static_cast<double>(u1),
+                     static_cast<double>(v0), static_cast<double>(v1),
+                     static_cast<double>(quad.v[0].r),
+                     static_cast<double>(quad.v[0].g),
+                     static_cast<double>(quad.v[0].b),
+                     static_cast<double>(quad.v[0].a));
+    }
     if (!vertices_.empty() && texture != current_texture_) {
         draw_batch();
     }
@@ -175,6 +217,14 @@ void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
         vertices_.push_back(quad.v[i]);
     }
 }
+
+void SpriteBatch::ui_frame_tick() {
+    // Called once per rendered frame by the app: closes the quad list of the
+    // frame so `[uiq]` lines group cleanly (and the order index restarts).
+    ++g_ui_frame;
+    g_ui_quad = 0;
+}
+
 
 void SpriteBatch::add_triangles(const float* verts, std::size_t vertex_count,
                                 float r, float g, float b, float a) {

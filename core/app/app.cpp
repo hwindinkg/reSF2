@@ -1768,6 +1768,8 @@ void App::render_frame() {
     // [dev panel] key `5`: modal over everything (its own backdrop).
     dev_panel_draw(*this, *renderer_);
     const double rt3 = tr ? glfwGetTime() : 0.0;
+    // [UI LOG] close the per-frame quad list (`SF2_TRACE_UI=1`).
+    if (renderer_ != nullptr) renderer_->batch().ui_frame_tick();
     renderer_->end_frame();
     const double rt4 = tr ? glfwGetTime() : 0.0;
     if (tr) {

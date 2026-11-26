@@ -57,6 +57,10 @@ rem [needed for the root-vs-mesh check] `[sepd] root=/dpiv=/drawn=` per frame, s
 rem gap between the drawn body and its root can be measured from this log. Without
 rem it the "mesh sticks in the opponent" item cannot be verified on a player run.
 set SF2_TRACE_SEP=1
+rem [UI LOG] every drawn quad: frame, order, texture, screen rect, uv, tint.
+rem Needed to compare a composite (the scroll rod caps, dialog paper) with the
+rem original's atlas assembly - positions/sizes/uv of each piece, not eyeballing.
+set SF2_TRACE_UI=1
 rem --- per-frame JSON state (the same rows the oracle diff uses) -----------
 set SF2_DEBUG_LOG=1
 
