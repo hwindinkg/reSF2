@@ -5238,6 +5238,30 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     move_held = hold;
                 }
             }
+            // [repeat repro] After the punchbag dialog the lesson sits at beat 2,
+            // which the JS resumes on `EAnimationAttack` (`Eo.Pf` L1125): tap
+            // Punch for real so the chain advances the way the player's does.
+            // Every NEW dialog's first line is logged, so a `tutorial_move` that
+            // comes back a second time is visible as a repeated id.
+            if (app.quest_engine().tutorial_gate_beat() == 2 &&
+                !app.quest_engine().has_modal() && (f % 20) == 0) {
+                app.inject_key(GLFW_KEY_K, true);
+                app.inject_key(GLFW_KEY_K, false);
+            }
+            {
+                sf2::app::QuestEngine& q1 = app.quest_engine();
+                static int seen_dialogs = 0;
+                const int n = q1.dialog_count();
+                if (n > seen_dialogs) {
+                    seen_dialogs = n;
+                    const sf2::app::EngineDialog* d1 = q1.modal_top();
+                    std::fprintf(stdout, "[tutreal] f=%d NEW dialog %s | %s\n", f,
+                                 d1 != nullptr ? d1->type.c_str() : "?",
+                                 d1 != nullptr && !d1->lines.empty()
+                                     ? d1->lines[0].c_str() : "");
+                    std::fflush(stdout);
+                }
+            }
             app.run_one_frame();
             sf2::app::QuestEngine& q = app.quest_engine();
             if (!saw_welcome && q.dialog_count() > 0) saw_welcome = true;
