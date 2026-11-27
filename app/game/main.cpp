@@ -11396,11 +11396,25 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             float worst_jump = 0.0f;
             const char* worst_jump_mv = "-";
             float wx_prev_case = ctl.player().fighter.world_x();
+            int punch_taps = 0;
             for (int f = 0; f < kMoveFrames[mi]; ++f) {
-                if (attack_probe && !attacked &&
-                    ctl.player().fighter.move_frame() >= 38) {
+                // [REPRO via the REAL input path] `debug_force_player_move`
+                // refuses while the wall-jump clip is still playing (measured:
+                // the attack never started, worst 15.4 in both A/B arms). The
+                // player's own transition is a BUFFERED punch that starts when the
+                // jump's `Uninterrupt` interval ends at clip frame 33, so tap
+                // Punch from frame 34 on - the same call the input layer uses.
+                if (attack_probe && ctl.player().fighter.move_frame() >= 34 &&
+                    ctl.player().fighter.move_frame() <= 44 && punch_taps < 6 &&
+                    (f % 3) == 0) {
+                    ++punch_taps;
+                    ctl.debug_player_key(sf2::scene::key_type::punch,
+                                         sf2::scene::press_type::tap);
+                }
+                if (attack_probe && !attacked && punch_taps > 0 &&
+                    !ctl.player().fighter.current_move()->name.empty() &&
+                    ctl.player().fighter.current_move()->name.compare(0, 8, "WallJump") != 0) {
                     attacked = true;
-                    ctl.debug_force_player_move("ShortUpwardElbowStrike", true);
                 }
                 ctl.update(1.0f / 60.0f);
                 {
