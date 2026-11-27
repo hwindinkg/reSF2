@@ -3236,14 +3236,8 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             };
             for (int side = 0; side < 2; ++side) {
                 const bool mirror = side != 0;
-                // [FIX rod x - measured] The oracle's rod occupies 717..761 at
-                // 1280x720 (bar left edge 740), i.e. it sits INSIDE the bar; the
-                // port drew it at 698..740, hanging 19 px off the bar's left edge
-                // (measured: 246-level difference at (708,108)). Shift it in.
-                const float rod_inset = 19.0f;
-                const float rod_cx = side == 0
-                    ? lx(0.0f) - rod_w * 0.5f + rod_inset
-                    : lx(kBarW) + rod_w * 0.5f - rod_inset;
+                const float rod_cx =
+                    side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
                 const float cy = ly(kBarH * 0.5f) + 1.5f;  // +3 px: the port rod ended ~5 px short
                 // [rod composite — measured against oracle_ib_00.png] The oracle's
                 // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
