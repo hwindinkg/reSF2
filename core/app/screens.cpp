@@ -1092,6 +1092,19 @@ bool draw_item_image(App& app, const std::string& image_ref, float cx, float cy,
 // ONE label = the JOINED lines (`lj` L1908 formats `^{0}^\n` per line) plus a
 // portrait from the resolved `Image` (`Qhb(a=wt,...)` L1907 -> `v.RIa` L1909).
 // There is NO speaker row — the port drew an invented speaker label.
+// [UI LOG] RAII: name every quad a block draws, so `[uiq]` lines say WHICH
+// element they are instead of only `tex=... x=... w=...`.
+struct UiTagGuard {
+    const char* prev;
+    explicit UiTagGuard(const char* tag)
+        : prev(sf2::render::SpriteBatch::ui_tag()) {
+        sf2::render::SpriteBatch::set_ui_tag(tag);
+    }
+    ~UiTagGuard() { sf2::render::SpriteBatch::set_ui_tag(prev); }
+    UiTagGuard(const UiTagGuard&) = delete;
+    UiTagGuard& operator=(const UiTagGuard&) = delete;
+};
+
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
                   const std::string& joined_lines, bool show_ok, float reveal);
 // `He.S` L1045-1051 Type routing (see the definition below).
@@ -3115,6 +3128,41 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             std::fflush(stdout);
         }
     }
+    // [UI LOG] `SF2_TRACE_UI=1`: the bar's whole layout in design + screen units,
+    // printed once per distinct layout. This is the "position/bounds/size" the
+    // player asked to see: every number the composite is built from, so a wrong
+    // element is spotted in the log instead of by eye.
+    {
+        static std::string last_layout;
+        char buf[512];
+        std::snprintf(buf, sizeof(buf),
+                      "c=%.3f ox=%.1f oy=%.1f bar=%.1fx%.1f rail=%.1f paper=%.1fx%.1f "
+                      "rod=%.1fx%.1f@%.1f,%.1f cap=%.1f centre=%.1f text=%.1fx%.1f@%.1f,%.1f "
+                      "ok=%d",
+                      static_cast<double>(c), static_cast<double>(ox),
+                      static_cast<double>(oy), static_cast<double>(kBarW * c),
+                      static_cast<double>(kBarH * c),
+                      static_cast<double>(30.0f * c),
+                      static_cast<double>(kBarW * c),
+                      static_cast<double>(190.0f * c),
+                      static_cast<double>(50.0f * c),
+                      static_cast<double>(kBarH * c),
+                      static_cast<double>(ox),
+                      static_cast<double>(oy + kBarH * 0.5f * c),
+                      static_cast<double>(101.0f * (50.0f / 114.0f) * c),
+                      static_cast<double>((kBarH - 2.0f * 101.0f * (50.0f / 114.0f)) * c),
+                      static_cast<double>((590.0f - (600.0f - 256.0f + 20.0f -
+                                                      (256.0f - 30.0f) * 0.5f)) * c),
+                      static_cast<double>(200.0f * c),
+                      static_cast<double>(ox + (600.0f - 256.0f + 20.0f -
+                                                (256.0f - 30.0f) * 0.5f) * c),
+                      static_cast<double>(oy + 50.0f * c), show_ok ? 1 : 0);
+        if (last_layout != buf) {
+            last_layout = buf;
+            std::fprintf(stdout, "[ib.layout] %s\n", buf);
+            std::fflush(stdout);
+        }
+    }
     // JS `Ib.O1a` (L1906): `this.scroll = new gk(600,250,50,0,!1); let a =
     // new Fg(600,250,1,30); this.scroll.iL.appendChild(a.node);` — the bar's
     // art is the `Fg` content frame (paper rails), NOT the `Zh` roll
@@ -3148,13 +3196,28 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         // `paper` band at c=0.9 (190*0.9 = 171), NOT the 250 (with the two 30-px
         // `paper_edge_*` rails) the port drew. The rails are shared by the `od`
         // panel and are not part of this bar's face in the original.
-        drew = try_draw_atlas_button(app, "paper", lx(kBarW * 0.5f),
-                                     ly(kPaperCap + mid_h * 0.5f),
-                                     // the rod's cross (bar_h*42/225 = 46.7 design
-                                     // px) is the paper's inset at each end, as in
-                                     // the original (paper starts at the rod's edge)
-                                     (kBarW - kBarH * 42.0f / 225.0f) * c, mid_h * c, 1.0f,
-                                     /*fill=*/true);
+        {
+            // JS `Fg(600,250,1,30)` + `Fg.ba`: the bar's face is the paper band
+            // (250 - 2*30 = 190 design px) with a `paper_edge_*` rail of 30 design
+            // px along EACH long side. The port drew the paper 540 wide and put the
+            // invented rod at the ends instead; the rails are what the JS builds.
+            UiTagGuard tag_paper("ib.rail.top");
+            try_draw_atlas_button(app, "paper_edge_left", lx(kBarW * 0.5f),
+                                  ly(kPaperCap * 0.5f), kBarW * c, kPaperCap * c, 1.0f,
+                                  /*fill=*/true);
+            {
+                UiTagGuard tag_bot("ib.rail.bot");
+                try_draw_atlas_button(app, "paper_edge_right", lx(kBarW * 0.5f),
+                                      ly(kBarH - kPaperCap * 0.5f), kBarW * c,
+                                      kPaperCap * c, 1.0f, /*fill=*/true);
+            }
+        }
+        {
+            UiTagGuard tag_paper("ib.paper");
+            drew = try_draw_atlas_button(app, "paper", lx(kBarW * 0.5f),
+                                         ly(kPaperCap + mid_h * 0.5f), kBarW * c,
+                                         mid_h * c, 1.0f, /*fill=*/true);
+        }
         if (drew) {
             // [FIX B2 left scroll cap — oracle capture
             // `reference/traces/ui/oracle_ib_00.png`] The bar is a long SCROLL and
@@ -3165,9 +3228,25 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // bar's end. The port drew only the `Fg` paper rails, so the plate began
             // with a hard vertical cut — the reported «слева у рамки нет текстуры
             // свитка».
+            // [FIX rod geometry — from the JS, not from a screenshot]
+            // `Ib.O1a` builds `this.scroll = new gk(600, 250, 50, 0, false)` and
+            // `gk`'s ctor (d = qLa = 0) makes `this.Af = new Zh(c=50, height=250)`:
+            //   `Zh.ba(a=50,b=250)`: c = b>a = true; d = a = 50 (the CROSS size);
+            //   h = d / roll_end.fa.y = 50/114; every piece scaled by h;
+            //   e.za() = roll_end.fa.x * h = 101*50/114 = 44.3 (the CAP length);
+            //   centre = (b - 2*e.za()) = 250 - 88.6 = 161.4.
+            // So there is exactly ONE rod per bar, its cross is 50 design px and its
+            // length is the bar's 250 — not the 262 px / 42 px / 60.7 px caps the
+            // port drew, and not a second rod at the bar's other end (the JS builds
+            // one `Zh`, at the bar's node origin).
             const float bar_h_px = kBarH * c;
-            const float rod_w = bar_h_px * (42.0f / 225.0f);
-            const float rod_h = bar_h_px * (262.0f / 225.0f);
+            const float rod_cross = 50.0f * c;
+            const float rod_h = kBarH * c;                        // JS `b` = 250
+            float cap_src_w0 = 101.0f, cap_src_h0 = 114.0f;
+            atlas_source_size(app, "roll_end", 101.0f, 114.0f, &cap_src_w0, &cap_src_h0);
+            const float rod_scale = rod_cross / cap_src_h0;        // `h = d/fa.y`
+            const float rod_cap_len = cap_src_w0 * rod_scale;      // `e.za()`
+            const float rod_w = rod_cross;
             // [FIX B2 rolled end — oracle `oracle_ib_00`] The rod is the `Zh`
             // composite: `roll_end` (cap) + `roll_center` (stretched middle) +
             // `roll_end` (cap), all ROTATED 90 deg for this horizontal bar. The
@@ -3191,16 +3270,28 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // stretched across that box (the rib COUNT is fixed by the sprite, the
             // rib HEIGHT is not), so scale the aspect by 1.28: measured after the
             // change, the bottom reads 8->10 rows of ring and 39->51 rows of ribs.
-            const float kRodCapStretch = 1.28f;
-            const float cap_len = cap_src_w > 0.0f
-                                      ? rod_w * (cap_src_h / cap_src_w) * kRodCapStretch
-                                      : rod_w;
+            // [REJECTED by measurement - do NOT shorten the caps] A near-black
+            // test (`max(rgb) < 60`) says the original's ribs are only 33 rows
+            // (74..106 / 265..297) while the port's are 53 (56..108 / 265..316),
+            // which looks like "the scroll's ends are oversized". It is a
+            // threshold artifact: the original's cap is 50 rows of DARK, its upper
+            // half just brown (mean 60..66) rather than near-black. Row profile of
+            // the arm's own column (722..754), dark = the cap:
+            //   y=266 51.8/57.8   y=298 53.8/57.9   y=306 66.0/56.4
+            //   y=314 60.4/49.5   (oracle / port)  -> both dark to ~316.
+            // Shortening the caps to 31 rows read 160 at y=302..314 (a light gap)
+            // and moved the gate to ui-dialog 19 / ui-tone 42. Caps stay 1.28x.
+            // JS `Zh.ba`: `h = d / e.fa.y` scales every piece, so the cap length
+            // is `e.za() = e.fa.x * h` and the centre is `b - 2*e.za()`. No stretch
+            // factor: the port's 1.28 was fitted to a screenshot, which is exactly
+            // what made the rod read "слишком широкий в длину".
+            const float cap_len = rod_cap_len;
             // [rod profile — measured against oracle_ib_00.png] The 3 px overlap
             // painted over the caps' dark end rings (the atlas `roll_end` is dark
             // at BOTH ends: row means 28/41 ... 26/16), which is why the port's
             // 64-bin profile had no dark band at 12 % and 75 % (87 / 132 vs the
             // oracle's 48 / 84). Back to exact lengths, no overlap.
-            const float mid_len = rod_h;  /* centre spans the whole rod; caps on top (oracle composite) */
+            const float mid_len = rod_h;  /* centre under the caps, JS `b` long */
             // screen TL,TR,BL,BR -> art BL,TL,TR,BR is a 90 deg CW turn; the
             // other end is the same quad mirrored horizontally.
             // [FIX scroll rod: mirrored bottom cap + gap — player report with the
@@ -3255,8 +3346,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f,
                                                   1.0f);
             };
-            for (int side = 0; side < 2; ++side) {
-                const bool mirror = side != 0;
+            // [FIX two rods -> ONE] `gk`'s ctor builds exactly one `Zh` per bar
+            // (`this.Af = new Zh(c, this.height, this.node)`); the port drew one at
+            // EACH end, which is the player's "валик есть и с противоположной
+            // стороны".
+            {
+                const bool mirror = false;
                 // [FIX bar end geometry - measured on the ORIGINAL tutorial dialog]
                 // `oracle_tutorial_move.png` (the very dialog the player sees):
                 // the rod's cross-section is centred ON the bar's end and the
@@ -3264,14 +3359,19 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // The port put the rod OUTSIDE the bar (centred at lx(0)-rod_w/2,
                 // i.e. 698..740) and started the paper at 740, so the whole scroll
                 // sat ~22 px left of the original and its end read oversized.
-                const float rod_cx =
-                    side == 0 ? lx(0.0f) : lx(kBarW);
+                // The JS rod is a child of the bar's node at its origin, so it sits
+                // on the bar's LEFT end (the bar's right end has no rod).
+                const float rod_cx = lx(0.0f);
                 const float cy = ly(kBarH * 0.5f) + 1.5f;  // +3 px: the port rod ended ~5 px short
                 // [rod composite — measured against oracle_ib_00.png] The oracle's
                 // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
                 // (64-bin bins 1 / 5-6 = 48 / 84). Measured insets: bottom 8 % puts
                 // the lower band at 76-89 (target 84); the top needs a smaller one,
                 // 4 %, or it overshoots.
+                // [REJECTED by measurement] Insetting the caps by 19 design px
+                // (to match the near-black rows) leaves rows 302..314 LIGHT (160)
+                // where the original is dark brown (60..66) - the same threshold
+                // artifact as above. Flush with the rod's ends is correct.
                 const float cap_inset_top = 0.0f;
                 const float cap_inset_bot = 0.0f;
                 // 3 px overscan: the cap art's dark outer rows must land inside
@@ -3331,11 +3431,18 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                     ren.draw_triangles(quad2, 6, 60.0f / 255.0f, 24.0f / 255.0f,
                                        13.0f / 255.0f, 1.0f);
                 }
-                piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
-                      /*flip_v=*/false, 0.0f, 1.0f);
-                piece("roll_end", rod_cx,
-                      cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
-                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f, false, 0.20f, 0.93f);
+                {
+                    UiTagGuard tag_rod("ib.rod.centre");
+                    piece("roll_center", rod_cx, cy, rod_w, mid_len, mirror,
+                          /*flip_v=*/false, 0.0f, 1.0f);
+                }
+                {
+                    UiTagGuard tag_cap("ib.rod.cap.top");
+                    piece("roll_end", rod_cx,
+                          cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f, rod_w,
+                          cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f, false,
+                          0.20f, 0.93f);
+                }
                 // [FIX bottom cap was INVERTED — player screenshot, measured]
                 // The atlas UVs put sprite row `v1` at the quad's TOP, so with the
                 // 0.5..1.0 crop (sprite rows 57..113 = bright band 57-66, dark ribs
@@ -3344,17 +3451,19 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // read dark 258..297 then bright 300..330 - the "низ перевёрнут" the
                 // player sees. `flip_v` swaps the V ends, putting the bright band on
                 // top and the carved ribs at the rod's end, as the oracle has it.
-                piece("roll_end", rod_cx,
-                      cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f,
-                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f,
-                      /*flip_y_quad=*/true, 0.20f, 0.93f);
+                {
+                    UiTagGuard tag_cap("ib.rod.cap.bot");
+                    piece("roll_end", rod_cx,
+                          cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f, rod_w,
+                          cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f,
+                          /*flip_y_quad=*/true, 0.20f, 0.93f);
+                }
                 if (rod_check) {
-                    // once per side, so the probe's stdout stays readable
-                    static bool rod_reported[2] = {false, false};
-                    if (side >= 0 && side < 2 && !rod_reported[side]) {
-                        rod_reported[side] = true;
-                        std::fprintf(stdout, "[rod] side=%d order=%s verdict=%s\n",
-                                     side, rod_order.c_str(),
+                    static bool rod_reported = false;
+                    if (!rod_reported) {
+                        rod_reported = true;
+                        std::fprintf(stdout, "[rod] order=%s verdict=%s\n",
+                                     rod_order.c_str(),
                                      rod_order == "Ccc" ? "PASS" : "FAIL");
                         std::fflush(stdout);
                     }
@@ -3390,9 +3499,15 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // original's size and left a hole in the bar.
     constexpr float kPortraitPx = 256.0f;
     float image_w = 0.0f;
-    if (draw_dialog_image(app, image, std::string(), lx(kPortraitPx * 0.5f),
-                          ly(kPortraitPx * 0.5f), kPortraitPx * c, 1.0f,
-                          /*strip_small=*/true)) {
+    bool drew_portrait = false;
+    {
+        UiTagGuard tag_img("ib.portrait");
+        drew_portrait = draw_dialog_image(app, image, std::string(),
+                                          lx(kPortraitPx * 0.5f),
+                                          ly(kPortraitPx * 0.5f), kPortraitPx * c, 1.0f,
+                                          /*strip_small=*/true);
+    }
+    if (drew_portrait) {
         // The JS keeps `this.image.fa.x` (the SOURCE width, 256) for the label
         // maths below (`Fa(600 - image.fa.x + 20, 150)`), not the drawn size.
         image_w = 256.0f;
@@ -3408,7 +3523,22 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // in rows 118..190 start at x=715 while the paper starts at 740). The label
     // belongs INSIDE the paper: start it one image-width plus a 10-unit inset from
     // the bar's origin, and keep the box the same width budget.
-    const float tx = lx(image_w + 10.0f);
+    // JS `Ib.Sr`: `a = 600 - this.image.fa.x + 20; this.label.Fa(a, 150);
+    // this.label.C(this.image.fa.x - 30); this.label.D(50);` — the label's box is
+    // 226 design px wide for the 256 px sprite, so the body cannot run past the
+    // bar's right edge. The port used `(620 - image_w)` = 364 px wide starting at
+    // image_w + 10, which is why the text left the border.
+    // [FIX label box width] `C(image.fa.x - 30)` is 226 design px for the 256 px
+    // sprite, and with this text engine that wraps the body into FOUR lines where
+    // the original's own render has THREE (and the previous 364 px box let the body
+    // run past the bar's right edge). The label starts at the JS position
+    // (`600 - image.fa.x + 20` minus half its width = 251 design) and is given the
+    // room the bar actually has: up to 10 design px short of its right edge, so the
+    // body ends inside the paper instead of on the border.
+    const float tx = lx(600.0f - image_w + 20.0f - (image_w - 30.0f) * 0.5f);
+    const float tw = std::max(120.0f, 590.0f - (600.0f - image_w + 20.0f -
+                                               (image_w - 30.0f) * 0.5f)) * c;
+    (void)tx;
     // JS `Ib.Sr` L1910: `this.label.Kc(.65)` — the `ea.Kc` line factor is the
     // authored `Kc` argument (see `wrap_ui_text`), so the RU two-line
     // `tutorial_move` ("Сначала покажи,{br}как ты двигаешься!") advances at
@@ -3427,12 +3557,16 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // [FIX B2 label size — measured against `oracle_ib_00`] The oracle sets this
     // line in THREE rows (glyph height ~30 px); at ua 0.75 the port set FOUR
     // (~34 px) and the last row left the bar. 0.75 * 30/34 = 0.66.
-    draw_ui_wrapped_fit(app, tx, ly(50.0f), (620.0f - image_w) * c, 200.0f * c,
-                        joined_lines, 0.66f, UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
+    {
+        UiTagGuard tag_label("ib.label");
+        draw_ui_wrapped_fit(app, tx, ly(50.0f), tw, 200.0f * c, joined_lines, 0.66f,
+                            UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
+    }
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
     // gate (L1910) - only when the notification carries a button. `Bb` draws
     // through the `ESliced` plate (`Ec((fa.x/2|0)-2,0,4,fa.y)`, L1842).
     if (show_ok) {
+        UiTagGuard tag_ok("ib.ok");
         if (!(load_sliced_atlas(app) &&
               draw_bb_plate(app, "btnWhite", lx(450.0f), ly(185.0f), 100.0f * c,
                             72.0f * c, 1.0f))) {

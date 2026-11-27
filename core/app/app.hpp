@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <map>
+#include <cstdlib>
 #include <memory>
 #include <set>
 #include <string>
@@ -191,6 +192,15 @@ public:
     // 30-frame "Loading 100%" hold (`ad.kp` @1014756). No-op during boot.
     // Public: ScreenManager::push_impl arms it on every scene push.
     void begin_scene_loader();
+
+    // [test speed] `SF2_NO_RENDER=1`: `run_one_frame()` skips `render_frame()`.
+    // The logic probes (quest chain, tours, hit probes) assert on state, not on
+    // pixels, and every frame was paying a full scene render - on this machine
+    // ~100 ms/frame, i.e. minutes of the `--full` run. Unset = unchanged.
+    static bool no_render_env() {
+        static const bool v = std::getenv("SF2_NO_RENDER") != nullptr;
+        return v;
+    }
 
     // Creates the window + GL context, loads the shared assets, boots to
     // the main menu. Returns false on failure. `lang` selects the UI

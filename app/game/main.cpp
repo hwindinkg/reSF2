@@ -10732,10 +10732,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             d.type = "Notification";
             d.lines.push_back(
                 "Not enough coins to buy this item.");
-            sf2::app::QuestAction noop;
-            noop.tag = "NoOp";
-            d.button_actions.push_back(noop);
-            d.button_text = "OK";
+            if (kind != "hint") {
+                sf2::app::QuestAction noop;
+                noop.tag = "NoOp";
+                d.button_actions.push_back(noop);
+                d.button_text = "OK";
+            }
             d.button_color = "White";
             app.quest_engine().push_dialog_for_test(std::move(d));
         } else if (kind == "buy") {
@@ -11125,13 +11127,21 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // resolves `_small` via `strip_small`); "sensei" alone resolved to
                 // nothing and the label slid left out of the plate.
                 d.lines.push_back("Сначала покажи, \nкак ты двигаешься!");
+                // [FIX probe fidelity] The real tutorial notification is
+                // `<Button Type="Right" Text="OK"/>` with NO children, and the JS
+                // (`hab()` counts ACTIONS) draws no plate for those - so the probe
+                // must not add one either, otherwise an A/B shows an OK button the
+                // game never has.
+                d.button_text.clear();
             } else {
                 d.lines.push_back("Not enough coins to buy this item.");
             }
-            sf2::app::QuestAction noop;
-            noop.tag = "NoOp";
-            d.button_actions.push_back(noop);
-            d.button_text = "OK";
+            if (kind != "hint") {
+                sf2::app::QuestAction noop;
+                noop.tag = "NoOp";
+                d.button_actions.push_back(noop);
+                d.button_text = "OK";
+            }
             d.button_color = "White";
             app.quest_engine().push_dialog_for_test(std::move(d));
             for (int i = 0; i < 60; ++i) {  // 0.5 s `Ib` reveal + settle

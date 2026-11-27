@@ -55,6 +55,14 @@ public:
     // rendered frame from the app.
     void ui_frame_tick();
 
+    // [UI LOG] a LOGICAL NAME for the quads drawn from now on ("ib.paper",
+    // "ib.rod.cap.top", ...). The immediate-mode UI has no tree, so the name is
+    // what turns a raw rect into "which element is this": without it a log line
+    // is just `tex=106 x=698 w=42`, with it the reader sees that this is the
+    // bar's rod cap and can compare it with the JS layout numbers.
+    static void set_ui_tag(const char* tag);
+    static const char* ui_tag();
+
     // Adds a flat-color triangle list (screen-space x,y pairs, z dropped) as
     // one solid-color draw (texture 0). `verts` = 2 floats per vertex.
     void add_triangles(const float* verts, std::size_t vertex_count, float r,

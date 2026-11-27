@@ -2336,7 +2336,7 @@ void App::run_one_frame() {
         ++fixed_steps_;
     }
     const double t_upd1 = glfwGetTime();
-    render_frame();
+    if (!no_render_env()) render_frame();
     const double t_rend1 = glfwGetTime();
     perf_cpu_sample(t_rend1);
     perf_commit(dt, (t_upd1 - t_upd0) * 1000.0, (t_rend1 - t_upd1) * 1000.0,

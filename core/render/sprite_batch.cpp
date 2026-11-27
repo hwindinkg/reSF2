@@ -17,6 +17,8 @@ namespace {
 // [UI LOG] frame index + per-frame quad order, advanced by `ui_frame_tick()`.
 long g_ui_frame = 0;
 long g_ui_quad = 0;
+// [UI LOG] current logical element name (see `set_ui_tag`).
+const char* g_ui_tag = "-";
 
 const char* kVertexSrc = R"GLSL(
 #version 330 core
@@ -212,9 +214,9 @@ void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
         }
         static long ui_quad_index = 0;
         std::fprintf(stdout,
-                     "[uiq] f=%ld i=%ld tex=%u x=%.1f y=%.1f w=%.1f h=%.1f "
+                     "[uiq] f=%ld i=%ld tag=%s tex=%u x=%.1f y=%.1f w=%.1f h=%.1f "
                      "u=%.4f..%.4f v=%.4f..%.4f rgba=%.2f,%.2f,%.2f,%.2f\n",
-                     g_ui_frame, g_ui_quad++, texture,
+                     g_ui_frame, g_ui_quad++, g_ui_tag, texture,
                      static_cast<double>(x0), static_cast<double>(y0),
                      static_cast<double>(x1 - x0), static_cast<double>(y1 - y0),
                      static_cast<double>(u0), static_cast<double>(u1),
@@ -232,6 +234,12 @@ void SpriteBatch::add_quad(const SpriteQuad& quad, unsigned int texture) {
         vertices_.push_back(quad.v[i]);
     }
 }
+
+void SpriteBatch::set_ui_tag(const char* tag) {
+    g_ui_tag = (tag != nullptr) ? tag : "-";
+}
+
+const char* SpriteBatch::ui_tag() { return g_ui_tag; }
 
 void SpriteBatch::ui_frame_tick() {
     // Called once per rendered frame by the app: closes the quad list of the
