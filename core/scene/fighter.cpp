@@ -2280,6 +2280,31 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // visibly snapped/slid back at each move->idle boundary. The JS has NO
     // such translation (see the solver-seed note in `set_model`).
     build_prepend(move);
+    // [ONE WORLD POSE, A/B] `SF2_ONEPOSE=1`: the placement offset is the CLIP's
+    // (`Gub`: prev_world(Pivot) - raw_clip(Pivot, FirstFrame)), not the blend's.
+    if (std::getenv("SF2_ONEPOSE") != nullptr && !align_absolute_ && !move.no_interp &&
+        !walljump_abs_ && !wall_pin_ && current_clip_ != nullptr &&
+        !current_clip_->frames.empty()) {
+        const std::size_t nc = current_clip_->bone_count();
+        const int an = model_.bone_by_name(fighter_pivot_bone());
+        if (an >= 0 && static_cast<std::size_t>(an) < nc) {
+            int src2 = mirror_swap_src(an, static_cast<int>(nc));
+            if (src2 < 0) src2 = an;
+            const int f0 = std::max(0, std::min(move_base_,
+                                                static_cast<int>(current_clip_->frames.size()) - 1));
+            const auto& fb2 = current_clip_->frames[static_cast<std::size_t>(f0)].bones;
+            const std::size_t au2 = static_cast<std::size_t>(an) * 2;
+            if (static_cast<std::size_t>(src2) < fb2.size() && au2 + 1 < pos_.size()) {
+                const float mneg2 = (clip_mirror_ < 0) ? -1.0f : 1.0f;
+                // the clip slots become WORLD through `align_x_` (the JS `Gla`
+                // shift), so the placement offset is zero and the prepend (already
+                // world) is not shifted a second time.
+                align_x_ = pos_[au2] - mneg2 * fb2[static_cast<std::size_t>(src2)].x;
+                render_offset_ = 0.0f;
+                render_offset_valid_ = true;
+            }
+        }
+    }
     // [FIX cloth double-step — JS `Te.Skb` L551] `Skb` builds the play buffer
     // (`Pka`/`qrb`) and the align (`Gub`/`Gla`) but does NOT sample a pose:
     // the first `eda` + `Al.ia` (solver) runs on the frame's `wd.ia`
@@ -3881,8 +3906,14 @@ void Fighter::wall_repulsion_step() {
     const std::size_t src = static_cast<std::size_t>(src_i);
     if (src >= fb.size()) return;
     const float mneg = (clip_mirror_ < 0) ? -1.0f : 1.0f;
-    const float fx = mneg * fb[src].x + align_x_ + render_offset_ -
-                     wall_shift_[static_cast<std::size_t>(c)];
+    float fx = mneg * fb[src].x + align_x_ + render_offset_ -
+               wall_shift_[static_cast<std::size_t>(c)];
+    if (std::getenv("SF2_ONEPOSE") != nullptr) {
+        const int an3 = model_.bone_by_name(fighter_pivot_bone());
+        if (an3 >= 0 && pos_.size() > static_cast<std::size_t>(an3) * 2 + 1) {
+            fx = pos_[static_cast<std::size_t>(an3) * 2];
+        }
+    }
     // `nzb` L198516: `Hra`/`hta` by facing — `a?30:100` / `a?100:30` with
     // `a = da.hd()>0`. (`qMa`'s initial 100/30 is overwritten every frame.)
     const bool facing_right = (clip_mirror_ > 0);
@@ -3983,6 +4014,19 @@ void Fighter::build_prepend(const MoveDef& move) {
                 prepend_[u + 1] = k.y;
                 prepend_[u + 2] = k.z;
             }
+        }
+        return;
+    }
+    // [ONE WORLD POSE, A/B] `SF2_ONEPOSE=1`: seed the `qrb` prepend from the pose
+    // the fighter is DRAWN in (world), not from `sol_ma_` (the previous clip's
+    // space). JS `Te.qrb` reads the posed node, which is exactly this.
+    static const bool one_pose = std::getenv("SF2_ONEPOSE") != nullptr;
+    if (one_pose && pose_sampled_ && pos_.size() >= nclip * 2) {
+        for (std::size_t i = 0; i < nclip; ++i) {
+            prepend_[(0 * nclip + i) * 3] = pos_[i * 2];
+            prepend_[(0 * nclip + i) * 3 + 1] = pos_[i * 2 + 1];
+            prepend_[(1 * nclip + i) * 3] = pos_[i * 2];
+            prepend_[(1 * nclip + i) * 3 + 1] = pos_[i * 2 + 1];
         }
         return;
     }
@@ -4712,7 +4756,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             if (clip_changed_now && clamp_prev_world_valid_) {
                 constexpr float kMaxClipStartJump = 150.0f;
                 const float d = world_x_ - clamp_prev_world_;
-                if (std::fabs(d) > kMaxClipStartJump) {
+                if (std::getenv("SF2_ONEPOSE") == nullptr &&
+                    std::fabs(d) > kMaxClipStartJump) {
                     render_offset_ += clamp_prev_world_ - world_x_;
                     world_x_ = clamp_prev_world_;
                     if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
