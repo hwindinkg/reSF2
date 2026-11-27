@@ -3194,7 +3194,8 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             // small overlap so the rod reads as one piece.
             auto rod_piece = [&](const char* frame, float cx, float cy, float w,
                                  float h, bool mirror, bool flip_v, float vf0,
-                                 float vf1, bool flip_y_quad = false) {
+                                 float vf1, bool flip_y_quad = false,
+                                 float uf0 = 0.0f, float uf1 = 1.0f) {
                 sf2::data::atlas_frame fr;
                 int tw = 0, th = 0;
                 unsigned int gl = 0;
@@ -3202,8 +3203,10 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                     th <= 0) {
                     return;
                 }
-                float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
-                float u1 = static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+                float u0 = static_cast<float>(fr.x) / static_cast<float>(tw) +
+                           (static_cast<float>(fr.w) / static_cast<float>(tw)) * uf0;
+                float u1 = static_cast<float>(fr.x) / static_cast<float>(tw) +
+                           (static_cast<float>(fr.w) / static_cast<float>(tw)) * uf1;
                 const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
                 const float v1 =
                     static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
@@ -3269,8 +3272,10 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 std::string rod_order;
                 auto piece = [&](const char* frame, float px, float py, float pw,
                                  float ph, bool pmirror, bool pflip, float pvf0,
-                                 float pvf1, bool pflipy = false) {
-                    rod_piece(frame, px, py, pw, ph, pmirror, pflip, pvf0, pvf1, pflipy);
+                                 float pvf1, bool pflipy = false, float puf0 = 0.0f,
+                                 float puf1 = 1.0f) {
+                    rod_piece(frame, px, py, pw, ph, pmirror, pflip, pvf0, pvf1, pflipy,
+                              puf0, puf1);
                     if (rod_check) {
                         rod_order += std::strcmp(frame, "roll_center") == 0 ? 'C' : 'c';
                     }
@@ -3305,7 +3310,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                       /*flip_v=*/false, 0.0f, 1.0f);
                 piece("roll_end", rod_cx,
                       cy - rod_h * 0.5f + cap_inset_top + cap_len * 0.5f,
-                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f);
+                      rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f, false, 0.20f, 0.93f);
                 // [FIX bottom cap was INVERTED — player screenshot, measured]
                 // The atlas UVs put sprite row `v1` at the quad's TOP, so with the
                 // 0.5..1.0 crop (sprite rows 57..113 = bright band 57-66, dark ribs
@@ -3317,7 +3322,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 piece("roll_end", rod_cx,
                       cy + rod_h * 0.5f - cap_inset_bot - cap_len * 0.5f,
                       rod_w, cap_len + cap_ov, mirror, /*flip_v=*/true, 0.0f, 1.0f,
-                      /*flip_y_quad=*/true);
+                      /*flip_y_quad=*/true, 0.20f, 0.93f);
                 if (rod_check) {
                     // once per side, so the probe's stdout stays readable
                     static bool rod_reported[2] = {false, false};
