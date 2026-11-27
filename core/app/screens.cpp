@@ -3154,7 +3154,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                       static_cast<double>((590.0f - 229.0f) * c),
                       static_cast<double>(200.0f * c),
                       static_cast<double>(ox + 229.0f * c),
-                      static_cast<double>(oy + 50.0f * c), show_ok ? 1 : 0);
+                      static_cast<double>(oy + 59.0f * c), show_ok ? 1 : 0);
         if (last_layout != buf) {
             last_layout = buf;
             std::fprintf(stdout, "[ib.layout] %s\n", buf);
@@ -3563,7 +3563,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // (~34 px) and the last row left the bar. 0.75 * 30/34 = 0.66.
     {
         UiTagGuard tag_label("ib.label");
-        draw_ui_wrapped_fit(app, tx, ly(50.0f), tw, 200.0f * c, joined_lines, 0.66f,
+        // [FIX caption row] The box started at `ly(50)` (design 50 -> 118 px),
+        // putting the first line at row 123 while the original's own render has it
+        // at 131. JS `Ib.Sr` places the label at `Fa(a, 150)` with `D(50)`; this
+        // box is 200 design px tall and top-anchored, so the same visual row is
+        // design 59 -> 126 px, first glyph 131 (`harness/bar_elements.py`).
+        draw_ui_wrapped_fit(app, tx, ly(59.0f), tw, 200.0f * c, joined_lines, 0.66f,
                             UiAlign::Left, 0.184f, 0.145f, 0.106f, 0.65f);
     }
     // OK (`Bb(Zva)` = "EButtonWhite", local (450,185), `zf(100)`); `Ib.RP`
