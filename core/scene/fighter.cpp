@@ -2131,7 +2131,38 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // using the PRE-sample `sol_ma_`, not the first interpolated
             // sample (the buffer's slot-2 reference is the raw clip frame).
             const float off_old = render_offset_;
+            // [FIX clip-start offset SPACE — the player's converging teleport]
+            // The JS `Gub` (L559) reads `d` from the RAW buffer at `Kh(2)`
+            // (= clip[FirstFrame] of the NEW clip) and `e` from the posed node's
+            // PREVIOUS world position, i.e.
+            //     off = prev_world(Part) - clip_new(Part, FirstFrame)
+            // The port used `sol_ma_[Part]` for the second term, which is the
+            // PREVIOUS clip's state. That is the same value only while the last
+            // frame was placed through the solver; after an ABSOLUTELY placed
+            // clip (wall jump / throw / pinned reaction) it is hundreds of units
+            // away. Measured on `--wall-probe` (right wall, SF2_TRACE_BLEND=1):
+            // StanceIdle's own pivot values are -392.1..-390.4 (+align 352.2),
+            // `sol_ma_[Part]` was 751.5, off came out 0, the first blended px was
+            // 1696.5 and the root slid 751.5 -> 669 -> 495 -> 320 -> 215 -> 180
+            // over five frames - exactly his `StanceIdle 2304 -> 1941 -> 1579 ->
+            // 1361` convergence. Read the term from the NEW clip's reference
+            // frame instead, and re-express the `qrb` prepend rigidly by the same
+            // delta so the blend starts on the previous pose in ONE space (the
+            // drawn pose is relative to the anchor, so a rigid shift moves no
+            // bone - only the root stops being dragged).
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            if (std::getenv("SF2_TRACE_BLEND") != nullptr) {
+                std::fprintf(stdout,
+                             "[offcalc] F%d move=%s mf=%d abs=%d prev_world=%.1f "
+                             "px_part_ref=%.1f sol=%.1f off=%.1f\n",
+                             g_trace_fight_frame,
+                             current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                             static_cast<int>(move_frame_), align_absolute_ ? 1 : 0,
+                             static_cast<double>(prev_align_pivot_world_x_),
+                             static_cast<double>(sol_ma_[pu * 3]),
+                             static_cast<double>(render_offset_));
+                std::fflush(stdout);
+            }
             // [probe] `SF2_TRACE_ALIGN=1`: the numbers behind an <Align> clip
             // start. At a MID-FRAME clip switch the offset is computed against
             // `sol_ma_` (the pose BEFORE the switch), which is what throws the
@@ -3862,6 +3893,21 @@ void Fighter::wall_repulsion_step() {
     float shift = 0.0f;
     if (fx < lo) shift = fx - lo;
     else if (fx > hi) shift = fx - hi;
+    // [probe] `SF2_TRACE_IUB=1`: dump the clamp's inputs when it is large, so a
+    // root shove can be traced to the space mismatch instead of guessed.
+    if (shift != 0.0f && std::getenv("SF2_TRACE_IUB") != nullptr) {
+        std::fprintf(stdout,
+                     "[iub] F%d clip=%s mf=%d c=%d fx=%.1f lo=%.1f hi=%.1f shift=%+.1f "
+                     "align=%.1f off=%.1f wx=%.1f mirror=%d\n",
+                     g_trace_fight_frame,
+                     current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                     move_frame_, c, static_cast<double>(fx), static_cast<double>(lo),
+                     static_cast<double>(hi), static_cast<double>(shift),
+                     static_cast<double>(align_x_),
+                     static_cast<double>(render_offset_),
+                     static_cast<double>(world_x_), clip_mirror_);
+        std::fflush(stdout);
+    }
     wall_rep_last_ = shift;  // `this.Hla = f`
     if (shift == 0.0f) return;
     // JS `Iub` shifts ONLY the two control points that follow the current
@@ -4346,6 +4392,61 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         } else if (i < nclip && ha) {
             px[i] = ax; py[i] = ay; pz[i] = az;
         } else { px[i] = bones[i].x; py[i] = bones[i].y; pz[i] = bones[i].z; }
+    }
+
+    // [probe, authorised] `SF2_TRACE_BLEND=1`: the three control points that
+    // feed the anchor's Bezier on the first frames of every clip, so a
+    // clip-start ramp (the player's "converging" teleport) can be traced to the
+    // prepend/clip space mismatch instead of guessed.
+    if (std::getenv("SF2_TRACE_BLEND") != nullptr && current_move_ != nullptr &&
+        interp) {
+        static std::map<const void*, const void*> blend_clip;
+        static std::map<const void*, int> blend_age;
+        if (blend_clip[this] != current_clip_) {
+            blend_clip[this] = current_clip_;
+            blend_age[this] = 0;
+        }
+        int& age = blend_age[this];
+        if (age < 8) {
+            float ax = 0.0f, ay = 0.0f, az = 0.0f;
+            float bx = 0.0f, by = 0.0f, bz = 0.0f;
+            float cx = 0.0f, cy = 0.0f, cz = 0.0f;
+            const bool ha = ctl(0, anchor_u, ax, ay, az);
+            const bool hb = ctl(1, anchor_u, bx, by, bz);
+            const bool hc = ctl(2, anchor_u, cx, cy, cz);
+            const std::size_t up = anchor_u * 3;
+            int sswap = mirror_swap_src(static_cast<int>(anchor_u),
+                                        static_cast<int>(nclip));
+            if (sswap < 0) sswap = static_cast<int>(anchor_u);
+            float cl[8] = {0};
+            for (int k = 0; k < 8; ++k) {
+                const int fk = std::min(static_cast<int>(current_clip_->frames.size()) - 1,
+                                        std::max(0, move_base_) + k);
+                const auto& fbk = current_clip_->frames[static_cast<std::size_t>(fk)].bones;
+                if (static_cast<std::size_t>(sswap) < fbk.size()) {
+                    cl[k] = fbk[static_cast<std::size_t>(sswap)].x;
+                }
+            }
+            std::fprintf(
+                stdout,
+                "[blend] F%d move=%s mf=%d age=%d play=%d w=(%.2f,%.2f,%.2f) "
+                "a=%s%.1f b=%s%.1f c=%s%.1f px=%.1f align=%.1f off=%.1f "
+                "solma=%.1f solmf=%.1f base=%d cl=%.1f,%.1f,%.1f,%.1f,%.1f\n",
+                g_trace_fight_frame,
+                current_move_->name.c_str(), static_cast<int>(move_frame_), age, play,
+                static_cast<double>(w0), static_cast<double>(w1),
+                static_cast<double>(w2), ha ? "" : "-", static_cast<double>(ax),
+                hb ? "" : "-", static_cast<double>(bx), hc ? "" : "-",
+                static_cast<double>(cx), static_cast<double>(px[anchor_u]),
+                static_cast<double>(align_x_), static_cast<double>(render_offset_),
+                static_cast<double>(up < sol_ma_.size() ? sol_ma_[up] : 0.0f),
+                static_cast<double>(up < sol_mf_.size() ? sol_mf_[up] : 0.0f),
+                static_cast<int>(move_base_), static_cast<double>(cl[0]),
+                static_cast<double>(cl[1]), static_cast<double>(cl[2]),
+                static_cast<double>(cl[3]), static_cast<double>(cl[4]));
+            std::fflush(stdout);
+            ++age;
+        }
     }
 
     // [FIX root-motion align — JS `Te.Gub` L557-559 -> `Te.Gla` L550 -> `vu.shift`

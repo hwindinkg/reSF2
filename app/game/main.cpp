@@ -11410,8 +11410,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 // Punch from frame 34 on - the same call the input layer uses.
                 if (attack_probe) {
                     const auto* cmv = ctl.player().fighter.current_move();
-                    std::fprintf(stdout, "[wjf] f=%3d clip_frame=%3d move=%s\n", f,
-                                 ctl.player().fighter.move_frame(),
+                    std::fprintf(stdout,
+                                 "[wjf] f=%3d clip_frame=%3d wx=%8.1f off=%8.1f move=%s\n",
+                                 f, ctl.player().fighter.move_frame(),
+                                 static_cast<double>(ctl.player().fighter.world_x()),
+                                 static_cast<double>(
+                                     ctl.player().fighter.debug_render_offset_x()),
                                  cmv != nullptr ? cmv->name.c_str() : "-");
                     std::fflush(stdout);
                 }
