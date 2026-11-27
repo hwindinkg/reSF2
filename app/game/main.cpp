@@ -5279,6 +5279,26 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                     sensei_title = m->title;
                 }
             }
+            // [repeat repro] The JS fires `StoryTutorialWelcome` on `ChangeTab`
+            // while `_$StoryTutorialStep` is still NotStarted, and the lesson
+            // action (`Do`) does not change the step - so a tab/scene round-trip
+            // during the lesson must re-queue the FIRST dialog. Fire that event
+            // for real (record-only in the engine) and print what it fires.
+            static int roundtrips = 0;
+            if (saw_welcome && roundtrips < 2 && app.quest_engine().tutorial_gate_beat() == 2) {
+                sf2::app::QuestJournal j2;
+                j2.scene_from = roundtrips == 0 ? "Dojo" : "Map";
+                j2.scene_to = roundtrips == 0 ? "Map" : "Dojo";
+                j2.tab_from = j2.scene_from;
+                j2.tab_to = j2.scene_to;
+                const auto fired2 = app.quest_engine().fire(app, "ChangeTab", j2);
+                std::fprintf(stdout, "[tutreal] ChangeTab %s->%s fired %zu quest(s):",
+                             j2.scene_from.c_str(), j2.scene_to.c_str(), fired2.size());
+                for (const auto& n : fired2) std::fprintf(stdout, " %s", n.c_str());
+                std::fprintf(stdout, "\n");
+                std::fflush(stdout);
+                ++roundtrips;
+            }
             if (saw_beat1 && saw_beat2 && saw_sensei) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(2));  // pace 60 Hz
         }
