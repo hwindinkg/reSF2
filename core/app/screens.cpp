@@ -3074,6 +3074,20 @@ bool draw_dialog_image(App& app, const std::string& image, const std::string& it
 // caller passes `show_ok` already gated on RP.
 void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image,
                   const std::string& joined_lines, bool show_ok, float reveal) {
+    // [bar re-post probe] `SF2_TRACE_IB=1`: log WHAT the bar draws and on every
+    // text change - the remaining explanation for "tutorial_move shows again
+    // after tutorial_punchbag" (the quest itself does not re-fire: measured).
+    if (std::getenv("SF2_TRACE_IB") != nullptr) {
+        static std::string ib_last;
+        static int ib_posts = 0;
+        const std::string now_text = joined_lines.substr(0, 48);
+        if (now_text != ib_last) {
+            ib_last = now_text;
+            std::fprintf(stdout, "[ib] post %d text='%s' reveal=%.2f\n", ++ib_posts,
+                         now_text.c_str(), static_cast<double>(reveal));
+            std::fflush(stdout);
+        }
+    }
     const float c =
         std::clamp(std::min(kViewW * 0.75f, kViewH * 0.75f) / 600.0f, 0.2f, 1.1f);
     const float sp = std::min(kViewH * 0.13f, 100.0f) * 0.78f;  // za.odb L1975

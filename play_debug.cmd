@@ -60,6 +60,9 @@ set SF2_TRACE_SEP=1
 rem [UI LOG] every drawn quad: frame, order, texture, screen rect, uv, tint.
 rem Needed to compare a composite (the scroll rod caps, dialog paper) with the
 rem original's atlas assembly - positions/sizes/uv of each piece, not eyeballing.
+rem [bar log] every notification-bar text change (id + time): shows whether the
+rem quest dialog repeats (tutorial_move -> tutorial_punchbag -> tutorial_move).
+set SF2_TRACE_IB=1
 set SF2_TRACE_UI=1
 rem sample every 10th frame (a dialog stays up for many frames, so the
 rem UI states are all captured without 190k lines per fight)
