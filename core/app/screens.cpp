@@ -3151,11 +3151,9 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                       static_cast<double>(oy + kBarH * 0.5f * c),
                       static_cast<double>(101.0f * (50.0f / 114.0f) * c),
                       static_cast<double>((kBarH - 2.0f * 101.0f * (50.0f / 114.0f)) * c),
-                      static_cast<double>((590.0f - (600.0f - 256.0f + 20.0f -
-                                                      (256.0f - 30.0f) * 0.5f)) * c),
+                      static_cast<double>((590.0f - 229.0f) * c),
                       static_cast<double>(200.0f * c),
-                      static_cast<double>(ox + (600.0f - 256.0f + 20.0f -
-                                                (256.0f - 30.0f) * 0.5f) * c),
+                      static_cast<double>(ox + 229.0f * c),
                       static_cast<double>(oy + 50.0f * c), show_ok ? 1 : 0);
         if (last_layout != buf) {
             last_layout = buf;
@@ -3535,10 +3533,16 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // (`600 - image.fa.x + 20` minus half its width = 251 design) and is given the
     // room the bar actually has: up to 10 design px short of its right edge, so the
     // body ends inside the paper instead of on the border.
-    const float tx = lx(600.0f - image_w + 20.0f - (image_w - 30.0f) * 0.5f);
-    const float tw = std::max(120.0f, 590.0f - (600.0f - image_w + 20.0f -
-                                               (image_w - 30.0f) * 0.5f)) * c;
-    (void)tx;
+    // [FIX label box — the line break the original has] The JS box
+    // (`Fa(600 - image.fa.x + 20, 150)`, `C(image.fa.x - 30)`) centred gives a
+    // left edge of 251 design px, and at this font that box is 15 px too narrow
+    // for the first line: "Сначала покажи," needed 315 px against 305 and wrapped
+    // into FOUR lines where the original's own render has THREE. The label starts
+    // at the same place the original's text starts (design 229 = 946 px) and runs
+    // to 10 design px short of the bar's right edge, which fits the first line and
+    // keeps the body inside the paper.
+    const float tx = lx(229.0f);
+    const float tw = std::max(120.0f, 590.0f - 229.0f) * c;
     // JS `Ib.Sr` L1910: `this.label.Kc(.65)` — the `ea.Kc` line factor is the
     // authored `Kc` argument (see `wrap_ui_text`), so the RU two-line
     // `tutorial_move` ("Сначала покажи,{br}как ты двигаешься!") advances at
