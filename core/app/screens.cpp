@@ -3149,8 +3149,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         // `paper_edge_*` rails) the port drew. The rails are shared by the `od`
         // panel and are not part of this bar's face in the original.
         drew = try_draw_atlas_button(app, "paper", lx(kBarW * 0.5f),
-                                     ly(kPaperCap + mid_h * 0.5f), kBarW * c, mid_h * c,
-                                     1.0f, /*fill=*/true);
+                                     ly(kPaperCap + mid_h * 0.5f),
+                                     // the rod's cross (bar_h*42/225 = 46.7 design
+                                     // px) is the paper's inset at each end, as in
+                                     // the original (paper starts at the rod's edge)
+                                     (kBarW - kBarH * 42.0f / 225.0f) * c, mid_h * c, 1.0f,
+                                     /*fill=*/true);
         if (drew) {
             // [FIX B2 left scroll cap — oracle capture
             // `reference/traces/ui/oracle_ib_00.png`] The bar is a long SCROLL and
@@ -3253,8 +3257,15 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             };
             for (int side = 0; side < 2; ++side) {
                 const bool mirror = side != 0;
+                // [FIX bar end geometry - measured on the ORIGINAL tutorial dialog]
+                // `oracle_tutorial_move.png` (the very dialog the player sees):
+                // the rod's cross-section is centred ON the bar's end and the
+                // paper starts at its right edge - rod ~720..765, paper 765..1280.
+                // The port put the rod OUTSIDE the bar (centred at lx(0)-rod_w/2,
+                // i.e. 698..740) and started the paper at 740, so the whole scroll
+                // sat ~22 px left of the original and its end read oversized.
                 const float rod_cx =
-                    side == 0 ? lx(0.0f) - rod_w * 0.5f : lx(kBarW) + rod_w * 0.5f;
+                    side == 0 ? lx(0.0f) : lx(kBarW);
                 const float cy = ly(kBarH * 0.5f) + 1.5f;  // +3 px: the port rod ended ~5 px short
                 // [rod composite — measured against oracle_ib_00.png] The oracle's
                 // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
@@ -3370,10 +3381,17 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // portrait rendered 230x230 at 1280x720 — 43 % of the 600-wide bar, and it
     // covered the scroll's paper (measured in his own `[uiq]`: one quad
     // `w=230.4 h=230.4` at (740.0, 74.8) over the 540x171 paper).
-    constexpr float kPortraitH = 130.0f;  // JS `this.image.D(130)`
+    // [REVERTED by measurement] `D(130)` is the height in the ASSET's own units:
+    // the shipped `character_sensei_small` is a 2x sprite, so the bar draws it at
+    // its full 256 design px. Two ORIGINAL frames agree: `oracle_ib_00.png`'s
+    // portrait ring is 134x128 px and `oracle_tutorial_move.png`'s is ~140 px,
+    // i.e. a ~222 px sprite at c=0.9 - exactly the 256 design px the port used.
+    // Drawing it 117 px (the `D(130)` reading) made the portrait HALF the
+    // original's size and left a hole in the bar.
+    constexpr float kPortraitPx = 256.0f;
     float image_w = 0.0f;
-    if (draw_dialog_image(app, image, std::string(), lx(kPortraitH * 0.5f),
-                          ly(kPortraitH * 0.5f), kPortraitH * c, 1.0f,
+    if (draw_dialog_image(app, image, std::string(), lx(kPortraitPx * 0.5f),
+                          ly(kPortraitPx * 0.5f), kPortraitPx * c, 1.0f,
                           /*strip_small=*/true)) {
         // The JS keeps `this.image.fa.x` (the SOURCE width, 256) for the label
         // maths below (`Fa(600 - image.fa.x + 20, 150)`), not the drawn size.
