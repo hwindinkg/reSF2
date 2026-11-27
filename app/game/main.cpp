@@ -11741,33 +11741,14 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                              is_throw ? "THROW" : "no throw");
                 std::fflush(stdout);
                 if (is_throw) {
+                    // [probe fix] Observe the throw HERE: a second "re-arm" after
+                    // the gap scan was eaten by the move cooldown (measured:
+                    // `re-armed ... -> -`, then 90 frames of `player=-@3`,
+                    // `victim frames=0 -> FAIL`), so the probe never saw a pair.
                     started = true;
-                    if (throw_gap < 0.0f) throw_gap = gap;
+                    throw_gap = gap;
+                    break;
                 }
-            }
-            // Re-arm the throw at a gap that actually passes its gate, so the
-            // observation loop below watches a REAL throw pair.
-            if (throw_gap > 0.0f && !one_shot) {
-                ctl.player_input(sf2::scene::key_type::back,
-                                 sf2::scene::press_type::release);
-                ctl.debug_reset_player_move();
-                ctl.debug_place_fighters(690.0f, 690.0f + throw_gap);
-                for (int i = 0; i < 3; ++i) ctl.update(1.0f / 60.0f);
-                ctl.debug_place_fighters(690.0f, 690.0f + throw_gap);
-                ctl.player_input(sf2::scene::key_type::back,
-                                 sf2::scene::press_type::tap);
-                for (int i = 0; i < 4; ++i) {
-                    ctl.debug_place_fighters(690.0f, 690.0f + throw_gap);
-                    ctl.update(1.0f / 60.0f);
-                }
-                ctl.player_input(sf2::scene::key_type::punch,
-                                 sf2::scene::press_type::tap);
-                for (int i = 0; i < 2; ++i) ctl.update(1.0f / 60.0f);
-                const sf2::scene::MoveDef* rm = ctl.player().fighter.current_move();
-                std::fprintf(stdout, "[throwprobe] re-armed at gap=%.0f -> %s\n",
-                             static_cast<double>(throw_gap),
-                             rm != nullptr ? rm->name.c_str() : "-");
-                std::fflush(stdout);
             }
         }
         std::fprintf(stdout, "[throwprobe] %s ThrowThroughTheBack -> %s\n",
