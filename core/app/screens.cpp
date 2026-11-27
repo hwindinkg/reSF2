@@ -3194,21 +3194,40 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         // `paper` band at c=0.9 (190*0.9 = 171), NOT the 250 (with the two 30-px
         // `paper_edge_*` rails) the port drew. The rails are shared by the `od`
         // panel and are not part of this bar's face in the original.
-        {
-            // JS `Fg(600,250,1,30)` + `Fg.ba`: the bar's face is the paper band
-            // (250 - 2*30 = 190 design px) with a `paper_edge_*` rail of 30 design
-            // px along EACH long side. The port drew the paper 540 wide and put the
-            // invented rod at the ends instead; the rails are what the JS builds.
-            UiTagGuard tag_paper("ib.rail.top");
-            try_draw_atlas_button(app, "paper_edge_left", lx(kBarW * 0.5f),
-                                  ly(kPaperCap * 0.5f), kBarW * c, kPaperCap * c, 1.0f,
-                                  /*fill=*/true);
-            {
-                UiTagGuard tag_bot("ib.rail.bot");
-                try_draw_atlas_button(app, "paper_edge_right", lx(kBarW * 0.5f),
-                                      ly(kBarH - kPaperCap * 0.5f), kBarW * c,
-                                      kPaperCap * c, 1.0f, /*fill=*/true);
+        // [FIX rails ROTATED like `Fg.ba`] `paper_edge_left` is a 30x800 strip and
+        // the JS turns it 90 degrees: `wc.Wg(90)` + `f.la(k)` / `f.Pb(600)` make
+        // the sprite's 800-px axis run ALONG the bar and its 30-px axis across it
+        // (30 design px = 27 px tall). The port drew it unrotated, so the 800-px
+        // texture was squeezed into 27 px and the 30-px one stretched over 540:
+        // that is the player's "линии по бокам слишком большие и растянутые".
+        // Measured over x 900..1200: rows 76..96 oracle 15/15/40/42 vs port 38/38;
+        // rows 274..294 oracle 41/42/114/164 vs port 71/98/73/87.
+        auto rail = [&](const char* frame, float cy) {
+            sf2::data::atlas_frame fr;
+            int tw = 0, th = 0;
+            unsigned int gl = 0;
+            if (!app.get_atlas_frame(frame, &fr, &tw, &th, &gl) || tw <= 0 || th <= 0) {
+                return;
             }
+            const float u0 = static_cast<float>(fr.x) / static_cast<float>(tw);
+            const float u1 = static_cast<float>(fr.x + fr.w) / static_cast<float>(tw);
+            const float v0 = static_cast<float>(fr.y) / static_cast<float>(th);
+            const float v1 = static_cast<float>(fr.y + fr.h) / static_cast<float>(th);
+            const float x0 = lx(0.0f), x1 = lx(kBarW);
+            const float y0 = cy - kPaperCap * 0.5f * c;
+            const float y1 = cy + kPaperCap * 0.5f * c;
+            // U across (the 30-px axis), V along (the 800-px axis).
+            const float xy[8] = {x0, y0, x1, y0, x0, y1, x1, y1};
+            const float uv[8] = {u0, v0, u0, v1, u1, v0, u1, v1};
+            app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
+        };
+        {
+            UiTagGuard tag_top("ib.rail.top");
+            rail("paper_edge_left", ly(kPaperCap * 0.5f));
+        }
+        {
+            UiTagGuard tag_bot("ib.rail.bot");
+            rail("paper_edge_right", ly(kBarH - kPaperCap * 0.5f));
         }
         {
             UiTagGuard tag_paper("ib.paper");
