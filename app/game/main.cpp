@@ -11397,13 +11397,24 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             const char* worst_jump_mv = "-";
             float wx_prev_case = ctl.player().fighter.world_x();
             int punch_taps = 0;
-            for (int f = 0; f < kMoveFrames[mi]; ++f) {
+            // The attack pass must outlive the jump so the buffered punch can
+            // start after clip frame 34: the main loop above already advanced
+            // the clip to ~14, and kMoveFrames alone never reaches 34 (measured).
+            const int loop_frames = kMoveFrames[mi] + 150;
+            for (int f = 0; f < loop_frames; ++f) {
                 // [REPRO via the REAL input path] `debug_force_player_move`
                 // refuses while the wall-jump clip is still playing (measured:
                 // the attack never started, worst 15.4 in both A/B arms). The
                 // player's own transition is a BUFFERED punch that starts when the
                 // jump's `Uninterrupt` interval ends at clip frame 33, so tap
                 // Punch from frame 34 on - the same call the input layer uses.
+                if (attack_probe) {
+                    const auto* cmv = ctl.player().fighter.current_move();
+                    std::fprintf(stdout, "[wjf] f=%3d clip_frame=%3d move=%s\n", f,
+                                 ctl.player().fighter.move_frame(),
+                                 cmv != nullptr ? cmv->name.c_str() : "-");
+                    std::fflush(stdout);
+                }
                 if (attack_probe && ctl.player().fighter.move_frame() >= 34 &&
                     ctl.player().fighter.move_frame() <= 44 && punch_taps < 6 &&
                     (f % 3) == 0) {
