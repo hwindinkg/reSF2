@@ -3360,9 +3360,23 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // `R.$(E.get(12), fileName, this.scroll.iL)` via `v.RIa` (basename +
     // `|Flip`), `_small` stripped. The `Item` composite never applies to the
     // bar (`Qhb` passes no `Ev`), so `item` is empty here.
+    // [FIX the dialog image was TWICE the original's size — player report
+    // 20261127_175200 "свиток в диалоге слишком огромный"]. The JS sizes it
+    // explicitly:
+    //     this.image.C(this.image.fa.x / 2);   // width = 128 for the 256px sprite
+    //     this.image.D(130);                   // height = 130 design px
+    // i.e. the shipped 256x256 `character_sensei_small` is drawn at 128x130 from
+    // the content origin. The port passed `256` as the square size, so the
+    // portrait rendered 230x230 at 1280x720 — 43 % of the 600-wide bar, and it
+    // covered the scroll's paper (measured in his own `[uiq]`: one quad
+    // `w=230.4 h=230.4` at (740.0, 74.8) over the 540x171 paper).
+    constexpr float kPortraitH = 130.0f;  // JS `this.image.D(130)`
     float image_w = 0.0f;
-    if (draw_dialog_image(app, image, std::string(), lx(128.0f), ly(130.0f), 256.0f * c,
-                          1.0f, /*strip_small=*/true)) {
+    if (draw_dialog_image(app, image, std::string(), lx(kPortraitH * 0.5f),
+                          ly(kPortraitH * 0.5f), kPortraitH * c, 1.0f,
+                          /*strip_small=*/true)) {
+        // The JS keeps `this.image.fa.x` (the SOURCE width, 256) for the label
+        // maths below (`Fa(600 - image.fa.x + 20, 150)`), not the drawn size.
         image_w = 256.0f;
     }
     // The ONE label: the joined lines (`lj` L1908). `Fa(600-image.w+20,150)`,
