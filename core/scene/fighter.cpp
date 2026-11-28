@@ -2165,8 +2165,13 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // delta so the blend starts on the previous pose in ONE space (the
             // drawn pose is relative to the anchor, so a rigid shift moves no
             // bone - only the root stops being dragged).
-            render_offset_src_ = "inv";
-            render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            const bool align_is_world =
+                std::getenv("SF2_ALIGN_DRAWN") != nullptr && move.align.has_align &&
+                move.align.axis_x && pose_sampled_;
+            render_offset_src_ = align_is_world ? "alignworld" : "inv";
+            render_offset_ = align_is_world
+                                 ? 0.0f
+                                 : (prev_align_pivot_world_x_ - sol_ma_[pu * 3]);
             if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
                 std::fprintf(stdout,
                              "[inv] move=%s abs=%d nointerp=%d wjabs=%d wpin=%d "
@@ -3832,10 +3837,28 @@ void Fighter::compute_align(const MoveDef& move) {
     // (clip) space: `currentNode.ma` / `L7a(i).ma` are the posed positions.
     float ex = 0.0f, ey = 0.0f, ez = 0.0f;
     int e_idx = -1;  // node `e` was read from (jk 1/4), for the world-space Fk
+    // [A/B `SF2_ALIGN_DRAWN=1` — from the original, verified in the bundle] JS
+    // `Gub` reads `e` from the POSED node (`currentNode.ma` / `L7a(id).ma`), which
+    // is WORLD: `eda` writes `node.ma = buffer + j8` and `j8` is zeroed at every
+    // `Skb`, so the placement is `Fk = posed_world(pivot) - raw_clip(pivot)` and
+    // the clip frames are shifted by it (`Gla`) - the offset is ZERO. The port
+    // reads `sol_ma_` (the solver, CLIP space) and splits the mapping into
+    // `align` + `render_offset_`; that is only equal while the solver equals the
+    // drawn pose, and it is NOT right after an absolutely placed clip - his log
+    // 20261128_113645 `StepForward` restart: `off 0.00 -> 1257.45`, `wx=2429.73`.
+    const bool posed_from_drawn =
+        std::getenv("SF2_ALIGN_DRAWN") != nullptr && pose_sampled_ &&
+        pos_.size() >= n * 2;
     auto posed = [&](int idx, float& ox, float& oy, float& oz) {
         if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
-        if (sol_ma_.size() != n * 3) return;
         const std::size_t u = static_cast<std::size_t>(idx);
+        if (posed_from_drawn) {
+            ox = pos_[u * 2];
+            oy = pos_[u * 2 + 1];
+            oz = 0.0f;
+            return;
+        }
+        if (sol_ma_.size() != n * 3) return;
         ox = sol_ma_[u * 3];
         oy = sol_ma_[u * 3 + 1];
         oz = sol_ma_[u * 3 + 2];

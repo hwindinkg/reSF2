@@ -2818,6 +2818,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // right wall, dumping the rendered root x + pose x-extent per frame — the
     // "stretched across the arena / teleported to the opposite end" repro.
     bool wall_probe = false;
+bool restart_probe = false;  // [probe] the player's clip-restart teleport
     bool act_probe = false;  // [probe] capture the `Rd` act overlay backdrop
     std::string act_probe_kind;  // "act" (default) / "multiline"
     std::string d3_probe_move = "FansSuperSlash";
@@ -3535,7 +3536,9 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             d3_probe = true;
         } else if (arg == "--wall-probe") {
             wall_probe = true;
-        } else if (arg == "--act-probe") {
+        
+    } else if (arg == "--restart-probe") {
+        restart_probe = true;} else if (arg == "--act-probe") {
             act_probe = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 act_probe_kind = argv[++i];
@@ -11164,6 +11167,145 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
         std::fflush(stdout);
         app.shutdown();
         return 0;
+    } else if (restart_probe) {
+        // [probe] `--restart-probe`: the player taps FORWARD again while
+        // `StepForward` is still playing, which restarts the same clip. His log
+        // 20261128_113645 caught that frame: F1109 `StepForward` restarted
+        // (mf 14 -> 3) with `px=1172.28 off=1257.45 wx=2429.73` on a 1773-wide
+        // arena, then a four-frame convergence back - the reported teleport.
+        // This drives the same input and reports the frames outside the arena and
+        // the root discontinuity at a restart, so the fix is measurable without
+        // another manual run.
+        if (!app.has_fight_assets()) {
+            std::fprintf(stderr, "[restartprobe] fight assets not loaded\n");
+            app.shutdown();
+            return 1;
+        }
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::BattleParams battle;
+        battle.name = "Training";
+        battle.location = "dojo";
+        battle.rounds = 2;
+        battle.round_time = 99;
+        battle.max_hp = 100;
+        battle.player_spawn_x = 690.0f;
+        battle.player_spawn_y = -93.0f;
+        battle.enemy_spawn_x = 973.0f;
+        battle.enemy_spawn_y = -110.0f;
+        const std::vector<sf2::scene::OwnedItem> owned = loadout_owned("Fists");
+        sf2::scene::FightController ctl;
+        std::mt19937 rng(0x5F2);
+        auto roll01 = [&rng]() {
+            return static_cast<float>(rng()) / static_cast<float>(rng.max());
+        };
+        const sf2::scene::TacticDef* tactic = nullptr;
+        const auto tit = fa.tactic_defs.find("Standard");
+        if (tit != fa.tactic_defs.end()) tactic = &tit->second;
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips,
+                       fa.select_tactics("Fists", battle.enemy_weapon_subtype),
+                       tactic, "Player", "Enemy", battle.player_spawn_x,
+                       battle.player_spawn_y, battle.enemy_spawn_x,
+                       battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
+                       roll01, owned, sf2::scene::PerkSetup(), nullptr, nullptr);
+        ctl.release_intro();
+        for (int g = 0; g < 20000 && ctl.phase() != 2; ++g) ctl.update(1.0f / 60.0f);
+        float wlo = 80.0f, whi = 1880.0f;
+        if (const char* wb = std::getenv("SF2_RESTART_BOUNDS")) {
+            float a = 0.0f, b2 = 0.0f;
+            if (std::sscanf(wb, "%f,%f", &a, &b2) == 2 && b2 > a) {
+                wlo = a;
+                whi = b2;
+            }
+        }
+        ctl.set_bounds(wlo, whi, 0.0f);
+        std::fprintf(stdout, "[restartprobe] phase=%d walls=[%.0f,%.0f]\n",
+                     ctl.phase(), static_cast<double>(wlo),
+                     static_cast<double>(whi));
+        std::fflush(stdout);
+        // [repro of HIS state] His restart happened with `off = 0.00` on the
+        // previous frames, i.e. after a clip that was placed ABSOLUTELY (throw
+        // victim / wall reaction / wall jump), and the restart then recomputed the
+        // offset against the stale solver state: `off 0.00 -> 1257.45`,
+        // `wx=2429.73`. A fresh dojo stance never reaches that, so the probe can
+        // warm up through such a clip first (`SF2_RESTART_WARMUP=1`).
+        if (std::getenv("SF2_RESTART_WARMUP") != nullptr) {
+            battle.player_spawn_x = 690.0f;
+            ctl.debug_place_fighters(690.0f, 760.0f);
+            for (int i = 0; i < 4; ++i) ctl.update(1.0f / 60.0f);
+            const bool threw = ctl.debug_force_player_move("ThrowThroughTheBack");
+            std::fprintf(stdout, "[restartprobe] warmup throw=%d\n", threw ? 1 : 0);
+            for (int i = 0; i < 150; ++i) ctl.update(1.0f / 60.0f);
+            std::fflush(stdout);
+        }
+        float prev_wx = ctl.player().fighter.world_x();
+        std::string prev_move = "-";
+        int prev_mf = -1;
+        int restarts = 0, out_of_arena = 0, worst_at = -1;
+        float worst = 0.0f, worst_wx = 0.0f;
+        float restart_worst = 0.0f;
+        std::string worst_mv = "-", worst_prev_mv = "-";
+        int worst_mf = -1;
+        float worst_off = 0.0f;
+        const int kFrames = 480;
+        for (int f = 0; f < kFrames; ++f) {
+            // The player's own input: tap Forward while the step clip is running.
+            const auto* cm = ctl.player().fighter.current_move();
+            const std::string mv = cm != nullptr ? cm->name : std::string("-");
+            const int mf = static_cast<int>(ctl.player().fighter.move_frame());
+            // The player MASHEs Forward - that is what restarts the step clip in
+            // his own fight (his log: `StepForward mf=14 -> 3` on the next tap).
+            // Tapping only while a step plays never STARTS one, so the probe
+            // measured nothing but the intro stance.
+            (void)mv;
+            (void)mf;
+            if ((f % 6) == 0) {
+                ctl.debug_player_key(sf2::scene::key_type::forward,
+                                     sf2::scene::press_type::tap);
+            }
+            ctl.update(1.0f / 60.0f);
+            const float wx = ctl.player().fighter.world_x();
+            const auto* cm2 = ctl.player().fighter.current_move();
+            const std::string mv2 = cm2 != nullptr ? cm2->name : std::string("-");
+            const int mf2 = static_cast<int>(ctl.player().fighter.move_frame());
+            const float d = std::fabs(wx - prev_wx);
+            const bool restarted = (mv2 == prev_move && mf2 < prev_mf && mf2 <= 6);
+            if (restarted) {
+                ++restarts;
+                if (d > restart_worst) restart_worst = d;
+                std::fprintf(stdout,
+                             "[restart] f=%3d %-18s mf %2d -> %2d  wx=%8.1f "
+                             "delta=%+7.1f off=%.1f\n",
+                             f, mv2.c_str(), prev_mf, mf2,
+                             static_cast<double>(wx), static_cast<double>(d),
+                             static_cast<double>(
+                                 ctl.player().fighter.debug_render_offset_x()));
+                std::fflush(stdout);
+            }
+            if (d > worst) {
+                worst = d;
+                worst_at = f;
+                worst_wx = wx;
+                worst_mv = mv2;
+                worst_mf = mf2;
+                worst_prev_mv = prev_move;
+                worst_off = ctl.player().fighter.debug_render_offset_x();
+            }
+            if (wx < wlo - 0.5f || wx > whi + 0.5f) ++out_of_arena;
+            prev_wx = wx;
+            prev_move = mv2;
+            prev_mf = mf2;
+        }
+        std::fprintf(stdout,
+                     "[restartprobe] frames=%d restarts=%d out_of_arena=%d "
+                     "worst_delta=%.1f at_f=%d wx=%.1f restart_worst=%.1f "
+                     "worst_move=%s mf=%d (prev=%s) off=%.1f\n",
+                     kFrames, restarts, out_of_arena, static_cast<double>(worst),
+                     worst_at, static_cast<double>(worst_wx),
+                     static_cast<double>(restart_worst), worst_mv.c_str(), worst_mf,
+                     worst_prev_mv.c_str(), static_cast<double>(worst_off));
+        std::fflush(stdout);
+        app.shutdown();
+        return out_of_arena == 0 ? 0 : 1;
     } else if (wall_probe) {
         // [probe, authorised] `--wall-probe`: force the `<Align><Position
         // Object="Wall" Part="Back">` moves on the player at the right wall
