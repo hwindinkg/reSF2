@@ -11009,6 +11009,18 @@ void draw_closing_dialog(App& app, sf2::render::Renderer& ren) {
         return;
     }
     if (kind == DialogKind::kIbBar) {
+        // [FIX "диалог появляется дважды" - his log 20261128_113645] The bar is
+        // ONE instance (`Ib.Qhb` L1907 OVERWRITES `this.S`), so a new
+        // notification replaces the old one on the spot. The port kept drawing
+        // the closing copy for its full 0.5 s WHILE the new bar was already up,
+        // so the same area showed two bars and the text alternated between them -
+        // measured in his log: `[ib] post 2` the punchbag text, then `post 3` the
+        // OLD move text at reveal 0.97 (the collapse), then `post 4` the punchbag
+        // again. A live bar cancels the closing one.
+        if (app.quest_engine().has_notification()) {
+            s.active = false;
+            return;
+        }
         // `gk.aa` L83037: `NLa(dc.Ln()(this.uJ ? a : 1 - a))` — on a COLLAPSE
         // (`uJ == false`) the fraction `a` counts 0 -> 1 and the mask `yI`
         // goes 1 -> 0 through the same ease-out, i.e. the bar shrinks from the
