@@ -3116,9 +3116,10 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     constexpr float kBarW = 600.0f;    // `Fg(600,250,...)` long axis
     constexpr float kBarH = 250.0f;    // short axis (pre-rotation width)
     const bool clipping = reveal < 1.0f;
+    float clip_vis_w = 0.0f;
     if (clipping) {
         const float vis_w = kBarW * c * (reveal < 0.0f ? 0.0f : reveal);
-        ren.push_clip(kViewW - vis_w, oy, vis_w, kBarH * c);
+        clip_vis_w = vis_w;
         // One-shot evidence: the `Ib` bar reveals from the right edge over
         // 0.5 s (`gk.expand(.5)`), not instantly.
         static int reveal_log = 0;
@@ -3221,6 +3222,13 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
             const float uv[8] = {u0, v0, u0, v1, u1, v0, u1, v1};
             app.renderer().draw_textured_quad(frame, xy, uv, 1.0f, 1.0f, 1.0f, 1.0f);
         };
+        // [FIX "при сворачивании свиток пропадает, остаётся только бумага"] The
+        // mask belongs to the PAPER: the JS `Ib.O1a` builds the rod (`Zh` ->
+        // `scroll.Af`) as a SEPARATE node from the masked content (`Fg`), so the
+        // scroll itself stays visible while the paper rolls up. The port masked
+        // the whole bar from the right, so a collapsing bar lost its rod first and
+        // left only paper. Clip the rails + paper only.
+        if (clipping) ren.push_clip(kViewW - clip_vis_w, oy, clip_vis_w, kBarH * c);
         {
             UiTagGuard tag_top("ib.rail.top");
             rail("paper_edge_left", ly(kPaperCap * 0.5f));
@@ -3235,6 +3243,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                                          ly(kPaperCap + mid_h * 0.5f), kBarW * c,
                                          mid_h * c, 1.0f, /*fill=*/true);
         }
+        if (clipping) ren.pop_clip();
         if (drew) {
             // [FIX B2 left scroll cap — oracle capture
             // `reference/traces/ui/oracle_ib_00.png`] The bar is a long SCROLL and
@@ -3438,14 +3447,31 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // (712,45) = (60,24,13), i.e. luminance ~33. Drawn behind the rod so
                 // the semi-transparent cap edge composites as in the original.
                 {
-                    const float pw2 = rod_w + 4.0f;
-                    const float ph2 = rod_h + 4.0f;
-                    const float px2 = rod_cx - pw2 * 0.5f;
-                    const float py2 = cy - ph2 * 0.5f;
-                    const float quad2[] = {px2, py2, px2 + pw2, py2, px2, py2 + ph2,
-                                           px2 + pw2, py2, px2 + pw2, py2 + ph2,
-                                           px2, py2 + ph2};
-                    ren.draw_triangles(quad2, 6, 60.0f / 255.0f, 24.0f / 255.0f,
+                    // [FIX "по краям всё ещё пиксели, которых быть не должно"] The
+                    // backing was one rect inflated by 4 px, so 2 px of it showed
+                    // around the ROD as a dark frame the oracle does not have (seen
+                    // on the 4x crop: a line down the left edge and a dark block
+                    // under the bottom cap). Its only job is the CAP art's 40 %-alpha
+                    // outer band, which must composite against the panel tone - so
+                    // back each cap separately and leave the shaft alone.
+                    const float pw2 = rod_w;
+                    const float cap_top_y = cy - rod_h * 0.5f + cap_inset_top;
+                    const float cap_bot_y = cy + rod_h * 0.5f - cap_inset_bot;
+                    const float cap2[] = {
+                        rod_cx - pw2 * 0.5f, cap_top_y,
+                        rod_cx + pw2 * 0.5f, cap_top_y,
+                        rod_cx - pw2 * 0.5f, cap_top_y + cap_len,
+                        rod_cx + pw2 * 0.5f, cap_top_y,
+                        rod_cx + pw2 * 0.5f, cap_top_y + cap_len,
+                        rod_cx - pw2 * 0.5f, cap_top_y + cap_len,
+                        rod_cx - pw2 * 0.5f, cap_bot_y - cap_len,
+                        rod_cx + pw2 * 0.5f, cap_bot_y - cap_len,
+                        rod_cx - pw2 * 0.5f, cap_bot_y,
+                        rod_cx + pw2 * 0.5f, cap_bot_y - cap_len,
+                        rod_cx + pw2 * 0.5f, cap_bot_y,
+                        rod_cx - pw2 * 0.5f, cap_bot_y,
+                    };
+                    ren.draw_triangles(cap2, 12, 60.0f / 255.0f, 24.0f / 255.0f,
                                        13.0f / 255.0f, 1.0f);
                 }
                 {
@@ -3609,7 +3635,8 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         draw_ui_label(app, lx(400.0f), ly(173.0f), 100.0f * c, 24.0f * c, "OK", 0.8f,
                       UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
-    if (clipping) ren.pop_clip();  // `Ib.open` reveal mask (see top)
+    // (the paper mask is popped right after the `paper` band - the rod and the
+    // label are separate nodes in the JS and must survive a collapse)
 }
 
 // One resolved item image (JS `Rf` L2307): the list.xml `Image` ref
@@ -11034,6 +11061,15 @@ void DojoScreen::launch_quest_fight(const std::string& triple) {
         std::fprintf(stderr, "[quest] Fight request '%s' has no battle\n", triple.c_str());
         return;
     }
+    // [FIX "диалог остаётся в бою с Кенджи"] A bar Notification belongs to the
+    // screen that posted it; a fight is a new screen, so the bar must not survive
+    // into it. In his log 20261128_113645 the punchbag notification was still on
+    // screen after the Sensei dialog had already started the Kenji fight and was
+    // only pressed at the END of it - its ReadTime clock does not even run while
+    // the fight screen is up (nothing calls `quest_modal_consume` there). Drop the
+    // bar entries when a fight is launched; the quest chain stays parked in the
+    // engine and resumes on the fight hooks.
+    app().quest_engine().pop_notifications();
     std::string location;
     for (const MapScreen::ZoneTab& z : load_zone_map(app())) {
         if (!zone.empty() && z.name != zone) continue;
