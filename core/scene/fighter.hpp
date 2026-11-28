@@ -1602,6 +1602,11 @@ private:
     float render_offset_ = 0.0f;
     std::string render_offset_src_ = "-";
     bool render_offset_valid_ = true;
+    // [FIX clip start after an ABSOLUTE clip] the previous drawn frame was
+    // placed by an absolute/pinned branch (wall jump, wall reaction, throw
+    // victim), so `sol_ma_` is in that clip's space and the solver term of
+    // `render_offset_` is meaningless for the next clip.
+    bool prev_abs_placement_ = false;
     // True while a display-only preview clip is seated (`start_preview_clip`):
     // the first sample then captures the y render offset from the `Pi` node
     // placement too. Fight moves keep the y anchor rule of `start_move_impl`.

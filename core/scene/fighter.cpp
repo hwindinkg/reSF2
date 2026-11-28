@@ -2169,7 +2169,17 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
                 std::getenv("SF2_ALIGN_DRAWN") != nullptr && move.align.has_align &&
                 move.align.axis_x && pose_sampled_;
             render_offset_src_ = align_is_world ? "alignworld" : "inv";
-            render_offset_ = align_is_world
+            // [FIX clip start after an ABSOLUTE clip - his log 20261128_113645]
+            // `off = prev_world(Pivot) - sol_ma_[Pivot]` maps the SOLVER space to
+            // world, which holds only when the last frame was placed through the
+            // solver. After an absolutely placed clip (throw victim:
+            // `StandupAfterThrowFall`; wall jump/reaction) the solver still holds
+            // that clip's space, so the offset came out ~1250 too large, the body
+            // flew to `wx=2429.73` (arena ends at 1773) and slid back over four
+            // frames. Then place the CLIP into world instead (`Fk = posed_world -
+            // raw_clip`, offset 0) - exactly `Gub`/`Gla` in the original.
+            const bool place_from_drawn = align_is_world || prev_abs_placement_;
+            render_offset_ = place_from_drawn
                                  ? 0.0f
                                  : (prev_align_pivot_world_x_ - sol_ma_[pu * 3]);
             if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
@@ -3847,8 +3857,8 @@ void Fighter::compute_align(const MoveDef& move) {
     // drawn pose, and it is NOT right after an absolutely placed clip - his log
     // 20261128_113645 `StepForward` restart: `off 0.00 -> 1257.45`, `wx=2429.73`.
     const bool posed_from_drawn =
-        std::getenv("SF2_ALIGN_DRAWN") != nullptr && pose_sampled_ &&
-        pos_.size() >= n * 2;
+        (std::getenv("SF2_ALIGN_DRAWN") != nullptr || prev_abs_placement_) &&
+        pose_sampled_ && pos_.size() >= n * 2;
     auto posed = [&](int idx, float& ox, float& oy, float& oz) {
         if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
         const std::size_t u = static_cast<std::size_t>(idx);
@@ -4801,6 +4811,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             }
         } else {
             world_x_ = px[anchor_u] + render_offset_ + j8_x_;
+            prev_abs_placement_ = align_absolute_ || walljump_abs_ || wall_pin_;
         }
         // [FIX right-wall wall jump overshoot — measured against the ORACLE]
         // A `WallJump_*` clip carries `px` by ~1600 units and the port follows it
