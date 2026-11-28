@@ -4,11 +4,11 @@
 
 ![gates](https://img.shields.io/badge/gates-104%20%C2%B7%2066%20%C2%B70-green) ![platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey) ![lang](https://img.shields.io/badge/C%2B%2B-20-00599C) ![api](https://img.shields.io/badge/OpenGL-3.3-5586A4)
 
-### Readiness: 97%
+### Readiness: 98%
 
 ![progress](https://hwindinkg.github.io/reSF2/progress.svg)
 
-86 of 89 checklist items; every gap below is documented in BUGS.md.
+86 of 88 checklist items; every gap below is documented in BUGS.md.
 
 Gates with a baseline: **104** (66 at 0 divergences, 38 known non-zero) · reference: the shipped `sf2.readable.js`
 
@@ -16,7 +16,7 @@ Gates with a baseline: **104** (66 at 0 divergences, 38 known non-zero) · refer
 |---|---|---|---|---|
 | **Assets & archives** | 🟩 | 100% | 5/5 | - |
 | **Rendering** | 🟩 | 100% | 4/4 | - |
-| **Animation & physics** | 🟨 | 90% | 26/29 | cloth/chain divergence: FIXED the measured defect and bounded the rest.; BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only p…; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability… (details: BUGS.md) |
+| **Animation & physics** | 🟨 | 93% | 26/28 | BLOCKED ON USER - Titan bodyguards: the location question (the guards should load `skyport`, Titan `neural_network`) and the roster scroll are only p…; BLOCKED ON USER - ranged/magic/ability enemies: MEASURED, not a port-vs-JS divergence - the reference (web build) never selects ranged/magic/ability… (details: BUGS.md) |
 | **Combat** | 🟩 | 100% | 6/6 | - |
 | **AI** | 🟩 | 100% | 8/8 | - |
 | **UI & screens** | 🟩 | 100% | 22/22 | - |
@@ -25,9 +25,9 @@ Gates with a baseline: **104** (66 at 0 divergences, 38 known non-zero) · refer
 | **Save & input** | 🟩 | 100% | 3/3 | - |
 | **Localization** | 🟩 | 100% | 1/1 | - |
 | **Harness & verification** | 🟩 | 100% | 4/4 | - |
-| **overall** | 🟩 | 97% | 86/89 | - |
+| **overall** | 🟩 | 98% | 86/88 | - |
 
-The `overall` row is every checklist item at once (86 of 89); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
+The `overall` row is every checklist item at once (86 of 88); a system row counts only that system's own items, so the rows are NOT averaged into the overall.
 
 ### Oracle divergences by scenario
 
