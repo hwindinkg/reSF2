@@ -10642,9 +10642,11 @@ void FightController::update(float dt) {
                 player_.fighter.clear_move();
                 enemy_.fighter.clear_move();
                 player_.fighter.teleport(battle_.player_spawn_x,
-                                         battle_.player_spawn_y);
+                                         battle_.player_spawn_y,
+                                         /*reseat_reference=*/true);
                 enemy_.fighter.teleport(battle_.enemy_spawn_x,
-                                        battle_.enemy_spawn_y);
+                                        battle_.enemy_spawn_y,
+                                        /*reseat_reference=*/true);
                 sample_idle(player_);
                 sample_enemy_idle();
                 rebuild_body(player_, enemy_);

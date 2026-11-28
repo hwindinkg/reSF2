@@ -829,7 +829,12 @@ public:
     // `world_x_ = px[anchor] + render_offset_ + j8_x_` (fighter.cpp:1663), so
     // the per-move constant must absorb the delta (and the `<Align>`
     // continuity target `prev_align_pivot_world_*` shifts with it).
-    void teleport(float x, float y) {
+    // `reseat_reference`: this teleport is the JS `Te.L4` absolute re-seat
+    // (`reset(); oL(parameters.position)`), so the clip-change continuity anchor
+    // must follow it. Measured: resetting it on the FIGHT-START stance too made
+    // titan-ladder start 166 units closer than the oracle (`sep_x` 199.8 vs
+    // 366.1 at f=1), so only the round transition asks for it.
+    void teleport(float x, float y, bool reseat_reference = false) {
         const float dx = x - world_x_;
         const float dy = y - world_y_;
         render_offset_src_ = "teleport";
@@ -841,6 +846,30 @@ public:
         prev_align_pivot_world_y_ += dy;
         world_x_ = x;
         world_y_ = y;
+        // [FIX round change at the arena edge — his log 20261128_164419]
+        // JS `Te.L4()` (L465263) is `{ this.reset(); this.oL(this.parameters
+        // .position); }` and `Dl.oL(a)` (L543924) SHIFTS every node so the
+        // anchor node lands exactly on `a`: an ABSOLUTE re-seat at the battle
+        // spawn, with no continuity against the previous frame (this is the
+        // `ZK` -> `L4` call `Onb` makes with the view hidden).
+        // The port's "no teleport at a clip change" guard (fighter.cpp
+        // `kMaxClipStartJump`) compares the FIRST clip start after this
+        // re-seat against `clamp_prev_world_`, which still held the last LIVE
+        // frame of the previous round. Round 2 therefore began with
+        // `[clipjump] F1 move=FistsStartStance-Left d=+568.8 -> clamped to
+        // 300.4`: the spawn placement was undone one frame after it was made
+        // and both fighters opened the round at the OLD round's KO spot — at
+        // the arena edge (walls [160,1773], spawns 868/1068, measured
+        // Me=300.4 Enemy=498.6 on round-2 F1, and `[pos]` stayed at 225..557
+        // for the whole intro stance). The continuity anchor must FOLLOW an
+        // absolute placement, exactly as `oL` moves the nodes.
+        // [A/B `SF2_KEEP_ROUND_CLAMP=1`] measured: titan-ladder regresses 1124
+        // divergences with this line, so the A/B keeps the old behaviour reachable
+        // while the cause is isolated.
+        if (reseat_reference && std::getenv("SF2_KEEP_ROUND_CLAMP") == nullptr) {
+            clamp_prev_world_ = x;
+            clamp_prev_world_valid_ = true;
+        }
     }
     float world_x() const { return world_x_; }
     // [FIX "противник оказался за спиной игрока" — the player's own fight log]

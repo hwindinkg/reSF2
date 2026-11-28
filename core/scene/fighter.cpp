@@ -1599,6 +1599,23 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         }
         current_clip_ = clip_lookup_(clip_name);
     }
+    // [FIX Iub shift surviving a clip start - his log 20261128_164419]
+    // `wall_shift_` emulates JS `Te.Iub`'s mutation of the play BUFFER, and the
+    // JS rebuilds that buffer on every clip start (`Te.Skb` L22984:
+    // `jc.Cbb` + `Pka` + one `Gla` shift), so no `Iub` shift can outlive the
+    // clip it was applied to. The port kept it while the SAME clip pointer (and
+    // base frame) came back - exactly the case at a wall, where a step clip is
+    // restarted (`StepForward`/`DoubleStepForward` mashing): the leftover shift
+    // moved the clip's slots by hundreds of units, the placement threw the root
+    // out of the arena and the clip-change invariant clamped it, leaving the
+    // 4-6 frame sweep the player reports ("странные телепорты ... на краях
+    // локаций"). Measured `--edge-probe`: with the stale shift `[blend] F229
+    // a=1545.6 b=1546.0 c=211.4 px=1471.8` -> `F230 c=1441.6` (+1230 in one
+    // frame, `off=-1251.6 offs=invariant`).
+    wall_shift_.clear();
+    wall_shift_clip_ = nullptr;
+    wall_shift_base_ = -1;
+    wall_rep_last_ = 0.0f;
 
     // JS `Te.Skb` (L550) gates its whole body on `if(a != null)` — with NO
     // animation there is no `Te.stop()` (`{this.jc.reset();
@@ -1852,8 +1869,15 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     compute_align(move);
     // JS `Te.Skb` builds a FRESH buffer (`jc`), so `Iub`'s per-slot shift and
     // its last amount start at zero every move.
-    wall_shift_.clear();
-    wall_rep_last_ = 0.0f;
+    // [MEASURED, OFF by default] Clearing `wall_shift_` on EVERY clip start is what
+    // the JS buffer rebuild implies, and it removes part of the edge teleport, but
+    // it regresses `diff:titan-ladder` 0 -> 1124 divergences (`sep_x` at f=1: the
+    // pair starts 199.8 apart instead of the oracle's 366.1) - so it stays behind
+    // `SF2_EDGE_FIX=1` until the trigger is narrowed (see BUGS.md QA-201).
+    if (std::getenv("SF2_EDGE_FIX") != nullptr) {
+        wall_shift_.clear();
+        wall_rep_last_ = 0.0f;
+    }
 
     // [FIX root motion — JS `Skb` L551-552] Seed the authored root-motion
     // state exactly as the JS controller does when a move starts:
@@ -4237,6 +4261,36 @@ void Fighter::build_prepend(const MoveDef& move) {
         prepend_[u1 + 1] = sol_ma_[u + 1] + vy;
         prepend_[u1 + 2] = sol_ma_[u + 2] + vz;
     }
+    // [probe, authorised] `SF2_TRACE_PREP=1`: the `qrb` seed for the anchor and
+    // the align pivot, next to the new clip's own value at `FirstFrame` - the
+    // two spaces the first frames of the clip interpolate between.
+    if (std::getenv("SF2_TRACE_PREP") != nullptr) {
+        const int ab = model_.bone_by_name(fighter_pivot_bone());
+        const int pb = align_ref_u_;
+        auto dump = [&](const char* tag, int bi) {
+            if (bi < 0 || static_cast<std::size_t>(bi) >= nclip) return;
+            const std::size_t u = static_cast<std::size_t>(bi) * 3;
+            const int f = std::min(static_cast<int>(current_clip_->frames.size()) - 1, ff);
+            const auto& fb = current_clip_->frames[static_cast<std::size_t>(f)].bones;
+            const float clip_x = static_cast<std::size_t>(bi) < fb.size() ? fb[bi].x : 0.0f;
+            std::fprintf(stdout,
+                         "[prep] move=%-18s %s b=%d ma=%.1f mf=%.1f v=%.1f s0=%.1f "
+                         "s1=%.1f clip=%.1f align=%.1f off=%.2f half=%.1f wjabs=%d\n",
+                         move.name.c_str(), tag, bi,
+                         static_cast<double>(sol_ma_[u]),
+                         static_cast<double>(sol_mf_[u]),
+                         static_cast<double>((sol_ma_[u] - sol_mf_[u]) * half),
+                         static_cast<double>(prepend_[(0 * nclip + static_cast<std::size_t>(bi)) * 3]),
+                         static_cast<double>(prepend_[(1 * nclip + static_cast<std::size_t>(bi)) * 3]),
+                         static_cast<double>(clip_x),
+                         static_cast<double>(align_x_),
+                         static_cast<double>(render_offset_),
+                         static_cast<double>(half), walljump_abs_ ? 1 : 0);
+        };
+        dump("anchor", ab);
+        dump("pivot", pb);
+        std::fflush(stdout);
+    }
     // [FIX wall jump arc] The clip's slots are placed ABSOLUTELY at the Wall
     // anchor (`align_x_` is part of `px`), while the `qrb` prepend above lives in
     // solver space. Blending the two spaces in `px[anchor]` is what dragged the
@@ -5022,7 +5076,26 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                     }
                 }
             }
-            clamp_prev_world_ = world_x_;
+            // [FIX ragdoll -> clip teleport at a wall - his log 20261128_164419]
+            // The invariant compares the new clip's root with the PREVIOUS
+            // frame's `world_x_`, but a ragdoll poses the body in WORLD space
+            // (`solver_world_`) without moving `world_x_`: the fighter is drawn
+            // at 430 after the fall while the root still says 190. On the getup
+            // clip the placement is right (`[blend] F802 a=427.7 b=436.3
+            // c=437.1 px=434.4`), and the invariant then dragged the body back
+            // to the 190 he fell from - measured `--edge-probe` (warmup):
+            // `StandupBack mf=6 wx=190.0 off=-244.44 ofs=invariant`, root
+            // -242.0 and drawn COM -242.9 in one frame. Track the DRAWN anchor
+            // while the solver owns the pose, so the next clip starts where the
+            // body actually is.
+            static const bool edge_fix =
+                std::getenv("SF2_EDGE_FIX") != nullptr;  // MEASURED, OFF by default
+            if (edge_fix && solver_world_ && pose_sampled_ &&
+                pos_.size() > static_cast<std::size_t>(anchor_u) * 2 + 1) {
+                clamp_prev_world_ = pos_[static_cast<std::size_t>(anchor_u) * 2];
+            } else {
+                clamp_prev_world_ = world_x_;
+            }
             clamp_prev_world_valid_ = true;
         }
         // [FIX wall jump — ported from the JS, not tuned] `Te.eda`/`Gla`
@@ -6024,6 +6097,22 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         strike_probe_pose_.clear();
     }
     pose_sampled_ = true;  // `pos_` now holds a real frame (the `ma` analog)
+    // [FIX ragdoll -> clip teleport - his log 20261128_164419]
+    // While NO clip drives the body (a ragdoll: `current_move_ == nullptr` or
+    // `solver_world_`) `world_x_` stays frozen at the pre-fall root, but the
+    // drawn body flies with the physics. The clip-change invariant compares the
+    // NEXT clip's placement with `clamp_prev_world_`, so it must track the BODY.
+    // Measured `--edge-probe` (warmup): the fighter was knocked down at the left
+    // wall, lay at 400 for 47 frames (no `[anchor]` line: no clip) and the getup
+    // `StandupBack` placed him correctly at 434.4 - the invariant then dragged
+    // him back to the 190 he fell from (`wx=190.0 off=-244.44 ofs=invariant`,
+    // root -242.0, drawn COM -242.9 in one frame, then the 4-frame convergence).
+    if (std::getenv("SF2_EDGE_FIX") != nullptr &&
+        (!interp || current_move_ == nullptr || solver_world_) &&
+        pos_.size() > static_cast<std::size_t>(anchor_u) * 2 + 1) {
+        clamp_prev_world_ = pos_[static_cast<std::size_t>(anchor_u) * 2];
+        clamp_prev_world_valid_ = true;
+    }
 }
 
 std::size_t Fighter::build_vertices(std::vector<float>& out) const {

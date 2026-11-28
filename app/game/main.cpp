@@ -2840,6 +2840,12 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
     // "stretched across the arena / teleported to the opposite end" repro.
     bool wall_probe = false;
 bool restart_probe = false;  // [probe] the player's clip-restart teleport
+    // [probe, authorised] `--edge-probe`: the player's "странные телепорты,
+    // когда я был на краях локаций". Walks him INTO each wall (Back taps, the
+    // foe on the inside), then mashes Forward - his own sequence at the bamboo
+    // wall (`StepBack mf=13 wx=1742.9` jammed at `zu=1773`, then `StepForward`
+    // and `DoubleStepForward` carrying him 1742 -> 366 in six frames).
+    bool edge_probe = false;
     bool act_probe = false;  // [probe] capture the `Rd` act overlay backdrop
     std::string act_probe_kind;  // "act" (default) / "multiline"
     std::string d3_probe_move = "FansSuperSlash";
@@ -3559,7 +3565,9 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
             wall_probe = true;
         
     } else if (arg == "--restart-probe") {
-        restart_probe = true;} else if (arg == "--act-probe") {
+        restart_probe = true;} else if (arg == "--edge-probe") {
+        edge_probe = true;
+    } else if (arg == "--act-probe") {
             act_probe = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 act_probe_kind = argv[++i];
@@ -11418,6 +11426,215 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
         std::fflush(stdout);
         app.shutdown();
         return out_of_arena == 0 ? 0 : 1;
+    } else if (edge_probe) {
+        // [probe, authorised] `--edge-probe`: his newest report, "остались
+        // какие-то странные телепорты, когда я был на краях локаций".
+        //
+        // His log 20261128_164419 shows the state and the clips: the player
+        // jammed 30 units off the bamboo `zu=1773` (`StepBack mf=11..14
+        // px=1741.18 -> 1743.00`, i.e. the root pinned by `Te.Iub`), then
+        // `StepForward@3` at 1742.50 and, on the NEXT frame,
+        // `DoubleStepForward@5` which the placement threw to 3059.25 and the
+        // clip-change invariant clamped, leaving the root to be dragged
+        // 1742 -> 370 over six frames (`[clipjump] F1652 d=+1316.7`). The same
+        // shape appears at 1363 -> 316 in segment 0 (`StepForward`,
+        // `d=-1033.9`). So the trigger is a NORMAL step clip starting while the
+        // fighter is jammed against a wall - not a wall jump, not a reaction.
+        //
+        // Per wall and per step clip: jam the fighter onto the wall with
+        // `StepBack` (Iub clamps the root onto `zu-30` / `yu+100`), then start
+        // the clip his log names and print the root, the DRAWN pose's COM and
+        // the placement writer every frame. A teleport is |d_wx| > 60 (a step
+        // is 3-8 units per frame).
+        if (!app.has_fight_assets()) {
+            std::fprintf(stderr, "[edgeprobe] fight assets not loaded\n");
+            app.shutdown();
+            return 1;
+        }
+        sf2::app::FightAssets& fa = app.fight_assets();
+        sf2::scene::BattleParams battle;
+        battle.name = "Training";
+        battle.location = "bamboo_grove";
+        battle.rounds = 2;
+        battle.round_time = 99;
+        battle.max_hp = 100;
+        battle.player_spawn_x = 868.0f;
+        battle.player_spawn_y = -93.0f;
+        battle.enemy_spawn_x = 1068.0f;
+        battle.enemy_spawn_y = -110.0f;
+        const std::vector<sf2::scene::OwnedItem> owned = loadout_owned("Fists");
+        sf2::scene::FightController ctl;
+        std::mt19937 rng(0x5F2);
+        auto roll01 = [&rng]() {
+            return static_cast<float>(rng()) / static_cast<float>(rng.max());
+        };
+        const sf2::scene::TacticDef* tactic = nullptr;
+        const auto tit = fa.tactic_defs.find("Standard");
+        if (tit != fa.tactic_defs.end()) tactic = &tit->second;
+        ctl.init_locks(battle, fa.merged, fa.moves, fa.clips,
+                       fa.select_tactics("Fists", battle.enemy_weapon_subtype),
+                       tactic, "Player", "Enemy", battle.player_spawn_x,
+                       battle.player_spawn_y, battle.enemy_spawn_x,
+                       battle.enemy_spawn_y, battle.max_hp, battle.max_hp,
+                       roll01, owned, sf2::scene::PerkSetup(), nullptr, nullptr);
+        ctl.release_intro();
+        for (int g = 0; g < 20000 && ctl.phase() != 2; ++g) ctl.update(1.0f / 60.0f);
+        // His fight is `BOSS_LYNX zone=ZONE_1 location=bamboo_grove`, whose walls
+        // his own log prints: `[walls] ... walls=[160.0,1773.0]`.
+        float wlo = 160.0f, whi = 1773.0f;
+        if (const char* wb = std::getenv("SF2_EDGE_BOUNDS")) {
+            float a = 0.0f, b2 = 0.0f;
+            if (std::sscanf(wb, "%f,%f", &a, &b2) == 2 && b2 > a) {
+                wlo = a;
+                whi = b2;
+            }
+        }
+        float spot_off = 60.0f;
+        if (const char* sd = std::getenv("SF2_EDGE_DIST")) {
+            const float v = static_cast<float>(std::atof(sd));
+            if (v > 1.0f) spot_off = v;
+        }
+        ctl.set_bounds(wlo, whi, 0.0f);
+        std::fprintf(stdout, "[edgeprobe] phase=%d walls=[%.0f,%.0f] spot=%.0f\n",
+                     ctl.phase(), static_cast<double>(wlo), static_cast<double>(whi),
+                     static_cast<double>(spot_off));
+        std::fflush(stdout);
+        // [repro of HIS state] His fight is in the "absolutely placed" regime
+        // from the first wall jump on (`[anchor] off=0.00 ofs=inv` on every
+        // clip, `[capx] align_x=1912`): `WallHit`/`WallJump_*` carry
+        // `<Pivot Object="Animation"/>`, which sets `align_absolute_` /
+        // `walljump_abs_` / `wall_pin_`, and those flags are only ever written
+        // inside `if (align_absolute)` - so ONE wall clip after F1201
+        // (`[anchor] WallJump_50 ofs=zero`) leaves `prev_abs_placement_` true
+        // for the rest of the fight. `SF2_EDGE_WARMUP=1` replays that: a wall
+        // jump from 130 off the right wall before the measured cases.
+        if (std::getenv("SF2_EDGE_WARMUP") != nullptr) {
+            ctl.debug_place_fighters(whi - 130.0f, whi - 190.0f);
+            for (int s = 0; s < 8; ++s) ctl.update(1.0f / 60.0f);
+            ctl.debug_place_fighters(whi - 130.0f, whi - 190.0f);
+            ctl.update(1.0f / 60.0f);
+            // facing left (foe on the left) -> the raw key id the input layer
+            // produces for `<Key Type="Up-Back"/>` is `up_forward`
+            ctl.debug_player_key(sf2::scene::key_type::up_forward,
+                                 sf2::scene::press_type::tap);
+            std::string seen = "-";
+            for (int f = 0; f < 200; ++f) {
+                ctl.update(1.0f / 60.0f);
+                const auto* cm = ctl.player().fighter.current_move();
+                if (cm != nullptr && cm->name.compare(0, 4, "Wall") == 0 &&
+                    seen == "-") {
+                    seen = cm->name;
+                }
+            }
+            std::fprintf(stdout, "[edgeprobe] warmup wall_clip=%s (expect WallJump_*)\n",
+                         seen.c_str());
+            ctl.debug_reset_player_move();
+            ctl.debug_place_fighters(868.0f, 1068.0f);
+            for (int s = 0; s < 30; ++s) ctl.update(1.0f / 60.0f);
+            std::fflush(stdout);
+        }
+        struct EdgeSpot { const char* tag; float me; float foe; };
+        const EdgeSpot kSpots[2] = {
+            {"left", wlo + spot_off, wlo + spot_off + 220.0f},
+            {"right", whi - spot_off, whi - spot_off - 220.0f},
+        };
+        const char* kMoves[3] = {"StepForward", "DoubleStepForward", "StepBack"};
+        int bad_total = 0;
+        int out_total = 0;
+        float worst_all = 0.0f;
+        for (int wi = 0; wi < 2; ++wi) {
+            for (int mi = 0; mi < 3; ++mi) {
+                ctl.debug_reset_player_move();
+                ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
+                for (int s = 0; s < 6; ++s) ctl.update(1.0f / 60.0f);
+                ctl.debug_place_fighters(kSpots[wi].me, kSpots[wi].foe);
+                ctl.update(1.0f / 60.0f);
+                // Jam him onto the wall: `StepBack` walks away from the foe, and
+                // the foe is INSIDE the arena, so the clip carries the root into
+                // the wall where `Te.Iub` pins it (his own state).
+                ctl.debug_force_player_move("StepBack");
+                for (int jf = 0; jf < 26; ++jf) ctl.update(1.0f / 60.0f);
+                const float jam_x = ctl.player().fighter.world_x();
+                const bool started = ctl.debug_force_player_move(kMoves[mi]);
+                std::fprintf(stdout,
+                             "[edgeprobe] === wall=%s move=%-18s started=%d jam=%.1f "
+                             "clip_bones=%d ===\n",
+                             kSpots[wi].tag, kMoves[mi], started ? 1 : 0,
+                             static_cast<double>(jam_x),
+                             ctl.player().fighter.clip_bone_count());
+                float prev_wx = ctl.player().fighter.world_x();
+                float prev_com = ctl.player().fighter.debug_pose_com_x();
+                std::string prev_mv = "-";
+                int worst_at = -1, bad = 0, out = 0;
+                float worst = 0.0f, worst_com_d = 0.0f, worst_wx = 0.0f;
+                std::string worst_mv = "-", worst_ofs = "-";
+                for (int f = 0; f < 90; ++f) {
+                    ctl.update(1.0f / 60.0f);
+                    const auto& pf = ctl.player().fighter;
+                    const float wx = pf.world_x();
+                    const float com = pf.debug_pose_com_x();
+                    const auto* cm2 = pf.current_move();
+                    const std::string mv2 =
+                        cm2 != nullptr ? cm2->name : std::string("-");
+                    const float d = wx - prev_wx;
+                    const float dc = com - prev_com;
+                    if (mv2 != prev_mv) {
+                        std::fprintf(stdout,
+                                     "[edgeprobe]   clip f=%2d %-20s mf=%3d wx=%8.1f "
+                                     "off=%8.2f ofs=%-9s com=%8.1f\n",
+                                     f, mv2.c_str(), pf.move_frame(),
+                                     static_cast<double>(wx),
+                                     static_cast<double>(pf.debug_render_offset_x()),
+                                     pf.debug_render_offset_src(),
+                                     static_cast<double>(com));
+                        prev_mv = mv2;
+                    }
+                    if (std::fabs(d) > std::fabs(worst)) {
+                        worst = d;
+                        worst_com_d = dc;
+                        worst_wx = wx;
+                        worst_at = f;
+                        worst_mv = mv2;
+                        worst_ofs = pf.debug_render_offset_src();
+                    }
+                    if (std::fabs(d) > 60.0f) ++bad;
+                    if (std::fabs(d) > 60.0f || std::fabs(dc) > 60.0f) {
+                        std::fprintf(stdout,
+                                     "[edgeprobe]   JUMP f=%2d %-20s mf=%3d wx=%8.1f "
+                                     "d=%+7.1f com=%8.1f dcom=%+7.1f off=%8.2f ofs=%s\n",
+                                     f, mv2.c_str(), pf.move_frame(),
+                                     static_cast<double>(wx), static_cast<double>(d),
+                                     static_cast<double>(com), static_cast<double>(dc),
+                                     static_cast<double>(pf.debug_render_offset_x()),
+                                     pf.debug_render_offset_src());
+                    }
+                    if (wx < wlo - 0.5f || wx > whi + 0.5f) ++out;
+                    prev_wx = wx;
+                    prev_com = com;
+                }
+                std::fprintf(stdout,
+                             "[edgeprobe] %s %-18s worst_d=%+8.1f at_f=%d wx=%.1f "
+                             "move=%s ofs=%s dcom=%+.1f frames>60=%d out_of_arena=%d\n",
+                             kSpots[wi].tag, kMoves[mi],
+                             static_cast<double>(worst), worst_at,
+                             static_cast<double>(worst_wx), worst_mv.c_str(),
+                             worst_ofs.c_str(), static_cast<double>(worst_com_d), bad,
+                             out);
+                std::fflush(stdout);
+                bad_total += bad;
+                out_total += out;
+                if (std::fabs(worst) > worst_all) worst_all = std::fabs(worst);
+            }
+        }
+        std::fprintf(stdout,
+                     "[edgeprobe] summary walls=[%.0f,%.0f] spot=%.0f worst_d=%.1f "
+                     "frames>60=%d out_of_arena=%d\n",
+                     static_cast<double>(wlo), static_cast<double>(whi),
+                     static_cast<double>(spot_off), static_cast<double>(worst_all),
+                     bad_total, out_total);
+        std::fflush(stdout);
+        app.shutdown();
+        return (bad_total == 0 && out_total == 0) ? 0 : 1;
     } else if (wall_probe) {
         // [probe, authorised] `--wall-probe`: force the `<Align><Position
         // Object="Wall" Part="Back">` moves on the player at the right wall
