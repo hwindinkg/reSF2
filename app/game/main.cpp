@@ -10712,7 +10712,8 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
         // blocks — so settle the boot FIRST (headless skips the overlay and
         // forces one fixed step per frame; `dialog_observe` keeps the modal
         // visible in headless), then queue the dialog.
-        const bool want_notify = (kind == "notify" || kind == "hint");
+        const bool want_notify = (kind == "notify" || kind == "hint" ||
+                              kind == "hintdouble" || kind == "hintcollapse");
         const bool want_modal =
             (kind == "multiline" || kind == "buy" || kind == "tutorial");
         if (want_modal) {
@@ -11146,10 +11147,58 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
                 d.button_text = "OK";
             }
             d.button_color = "White";
+            // [probe] `--act-probe hintdouble`: reproduce the bar that is
+            // DISMISSED and replaced while its 0.5 s collapse is still running -
+            // his log showed the old text drawn again between the new posts
+            // (`post 2` punchbag, `post 3` the old move text, `post 4` punchbag).
+            // The first bar carries a short ReadTime so the engine dismisses it
+            // by itself; the second is posted 0.2 s later, mid-collapse.
+            if (kind == "hintdouble" || kind == "hintcollapse") {
+                d.read_time = 0.20f;
+            }
             app.quest_engine().push_dialog_for_test(std::move(d));
-            for (int i = 0; i < 60; ++i) {  // 0.5 s `Ib` reveal + settle
+            const int settle_frames =
+                (kind == "hintdouble" || kind == "hintcollapse") ? 14 : 60;
+            for (int i = 0; i < settle_frames; ++i) {
                 glfwPollEvents();
                 app.run_one_frame();
+            }
+            // [probe] `--act-probe hintcollapse`: the bar collapses with NO new
+            // one behind it, so the captured frames show whether the rod (the
+            // scroll) survives while the paper rolls up - the player's "при
+            // сворачивании свиток пропадает, остаётся только бумага".
+            if (kind == "hintcollapse") {
+                for (int i = 0; i < 36; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                    if ((i % 4) == 0) {
+                        char nm[96];
+                        std::snprintf(nm, sizeof(nm),
+                                      ".harness/artifacts/ib_collapse_%02d.png", i);
+                        app.capture_png(nm);
+                        std::fprintf(stdout, "[ibprobe] captured %s\n", nm);
+                        std::fflush(stdout);
+                    }
+                }
+            }
+            if (kind == "hintdouble") {
+                sf2::app::EngineDialog d2;
+                d2.type = "Notification";
+                d2.image = "character_sensei";
+                d2.lines.push_back("Хорошо! Теперь бей грушу!");
+                app.quest_engine().push_dialog_for_test(std::move(d2));
+                for (int i = 0; i < 36; ++i) {
+                    glfwPollEvents();
+                    app.run_one_frame();
+                    if ((i % 4) == 0) {
+                        char nm[96];
+                        std::snprintf(nm, sizeof(nm),
+                                      ".harness/artifacts/ib_double_%02d.png", i);
+                        app.capture_png(nm);
+                        std::fprintf(stdout, "[ibprobe] captured %s\n", nm);
+                        std::fflush(stdout);
+                    }
+                }
             }
             settle = 0;
         }
@@ -11234,7 +11283,38 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
             for (int i = 0; i < 4; ++i) ctl.update(1.0f / 60.0f);
             const bool threw = ctl.debug_force_player_move("ThrowThroughTheBack");
             std::fprintf(stdout, "[restartprobe] warmup throw=%d\n", threw ? 1 : 0);
-            for (int i = 0; i < 150; ++i) ctl.update(1.0f / 60.0f);
+            // [measure] the VICTIM's continuity across the throw and the getup:
+            // his `StandupAfterThrowFall -149.8/-262.9/-262.7/-157.1` is this
+            // window, and the getup is the clip that starts right after the
+            // absolutely placed victim clip the new placement handles.
+            float vprev = ctl.enemy().fighter.world_x();
+            float vworst = 0.0f;
+            int vworst_f = -1;
+            std::string vworst_mv = "-";
+            int vout = 0;
+            for (int i = 0; i < 150; ++i) {
+                ctl.update(1.0f / 60.0f);
+                const float vx = ctl.enemy().fighter.world_x();
+                const auto* vm = ctl.enemy().fighter.current_move();
+                // a frame with NO clip is a round/fight re-spawn, not a jerk
+                if (vm == nullptr || vm->name.empty()) {
+                    vprev = vx;
+                    continue;
+                }
+                const float dv = std::fabs(vx - vprev);
+                if (dv > vworst) {
+                    vworst = dv;
+                    vworst_f = i;
+                    vworst_mv = vm->name;
+                }
+                if (vx < wlo - 0.5f || vx > whi + 0.5f) ++vout;
+                vprev = vx;
+            }
+            std::fprintf(stdout,
+                         "[restartprobe] victim worst_delta=%.1f at=%d move=%s "
+                         "out_of_arena=%d\n",
+                         static_cast<double>(vworst), vworst_f, vworst_mv.c_str(),
+                         vout);
             std::fflush(stdout);
         }
         float prev_wx = ctl.player().fighter.world_x();

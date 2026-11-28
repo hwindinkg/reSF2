@@ -3454,6 +3454,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                     // under the bottom cap). Its only job is the CAP art's 40 %-alpha
                     // outer band, which must composite against the panel tone - so
                     // back each cap separately and leave the shaft alone.
+                    // [REJECTED by measurement] Insetting the backing quad (rod_w - 10,
+                    // 3 px off each cap end) changed NOTHING on the frame (extra dark
+                    // pixels 680 / missing 429 before and after), so the "stray pixels"
+                    // in the left margin are the game SCENE behind the bar, not this
+                    // quad: the two captures are different moments. Kept at the exact
+                    // cap box.
                     const float pw2 = rod_w;
                     const float cap_top_y = cy - rod_h * 0.5f + cap_inset_top;
                     const float cap_bot_y = cy + rod_h * 0.5f - cap_inset_bot;
@@ -3540,6 +3546,12 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
     // i.e. a ~222 px sprite at c=0.9 - exactly the 256 design px the port used.
     // Drawing it 117 px (the `D(130)` reading) made the portrait HALF the
     // original's size and left a hole in the bar.
+    // [FIX the collapse look] The paper is masked above and the ROD stays outside
+    // it (the scroll itself never disappears), but the portrait/caption/OK are the
+    // bar's CONTENT - they must roll up with the paper. Re-open the same mask for
+    // them, so a collapsing bar reads as a scroll rolling shut: rod fixed, content
+    // gone.
+    if (clipping) ren.push_clip(kViewW - clip_vis_w, oy, clip_vis_w, kBarH * c);
     constexpr float kPortraitPx = 256.0f;
     float image_w = 0.0f;
     bool drew_portrait = false;
@@ -3635,8 +3647,7 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
         draw_ui_label(app, lx(400.0f), ly(173.0f), 100.0f * c, 24.0f * c, "OK", 0.8f,
                       UiAlign::Center, 0.184f, 0.145f, 0.106f);
     }
-    // (the paper mask is popped right after the `paper` band - the rod and the
-    // label are separate nodes in the JS and must survive a collapse)
+    if (clipping) ren.pop_clip();  // end of the content mask (portrait/caption/OK)
 }
 
 // One resolved item image (JS `Rf` L2307): the list.xml `Image` ref
