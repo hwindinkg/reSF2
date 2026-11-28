@@ -2308,6 +2308,51 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     // visibly snapped/slid back at each move->idle boundary. The JS has NO
     // such translation (see the solver-seed note in `set_model`).
     build_prepend(move);
+    // [FIX teleport on a clip RESTART - his log 20261128_113645] When the same
+    // clip is started again while the `qrb` blend is still active, `px[anchor]`
+    // already carries the WORLD origin (the prepend is the drawn pose) while
+    // `render_offset_` still maps pure CLIP space to world - adding both
+    // double-counts the origin. Measured: F1109 `StepForward` restarted
+    // (mf 14 -> 3), `px=1172.28 off=1257.45 wx=2429.73` (the arena ends at 1773),
+    // then 2429 -> 2221 -> 1875 -> 1528 over four frames: the reported teleport.
+    // Re-anchoring the CLIP into world (`Gla` shift + placement offset 0) keeps
+    // one origin for both halves of the blend. Applied to RESTARTS only: the
+    // oracle diff is the authority for normal clip starts and it is green there
+    // (a global version of this placement measured dojo-move 0 -> 1926).
+    const bool clip_restart =
+        current_move_ != nullptr && current_move_->name == move.name &&
+        static_cast<int>(move_frame_) > move_base_ + 2;
+    if (clip_restart && !align_absolute_ && !walljump_abs_ && !wall_pin_ &&
+        current_clip_ != nullptr && !current_clip_->frames.empty()) {
+        const std::size_t nc_r = current_clip_->bone_count();
+        const int an_r = model_.bone_by_name(fighter_pivot_bone());
+        if (an_r >= 0 && static_cast<std::size_t>(an_r) < nc_r) {
+            int src_r = mirror_swap_src(an_r, static_cast<int>(nc_r));
+            if (src_r < 0) src_r = an_r;
+            const int f0_r = std::max(
+                0, std::min(move_base_,
+                            static_cast<int>(current_clip_->frames.size()) - 1));
+            const auto& fb_r =
+                current_clip_->frames[static_cast<std::size_t>(f0_r)].bones;
+            const std::size_t au_r = static_cast<std::size_t>(an_r) * 2;
+            if (static_cast<std::size_t>(src_r) < fb_r.size() && au_r + 1 < pos_.size()) {
+                const float mneg_r = (clip_mirror_ < 0) ? -1.0f : 1.0f;
+                align_x_ = pos_[au_r] - mneg_r * fb_r[static_cast<std::size_t>(src_r)].x;
+                align_pivot_u_ = an_r;
+                render_offset_src_ = "restart";
+                render_offset_ = 0.0f;
+                render_offset_valid_ = true;
+                if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
+                    std::fprintf(stdout,
+                                 "[restart] move=%s mf=%d align=%.1f world=%.1f\n",
+                                 move.name.c_str(), static_cast<int>(move_frame_),
+                                 static_cast<double>(align_x_),
+                                 static_cast<double>(pos_[au_r]));
+                    std::fflush(stdout);
+                }
+            }
+        }
+    }
     // [ONE WORLD POSE, A/B] `SF2_ONEPOSE=1`: the placement offset is the CLIP's
     // (`Gub`: prev_world(Pivot) - raw_clip(Pivot, FirstFrame)), not the blend's.
     // [ONE WORLD POSE - scope] Every clip is placed from the DRAWN pose except a
