@@ -9536,6 +9536,23 @@ int DojoScreen::dojo_last_key_type() const { return dojo_last_key_type_; }
 // the SAME `player_input` path the drawn pad uses (`update_pad_input`). The
 // base `Screen::on_key` is a no-op, which is why only the pad worked here.
 void DojoScreen::on_key(int glfw_key, bool down) {
+    // [player verification hook] The tutorial notifications are gated on the
+    // save's tutorial step (`quest_extensions/tutorial_quests.xml` is OFF for a
+    // finished save), so on his account the side dialog can never appear and the
+    // scroll cannot be checked in game. F9 posts the exact tutorial_move bar on
+    // demand (same path the quest uses, `ReadTime` included), so the collapse and
+    // the rod can be watched without touching the save.
+    if (down && glfw_key == 298) {  // GLFW_KEY_F9 (no GLFW include here)
+        sf2::app::EngineDialog demo;
+        demo.type = "Notification";
+        demo.image = "character_sensei";
+        demo.lines.push_back("Сначала покажи, \nкак ты двигаешься!");
+        demo.read_time = 5.0f;
+        app().quest_engine().push_dialog_for_test(std::move(demo));
+        std::fprintf(stdout, "[demo] F9 -> tutorial bar posted\n");
+        std::fflush(stdout);
+        return;
+    }
     // The hub's FightNone battle is put straight into phase 2 (`xF(2)`, JS
     // `kg` L387) with no round flow, so every fight key is live — no pause
     // gate. Directions use the JS diagonal-pair table (`Af.oUa` L2472; the
