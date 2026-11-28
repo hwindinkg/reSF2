@@ -62,6 +62,12 @@ void Fighter::set_model(const Model& model) {
     pos_.assign(model_.bones.size() * 2, 0.0f);
     playhead_ = 0;
     prepend_.clear();
+    if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
+        std::fprintf(stdout, "[seed] F%d uid=%d set_model bones=%zu nk=%d sw=%d\n",
+                     g_trace_fight_frame, uid_, model_.bones.size(), nk_ ? 1 : 0,
+                     solver_world_ ? 1 : 0);
+        std::fflush(stdout);
+    }
     // [FIX stale solver index caches] `ensure_solver_caches()` rebuilds ONLY
     // when the cached SIZE differs from the model's, so re-pointing a Fighter
     // at a DIFFERENT model with the same bone/edge counts kept the old
@@ -2178,20 +2184,39 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // flew to `wx=2429.73` (arena ends at 1773) and slid back over four
             // frames. Then place the CLIP into world instead (`Fk = posed_world -
             // raw_clip`, offset 0) - exactly `Gub`/`Gla` in the original.
-            const bool place_from_drawn = align_is_world || prev_abs_placement_;
+            // [FIX "во втором раунде позиция не сбросилась"] The drawn placement
+            // is only valid when the align was actually recomputed in WORLD for
+            // THIS clip (`compute_align` writes `align_x_ = posed - clip` only when
+            // the move declares an X align). For a clip WITHOUT it (`Win_Fists` -
+            // measured at the round end: `side=1 Win_Fists wx=607.6 com=-1474`),
+            // zeroing the offset left the BODY in clip space while the root stayed
+            // placed: the model warped ~2000 units away at the round transition,
+            // which is what "the fighters are not reset to the centre" looks like.
+            const bool place_from_drawn =
+                (align_is_world || prev_abs_placement_) && move.align.has_align &&
+                move.align.axis_x;
             render_offset_ = place_from_drawn
                                  ? 0.0f
                                  : (prev_align_pivot_world_x_ - sol_ma_[pu * 3]);
             if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
                 std::fprintf(stdout,
-                             "[inv] move=%s abs=%d nointerp=%d wjabs=%d wpin=%d "
-                             "prev=%.1f sol=%.1f -> off=%.1f\n",
+                             "[inv] F%d uid=%d move=%s abs=%d nointerp=%d wjabs=%d wpin=%d "
+                             "prev=%.1f sol=%.1f -> off=%.1f | Y prev=%.2f "
+                             "sol=%.2f pos_au=%.2f sol_au=%.2f world_y=%.2f\n",
+                             g_trace_fight_frame, uid_,
                              current_move_ != nullptr ? current_move_->name.c_str() : "-",
                              align_absolute_ ? 1 : 0, move.no_interp ? 1 : 0,
                              walljump_abs_ ? 1 : 0, wall_pin_ ? 1 : 0,
                              static_cast<double>(prev_align_pivot_world_x_),
                              static_cast<double>(sol_ma_[pu * 3]),
-                             static_cast<double>(render_offset_));
+                             static_cast<double>(render_offset_),
+                             static_cast<double>(prev_align_pivot_world_y_),
+                             static_cast<double>(sol_ma_[pu * 3 + 1]),
+                             static_cast<double>(pos_.size() > au * 2 + 1
+                                                     ? pos_[au * 2 + 1]
+                                                     : 0.0f),
+                             static_cast<double>(sol_ma_[au * 3 + 1]),
+                             static_cast<double>(world_y_));
                 std::fflush(stdout);
             }
             if (std::getenv("SF2_TRACE_BLEND") != nullptr) {
@@ -2270,7 +2295,43 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // clip's first frames). Keep the placement on EVERY axis; the
             // buffer shift that makes the total clip y shift equal the JS
             // `Gla` value is applied to `align_y_` below.
-            render_offset_y_ = prev_align_pivot_world_y_ - sol_ma_[pu * 3 + 1];
+            // [FIX vertical jitter after a wall bounce — player report
+            // "после отскока от стены начинает дёргаться вверх вниз"]
+            // `pos_[i*2+1] = py[i] + dy` with `dy = world_y_ - py[anchor]`, so a
+            // nonzero `render_offset_y_` lifts EVERY `py` slot into world —
+            // including the `qrb` PREPEND slots, which `build_prepend` fills
+            // from `sol_ma_`/`sol_mf_`. That is only sound while `sol_ma_` is
+            // the same space as the drawn pose. After an ABSOLUTELY placed clip
+            // (wall jump / throw / pinned reaction) it is not, and the term
+            // `prev_align_pivot_world_y_ - sol_ma_[Part]` becomes a fixed point
+            // of its own recurrence (`pos = sol + roy` makes the next `roy`
+            // equal this one), so it never heals: the prepend is then drawn
+            // `roy` away from the real pose at EVERY following clip start.
+            // Measured on `--wall-probe` (SF2_WALL_PROBE_Y=1, WallJump_50 ->
+            // StanceIdle, f=74..79): `roy=63.58`, the drawn feet went +59.34 ->
+            // +48.68 -> +30.91 -> +13.34 -> +2.82 -> -0.69 — the body sinks ~60
+            // units into the floor and pops back over five frames (the same at
+            // MiddleBlock, f=123..128: +59.36 -> -0.22, i.e. the seed survives
+            // the clip that follows). Read the placement from the DRAWN pose
+            // (offset 0) after such a clip; a plain clip start keeps the
+            // solver term (that is what `--dojo-move` matches, f=296).
+            // A/B: `SF2_Y_PLACE_OLD=1` restores the solver-derived placement.
+            static const bool y_place_old = [] {
+                return std::getenv("SF2_Y_PLACE_OLD") != nullptr;
+            }();
+            // Mirror of `place_from_drawn` above, on the y axis: after an
+            // ABSOLUTELY placed clip (wall jump / throw / pinned reaction) the
+            // solver state is that clip's space, so the solver-derived term is
+            // not a world mapping — and, being a fixed point of its own
+            // recurrence, it would then never return to zero. Take the y
+            // placement from the DRAWN pose there (offset 0), which is exactly
+            // `Gub`'s `Fk.y = posed_world(Pivot) - raw_clip(Pivot)` computed
+            // against `pos_` (see `compute_align`'s `posed_from_drawn`).
+            const bool y_from_drawn = align_is_world || prev_abs_placement_;
+            render_offset_y_ =
+                (y_place_old || !y_from_drawn)
+                    ? (prev_align_pivot_world_y_ - sol_ma_[pu * 3 + 1])
+                    : 0.0f;
             render_offset_valid_ = true;
             // [FIX cloth across a clip start — JS keeps the solver `ma` in
             // WORLD space] `pos = sol + render_offset_`, so changing
@@ -3858,7 +3919,7 @@ void Fighter::compute_align(const MoveDef& move) {
     // 20261128_113645 `StepForward` restart: `off 0.00 -> 1257.45`, `wx=2429.73`.
     const bool posed_from_drawn =
         (std::getenv("SF2_ALIGN_DRAWN") != nullptr || prev_abs_placement_) &&
-        pose_sampled_ && pos_.size() >= n * 2;
+        al.axis_x && pose_sampled_ && pos_.size() >= n * 2;
     auto posed = [&](int idx, float& ox, float& oy, float& oz) {
         if (idx < 0 || static_cast<std::size_t>(idx) >= n) return;
         const std::size_t u = static_cast<std::size_t>(idx);
@@ -4799,9 +4860,34 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             // passes `FirstFrame`): before that `px` still carries the previous
             // pose's solver-space prepend, and using it teleported the victim
             // +641 units on the frame the blend ended (measured).
+            // [FIX throw pair phase — measured against BOTH oracle episodes]
+            // The delta used to be captured on the frame AFTER `FirstFrame`
+            // (`move_frame_ > ff_v`), so the victim's root stayed pinned to
+            // `align_own_x_` for the whole `MidFrames` interpolation — measured
+            // 7 frozen frames (`--throw-probe`, x = 778.0 on f0..f6). The
+            // ORIGINAL starts his arc on the FIRST throw frame (oracle
+            // `ThrowThroughTheBack`: 225.5 -> 225.0 -> 217.3 within 2 af;
+            // `ThrowForward`: 380.2 -> 380.0), so freezing him delays his whole
+            // flight by ~7 frames: the pair then crosses too early and parts too
+            // wide. Measured at the SAME start distance (87.7, park 88) against
+            // the oracle's own episode, 0..100 %:
+            //   oracle   87.7  72.5  41.9  11.4  45.9 119.6 141.1 142.3 154.6 156.8 169.8
+            //   `>`      86.5  47.6  16.4  15.8  76.8 144.4 165.9 166.4 179.2 181.0 193.4
+            //   `>=`     86.5  70.8  39.7   7.5  53.5 121.1 142.6 143.1 155.9 157.7 170.1
+            //   mean |delta| 21.2 -> 2.1, max 30.9 -> 7.6; `ThrowForward` (same
+            //   A/B): 86.6 59.7 23.9 2.4 33.6 -> 86.6 37.8 45.8 24.3 55.5 against
+            //   the oracle's 85.4 38.5 46.8 25.6 59.6 (mean 19.2 -> 1.7).
+            // The victim's travel is smooth, not a teleport (worst frame-to-frame
+            // 6.8 over the first 60 frames, the same as the clip's own arc).
+            // `SF2_THROW_PX0=0` restores the old frame for an A/B.
             const int ff_v = std::max(0, move_base_);
+            static const bool px0_early = [] {
+                const char* e = std::getenv("SF2_THROW_PX0");
+                return e == nullptr || std::atoi(e) != 0;
+            }();
             if (!throw_px0_valid_) {
-                if (static_cast<int>(move_frame_) > ff_v) {
+                if (px0_early ? (static_cast<int>(move_frame_) >= ff_v)
+                              : (static_cast<int>(move_frame_) > ff_v)) {
                     throw_px0_ = px[anchor_u];
                     throw_px0_valid_ = true;
                 }
@@ -4968,22 +5054,28 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // the stretched triangle).
         (void)0;
         // A TryOn (`ShopTryOn`) preview plays IN PLACE on its `Pi` seat; the
-        // idle loop keeps riding its clip (see `preview_pin_x_`).
-        // [FIX B7 "после надевания ножей персонажа откидывает назад"] The idle
-        // preview used to ride its clip's ROOT MOTION: `world_x_` came from the
-        // clip-space pivot (`px[anchor]`), so the shipped stance clip drifted the
-        // DRAWN body ~33 units away from the `Pi.J9` seat — measured with the
-        // drawn-pose probe (`[tryon] pivot_x`: before +2.10, after the knives
-        // stance -31.37; the JS re-seats `Pi.job`/`oL` at J9 on every update).
-        // The try-on clip itself is exempt (`preview_pin_x_`), exactly as before.
-        if (preview_mode_) {
+        // idle loop and the profile's Peaceful idle RIDE their clip's root.
+        // [FIX shop/profile "ноги скользят по полу" + "модель чуть дальше"]
+        // The pin used to run for EVERY display preview (9985179a). Measured
+        // against the oracle at the same 60-tick capture point, that put the
+        // whole figure +77.4 px (centroid 363.6 vs the oracle 286.2; bbox
+        // 272..482 vs 162..482, feet 279..457 vs 206..379) and made the PLANTED
+        // front foot travel 78 units under the body during the stance draw
+        // (NToe_1 x 16.2..94.2 where the clip itself moves it 6.8). The JS does
+        // NOT re-seat per frame: `Pi.ia` (L18401) only does `this.C(0)` on the
+        // Pi NODE, and `Dl.oL(J9)` runs ONCE per state entry (`Pi.job` from
+        // `Pi.L4`); the drawn body therefore rides `px[anchor]` exactly like the
+        // fight. With the pin removed for the idle/draw the same capture lands
+        // at centroid 289.8 (oracle 286.2) and feet 205..382 (oracle 206..379).
+        // The one-shot TryOn keeps the pin: without it that clip walks the body
+        // +183 units across the backdrop (`[tryon] pivot_x` -1.75 -> +182.9)
+        // and lands 42 units off the seat after the animation.
+        if (preview_mode_ && (preview_pin_x_ ||
+                              std::getenv("SF2_PREVIEW_PIN_ALL") != nullptr)) {
             world_x_ = preview_seat_x_;
         }
-        // [REJECTED by measurement] Pinning a display-only preview's x to its
-        // `Pi` seat (`preview_seat_x_`) was TRIED: it made the shop/profile
-        // captures WORSE (`shop_tab1` 11.53 -> 14.02 %pix>12, `shop_detail`
-        // 11.31 -> 13.02, `profile_tab2` 8.64 -> 11.98), i.e. the JS preview
-        // really does ride its clip's root travel. Not enabled.
+        // The earlier A/B that "rejected" the pin used the EVERY-preview
+        // variant; it is kept here as the record of why the TryOn pin stayed.
         if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
             std::fprintf(stdout,
                          "[anchor] F%d move=%s mf=%d px=%.2f off=%.2f j8=%.2f wx=%.2f "

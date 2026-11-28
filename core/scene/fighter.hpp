@@ -908,6 +908,41 @@ public:
     // Debug/probe accessor: the clip->world placement constant (see
     // `render_offset_`). Test-only; no simulation reads it.
     float debug_render_offset_x() const { return render_offset_; }
+    // [probe, authorised] `--wall-probe` y-axis dump: the vertical terms the
+    // player's "дёргается вверх-вниз" report is about. `render_offset_y_` is the
+    // clip->world PLACEMENT on y, `align_y_` the buffer shift, `world_y_` the
+    // anchor the drawn pose is placed on.
+    float debug_render_offset_y() const { return render_offset_y_; }
+    float debug_align_y() const { return align_y_; }
+    float debug_prev_pivot_y() const { return prev_align_pivot_world_y_; }
+    // The DRAWN pose's y bounds + COM y (`pos_`, the input of `build_vertices`):
+    // the feet are the MAX y of the drawn pose in this model's convention
+    // (y grows downward, see `sample()`), so `hi` is the sole.
+    bool debug_pose_y_bounds(float& lo, float& hi) const {
+        if (pos_.size() < 2) return false;
+        lo = hi = pos_[1];
+        for (std::size_t i = 1; i * 2 + 1 < pos_.size(); ++i) {
+            const float v = pos_[i * 2 + 1];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        return true;
+    }
+    float debug_pose_com_y() const {
+        if (pos_.size() < 2) return 0.0f;
+        double acc = 0.0;
+        const std::size_t nb = pos_.size() / 2;
+        for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2 + 1];
+        return static_cast<float>(acc / static_cast<double>(nb));
+    }
+    float debug_solver_y(int bone) const {
+        if (bone < 0 || sol_ma_.size() != model_.bones.size() * 3) return 0.0f;
+        return sol_ma_[static_cast<std::size_t>(bone) * 3 + 1];
+    }
+    int debug_anchor_bone() const {
+        return model_.bone_by_name(fighter_pivot_bone());
+    }
+    bool debug_solver_world() const { return solver_world_; }
     // [probe] which writer last set `render_offset_` (teleport = a
     // round/fight re-spawn, not a fight movement).
     const char* debug_render_offset_src() const {

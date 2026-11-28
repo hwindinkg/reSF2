@@ -1071,12 +1071,20 @@ struct TourDriver {
         }
 
         if (s.hold_frames > 0) {
+            // [probe, authorised] `SF2_TOUR_HOLD=<n>`: lengthen every step's
+            // post-click hold so one screen can be observed for many ticks
+            // (the shop/profile preview's per-frame slide measurement).
+            static const int hold_env = [] {
+                const char* e = std::getenv("SF2_TOUR_HOLD");
+                return e != nullptr ? std::atoi(e) : 0;
+            }();
+            const int hold_n = hold_env > 0 ? hold_env : s.hold_frames;
             // Wait for the destination screen BEFORE the hold (a same-screen
             // step has expect_screen == -1). The boss-intro `jk` roster
             // (4.6 s) now delays the Fight push, so a capture must not fire
             // before the screen it belongs to has arrived.
             const bool arrived = s.expect_screen < 0 || cur == s.expect_screen;
-            bool ready = arrived && step_frame >= s.min_delay + s.hold_frames;
+            bool ready = arrived && step_frame >= s.min_delay + hold_n;
             // [fidelity tutorial-beat gate] Wait on the quest chain's own beat
             // (quest_engine `tutorial_gate_beat`) instead of a frame count tied
             // to the lesson timeout: 1/2 = the bar beat the chain is parked at,
@@ -1162,6 +1170,19 @@ struct TourDriver {
         if (step >= count) {
             finished = true;
             std::fprintf(stdout, "%s ALL %d STEPS DONE\n", tag, count);
+            std::fflush(stdout);
+            return;
+        }
+        // [probe, authorised] `SF2_TOUR_STOP_AFTER=<n>` (1-based): end the tour
+        // cleanly after step `n`, so a measurement of one screen does not pay
+        // for the rest of the tour (and never reaches a fight).
+        static const int stop_after = [] {
+            const char* e = std::getenv("SF2_TOUR_STOP_AFTER");
+            return e != nullptr ? std::atoi(e) : 0;
+        }();
+        if (stop_after > 0 && step >= stop_after) {
+            finished = true;
+            std::fprintf(stdout, "%s STOP AFTER STEP %d (%s)\n", tag, step, count);
             std::fflush(stdout);
         }
     }
@@ -11114,6 +11135,14 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
             // the splash was still up after 1800 present frames).
             app.set_headless_frames(100000);
             app.set_dialog_observe(true);  // headless hides modals unless observed
+            // [FIX the flaky `ui-dialog` reading in a PARALLEL run] The bar is
+            // captured after a fixed number of frames, but an uncapped window lets
+            // the app clock advance by the REAL frame time, so under load the 0.5 s
+            // reveal had not settled when the capture ran and the measured rod rows
+            // came out one row off (`cbott+4` instead of `+3`; the same gate passed
+            // 3/3 serially). A fixed 1/60 s step per frame makes the reveal exactly 1.0
+            // at capture time whatever the machine is doing.
+            app.set_headless_frames(1);
             for (int i = 0; i < 200; ++i) {
                 glfwPollEvents();
                 app.run_one_frame();
@@ -11171,7 +11200,10 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
                 for (int i = 0; i < 36; ++i) {
                     glfwPollEvents();
                     app.run_one_frame();
-                    if ((i % 4) == 0) {
+                    // [probe] every 2nd frame: the `gk` collapse tween runs ~12
+                    // probe frames, so a 4-frame stride left only 3 samples of the
+                    // rod's travel (the "валик остаётся на месте" measurement).
+                    if ((i % 2) == 0) {
                         char nm[96];
                         std::snprintf(nm, sizeof(nm),
                                       ".harness/artifacts/ib_collapse_%02d.png", i);
@@ -11559,9 +11591,14 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
             // `SF2_WALL_PROBE_NO_FORCE=1`: keep the injected key but do NOT force a
             // move, so the run shows what the GAME's own input gate starts - which
             // is what the oracle trace records.
+            // `SF2_WALL_PROBE_AI=1`: force through the AI path
+            // (`ai_start_move`, `<Tactics>` only) instead of the input path, so a
+            // HIT reaction (`WallHit`/`WallHitFall`, which carry no `<Keys>`) can
+            // be started directly in the probe.
             const bool no_force = std::getenv("SF2_WALL_PROBE_NO_FORCE") != nullptr;
+            const bool ai_force = std::getenv("SF2_WALL_PROBE_AI") != nullptr;
             const bool started =
-                no_force ? false : ctl.debug_force_player_move(kMoves[mi], true);
+                no_force ? false : ctl.debug_force_player_move(kMoves[mi], !ai_force);
             std::fprintf(stdout, "[wallprobe] force %-14s wall=%-5s started=%d x0=%.1f nclip=%d\n",
                          kMoves[mi], kSpots[wi].tag, started ? 1 : 0,
                          static_cast<double>(x0),
@@ -11591,6 +11628,38 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
                                  "[wallprobe]   f=%2d mv=%-14s wx=%.1f span=%.1f\n",
                                  f, cm != nullptr ? cm->name.c_str() : "-",
                                  static_cast<double>(wx), static_cast<double>(sp));
+                }
+                // [probe, authorised] `SF2_WALL_PROBE_Y=1`: the VERTICAL terms
+                // every frame of the case (the player's "дёргается вверх-вниз"
+                // after a wall bounce). `wy` = the world anchor, `ycom` the drawn
+                // pose's COM, `foot` the drawn pose's lowest node, plus the
+                // placement (`roy`) / buffer shift (`ay`) / solver y of the
+                // anchor — so a term that flips sign per frame is visible.
+                if (std::getenv("SF2_WALL_PROBE_Y") != nullptr) {
+                    const auto* cm5 = ctl.player().fighter.current_move();
+                    float ylo = 0.0f, yhi = 0.0f;
+                    ctl.player().fighter.debug_pose_y_bounds(ylo, yhi);
+                    const int ab = ctl.player().fighter.debug_anchor_bone();
+                    std::fprintf(
+                        stdout,
+                        "[wpy] f=%3d mv=%-16s mf=%3d wy=%8.2f ycom=%8.2f foot=%8.2f "
+                        "roy=%8.2f ay=%8.2f prev_piv=%8.2f sol_anch=%8.2f "
+                        "solverw=%d nk=%d\n",
+                        f, cm5 != nullptr ? cm5->name.c_str() : "-",
+                        ctl.player().fighter.move_frame(),
+                        static_cast<double>(ctl.player().fighter.world_y()),
+                        static_cast<double>(ctl.player().fighter.debug_pose_com_y()),
+                        static_cast<double>(yhi),
+                        static_cast<double>(
+                            ctl.player().fighter.debug_render_offset_y()),
+                        static_cast<double>(ctl.player().fighter.debug_align_y()),
+                        static_cast<double>(
+                            ctl.player().fighter.debug_prev_pivot_y()),
+                        static_cast<double>(
+                            ctl.player().fighter.debug_solver_y(ab)),
+                        ctl.player().fighter.debug_solver_world() ? 1 : 0,
+                        ctl.player().fighter.ragdoll_active() ? 1 : 0);
+                    std::fflush(stdout);
                 }
                 // [probe] a drawn pose wider than 600 units means the mesh is
                 // stretched across the arena (the player's "разнесло" symptom);
@@ -11643,13 +11712,26 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
                 // Punch from frame 34 on - the same call the input layer uses.
                 if (attack_probe) {
                     const auto* cmv = ctl.player().fighter.current_move();
-                    std::fprintf(stdout,
-                                 "[wjf] f=%3d clip_frame=%3d wx=%8.1f off=%8.1f move=%s\n",
-                                 f, ctl.player().fighter.move_frame(),
-                                 static_cast<double>(ctl.player().fighter.world_x()),
-                                 static_cast<double>(
-                                     ctl.player().fighter.debug_render_offset_x()),
-                                 cmv != nullptr ? cmv->name.c_str() : "-");
+                    float ylo2 = 0.0f, yhi2 = 0.0f;
+                    ctl.player().fighter.debug_pose_y_bounds(ylo2, yhi2);
+                    std::fprintf(
+                        stdout,
+                        "[wjf] f=%3d clip_frame=%3d wx=%8.1f off=%8.1f "
+                        "wy=%8.2f ycom=%8.2f foot=%8.2f roy=%8.2f ay=%8.2f "
+                        "solverw=%d nk=%d move=%s\n",
+                        f, ctl.player().fighter.move_frame(),
+                        static_cast<double>(ctl.player().fighter.world_x()),
+                        static_cast<double>(
+                            ctl.player().fighter.debug_render_offset_x()),
+                        static_cast<double>(ctl.player().fighter.world_y()),
+                        static_cast<double>(ctl.player().fighter.debug_pose_com_y()),
+                        static_cast<double>(yhi2),
+                        static_cast<double>(
+                            ctl.player().fighter.debug_render_offset_y()),
+                        static_cast<double>(ctl.player().fighter.debug_align_y()),
+                        ctl.player().fighter.debug_solver_world() ? 1 : 0,
+                        ctl.player().fighter.ragdoll_active() ? 1 : 0,
+                        cmv != nullptr ? cmv->name.c_str() : "-");
                     std::fflush(stdout);
                 }
                 if (attack_probe && ctl.player().fighter.move_frame() >= 34 &&
@@ -11893,7 +11975,18 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
         if (const char* px = std::getenv("SF2_THROW_X")) {
             if (px[0] != '\0') pair_x = std::strtof(px, nullptr);
         }
-        ctl.debug_place_fighters(pair_x, pair_x + 60.0f);
+        // [probe] `SF2_THROW_PARK=<n>`: the ROOT gap the throw is staged from.
+        // In FORCE mode the pair was always parked at 60, so a throw could only
+        // ever be measured from that one distance - and the original's own
+        // episodes start at 85.4 / 87.7 (oracle_state.jsonl), i.e. the probe was
+        // not measuring the same situation. The start gap is INHERITED by the
+        // throw (the victim's `<Align>` keeps his own root), so this is the one
+        // input the pair curve is sensitive to.
+        float park_gap = 60.0f;
+        if (const char* pg = std::getenv("SF2_THROW_PARK")) {
+            if (pg[0] != '\0') park_gap = std::strtof(pg, nullptr);
+        }
+        ctl.debug_place_fighters(pair_x, pair_x + park_gap);
         // Drive the REAL input path: hold Back (the keyboard move path emits
         // `back` tap -> the buffered `back/hold` after the age tick), then tap
         // Punch. This is exactly what `FightScreen::on_key` feeds.
@@ -11994,18 +12087,34 @@ bool restart_probe = false;  // [probe] the player's clip-restart teleport
                      force ? "force" : "input", started ? "sent" : "refused");
         std::fflush(stdout);
         int victim_frames = 0;
-        for (int f = 0; f < 90; ++f) {
+        // [probe fix — the WHOLE throw] 90 frames covered only af 3..31 of a
+        // ~39-frame clip: `ThrowThroughTheBack`'s `<Interval End="38">` and the
+        // oracle's own episode is 112 frames, so the last quarter (where the
+        // pair widens the most) was never measured. Run until the throw pair
+        // leaves the family (or 200 frames), so the curve is comparable to the
+        // original at 100 %.
+        int last_throw_frame = -1;
+        for (int f = 0; f < 200; ++f) {
             // NO per-frame re-park: the throw's own `<Align>` moves the victim,
             // and forcing the roots every frame fights it (the old probe
             // measured a bogus 121 -> 950 "jump" that was the teleport).
             ctl.update(1.0f / 60.0f);
+            if (std::getenv("SF2_TRACE_THROW") != nullptr) {
+                ctl.player().fighter.debug_throw_probe("TP");
+                ctl.enemy().fighter.debug_throw_probe("TV");
+            }
             const sf2::scene::MoveDef* pm = ctl.player().fighter.current_move();
             const sf2::scene::MoveDef* em = ctl.enemy().fighter.current_move();
             const std::string pn = pm != nullptr ? pm->name : std::string("-");
             const std::string en = em != nullptr ? em->name : std::string("-");
-            if (en.size() > 1 && en.back() == 'V' &&
-                en.find("Throw") != std::string::npos) {
+            const bool pair_in_throw =
+                (en.size() > 1 && en.back() == 'V' &&
+                 en.find("Throw") != std::string::npos);
+            if (pair_in_throw) {
                 ++victim_frames;
+                last_throw_frame = f;
+            } else if (last_throw_frame >= 0 && f > last_throw_frame + 3) {
+                break;  // the throw pair is over (+3 frames of afterpose)
             }
             // [jerk probe] the max per-bone movement between consecutive
             // frames: a 1-frame whole-model stretch shows up as a spike that

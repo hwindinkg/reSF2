@@ -3385,9 +3385,22 @@ void draw_ib_hint(App& app, sf2::render::Renderer& ren, const std::string& image
                 // The port put the rod OUTSIDE the bar (centred at lx(0)-rod_w/2,
                 // i.e. 698..740) and started the paper at 740, so the whole scroll
                 // sat ~22 px left of the original and its end read oversized.
-                // The JS rod is a child of the bar's node at its origin, so it sits
-                // on the bar's LEFT end (the bar's right end has no rod).
-                const float rod_cx = lx(0.0f);
+                // The JS rod is a child of the bar's node at its origin, so at
+                // STEADY state (reveal == 1) it sits on the bar's LEFT end.
+                // [FIX "Свиток сворачивается, а валик остаётся на месте" — player
+                // report, verified in `gk.JT` L83138] The rod is NOT pinned: it is
+                // the leading edge of the rolling paper. `JT` (qLa == 0) computes
+                //     J = width - yI*width                    // mask's left edge
+                //     Af.node.C(J - vk + yI*Af.width/2)      // vk = 50, Af.width = 50
+                // `Af` is `Zh(50,250)` and only its position is animated, so the
+                // rod's centre runs `(600 - 50/2)*(1 - yI)` design px, i.e.
+                // 0 at reveal 1 (the measured steady state, `lx(0)`) and 575 at
+                // reveal 0 (flush with the bar's right end). Masked: the paper +
+                // rails (inside `scroll`), NOT the rod (a sibling of `scroll`).
+                // The port pinned the rod at `lx(0)` while the clip ate the paper
+                // from the left, so the rod hung in the hole the paper had left.
+                const float rod_cx =
+                    lx((kBarW - 25.0f) * (1.0f - std::clamp(reveal, 0.0f, 1.0f)));
                 const float cy = ly(kBarH * 0.5f) + 1.5f;  // +3 px: the port rod ended ~5 px short
                 // [rod composite — measured against oracle_ib_00.png] The oracle's
                 // dark bands sit INSIDE the rod: ~12 % from the top and ~75 % down
@@ -9007,6 +9020,75 @@ void draw_destination_model(App& app, sf2::render::Renderer& ren,
 // re-seat on a loop) drifted the model off-screen. Restart with the idle loop
 // once it resolves.
 void shop_dispatch_model_sounds(sf2::scene::Fighter& f, const char* tag);
+void preview_slide_trace(const sf2::scene::Fighter& f, const char* tag);
+// [probe, authorised] `SF2_PI_SLIDE=1`: the destination `Pi` preview trace the
+// player's "the feet slide along the floor / the model stands further away"
+// report needs - per 60 Hz tick the DRAWN pose's feet row (bones sharing the
+// lowest y within 2u), its x, the pose bbox and the `Pi` node x, in model units
+// and SCREEN px (scale 1.8, node translate -433.3,412 at 1280x720:
+// `x_screen = (x*1.8 - 433.33)*0.6561 + 640`).
+void preview_slide_trace(const sf2::scene::Fighter& f, const char* tag) {
+    static const bool on = std::getenv("SF2_PI_SLIDE") != nullptr;
+    if (!on) return;
+    static std::map<const void*, int> tick;
+    const int n = ++tick[static_cast<const void*>(&f)];
+    const std::vector<float>& pp = f.positions();
+    const sf2::scene::Model& m = f.model();
+    if (pp.size() < 2) return;
+    float hi = -1e9f, bx0 = 1e9f, bx1 = -1e9f;
+    for (std::size_t i = 0; i < m.bones.size() && i * 2 + 1 < pp.size(); ++i) {
+        if (m.bones[i].is_macro) continue;
+        const float x = pp[i * 2], y = pp[i * 2 + 1];
+        if (y > hi) hi = y;
+        if (x < bx0) bx0 = x;
+        if (x > bx1) bx1 = x;
+    }
+    double fsum = 0.0;
+    int fn = 0;
+    for (std::size_t i = 0; i < m.bones.size() && i * 2 + 1 < pp.size(); ++i) {
+        if (m.bones[i].is_macro) continue;
+        if (pp[i * 2 + 1] < hi - 2.0f) continue;
+        fsum += pp[i * 2];
+        ++fn;
+    }
+    const float feet_x = fn > 0 ? static_cast<float>(fsum / fn) : bx0;
+    const int ip = m.bone_by_name(sf2::scene::fighter_pivot_bone());
+    float piv_x = 0.0f, piv_y = 0.0f;
+    if (ip >= 0 && static_cast<std::size_t>(ip) * 2 + 1 < pp.size()) {
+        piv_x = pp[static_cast<std::size_t>(ip) * 2];
+        piv_y = pp[static_cast<std::size_t>(ip) * 2 + 1];
+    }
+    auto sx = [](float x) { return (x * 1.8f - 433.33f) * 0.6561f + 640.0f; };
+    // The individual foot bones: which of them actually touches the floor, and
+    // how far it travels, is the player's "the legs slide" report.
+    char fb[256];
+    fb[0] = '\0';
+    int written = 0;
+    for (const char* nm : {"NToe_1", "NToe_2", "NHeel_1", "NHeel_2",
+                           "NAnkle_1", "NAnkle_2"}) {
+        const int bi = m.bone_by_name(nm);
+        if (bi < 0 || static_cast<std::size_t>(bi) * 2 + 1 >= pp.size()) continue;
+        written += std::snprintf(fb + written, sizeof(fb) - static_cast<std::size_t>(written),
+                                 "%s(%0.1f,%0.1f) ", nm,
+                                 static_cast<double>(pp[static_cast<std::size_t>(bi) * 2]),
+                                 static_cast<double>(pp[static_cast<std::size_t>(bi) * 2 + 1]));
+        if (static_cast<std::size_t>(written) >= sizeof(fb) - 40) break;
+    }
+    std::fprintf(stdout,
+                 "[slide] %s n=%d mv=%s mf=%d feet=(%.2f,%.2f) nfeet=%d "
+                 "pivot=(%.2f,%.2f) bbox=(%.2f..%.2f) feet_sx=%.2f "
+                 "centre_sx=%.2f wx=%.1f wy=%.1f %s\n",
+                 tag, n,
+                 f.current_move() != nullptr ? f.current_move()->name.c_str() : "-",
+                 f.move_frame(), static_cast<double>(feet_x),
+                 static_cast<double>(hi), fn, static_cast<double>(piv_x),
+                 static_cast<double>(piv_y), static_cast<double>(bx0),
+                 static_cast<double>(bx1), static_cast<double>(sx(feet_x)),
+                 static_cast<double>(sx((bx0 + bx1) * 0.5f)),
+                 static_cast<double>(f.world_x()),
+                 static_cast<double>(f.world_y()), fb);
+    std::fflush(stdout);
+}
 void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
                                const sf2::data::anim_clip* idle,
                                const sf2::scene::MoveDef* move,
@@ -9090,6 +9172,7 @@ void advance_destination_model(std::unique_ptr<sf2::scene::Fighter>& fighter,
         // here: re-seat on the state re-entry.
         fighter->start_preview_clip(*move, *idle, 0.0f, -93.0f, true);
     }
+    preview_slide_trace(*fighter, "idle");
 }
 
 // Draws one `Pi` model at frame `frame` of `clip` (the `Pi.Jc` viewer). Shared
@@ -23204,6 +23287,7 @@ void ShopScreen::update_impl(float dt) {
     }
     if (preview_active_ && preview_fighter_ != nullptr) {
             preview_fighter_->advance(dt);
+            preview_slide_trace(*preview_fighter_, "tryon");
             // [probe, authorised] `SF2_TRACE_EDGES=1` on the SHOP TryOn preview:
             // the same worst-edge stretch report the fight controller prints, so
             // item 2 ("the models look stretched") can be checked on this
