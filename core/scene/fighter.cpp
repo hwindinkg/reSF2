@@ -22,6 +22,18 @@
 #include "scene/location_scene.hpp"  // `active_friction` = JS `xd.bAa`
 #include "scene/move_def.hpp"
 
+// [ONE WORLD POSE] Single switch for the placement rework. REJECTED as a
+// default by the oracle diff (QA-184: dojo-move 0 -> 642 divergences,
+// challenge 0 -> 313, titan-ladder 0 -> 306, cam/pose too), so it stays OFF
+// and is reachable only for A/B measurements via `SF2_ONEPOSE=1`.
+static bool one_pose_on() {
+    static const bool on = [] {
+        const char* v = std::getenv("SF2_ONEPOSE");
+        return v != nullptr && std::atoi(v) != 0;
+    }();
+    return on;
+}
+
 namespace sf2::scene {
 
 // [probe] The live fight frame (set by `FightController::update` via
@@ -1921,6 +1933,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         return e == nullptr ? 2 : std::atoi(e);
     }();
     if (align_absolute) {
+        render_offset_src_ = "zero";
         render_offset_ = 0.0f;
         render_offset_y_ = 0.0f;
         // abs_mode 2 keeps the offset INVALID so the first `sample()` captures
@@ -1983,6 +1996,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
         // 1773-179.7 = 1593.3 at the right, matching the oracle's own numbers.
         if (wall_jump_move) {
             render_offset_valid_ = true;
+            render_offset_src_ = "zero";
             render_offset_ = 0.0f;
         }
         walljump_abs_ = wall_jump_move;
@@ -2050,6 +2064,7 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // gaps 20 and 130 now gives the SAME curve
             // (58.5 -> 24.8 -> 3.3 -> 23.0 -> 56.5 -> ... -> 207.4).
             render_offset_valid_ = true;
+            render_offset_src_ = "zero";
             render_offset_ = 0.0f;
             walljump_abs_ = true;
             // [FIX throw pair — measured against BOTH oracle references] oracle
@@ -2150,7 +2165,20 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
             // delta so the blend starts on the previous pose in ONE space (the
             // drawn pose is relative to the anchor, so a rigid shift moves no
             // bone - only the root stops being dragged).
+            render_offset_src_ = "inv";
             render_offset_ = prev_align_pivot_world_x_ - sol_ma_[pu * 3];
+            if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
+                std::fprintf(stdout,
+                             "[inv] move=%s abs=%d nointerp=%d wjabs=%d wpin=%d "
+                             "prev=%.1f sol=%.1f -> off=%.1f\n",
+                             current_move_ != nullptr ? current_move_->name.c_str() : "-",
+                             align_absolute_ ? 1 : 0, move.no_interp ? 1 : 0,
+                             walljump_abs_ ? 1 : 0, wall_pin_ ? 1 : 0,
+                             static_cast<double>(prev_align_pivot_world_x_),
+                             static_cast<double>(sol_ma_[pu * 3]),
+                             static_cast<double>(render_offset_));
+                std::fflush(stdout);
+            }
             if (std::getenv("SF2_TRACE_BLEND") != nullptr) {
                 std::fprintf(stdout,
                              "[offcalc] F%d move=%s mf=%d abs=%d prev_world=%.1f "
@@ -2282,8 +2310,23 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
     build_prepend(move);
     // [ONE WORLD POSE, A/B] `SF2_ONEPOSE=1`: the placement offset is the CLIP's
     // (`Gub`: prev_world(Pivot) - raw_clip(Pivot, FirstFrame)), not the blend's.
-    if (std::getenv("SF2_ONEPOSE") != nullptr && !align_absolute_ && !move.no_interp &&
-        !walljump_abs_ && !wall_pin_ && current_clip_ != nullptr &&
+    // [ONE WORLD POSE - scope] Every clip is placed from the DRAWN pose except a
+    // voluntary `WallJump_*`, whose buffer the JS puts ABSOLUTELY on the wall
+    // (`Object="Wall"`). The previous guard also excluded the absolute / pinned
+    // clips, and that is where the offset LEAKED: those start through the
+    // `sol_ma_` invariant instead (`[inv] move=StandupAfterThrowFall wjabs=1
+    // prev=976.9 sol=-15.8 -> off=992.8`), and the 992.8 was then applied to
+    // every following frame - measured 114 frames outside [160,1773], worst
+    // 3334.9 on BOSS_LYNX. The wall reaction and the throw victim are placed by
+    // their own branches anyway (`align_own_x_`), so including them is safe.
+    const bool one_pose_walljump =
+        current_move_ != nullptr && current_move_->name.compare(0, 8, "WallJump") == 0;
+    // `NoInterpolationFrames` clips (the round-intro stances) keep the OLD
+    // placement: placing them from the drawn pose made the INTRO slide 220 px per
+    // frame (`--throw-probe`, F1..F4: 23 -> 160 -> 380 -> 600 -> 732), which the
+    // baseline does not do (5.1 worst).
+    if (one_pose_on() && !one_pose_walljump &&
+        !move.no_interp && current_clip_ != nullptr &&
         !current_clip_->frames.empty()) {
         const std::size_t nc = current_clip_->bone_count();
         const int an = model_.bone_by_name(fighter_pivot_bone());
@@ -2300,8 +2343,15 @@ bool Fighter::start_move_impl(const MoveDef& move, FightContext& ctx, bool ai) {
                 // shift), so the placement offset is zero and the prepend (already
                 // world) is not shifted a second time.
                 align_x_ = pos_[au2] - mneg2 * fb2[static_cast<std::size_t>(src2)].x;
+                render_offset_src_ = "onepose";
                 render_offset_ = 0.0f;
                 render_offset_valid_ = true;
+                if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
+                    std::fprintf(stdout, "[op] move=%s align=%.1f off=0\n",
+                                 current_move_ ? current_move_->name.c_str() : "-",
+                                 static_cast<double>(align_x_));
+                    std::fflush(stdout);
+                }
             }
         }
     }
@@ -3155,6 +3205,7 @@ void Fighter::advance_step(int slot) {
         j8_x_ = 0.0f;
         wall_shift_.clear();
         wall_rep_last_ = 0.0f;
+        render_offset_src_ = "zero";
         render_offset_ = 0.0f;
         render_offset_y_ = 0.0f;
         render_offset_valid_ = true;
@@ -3452,6 +3503,7 @@ void Fighter::clear_move() {
     root_active_ = false;
     root_dm_x_ = root_av_x_ = 0.0f;
     j8_x_ = 0.0f;
+    render_offset_src_ = "zero";
     render_offset_ = 0.0f;
     render_offset_y_ = 0.0f;
     render_offset_valid_ = true;
@@ -3571,6 +3623,7 @@ void Fighter::start_preview_clip(const MoveDef& move, const sf2::data::anim_clip
     // (the JS `Gla` shift on the align axes is carried by `align_*`, which
     // `compute_align` now derives from the J9-seated `sol_ma_`). The old capture
     // added `node - p0[anchor]` to every later frame.
+    render_offset_src_ = "zero";
     render_offset_ = 0.0f;
     render_offset_y_ = 0.0f;
     render_offset_valid_ = true;
@@ -3908,7 +3961,7 @@ void Fighter::wall_repulsion_step() {
     const float mneg = (clip_mirror_ < 0) ? -1.0f : 1.0f;
     float fx = mneg * fb[src].x + align_x_ + render_offset_ -
                wall_shift_[static_cast<std::size_t>(c)];
-    if (std::getenv("SF2_ONEPOSE") != nullptr) {
+    if (one_pose_on()) {
         const int an3 = model_.bone_by_name(fighter_pivot_bone());
         if (an3 >= 0 && pos_.size() > static_cast<std::size_t>(an3) * 2 + 1) {
             fx = pos_[static_cast<std::size_t>(an3) * 2];
@@ -4020,7 +4073,7 @@ void Fighter::build_prepend(const MoveDef& move) {
     // [ONE WORLD POSE, A/B] `SF2_ONEPOSE=1`: seed the `qrb` prepend from the pose
     // the fighter is DRAWN in (world), not from `sol_ma_` (the previous clip's
     // space). JS `Te.qrb` reads the posed node, which is exactly this.
-    static const bool one_pose = std::getenv("SF2_ONEPOSE") != nullptr;
+    const bool one_pose = one_pose_on();
     if (one_pose && pose_sampled_ && pos_.size() >= nclip * 2) {
         for (std::size_t i = 0; i < nclip; ++i) {
             prepend_[(0 * nclip + i) * 3] = pos_[i * 2];
@@ -4581,7 +4634,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         if (!render_offset_valid_) {
             // No `<Align>` (JS `Gla(0,0,0)` shifts nothing): hold the anchor
             // itself continuous.
+            render_offset_src_ = "capture";
             render_offset_ = world_x_ - px[anchor_u];
+            if (std::getenv("SF2_TRACE_ONEPOSE") != nullptr) {
+                std::fprintf(stdout, "[cap] move=%s world=%.1f px=%.1f -> off=%.1f\n",
+                             current_move_ ? current_move_->name.c_str() : "-",
+                             static_cast<double>(world_x_),
+                             static_cast<double>(px[anchor_u]),
+                             static_cast<double>(render_offset_));
+                std::fflush(stdout);
+            }
             // [FIX Pi preview placement] A display-only preview (`Pi` node at
             // J9) captures the y offset from the node too; a fight move keeps
             // `render_offset_y_` from `start_move_impl` (the `Gla` y shift).
@@ -4685,6 +4747,23 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         // Clamp the root for the wall-jump clips only (the general clamp was tried
         // and reverted - it changes `kick-ko`), and let the drawn pose follow: the
         // placement below uses `world_x_`, so the body moves as one.
+        // [ONE WORLD POSE] With the placement now read from the drawn pose, the
+        // `Iub` buffer clamp is applied two slots AHEAD of the sampled pivot, so a
+        // fast clip can carry the root past the wall before it lands: measured on
+        // BOSS_LYNX 27 frames outside [160,1773], worst 113.3 (`FrontFlip px=1886.3
+        // off=0`). The JS `Iub` clamps the slot it samples, i.e. the frame itself,
+        // so clamp the placed root by the same margins here.
+        if (one_pose_on() && current_move_ != nullptr &&
+            arena_wall_max_ > arena_wall_min_) {
+            const float hra = (clip_mirror_ > 0) ? 30.0f : 100.0f;
+            const float hta = (clip_mirror_ > 0) ? 100.0f : 30.0f;
+            const float lo = arena_wall_min_ + hra;
+            const float hi = arena_wall_max_ - hta;
+            if (lo < hi) {
+                if (world_x_ < lo) world_x_ = lo;
+                else if (world_x_ > hi) world_x_ = hi;
+            }
+        }
         if (current_move_ != nullptr && arena_wall_max_ > arena_wall_min_ &&
             (current_move_->name.compare(0, 8, "WallJump") == 0 ||
              current_move_->no_wall_repulsion)) {
@@ -4736,6 +4815,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                 const float mid = (arena_wall_min_ + arena_wall_max_) * 0.5f;
                 const float wall_ref =
                     (world_x_ <= mid) ? arena_wall_min_ : arena_wall_max_;
+                render_offset_src_ = "wallmove";
                 render_offset_ += wall_ref - world_x_;
                 world_x_ = wall_ref;
             }
@@ -4753,11 +4833,16 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
         {
             const bool clip_changed_now = (current_clip_ != clamp_clip_);
             clamp_clip_ = current_clip_;
+            // [REJECTED by measurement] Holding the anchor through the whole blend
+            // window (3 frames) was tried to kill the second-frame slide; it made
+            // the wall case WORSE (right wall 384.0 -> 402.7) because the clip is
+            // re-clamped against a moving anchor instead of the previous pose.
+            // Single-frame continuity stays.
             if (clip_changed_now && clamp_prev_world_valid_) {
                 constexpr float kMaxClipStartJump = 150.0f;
                 const float d = world_x_ - clamp_prev_world_;
-                if (std::getenv("SF2_ONEPOSE") == nullptr &&
-                    std::fabs(d) > kMaxClipStartJump) {
+                if (!one_pose_on() && std::fabs(d) > kMaxClipStartJump) {
+                    render_offset_src_ = "invariant";
                     render_offset_ += clamp_prev_world_ - world_x_;
                     world_x_ = clamp_prev_world_;
                     if (std::getenv("SF2_TRACE_ANCHOR") != nullptr) {
@@ -4824,7 +4909,7 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
             std::fprintf(stdout,
                          "[anchor] F%d move=%s mf=%d px=%.2f off=%.2f j8=%.2f wx=%.2f "
                          "off_valid=%d align_u=%d anchor_u=%d solver=%d com=%.1f "
-                         "id=%p uid=%d side=%d\n",
+                         "id=%p uid=%d side=%d ofs=%s\n",
                          g_trace_fight_frame,
                          current_move_ != nullptr ? current_move_->name.c_str() : "-",
                          static_cast<int>(move_frame_),
@@ -4842,7 +4927,8 @@ void Fighter::sample(const sf2::data::anim_clip& clip, int frame, float x,
                              for (std::size_t i = 0; i < nb; ++i) acc += pos_[i * 2];
                              return static_cast<float>(acc / static_cast<double>(nb));
                          }()),
-                         static_cast<const void*>(this), uid_, g_trace_slot);
+                         static_cast<const void*>(this), uid_, g_trace_slot,
+                         render_offset_src_.c_str());
             std::fflush(stdout);
             trace_prev_final[this] = world_x_;
         }

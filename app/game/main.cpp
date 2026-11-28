@@ -11405,6 +11405,7 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
             bool attacked = false;
             float worst_jump = 0.0f;
             const char* worst_jump_mv = "-";
+            int worst_jump_at = -1;
             float wx_prev_case = ctl.player().fighter.world_x();
             int punch_taps = 0;
             // The attack pass must outlive the jump so the buffered punch can
@@ -11444,20 +11445,36 @@ bool map_difficulty_probe_mode = false;  // --map-difficulty-probe
                 ctl.update(1.0f / 60.0f);
                 {
                     const float wx_j = ctl.player().fighter.world_x();
-                    const float d_j = std::fabs(wx_j - wx_prev_case);
-                    if (d_j > worst_jump) {
-                        worst_jump = d_j;
-                        const auto* cm4 = ctl.player().fighter.current_move();
-                        worst_jump_mv = cm4 != nullptr ? cm4->name.c_str() : "-";
+                    const auto* cm4 = ctl.player().fighter.current_move();
+                    // [MEASUREMENT FIX] A frame with NO clip is a round/fight
+                    // restart: the controller re-spawns both fighters with
+                    // `teleport()`, and counting that as a "teleport in the fight"
+                    // is what produced the 384/1060 readings - the fighter was
+                    // simply placed at his spawn (measured: F461 off 0 -> 1241.3,
+                    // world 448.7 -> 1690.0, on the frame the opponent object
+                    // disappeared from the trace). Skip such frames and restart
+                    // the reference from the next clipped frame.
+                    const std::string src4 =
+                        ctl.player().fighter.debug_render_offset_src();
+                    if (cm4 == nullptr || cm4->name.empty() || src4 == "teleport") {
+                        wx_prev_case = wx_j;
+                    } else {
+                        const float d_j = std::fabs(wx_j - wx_prev_case);
+                        if (d_j > worst_jump) {
+                            worst_jump = d_j;
+                            worst_jump_mv = cm4->name.c_str();
+                            worst_jump_at = f;
+                        }
+                        wx_prev_case = wx_j;
                     }
-                    wx_prev_case = wx_j;
                 }
             }
             if (attack_probe) {
                 std::fprintf(stdout,
-                             "[wjatt] %-14s wall=%-5s worst_per_frame=%.1f at=%s\n",
+                             "[wjatt] %-14s wall=%-5s worst_per_frame=%.1f at=%s f=%d\n",
                              kMoves[mi], kSpots[wi].tag,
-                             static_cast<double>(worst_jump), worst_jump_mv);
+                             static_cast<double>(worst_jump), worst_jump_mv,
+                             worst_jump_at);
                 std::fflush(stdout);
             }
             std::fprintf(stdout,

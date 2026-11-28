@@ -832,6 +832,7 @@ public:
     void teleport(float x, float y) {
         const float dx = x - world_x_;
         const float dy = y - world_y_;
+        render_offset_src_ = "teleport";
         render_offset_ += dx;
         render_offset_y_ += dy;
         render_offset_valid_ = true;
@@ -873,6 +874,7 @@ public:
     // single source for hit tests/AI/camera. Same shape as `teleport`.
     void shift_root_x(float d) {
         if (d == 0.0f) return;
+        render_offset_src_ = "shift_root";
         render_offset_ += d;
         render_offset_valid_ = true;
         prev_align_pivot_world_x_ += d;
@@ -906,6 +908,11 @@ public:
     // Debug/probe accessor: the clip->world placement constant (see
     // `render_offset_`). Test-only; no simulation reads it.
     float debug_render_offset_x() const { return render_offset_; }
+    // [probe] which writer last set `render_offset_` (teleport = a
+    // round/fight re-spawn, not a fight movement).
+    const char* debug_render_offset_src() const {
+        return render_offset_src_.c_str();
+    }
     // JS `Dl.Eu.ma` — the fighter's Center-Of-Mass BODY. It is NOT the XML
     // `<COM Type="CenterOfMass">` bone (that one has Mass=0 and no LCC — a
     // separate immovable body in JS, `sf2.502f0946.js` L571), and NOT the
@@ -1593,6 +1600,7 @@ private:
     // accumulated the clip's root-BONE-0 delta instead, which is a different
     // node's swing and drifted the intro stance ~19u off the JS.
     float render_offset_ = 0.0f;
+    std::string render_offset_src_ = "-";
     bool render_offset_valid_ = true;
     // True while a display-only preview clip is seated (`start_preview_clip`):
     // the first sample then captures the y render offset from the `Pi` node
